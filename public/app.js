@@ -2,7 +2,6 @@ import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote } from './model.js'
 import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
-import { gradeWindow, mergeReports, newTracker, pendingWindows, pruneWindows, summarize, trackWindow } from './tracker.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -44,7 +43,8 @@ if (store.get('settingsVersion', 1) < 4 && settings.minConfidence === 55) { sett
 if (store.get('settingsVersion', 1) < 4) store.set('settingsVersion', 4);
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
-  positions: store.get('positions', []), trades: store.get('trades', []), tracker: store.get('tracker', null) || newTracker(), serverReports: [], trackerSavedAt: 0 };
+  positions: store.get('positions', []), trades: store.get('trades', []) };
+try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
 // Access lapsed (paywall): reload so the server shows the paywall page.
 function paywalled(r) {
@@ -76,22 +76,8 @@ async function refreshSpot() {
   state.spot = Number(t.price);
 }
 
-// ---------- 15-minute report cards ----------
-// The bot is scored on the whole window (see tracker.js), not on its first call.
-function saveTracker(force) {
-  if (force || Date.now() - state.trackerSavedAt > 15000) { state.trackerSavedAt = Date.now(); store.set('tracker', state.tracker); }
-}
-
-async function settleWindows() {
-  for (const w of pendingWindows(state.tracker).slice(0, 3)) {
-    try {
-      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(w.ticker)}`);
-      if (market && (market.result === 'yes' || market.result === 'no')) gradeWindow(state.tracker, w.ticker, market.result);
-    } catch { /* retry next cycle */ }
-  }
-  pruneWindows(state.tracker);
-  saveTracker(true);
-
+// ---------- settlement ----------
+async function settlePositions() {
   // Positions still open when their market settled
   for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).slice(0, 3)) {
     try {
@@ -171,7 +157,6 @@ function renderPositions(snap) {
 // "I bought it" / "I sold" are single taps: side, Kalshi's live price and the time are locked in
 // automatically, and the amount is the bot's suggestion (or the fixed amount from Settings).
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-const hm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 let undoTimer = null;
 function toast(text, undo) {
   $('toastText').textContent = text;
@@ -256,7 +241,6 @@ function render() {
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
   const sig = live ? buySignal(live, snap, settings, now) : null;
-  if (live && trackWindow(state.tracker, snap, live, sig, settings, now)) saveTracker();
   renderDeep(live, sig);
   state.liveCall = live?.ev.side && sig?.confident ? { ...live, sig } : null;
   $('boughtBtn').hidden = !state.liveCall || state.positions.some((p) => p.ticker === live.m.ticker);
@@ -407,52 +391,7 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   ctx.fillText(Math.round(last).toLocaleString(), w - axis + 4, Math.min(h - 4, Math.max(10, Y(last) + 3)));
 }
 
-// Tiny chart of the bot's YES odds across the window; green when it ended on the winner.
-function sparkline(r) {
-  const W = 300, H = 44, yes = r.result === 'yes';
-  const pts = r.spark.map(([min, p]) => `${((min / 15) * W).toFixed(1)},${((1 - p) * H).toFixed(1)}`).join(' ');
-  const marks = (r.trades || []).map((t) => {
-    const x = ((t.at - r.openTime) / 900000) * W;
-    return `<circle cx="${x.toFixed(1)}" cy="${t.side === 'YES' ? 4 : H - 4}" r="3" class="${t.pts >= 0 ? 'win' : 'loss'}"/>`;
-  }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="spark ${r.finalOdds >= 0.5 ? 'right' : 'wrong'}">
-    <rect x="0" y="0" width="${W}" height="${H / 2}" class="${yes ? 'zone-win' : 'zone-lose'}"/>
-    <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" class="mid"/>
-    <polyline points="${pts}"/>${marks}</svg>`;
-}
-
-function renderReports() {
-  const reports = mergeReports(state.tracker.reports, state.serverReports);
-  const sum = summarize(reports);
-  $('rCount').textContent = sum ? sum.windows : 0;
-  $('rOdds').textContent = sum ? pc(sum.avgWinnerOdds) : '—';
-  $('rRight').textContent = sum ? pc(sum.timeRight) : '—';
-  $('rPnl').textContent = sum ? money(sum.paperUsd) : '—';
-  sign($('rPnl'), sum?.paperUsd ?? 0);
-  const bc = sum?.byConfidence || {};
-  $('rByConf').innerHTML = Object.keys(bc).length
-    ? '<div class="bg-head">Calls by confidence</div>' + ['80+', '70–79', '60–69', 'under 60'].filter((k) => bc[k]).map((k) =>
-      `<div class="bg-row"><span class="tier">${k}</span><span>${bc[k].calls} call${bc[k].calls === 1 ? '' : 's'} · won ${pc(bc[k].wins / bc[k].calls)}</span><b class="${bc[k].usd >= 0 ? 'pos' : 'neg'}">${money(bc[k].usd)}</b></div>`).join('')
-    : '';
-  const pending = Object.values(state.tracker.windows).filter((w) => w.samples.length);
-  $('reportList').innerHTML = pending.map((w) => `<li class="report pending"><div class="rp-top"><b>${hm(w.openTime)}–${hm(w.closeTime)}</b><span class="muted">${w.closeTime > Date.now() ? 'in progress' : 'waiting for Kalshi result'} · tracking ${Math.max(1, Math.round((w.samples[w.samples.length - 1].t - w.samples[0].t) / 60000))} min</span></div></li>`).join('') +
-    reports.slice(0, 60).map((r) => `<li class="report">
-      <div class="rp-top"><b>${hm(r.openTime)}–${hm(r.closeTime)}</b>
-        <span class="pill ${r.result}">Settled ${r.result.toUpperCase()}${r.result === 'yes' ? ' · above' : ' · below'}</span>
-        </div>
-      ${sparkline(r)}
-      <div class="rp-stats">
-        <span>Odds on winner <b>${pc(r.avgWinnerOdds)}</b></span>
-        <span>Right side <b>${pc(r.timeRight)}</b> of the time</span>
-        <span>${r.calls} call${r.calls === 1 ? '' : 's'}${r.callsRight != null ? `, right ${pc(r.callsRight)}` : ''}</span>
-        <span>Follow-the-bot <b class="${r.paperUsd >= 0 ? 'pos' : 'neg'}">${money(r.paperUsd)}</b></span>
-        <span class="muted">Ended at ${pc(r.finalOdds)} on the winner · ${r.flips} flip${r.flips === 1 ? '' : 's'} · watched ${Math.round(r.coverage * 15)} of 15 min</span>
-      </div></li>`).join('') ||
-    '<li class="muted">Report cards appear here after each 15-minute window settles. The bot is scored on every sample across the window, not just its first call.</li>';
-}
-
 function renderHistory() {
-  renderReports();
   const tp = state.trades.reduce((a, t) => a + t.pnl, 0), tw = state.trades.filter((t) => t.pnl > 0).length;
   $('tPnl').textContent = state.trades.length ? money(tp) : '—';
   sign($('tPnl'), tp);
@@ -461,12 +400,6 @@ function renderHistory() {
     `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
     '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
-}
-
-// Server report cards cover windows while the phone was closed (needs push on).
-async function fetchServerReports() {
-  if (!pushSub || !state.pushOn) return;
-  try { state.serverReports = (await postJSON('push/report', { endpoint: pushSub.endpoint })).reports || []; } catch { /* keep last */ }
 }
 
 // ---------- live BTC price ----------
@@ -715,8 +648,7 @@ async function tick() {
     await Promise.all(jobs);
     $('status').className = 'dot ok';
     $('status').title = 'connected';
-    settleWindows();
-    if (Date.now() - (state.reportsAt || 0) > 60000) { state.reportsAt = Date.now(); fetchServerReports(); }
+    settlePositions();
   } catch (e) {
     console.warn(e);
     $('status').className = 'dot err';
@@ -791,9 +723,6 @@ function removePosition(id) {
   savePositions();
   pushSyncSoon();
 }
-$('clearHistory').addEventListener('click', () => {
-  if (confirm('Clear the report cards stored on this phone? (Server report cards stay.)')) { state.tracker.reports = []; saveTracker(true); render(); }
-});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) liveDisconnect();
   else { liveConnect(); tick(); }

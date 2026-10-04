@@ -57,7 +57,7 @@ Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtract
 - Kalshi spread: tight (+3) or wide (−5)
 - Kalshi's price moving with or against the call over the last 2 minutes (+3 / −5)
 
-The result is a single **confidence score from 0 to 100**, shown on the call, in the Deep dive card and in push alerts. There are no letter grades. A call only fires, on screen and as a push, when confidence is at least *Min confidence* (60). Below that the bot keeps watching and calls if confidence rises. The suggested size scales with confidence: half size at 45, three quarters at 60, full size at 75 and above. The **Deep dive** card lists every factor with its points. History groups follow-the-bot results **by confidence** (80+, 70–79, 60–69), so you can check that higher-confidence calls really do better.
+The result is a single **confidence score from 0 to 100**, shown on the call, in the Deep dive card and in push alerts. There are no letter grades. A call only fires, on screen and as a push, when confidence is at least *Min confidence* (60). Below that the bot keeps watching and calls if confidence rises. The suggested size scales with confidence: half size at 45, three quarters at 60, full size at 75 and above. The **Deep dive** card lists every factor with its points.
 
 ### Candle timing (optional)
 
@@ -78,17 +78,9 @@ Alerts fire on every BUY THE LOW. Turn on **Also wait for candle dip** to alert 
 
 Next to each side's buy price, the app shows Kalshi's **cash-out price**: the live bid, which is what you get if you sell right now. It also shows what $10 bought this second would cash out for after fees, so you can see the round-trip cost. Open positions show **Cash out at** (the bid) and **Cash out value** (your contracts × bid after fees), and SELL NOW alerts include the cash-out value.
 
-### 15-minute report cards (whole-window grading)
+### Window scoring (behind the 15-minute updates)
 
-The bot isn't judged on its first call. Every 5 seconds through each window it records its odds and its call, and it paper-trades **follow the bot**: buy at the ask on each call, cash out at the bid on a sell signal or when the call flips, otherwise hold to settlement. When Kalshi settles the window, it becomes a report card:
-
-- **Odds on the winner:** the average probability the bot gave the side that won, across the whole window
-- **Right side:** the share of the window the bot favored the eventual winner
-- **Calls:** how many calls it made and how many were on the winning side
-- **Follow-the-bot P&L:** paper result per $10 call, after fees on both sides
-- A sparkline of its YES odds over the 15 minutes, with dots for each paper trade
-
-History shows the totals and every card. With push on, the server scores every window even while your phone is closed, and the app merges those cards with its own, keeping whichever watched more of the window.
+The server still follows each whole window (the bot's odds every 5 seconds, plus a paper "follow the bot" trade) so the 15-minute update can say how the last window went. The app's History tab shows only **My trades**.
 
 ### Selling for profit (exit signals)
 
