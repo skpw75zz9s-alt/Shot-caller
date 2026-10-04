@@ -127,6 +127,7 @@ export const DEFAULTS = {
   marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
   maxEdge: 1,           // a gap bigger than this is too good to be true (usually a lag that's gone before you can buy)
   scaleIn: false,       // add to a call as its gap grows past minEdge +2, +4 and +8 pts (Aggressive)
+  scaleStep: 0.02,      // spacing of the scale-in tiers: minEdge +1, +2 and +4 steps
   firstSize: 1,         // with scaleIn, the first entry is this fraction of the normal size (adds carry the rest)
   reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
 };

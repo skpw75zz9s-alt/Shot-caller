@@ -164,7 +164,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const limit = callSide && pick.robustEdge != null ? maxPay(pick.robustEdge + pick.price + kalshiFee(pick.price), s.minEdge * s.limitEdgeFrac) : null;
   // Scale-in tiers: a call opens at the first tier its gap clears; each time the gap later clears the next
   // tier (with full confidence) it signals an add. Small early entries, bigger ones as the edge proves out.
-  const tiers = s.scaleIn ? [s.minEdge, s.minEdge + 0.02, s.minEdge + 0.04, s.minEdge + 0.08] : [s.minEdge];
+  const st = s.scaleStep;
+  const tiers = s.scaleIn ? [s.minEdge, s.minEdge + st, s.minEdge + 2 * st, s.minEdge + 4 * st] : [s.minEdge];
   const reached = (e) => tiers.reduce((k, t, i) => (e != null && e >= t - 1e-9 ? i : k), -1);
   let add = false;
   if (fire) { mem.side = callSide; mem.at = now; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
