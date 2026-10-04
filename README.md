@@ -26,7 +26,7 @@ A sticky ticker at the top streams every BTC trade from Coinbase's public WebSoc
 
 ### Buying the low
 
-"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (8¢ by default) **even if volatility is 20% lower or 25% higher than measured** (the robust edge), and the deep-dive confidence clears 60. An edge that only exists at one volatility guess is mostly model error; in the profit simulator those trades lost money.
+"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (6¢ on the default Balanced risk level) **even if volatility is 20% lower or 25% higher than measured** (the robust edge), and the deep-dive confidence clears 60. An edge that only exists at one volatility guess is mostly model error; in the profit simulator those trades lost money.
 
 ### Rejection trends (inside each 15-minute window)
 
@@ -101,6 +101,23 @@ Security:
 - Each request is signed on the phone (Ed25519 or RSA-PSS, matching the key type Kalshi issued). The server only forwards the signature headers.
 - The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
+
+### Risk level
+
+Settings → **Risk level**:
+
+| Level | Min gap | Confidence | Practice buys at |
+|---|---|---|---|
+| Safe | 8 pts | 60 | 70+ |
+| **Balanced (default)** | 6 pts | 55 | 60+ |
+| Aggressive | 4 pts | 50 | 55+ |
+
+In the simulator with a ~10s human buy delay and max prices:
+- **Balanced** made about twice Safe's calls, and matched or beat Safe's profit in 4 of 6 market types.
+- **Aggressive** made 3–4× the calls, with similar totals and bigger swings.
+- **Safe** still has the best return per dollar when orders fill instantly.
+
+Editing the gap or confidence by hand shows as *Custom*.
 
 ### Max price and speed (why calls can lose money by hand)
 

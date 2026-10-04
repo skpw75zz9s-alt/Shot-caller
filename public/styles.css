@@ -225,3 +225,8 @@ nav button.active::before { content: ''; position: absolute; top: -1px; left: 30
 .pr-log li small { display: block; color: var(--muted); }
 .practice-strip { margin: 0 0 10px; padding: 9px 12px; border: 1px dashed var(--accent); border-radius: 10px; font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .practice-strip b { color: var(--accent); letter-spacing: .5px; }
+
+/* Risk level */
+.risk-btns { display: flex; gap: 8px; margin: 8px 0 6px; }
+.risk-btns button { flex: 1; margin: 0; background: transparent; border: 1px solid var(--line-2); color: var(--muted); }
+.risk-btns button.on { background: var(--accent); border-color: var(--accent); color: #fff; }

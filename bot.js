@@ -28,6 +28,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings?.volMultiplier === 1.15) d.settings.volMultiplier = 1; // v3.2: measured vol
       if (d.settings?.momentumWeight === 0.25) d.settings.momentumWeight = 0; // v3.3: profit tuning
       if (d.settings?.minEdge === 0.04) d.settings.minEdge = 0.08;
+      if (d.settings?.minEdge === 0.08 && d.settings?.minConfidence === 60) Object.assign(d.settings, { minEdge: 0.06, minConfidence: 55 }); // v3.9: Balanced
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };

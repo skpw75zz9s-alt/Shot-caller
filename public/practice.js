@@ -4,7 +4,7 @@
 import { kalshiFee } from './model.js';
 import { positionCheck } from './engine.js';
 
-export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 70 };
+export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 60 };
 export const newPractice = () => ({ positions: [], log: [], since: Date.now(), range: { positions: [], log: [] } });
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };

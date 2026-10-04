@@ -1,4 +1,4 @@
-import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf } from './model.js';
 import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
@@ -52,6 +52,14 @@ if (store.get('settingsVersion', 1) < 6) {
   if (settings.momentumWeight === 0.25) settings.momentumWeight = 0;
   if (settings.minEdge === 0.04) settings.minEdge = 0.08;
   store.set('settings', settings); store.set('settingsVersion', 6);
+}
+
+// v3.9: Safe was leaving trades on the table for hand trading; old Safe defaults move to Balanced
+if (store.get('settingsVersion', 1) < 7) {
+  if (riskLevelOf(settings) === 'safe') Object.assign(settings, { minEdge: RISK_LEVELS.balanced.minEdge, minConfidence: RISK_LEVELS.balanced.minConfidence });
+  const pc0 = store.get('practiceCfg', null);
+  if (pc0 && pc0.minConfidence === 70) { pc0.minConfidence = RISK_LEVELS.balanced.practiceConfidence; store.set('practiceCfg', pc0); }
+  store.set('settings', settings); store.set('settingsVersion', 7);
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
@@ -1053,7 +1061,28 @@ $('prReset').addEventListener('click', () => {
   renderPractice(); render();
 });
 
+function renderRisk() {
+  const cur = riskLevelOf(settings);
+  $('riskBtns').innerHTML = Object.entries(RISK_LEVELS).map(([k, r]) => `<button type="button" data-risk="${k}" class="${cur === k ? 'on' : ''}">${r.label}</button>`).join('');
+  $('riskHint').textContent = cur === 'custom'
+    ? `Custom: min gap ${(settings.minEdge * 100).toFixed(0)} pts, confidence ${settings.minConfidence}. Tap a level to reset.`
+    : `${RISK_LEVELS[cur].hint}: calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}. Auto-trade practice buys at confidence ${RISK_LEVELS[cur].practiceConfidence}+.`;
+}
+$('riskBtns').addEventListener('click', (e) => {
+  const k = e.target.closest('button[data-risk]')?.dataset.risk;
+  if (!k) return;
+  const r = RISK_LEVELS[k];
+  Object.assign(settings, { minEdge: r.minEdge, minConfidence: r.minConfidence });
+  practiceCfg.minConfidence = r.practiceConfidence;
+  store.set('settings', settings); store.set('practiceCfg', practiceCfg);
+  for (const [name, v] of [['minEdge', r.minEdge * 100], ['minConfidence', r.minConfidence]]) { const el = $('settingsForm').elements[name]; if (el) el.value = v; }
+  pushSyncSoon(); renderRisk(); renderPractice(); render();
+  toast(`Risk level: ${r.label}`);
+});
+$('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // after the form's own handler saves the value
+
 buildSettings();
+renderRisk();
 renderPractice();
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }

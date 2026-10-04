@@ -221,10 +221,11 @@ test('sticks with its call: holds at a lower bar, and switching sides needs clea
   assert.equal(memory.S1.side, 'YES');
   // Max price: at or above today's price, and buying there still clears half the min gap with vol 20% off
   assert.ok(first.limit >= first.price, `limit ${first.limit} vs price ${first.price}`);
-  const { kalshiFee } = await import('../public/model.js');
+  const { kalshiFee, DEFAULTS: D0 } = await import('../public/model.js');
+  const half = D0.minEdge * D0.limitEdgeFrac;
   const pRobust = first.robustEdge + first.price + kalshiFee(first.price);
-  assert.ok(pRobust - first.limit - kalshiFee(first.limit) >= 0.04 - 1e-9);
-  assert.ok(pRobust - (first.limit + 0.01) - kalshiFee(first.limit + 0.01) < 0.04, 'and it is the highest such price');
+  assert.ok(pRobust - first.limit - kalshiFee(first.limit) >= half - 1e-9);
+  assert.ok(pRobust - (first.limit + 0.01) - kalshiFee(first.limit + 0.01) < half, 'and it is the highest such price');
   // Raise Kalshi's YES price until a fresh call would no longer fire; the existing call still stands
   let held = null;
   for (let yb = 20; yb <= 90 && !held; yb++) {
@@ -236,12 +237,14 @@ test('sticks with its call: holds at a lower bar, and switching sides needs clea
   assert.equal(held.stance, 'holding');
   assert.equal(held.fire, false, 'holding does not re-alert');
   // With BTC dropping under the target, NO looks a little cheap: not enough to flip the call
+  const { DEFAULTS } = await import('../public/model.js');
+  const SWITCH = DEFAULTS.minEdge + DEFAULTS.switchEdgeExtra;
   let flipped = false, sawSmallNo = false;
   for (let yb = 30; yb <= 70; yb++) {
     const fresh = run(yb, {}, 99990), sticky = run(yb, structuredClone(memory), 99990);
     if (fresh.callSide === 'NO' && sticky.callSide !== 'NO') sawSmallNo = true;
-    if (sticky.callSide === 'NO' && sticky.stance === 'switching' && (sticky.edge < 0.12 - 1e-9)) flipped = true;
+    if (sticky.callSide === 'NO' && sticky.stance === 'switching' && (sticky.edge < SWITCH - 1e-9)) flipped = true;
   }
   assert.ok(sawSmallNo, 'a NO edge that would be a fresh call is not enough to switch');
-  assert.equal(flipped, false, 'switching needs 12+ pts');
+  assert.equal(flipped, false, 'switching needs min gap + 4 pts');
 });

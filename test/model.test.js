@@ -116,3 +116,11 @@ test('final minute: the already-printed part of the settlement average counts', 
   // Before the last minute the average doesn't apply
   assert.equal(probAbove(100040, 100000, 0.0002, 3, 0, 1, 99960), probAbove(100040, 100000, 0.0002, 3));
 });
+
+test('risk levels: Balanced is the default, presets are recognized, edits read as custom', async () => {
+  const { DEFAULTS, RISK_LEVELS, riskLevelOf } = await import('../public/model.js');
+  assert.equal(riskLevelOf(DEFAULTS), 'balanced');
+  for (const k of Object.keys(RISK_LEVELS)) assert.equal(riskLevelOf({ ...DEFAULTS, ...RISK_LEVELS[k] }), k);
+  assert.equal(riskLevelOf({ ...DEFAULTS, minEdge: 0.07 }), 'custom');
+  assert.ok(RISK_LEVELS.safe.minEdge > RISK_LEVELS.balanced.minEdge && RISK_LEVELS.balanced.minEdge > RISK_LEVELS.aggressive.minEdge);
+});

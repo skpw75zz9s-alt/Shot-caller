@@ -105,7 +105,7 @@ export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin, settleAvg
 }
 
 export const DEFAULTS = {
-  minEdge: 0.08,        // required EV per contract after fees, in dollars, even with vol 20% off either way
+  minEdge: 0.06,        // required EV per contract after fees, in dollars, even with vol 20% off either way (Balanced)
   maxSpread: 0.10,      // skip markets with a wider yes spread
   minMinutesLeft: 0.5,  // don't call shots in the last 30 seconds
   maxMinutesLeft: 14,   // or right after open when the strike is barely set
@@ -116,7 +116,7 @@ export const DEFAULTS = {
   bankroll: 100,
   maxStake: 25,
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
-  minConfidence: 60,    // deep-dive score (0-100) a call needs before it fires: B or better
+  minConfidence: 55,    // deep-dive score (0-100) a call needs before it fires (Balanced)
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
   holdEdgeFrac: 0.5,    // once called, the call stands while the robust gap is at least half of minEdge...
   holdConfDrop: 10,     // ...and confidence is no more than 10 below minConfidence
@@ -127,6 +127,16 @@ export const DEFAULTS = {
   marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
   maxEdge: 1,           // a gap bigger than this is too good to be true (usually a lag that's gone before you can buy)
 };
+
+// Risk levels (Settings). Simulated with a ~10s human buy delay and max prices: Balanced made about twice
+// Safe's calls and matched or beat its profit in most market types; Aggressive ~3-4x the calls, similar
+// totals, bigger swings. Safe has the best return per dollar when orders fill instantly.
+export const RISK_LEVELS = {
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, hint: 'About 2× the calls of Safe' },
+  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, hint: 'Most calls, bigger swings' },
+};
+export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
 
 // Decide the call for one market.
 // pShift nudges P(YES) by evidence the price model can't see (e.g. rejection trends), in probability points.
