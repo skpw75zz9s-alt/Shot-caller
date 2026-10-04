@@ -60,7 +60,7 @@ export const leanSide = (ev) =>
   ev.side ?? (ev.evYes == null && ev.evNo == null ? null : (ev.evYes ?? -1) >= (ev.evNo ?? -1) ? 'YES' : 'NO');
 
 // Should this market fire a BUY THE LOW alert right now? Runs the deep dive and only fires when the
-// confidence score clears minConfidence; position size scales with the grade.
+// confidence score clears minConfidence; position size scales with confidence.
 export function buySignal(row, snap, settings, now = snap.now) {
   const s = { ...DEFAULTS, ...settings };
   const side = leanSide(row.ev);
@@ -110,7 +110,7 @@ export function buyMessage(row, sig, spot) {
     tag: `buy-${m.ticker}`,
     title: `Buy the low: ${sideName(ev.side)} at ${pc(ev.price)}`,
     body: `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * ev.price)}${where}` +
-      `${sig.deep ? ` · confidence ${sig.deep.score} (${sig.deep.grade})` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
+      `${sig.deep ? ` · confidence ${sig.deep.score}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }
 
@@ -128,7 +128,7 @@ export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
   const parts = [];
   if (prev) {
     const money = `${prev.paperUsd >= 0 ? '+' : '-'}$${Math.abs(prev.paperUsd).toFixed(2)}`;
-    parts.push(`${hm(prev.openTime, tz)} window settled ${prev.result.toUpperCase()} · bot grade ${prev.grade} (${pc(prev.avgWinnerOdds)} on the winner)` +
+    parts.push(`${hm(prev.openTime, tz)} window settled ${prev.result.toUpperCase()} · bot had ${pc(prev.avgWinnerOdds)} on the winner` +
       `${prev.calls ? ` · follow-the-bot ${money}` : ''}.`);
   }
   const lean = ev.pYes >= 0.5 ? `YES ${pc(ev.pYes)}` : `NO ${pc(1 - ev.pYes)}`;

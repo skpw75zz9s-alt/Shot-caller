@@ -21,7 +21,7 @@ test('samples at most every 5 seconds and stops at close', () => {
   assert.equal(tr.windows.W1.samples.length, 2);
 });
 
-test('grades the whole window, not the first call', () => {
+test('scores the whole window, not the first call', () => {
   const tr = newTracker();
   // First 5 minutes the bot leans NO (wrong), then switches to YES for 10 minutes and the window settles YES
   for (let i = 0; i < 60; i++) feed(tr, OPEN + i * 5000, 0.4, null, Q(0.45, 0.47));
@@ -30,7 +30,7 @@ test('grades the whole window, not the first call', () => {
   assert.ok(Math.abs(r.timeRight - 120 / 180) < 0.01);
   assert.ok(Math.abs(r.avgWinnerOdds - (60 * 0.4 + 120 * 0.72) / 180) < 0.01);
   assert.equal(r.flips, 1);
-  assert.equal(r.grade, 'B');
+  assert.equal(r.grade, undefined, 'no letter grades');
   assert.ok(r.coverage > 0.99);
   assert.ok(r.spark.length <= 41 && r.spark[0][0] === 0);
   assert.equal(tr.windows.W1, undefined);
@@ -72,9 +72,10 @@ test('pending, summary and merge', () => {
   assert.equal(pendingWindows(tr, CLOSE + 30000).length, 0);
   assert.equal(pendingWindows(tr, CLOSE + 61000).length, 1);
   const r = gradeWindow(tr, 'W1', 'yes');
-  const s = summarize([r, { ...r, ticker: 'W2', avgWinnerOdds: 0.4, grade: 'D', paperUsd: -2, calls: 1 }]);
+  const s = summarize([r, { ...r, ticker: 'W2', avgWinnerOdds: 0.4, paperUsd: -2, calls: 1 }]);
   assert.equal(s.windows, 2);
-  assert.deepEqual(s.grades, [0, 1, 0, 1]);
+  assert.ok(Math.abs(s.avgWinnerOdds - (r.avgWinnerOdds + 0.4) / 2) < 1e-9);
+  assert.equal(s.grades, undefined);
   const merged = mergeReports([{ ticker: 'A', coverage: 0.3, closeTime: 1 }], [{ ticker: 'A', coverage: 0.9, closeTime: 1 }, { ticker: 'B', coverage: 1, closeTime: 2 }]);
   assert.deepEqual(merged.map((x) => [x.ticker, x.coverage]), [['B', 1], ['A', 0.9]]);
 });

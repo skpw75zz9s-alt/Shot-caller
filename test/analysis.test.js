@@ -72,18 +72,20 @@ test('quoteTrend measures how Kalshi moved over ~2 minutes', () => {
 
 const market = (min, yb, ya) => ({ close_time: new Date(OPEN + min * 60000).toISOString(), strike_type: 'greater', floor_strike: K, yes_bid: yb, yes_ask: ya });
 
-test('deepDive grades a strong call A and a weak one D, with reasons', () => {
+test('deepDive scores a strong call high and a weak one low, with reasons', () => {
   const now = OPEN;
   const strongEv = evaluate({ market: market(2, 52, 53), strike: K, spot: 100080, sigmaMin: 0.0006, now });
   const strong = deepDive({ ev: strongEv, side: 'YES', rej: { tilt: 0.03, summary: ['Target held 2× as support'] }, timing: { state: 'NOW' },
     sigmaMin: 0.0006, sigmaLong: 0.0008, driftMin: 0.0001, spot: 100080, strike: K, kalshiDrift: 0.04 });
-  assert.equal(strong.grade, 'A');
+  assert.ok(strong.score >= 75, `score ${strong.score}`);
+  assert.equal(strong.sizeMult, 1);
+  assert.equal(strong.grade, undefined, 'no letter grades');
   assert.ok(strong.checks.some((c) => c.ok && /Rejections favor YES/.test(c.label)));
 
   const weakEv = evaluate({ market: market(13, 40, 41), strike: K, spot: 99990, sigmaMin: 0.0012, now });
   const weak = deepDive({ ev: weakEv, side: 'YES', rej: { tilt: -0.03, summary: ['Target rejected 3× from below'] }, timing: { state: 'CHASE' },
     sigmaMin: 0.0012, sigmaLong: 0.0005, driftMin: -0.0001, spot: 99990, strike: K, kalshiDrift: -0.05 });
-  assert.equal(weak.grade, 'D');
+  assert.ok(weak.score < 45, `score ${weak.score}`);
   assert.equal(weak.sizeMult, 0);
   for (const label of [/Rejections against YES/, /momentum is against/, /Chasing/, /Volatility spiking/, /Early in the window/, /Kalshi moving against/]) {
     assert.ok(weak.checks.some((c) => c.ok === false && label.test(c.label)), String(label));
@@ -120,27 +122,28 @@ const NOW2 = OPEN + 10 * 60000;
 const trendBars = (dir) => [...Array(40)].map((_, i) => { const c = 100000 + dir * i * 3; return { t: NOW2 - (40 - i) * 60000, o: c - dir * 3, h: c + 2, l: c - 5, c }; });
 const logOf = (ps, ask = 0.5) => ps.map((p, i) => ({ t: NOW2 - (ps.length - 1 - i) * 2000, p, yesAsk: ask, noAsk: 1 - ask + 0.02 }));
 
-test('strong confluence earns an A; a flip-flopping, fading read drops to C/D', () => {
+test('strong confluence scores 75+; a flip-flopping, fading read scores under 60', () => {
   const ev = evaluate({ market: market(5, 50, 52), strike: K, spot: 100070, sigmaMin: 0.0006, now: OPEN });
   const base = { ev, side: 'YES', rej: { tilt: 0.02, summary: ['Target held 2× as support'] }, timing: { state: 'WAIT' }, sigmaMin: 0.0006, sigmaLong: 0.0006, spot: 100070, strike: K, now: NOW2 };
   const strong = deepDive({ ...base, bars: trendBars(1), log: logOf([...Array(90)].map((_, i) => 0.6 + i * 0.0015)) });
-  assert.equal(strong.grade, 'A', JSON.stringify(strong.checks));
+  assert.ok(strong.score >= 75, JSON.stringify(strong.checks));
   for (const re of [/Trend lines up with YES on 3\/10\/30 min/, /favored YES for 3 min straight/, /Odds building toward YES/, /Edge has held for 30\+ seconds/]) {
     assert.ok(strong.checks.some((c) => c.ok && re.test(c.label)), String(re));
   }
   const choppy = deepDive({ ...base, rej: { tilt: 0, summary: [] }, bars: trendBars(-1), log: logOf([...Array(90)].map((_, i) => (i % 3 ? 0.45 : 0.6) - i * 0.0015), 0.5) });
-  assert.ok(['C', 'D'].includes(choppy.grade), `${choppy.score} ${JSON.stringify(choppy.checks)}`);
+  assert.ok(choppy.score < 60, `${choppy.score} ${JSON.stringify(choppy.checks)}`);
   for (const re of [/Trend is against YES/, /read keeps flipping/, /Odds fading/, /Edge just appeared/]) {
     assert.ok(choppy.checks.some((c) => c.ok === false && re.test(c.label)), String(re));
   }
 });
 
-test('callsByGrade splits follow-the-bot results by the grade at entry', async () => {
-  const { callsByGrade } = await import('../public/tracker.js');
-  const out = callsByGrade([{ trades: [{ conf: 80, pts: 0.3, entry: 0.5 }, { conf: 78, pts: -0.52, entry: 0.5 }, { conf: 62, pts: 0.1, entry: 0.4 }, { conf: null, pts: 1, entry: 0.5 }] }]);
-  assert.deepEqual(Object.keys(out).sort(), ['A', 'B']);
-  assert.equal(out.A.calls, 2);
-  assert.equal(out.A.wins, 1);
-  assert.ok(Math.abs(out.A.usd - (6 - 10.4)) < 1e-9);
-  assert.equal(out.B.calls, 1);
+test('callsByConfidence groups follow-the-bot results by confidence at entry', async () => {
+  const { callsByConfidence } = await import('../public/tracker.js');
+  const out = callsByConfidence([{ trades: [{ conf: 80, pts: 0.3, entry: 0.5 }, { conf: 78, pts: -0.52, entry: 0.5 }, { conf: 62, pts: 0.1, entry: 0.4 }, { conf: null, pts: 1, entry: 0.5 }] }]);
+  assert.deepEqual(Object.keys(out).sort(), ['60–69', '70–79', '80+']);
+  assert.equal(out['80+'].calls, 1);
+  assert.equal(out['80+'].wins, 1);
+  assert.equal(out['70–79'].calls, 1);
+  assert.ok(Math.abs(out['70–79'].usd + 10.4) < 1e-9);
+  assert.equal(out['60–69'].calls, 1);
 });

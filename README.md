@@ -57,7 +57,7 @@ Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtract
 - Kalshi spread: tight (+3) or wide (−5)
 - Kalshi's price moving with or against the call over the last 2 minutes (+3 / −5)
 
-The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (60, so B or better). A C setup isn't called: the bot keeps watching and calls if it upgrades. The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History also splits follow-the-bot results **by the grade each call had** (calls, win rate, P&L for A, B and C), so you can check that A calls really do better.
+The result is a single **confidence score from 0 to 100**, shown on the call, in the Deep dive card and in push alerts. There are no letter grades. A call only fires, on screen and as a push, when confidence is at least *Min confidence* (60). Below that the bot keeps watching and calls if confidence rises. The suggested size scales with confidence: half size at 45, three quarters at 60, full size at 75 and above. The **Deep dive** card lists every factor with its points. History groups follow-the-bot results **by confidence** (80+, 70–79, 60–69), so you can check that higher-confidence calls really do better.
 
 ### Candle timing (optional)
 
@@ -86,10 +86,9 @@ The bot isn't judged on its first call. Every 5 seconds through each window it r
 - **Right side:** the share of the window the bot favored the eventual winner
 - **Calls:** how many calls it made and how many were on the winning side
 - **Follow-the-bot P&L:** paper result per $10 call, after fees on both sides
-- **Grade:** A ≥ 70% odds on the winner, B ≥ 60%, C ≥ 50%, D below
 - A sparkline of its YES odds over the 15 minutes, with dots for each paper trade
 
-History shows the totals and every card. With push on, the server grades every window even while your phone is closed, and the app merges those cards with its own, keeping whichever watched more of the window.
+History shows the totals and every card. With push on, the server scores every window even while your phone is closed, and the app merges those cards with its own, keeping whichever watched more of the window.
 
 ### Selling for profit (exit signals)
 
@@ -113,10 +112,10 @@ The server runs the same bot as the app, around the clock. It sends **Web Push**
 2. Open **Settings → Turn on push notifications** and allow notifications.
 3. Tap **Send test**. You should get "Shot Caller ✓" within a few seconds.
 
-**15-minute updates:** each time a new window opens, every subscribed phone gets one push. It covers how the last window went (settled YES or NO, the bot's grade, follow-the-bot result) and the read on the new one (target, where BTC is versus it, which way the bot leans, and BUY THE LOW if it's already a call). For example:
+**15-minute updates:** each time a new window opens, every subscribed phone gets one push. It covers how the last window went (settled YES or NO, the odds the bot gave the winner, follow-the-bot result) and the read on the new one (target, where BTC is versus it, which way the bot leans, and BUY THE LOW if it's already a call). For example:
 
 > 🕒 3:30 AM–3:45 AM window · target $84,812
-> 3:15 AM window settled YES · bot grade B (67% on the winner) · follow-the-bot +$3.20. Now BTC $84,820 (+$8) · bot leans YES 58% · BUY THE LOW YES · Above at 52%.
+> 3:15 AM window settled YES · bot had 67% on the winner · follow-the-bot +$3.20. Now BTC $84,820 (+$8) · bot leans YES 58% · BUY THE LOW YES · Above at 52%.
 
 The server waits up to 4 minutes for Kalshi to settle the last window so the result is included. Times use the phone's time zone. Each update replaces the previous one in the notification list, and there's no update right after you first turn on push. Turn it off with **Notify: 15-minute updates**.
 
@@ -183,7 +182,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
 | Fixed trade amount | 0 | What one-tap "I bought it" records ($). 0 = the bot's suggested amount |
-| Min confidence | 60 | Deep-dive score a call needs to fire (60 = B or better) |
+| Min confidence | 60 | Confidence (0–100) a call needs to fire |
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |

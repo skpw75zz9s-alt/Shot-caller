@@ -118,7 +118,10 @@ function ret(bars, mins) {
   return n > mins && bars[n - 1 - mins].c > 0 ? Math.log(bars[n - 1].c / bars[n - 1 - mins].c) : null;
 }
 
-export const gradeOf = (score) => (score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 45 ? 'C' : 'D');
+// Display tint for a confidence score (color only; the number is what's shown).
+export const confTier = (score) => (score >= 75 ? 'hi' : score >= 60 ? 'mid' : 'lo');
+// Confidence ranges used to group results in History.
+export const confBucket = (score) => (score >= 80 ? '80+' : score >= 70 ? '70–79' : score >= 60 ? '60–69' : 'under 60');
 
 // Multi-factor confidence for a call on `side`. Starts at 50 and adds or subtracts per factor.
 // `log` is this market's recent history [{ t, p (bot P(YES)), yesAsk, noAsk }] used for the
@@ -207,8 +210,7 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   }
 
   score = clamp(Math.round(score), 0, 100);
-  const grade = gradeOf(score);
-  const verdict = { A: 'Strong call', B: 'Good call', C: 'Marginal: size down', D: 'Weak: skip' }[grade];
-  const sizeMult = { A: 1, B: 0.75, C: 0.5, D: 0 }[grade];
-  return { score, grade, verdict, sizeMult, checks };
+  // Size scales with confidence: 45 → half size, 60 → three quarters, 75+ → full; below 45, nothing.
+  const sizeMult = score < 45 ? 0 : clamp(0.5 + (score - 45) / 60, 0.5, 1);
+  return { score, sizeMult, checks };
 }

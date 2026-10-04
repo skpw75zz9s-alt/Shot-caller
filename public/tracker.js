@@ -1,10 +1,10 @@
-// Grades the bot on the whole 15-minute window instead of its first call.
+// Scores the bot on the whole 15-minute window instead of its first call.
 // Every few seconds it samples the bot's odds and call, paper-trades "follow the bot"
 // (buy on each call, cash out on a sell signal or when the call flips, else hold to settlement),
 // and when Kalshi settles the window it turns that into a report card.
 import { exitSignal, kalshiFee } from './model.js';
 import { flipSigns } from './candles.js';
-import { gradeOf } from './analysis.js';
+import { confBucket } from './analysis.js';
 
 const SAMPLE_MS = 5000;
 const STAKE = 10; // paper P&L is reported per $10 call
@@ -80,14 +80,13 @@ export function gradeWindow(tr, ticker, result) {
   const callsRight = callSamples.length ? callSamples.filter((x) => x.call === (yes ? 'YES' : 'NO')).length / callSamples.length : null;
   const paperPts = w.trades.reduce((a, t) => a + t.pts, 0);
   const paperUsd = w.trades.reduce((a, t) => a + (t.pts * STAKE) / t.entry, 0);
-  const grade = avgWinnerOdds >= 0.7 ? 'A' : avgWinnerOdds >= 0.6 ? 'B' : avgWinnerOdds >= 0.5 ? 'C' : 'D';
 
   // Downsample the odds to ~40 points for the sparkline: [minute into window, P(YES)]
   const step = Math.max(1, Math.ceil(s.length / 40));
   const spark = s.filter((_, i) => i % step === 0 || i === s.length - 1).map((x) => [r3((x.t - w.openTime) / 60000), x.p]);
 
   const report = {
-    ticker, title: w.title, strike: w.strike, openTime: w.openTime, closeTime: w.closeTime, result, grade,
+    ticker, title: w.title, strike: w.strike, openTime: w.openTime, closeTime: w.closeTime, result,
     avgWinnerOdds: r3(avgWinnerOdds), timeRight: r3(timeRight), callsRight: r3(callsRight), flips, coverage: r3(coverage),
     finalOdds: r3(winnerP[winnerP.length - 1]), calls: w.trades.length, trades: w.trades, paperPts: r3(paperPts), paperUsd: Math.round(paperUsd * 100) / 100, spark,
   };
@@ -108,17 +107,16 @@ export function summarize(reports) {
   return {
     windows: n, avgWinnerOdds: mean('avgWinnerOdds'), timeRight: mean('timeRight'),
     calls: reports.reduce((a, r) => a + r.calls, 0), paperUsd: reports.reduce((a, r) => a + r.paperUsd, 0),
-    grades: ['A', 'B', 'C', 'D'].map((g) => reports.filter((r) => r.grade === g).length),
-    byCallGrade: callsByGrade(reports),
+    byConfidence: callsByConfidence(reports),
   };
 }
 
-// Follow-the-bot results split by the confidence grade each call had when it was made.
-export function callsByGrade(reports) {
+// Follow-the-bot results grouped by the confidence each call had when it was made.
+export function callsByConfidence(reports) {
   const out = {};
   for (const t of reports.flatMap((r) => r.trades || [])) {
     if (t.conf == null) continue;
-    const g = gradeOf(t.conf);
+    const g = confBucket(t.conf);
     const b = (out[g] ||= { calls: 0, wins: 0, usd: 0 });
     b.calls++;
     if (t.pts > 0) b.wins++;

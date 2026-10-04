@@ -114,7 +114,8 @@ test('every new 15-minute window sends one update with the last result, in local
   const msg = updates[0];
   assert.match(msg.title, /^🕒 \d{1,2}:\d\d (AM|PM)–\d{1,2}:\d\d (AM|PM) window · target \$100,050$/);
   assert.doesNotMatch(msg.title, /UTC/);
-  assert.match(msg.body, /window settled YES · bot grade [A-D] \(\d+% on the winner\)/);
+  assert.match(msg.body, /window settled YES · bot had \d+% on the winner/);
+  assert.doesNotMatch(msg.body, /grade/);
   assert.match(msg.body, /Now BTC \$100,060 \(\+\$10\) · bot leans (YES|NO) \d+%/);
   assert.match(msg.body, /calls start \d{1,2}:\d\d (AM|PM)\.$/, 'new window is 2.5 min old: bot is still watching');
   assert.equal(fresh.filter((x) => /^Buy the low/.test(x.title)).length, 0, 'no calls in the first 5 minutes');

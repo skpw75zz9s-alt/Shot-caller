@@ -1,6 +1,7 @@
 import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote } from './model.js';
 import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
+import { confTier } from './analysis.js';
 import { gradeWindow, mergeReports, newTracker, pendingWindows, pruneWindows, summarize, trackWindow } from './tracker.js';
 
 const API = './api';
@@ -38,7 +39,7 @@ const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyB
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
 if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settings.refreshSec = 3; store.set('settings', settings); store.set('settingsVersion', 3); }
-// v2.6: calls need a B grade or better
+// v2.6: calls need confidence 60 or more
 if (store.get('settingsVersion', 1) < 4 && settings.minConfidence === 55) { settings.minConfidence = 60; store.set('settings', settings); }
 if (store.get('settingsVersion', 1) < 4) store.set('settingsVersion', 4);
 
@@ -76,7 +77,7 @@ async function refreshSpot() {
 }
 
 // ---------- 15-minute report cards ----------
-// The bot is graded on the whole window (see tracker.js), not on its first call.
+// The bot is scored on the whole window (see tracker.js), not on its first call.
 function saveTracker(force) {
   if (force || Date.now() - state.trackerSavedAt > 15000) { state.trackerSavedAt = Date.now(); store.set('tracker', state.tracker); }
 }
@@ -209,10 +210,10 @@ function renderDeep(row, sig) {
   $('deepCard').hidden = !deep;
   $('conf').hidden = !deep;
   if (deep) {
-    $('conf').className = `conf g${deep.grade}`;
-    $('conf').textContent = `Confidence ${deep.score} · ${deep.grade} · ${deep.verdict}`;
-    $('deepScore').textContent = `${deep.score}/100 · ${deep.grade}`;
-    $('deepScore').className = `g${deep.grade}`;
+    $('conf').className = `conf ${confTier(deep.score)}`;
+    $('conf').textContent = `Confidence ${deep.score}`;
+    $('deepScore').textContent = `Confidence ${deep.score}`;
+    $('deepScore').className = confTier(deep.score);
     $('deepChecks').innerHTML = deep.checks.map((c) =>
       `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('');
   }
@@ -281,7 +282,7 @@ function render() {
     const waitingToCall = ev.callsAt && now < ev.callsAt;
     if (waitingToCall && sig.deep) { // a read on the window, not a call yet
       $('conf').className = 'conf';
-      $('conf').textContent = `Preview · confidence ${sig.deep.score} (${sig.deep.grade}) · no call yet`;
+      $('conf').textContent = `Preview · confidence ${sig.deep.score} · no call yet`;
     }
     $('reason').textContent = call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
       : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${settings.minConfidence}` : ev.reason;
@@ -428,18 +429,17 @@ function renderReports() {
   $('rRight').textContent = sum ? pc(sum.timeRight) : '—';
   $('rPnl').textContent = sum ? money(sum.paperUsd) : '—';
   sign($('rPnl'), sum?.paperUsd ?? 0);
-  $('rGrades').innerHTML = sum ? sum.grades.map((n, i) => `<span class="g${'ABCD'[i]}">${'ABCD'[i]} <b>${n}</b></span>`).join('') : '';
-  const bg = sum?.byCallGrade || {};
-  $('rByGrade').innerHTML = Object.keys(bg).length
-    ? `<div class="bg-head">Calls by confidence grade</div>` + ['A', 'B', 'C', 'D'].filter((g) => bg[g]).map((g) =>
-      `<div class="bg-row"><span class="grade g${g}">${g}</span><span>${bg[g].calls} call${bg[g].calls === 1 ? '' : 's'} · won ${pc(bg[g].wins / bg[g].calls)}</span><b class="${bg[g].usd >= 0 ? 'pos' : 'neg'}">${money(bg[g].usd)}</b></div>`).join('')
+  const bc = sum?.byConfidence || {};
+  $('rByConf').innerHTML = Object.keys(bc).length
+    ? '<div class="bg-head">Calls by confidence</div>' + ['80+', '70–79', '60–69', 'under 60'].filter((k) => bc[k]).map((k) =>
+      `<div class="bg-row"><span class="tier">${k}</span><span>${bc[k].calls} call${bc[k].calls === 1 ? '' : 's'} · won ${pc(bc[k].wins / bc[k].calls)}</span><b class="${bc[k].usd >= 0 ? 'pos' : 'neg'}">${money(bc[k].usd)}</b></div>`).join('')
     : '';
   const pending = Object.values(state.tracker.windows).filter((w) => w.samples.length);
   $('reportList').innerHTML = pending.map((w) => `<li class="report pending"><div class="rp-top"><b>${hm(w.openTime)}–${hm(w.closeTime)}</b><span class="muted">${w.closeTime > Date.now() ? 'in progress' : 'waiting for Kalshi result'} · tracking ${Math.max(1, Math.round((w.samples[w.samples.length - 1].t - w.samples[0].t) / 60000))} min</span></div></li>`).join('') +
     reports.slice(0, 60).map((r) => `<li class="report">
       <div class="rp-top"><b>${hm(r.openTime)}–${hm(r.closeTime)}</b>
         <span class="pill ${r.result}">Settled ${r.result.toUpperCase()}${r.result === 'yes' ? ' · above' : ' · below'}</span>
-        <span class="grade g${r.grade}">${r.grade}</span></div>
+        </div>
       ${sparkline(r)}
       <div class="rp-stats">
         <span>Odds on winner <b>${pc(r.avgWinnerOdds)}</b></span>
@@ -448,7 +448,7 @@ function renderReports() {
         <span>Follow-the-bot <b class="${r.paperUsd >= 0 ? 'pos' : 'neg'}">${money(r.paperUsd)}</b></span>
         <span class="muted">Ended at ${pc(r.finalOdds)} on the winner · ${r.flips} flip${r.flips === 1 ? '' : 's'} · watched ${Math.round(r.coverage * 15)} of 15 min</span>
       </div></li>`).join('') ||
-    '<li class="muted">Report cards appear here after each 15-minute window settles. The bot is graded on every sample across the window, not just its first call.</li>';
+    '<li class="muted">Report cards appear here after each 15-minute window settles. The bot is scored on every sample across the window, not just its first call.</li>';
 }
 
 function renderHistory() {
