@@ -1,5 +1,6 @@
 // Read-only link to a Kalshi account with a Kalshi API key, done entirely on the phone.
-// Kalshi signs API requests with RSA-PSS: signature = sign(timestamp + METHOD + path). The private key
+// Kalshi signs API requests with the key: signature = sign(timestamp + METHOD + path), RSA-PSS for
+// RSA keys and Ed25519 for the newer short keys ("MC4CAQAwBQYDK2Vw…"). The private key
 // is imported as a non-extractable WebCrypto key, so after linking even this app's own code can't read
 // it back out, and it never leaves the device. The server only forwards signed GETs for portfolio data.
 
@@ -19,17 +20,28 @@ const RSA_ALG_ID = [0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 
 export function pemToPkcs8(pem) {
   const text = String(pem || '').trim();
   const m = text.match(/-----BEGIN (RSA )?PRIVATE KEY-----([\s\S]+?)-----END (RSA )?PRIVATE KEY-----/);
-  if (!m) throw new Error('That doesn\'t look like a Kalshi private key (it starts with -----BEGIN RSA PRIVATE KEY-----)');
+  if (!m) throw new Error('That doesn\'t look like a Kalshi private key (it starts with -----BEGIN PRIVATE KEY----- or -----BEGIN RSA PRIVATE KEY-----)');
   const body = unb64(m[2].replace(/[^A-Za-z0-9+/=]/g, ''));
   if (!m[1]) return body;
   return der(0x30, [0x02, 0x01, 0x00, ...RSA_ALG_ID, ...der(0x04, body)]);
 }
 
+// Which kind of key a PKCS#8 blob holds, from its algorithm OID.
+const ED25519_OID = [0x06, 0x03, 0x2b, 0x65, 0x70];
+const hasBytes = (buf, seq) => { for (let i = 0; i + seq.length <= Math.min(buf.length, 32); i++) if (seq.every((x, j) => buf[i + j] === x)) return true; return false; };
+export const keyType = (pkcs8) => (hasBytes(pkcs8, ED25519_OID) ? 'Ed25519' : 'RSA-PSS');
+
 export async function importKey(pem, subtle = globalThis.crypto.subtle) {
+  const der = pemToPkcs8(pem);
+  const type = keyType(der);
   try {
-    return await subtle.importKey('pkcs8', pemToPkcs8(pem), { name: 'RSA-PSS', hash: 'SHA-256' }, false, ['sign']);
+    return type === 'Ed25519'
+      ? await subtle.importKey('pkcs8', der, { name: 'Ed25519' }, false, ['sign'])
+      : await subtle.importKey('pkcs8', der, { name: 'RSA-PSS', hash: 'SHA-256' }, false, ['sign']);
   } catch (e) {
-    if (/look like/.test(e.message)) throw e;
+    if (type === 'Ed25519' && /not supported|unrecognized|algorithm/i.test(`${e.name} ${e.message}`)) {
+      throw new Error('This browser can\'t use Kalshi\'s Ed25519 keys yet. Update iOS/Safari or Chrome and try again.');
+    }
     throw new Error('Couldn\'t read that private key. Paste the whole file Kalshi gave you, including the BEGIN/END lines.');
   }
 }
@@ -37,7 +49,8 @@ export async function importKey(pem, subtle = globalThis.crypto.subtle) {
 // Headers for one Kalshi request. `path` is the full API path without the query, e.g. /trade-api/v2/portfolio/fills
 export async function signHeaders(key, keyId, method, path, ts = Date.now(), subtle = globalThis.crypto.subtle) {
   const msg = new TextEncoder().encode(`${ts}${method}${path}`);
-  const sig = new Uint8Array(await subtle.sign({ name: 'RSA-PSS', saltLength: 32 }, key, msg));
+  const alg = key.algorithm.name === 'Ed25519' ? { name: 'Ed25519' } : { name: 'RSA-PSS', saltLength: 32 };
+  const sig = new Uint8Array(await subtle.sign(alg, key, msg));
   return { 'x-kalshi-key': keyId, 'x-kalshi-ts': String(ts), 'x-kalshi-sig': b64(sig) };
 }
 

@@ -19,6 +19,18 @@ test('signs exactly like Kalshi expects: RSA-PSS SHA-256 over timestamp + method
   }
 });
 
+test('Ed25519 keys (Kalshi\'s newer short keys) import and sign too', async () => {
+  const ed = generateKeyPairSync('ed25519');
+  const pem = ed.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  assert.match(pem.replace(/-----[^-]+-----|\s/g, ''), /^MC4CAQAwBQYDK2Vw/, 'same shape as the key Kalshi hands out');
+  const key = await importKey(pem);
+  assert.equal(key.algorithm.name, 'Ed25519');
+  assert.equal(key.extractable, false);
+  const h = await signHeaders(key, 'key-id-1234', 'GET', '/trade-api/v2/portfolio/balance', 1700000000000);
+  assert.ok(verify(null, Buffer.from('1700000000000GET/trade-api/v2/portfolio/balance'), ed.publicKey, Buffer.from(h['x-kalshi-sig'], 'base64')));
+  assert.equal(Buffer.from(h['x-kalshi-sig'], 'base64').length, 64);
+});
+
 test('PKCS#1 keys are wrapped to PKCS#8 byte-for-byte like OpenSSL does', () => {
   const ours = Buffer.from(pemToPkcs8(pkcs1));
   const openssl = Buffer.from(pkcs8.replace(/-----[^-]+-----|\s/g, ''), 'base64');

@@ -114,7 +114,7 @@
         <p id="kStatus" class="push-status">Not linked. Link it and the app reads exactly what you bought, sold and when, so there's nothing to tap.</p>
         <div id="kForm">
           <div class="adm-row"><label>API key ID<input id="kKeyId" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="a1b2c3d4-…"></label></div>
-          <div class="adm-row"><label>Private key<textarea id="kPem" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></label></div>
+          <div class="adm-row"><label>Private key<textarea id="kPem" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label></div>
           <div class="pos-btns"><label class="file-btn">Choose key file<input id="kFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="kLink">Link account</button></div>
           <p class="fine">On Kalshi: Account → API keys → Create key. Copy the key ID and download the private key file.
             The key stays on this phone: it's locked in so that even this app can't read it back out, and it's never sent to our server.
@@ -131,7 +131,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v3.4 · link your Kalshi account</p>
+      <p class="fine" id="version">Shot Caller v3.4.1 · Ed25519 Kalshi keys</p>
     </section>
   </main>
 

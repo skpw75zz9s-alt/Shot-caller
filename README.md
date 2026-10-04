@@ -98,7 +98,7 @@ Once linked, the app reads your **fills** (every buy and sell, with exact price,
 
 Security:
 - **The key never leaves the phone.** It's imported as a non-extractable WebCrypto key in IndexedDB, so it can sign requests but can't be read back out, not even by the app's own code. The pasted text is cleared right away.
-- Each request is signed on the phone (RSA-PSS, Kalshi's API-key method). The server only forwards the signature headers.
+- Each request is signed on the phone (Ed25519 or RSA-PSS, matching the key type Kalshi issued). The server only forwards the signature headers.
 - The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
 
