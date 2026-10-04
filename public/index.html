@@ -46,6 +46,7 @@
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
         <button id="boughtBtn" class="buy-btn" hidden>I bought it</button>
+        <p id="autoNote" class="auto-note" hidden>Kalshi linked: when you buy, it shows up here on its own</p>
         <div class="entry" id="entry" hidden></div>
       </div>
 
@@ -108,6 +109,20 @@
         <h4>Members</h4>
         <ul id="admMembers" class="adm-list"></ul>
       </div>
+      <div class="card push-card kalshi-card">
+        <h3>Kalshi account</h3>
+        <p id="kStatus" class="push-status">Not linked. Link it and the app reads exactly what you bought, sold and when, so there's nothing to tap.</p>
+        <div id="kForm">
+          <div class="adm-row"><label>API key ID<input id="kKeyId" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="a1b2c3d4-…"></label></div>
+          <div class="adm-row"><label>Private key<textarea id="kPem" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></label></div>
+          <div class="pos-btns"><label class="file-btn">Choose key file<input id="kFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="kLink">Link account</button></div>
+          <p class="fine">On Kalshi: Account → API keys → Create key. Copy the key ID and download the private key file.
+            The key stays on this phone: it's locked in so that even this app can't read it back out, and it's never sent to our server.
+            Shot Caller only reads your trades and balance and has no way to place orders. Delete the key on Kalshi any time to cut access.</p>
+        </div>
+        <div id="kLinked" class="pos-btns" hidden><button id="kSync">Sync now</button><button id="kUnlink" class="ghost">Unlink</button></div>
+        <p class="err" id="kErr"></p>
+      </div>
       <div class="card push-card">
         <h3>Notifications</h3>
         <p id="pushStatus" class="push-status">Checking…</p>
@@ -116,7 +131,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v3.3 · tuned for profit</p>
+      <p class="fine" id="version">Shot Caller v3.4 · link your Kalshi account</p>
     </section>
   </main>
 

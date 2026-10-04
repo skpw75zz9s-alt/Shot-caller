@@ -88,3 +88,35 @@ test('compresses the app and market data when the phone accepts it, plain otherw
   assert.equal((await raw('/icon-192.png', 'br')).h['content-encoding'], undefined, 'PNGs are sent as-is');
   assert.equal((await fetch(`${app}/api/kalshi/markets?series_ticker=KXBTC15M&status=open`)).status, 200); // fetch decodes it transparently
 });
+
+test('Kalshi account reads: signed GETs to portfolio only, headers forwarded, never cached, 401 becomes 403', async () => {
+  const seen = [];
+  const kal = http.createServer((req, res) => {
+    seen.push({ url: req.url, key: req.headers['kalshi-access-key'], ts: req.headers['kalshi-access-timestamp'], sig: req.headers['kalshi-access-signature'] });
+    res.setHeader('content-type', 'application/json');
+    if (req.headers['kalshi-access-key'] === 'bad-key-0000') { res.statusCode = 401; return res.end('{"error":"unauthorized"}'); }
+    res.end(JSON.stringify({ fills: [{ n: seen.length }] }));
+  });
+  await new Promise((r) => kal.listen(0, r));
+  // Same handler the server uses, aimed at a mock Kalshi
+  const { kalshiAuthFor } = await import('../server.js');
+  const handler = kalshiAuthFor(`http://127.0.0.1:${kal.address().port}/trade-api/v2`);
+  const srv = http.createServer((req, res) => handler(req, res, req.url.split('?')[0].split('/').pop(), new URL(req.url, 'http://x')));
+  await new Promise((r) => srv.listen(0, r));
+  const at = `http://127.0.0.1:${srv.address().port}/api/kalshi-auth`;
+  const h = { 'x-kalshi-key': 'good-key-1234', 'x-kalshi-ts': '1700000000000', 'x-kalshi-sig': 'A'.repeat(344) };
+  const info = await (await fetch(`${at}/info`)).json();
+  assert.equal(info.pathPrefix, '/trade-api/v2/portfolio/');
+  const r1 = await fetch(`${at}/fills?min_ts=1&limit=200&evil=1`, { headers: h });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.headers.get('cache-control'), 'no-store, private');
+  assert.deepEqual(seen[0], { url: '/trade-api/v2/portfolio/fills?min_ts=1&limit=200', key: 'good-key-1234', ts: '1700000000000', sig: 'A'.repeat(344) });
+  await fetch(`${at}/fills?min_ts=1&limit=200`, { headers: h });
+  assert.equal(seen.length, 2, 'not cached');
+  assert.equal((await fetch(`${at}/orders-create`, { headers: h })).status, 404);
+  assert.equal((await fetch(`${at}/fills`)).status, 400, 'unsigned requests are refused');
+  assert.equal((await fetch(`${at}/balance`, { headers: { ...h, 'x-kalshi-key': 'bad-key-0000' } })).status, 403);
+  // Through the real app server: GET only
+  assert.equal((await fetch(`${app}/api/kalshi-auth/fills`, { method: 'POST', headers: h })).status, 405);
+  srv.close(); kal.close();
+});

@@ -79,6 +79,33 @@ async function proxy(route, url, req, res) {
   }
 }
 
+// /api/kalshi-auth/* — a linked Kalshi account's own portfolio, read-only. The phone signs each request
+// with its Kalshi API key (the key never reaches this server); we only forward the signature headers.
+// GET only, portfolio read endpoints only, never cached (it's one person's data).
+const AUTH_READS = new Set(['fills', 'positions', 'balance', 'settlements', 'orders']);
+const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status']);
+export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpoint, url) {
+  if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/` });
+  if (!AUTH_READS.has(endpoint)) return send(res, 404, { error: 'not allowed' });
+  const key = req.headers['x-kalshi-key'], ts = req.headers['x-kalshi-ts'], sig = req.headers['x-kalshi-sig'];
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(key || '') || !/^\d{12,14}$/.test(ts || '') || !/^[A-Za-z0-9+/=]{40,1024}$/.test(sig || '')) {
+    return send(res, 400, { error: 'missing or malformed Kalshi signature' });
+  }
+  const q = new URLSearchParams();
+  for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
+  try {
+    const r = await fetch(`${base}/portfolio/${endpoint}${q.size ? `?${q}` : ''}`, {
+      headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig },
+      signal: AbortSignal.timeout(8000),
+    });
+    // Kalshi's 401 (bad key) goes out as 403 so the app doesn't mistake it for the paywall's 401
+    sendEntry(req, res, r.status === 401 ? 403 : r.status, { raw: Buffer.from(await r.text()) }, 'application/json', { 'cache-control': 'no-store, private' });
+  } catch (e) {
+    send(res, 502, { error: `Kalshi didn't answer: ${e.message}` });
+  }
+};
+const kalshiAuth = kalshiAuthFor(KALSHI);
+
 async function readBody(req) {
   let raw = '';
   for await (const chunk of req) {
@@ -180,6 +207,8 @@ export const server = http.createServer(async (req, res) => {
     if (push && req.method === 'POST') return await pushApi(req, res, push[1], token);
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
+    const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
+    if (ka) return kalshiAuth(req, res, ka[1], url);
     const route = ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) return proxy(route, url, req, res);
     if (rel === '/paywall.html') return serveFile(req, res, '/index.html'); // already paid: go straight to the app

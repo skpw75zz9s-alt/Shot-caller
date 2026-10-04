@@ -83,6 +83,25 @@ Next to each side's buy price, the app shows Kalshi's **cash-out price**: the li
 
 The server still follows each whole window (the bot's odds every 5 seconds, plus a paper "follow the bot" trade) so the 15-minute update can say how the last window went. The app's History tab shows only **My trades**.
 
+### Link your Kalshi account (optional)
+
+Settings → **Kalshi account**. On Kalshi, go to Account → API keys → Create key, then copy the key ID and download the private key file. Paste the key ID, then paste the key or pick the file, and tap **Link account**. The app checks the key by reading your balance.
+
+Once linked, the app reads your **fills** (every buy and sell, with exact price, size and time) every 10 seconds and whenever you open it. It also imports the last 24 hours when you first link:
+- A buy in the current series becomes a position card marked *From Kalshi*. The "I bought it" button goes away.
+- Adding to a position averages the price in.
+- A sale, partial or full, goes into **My trades** at the price you actually got.
+- Buying the other side nets out, the way Kalshi does it.
+- Positions you hold to settlement are scored when the market settles.
+- Positions sync to the alert server as before, so SELL NOW pushes keep working with the app closed.
+- Fees in P&L are estimated with Kalshi's taker formula.
+
+Security:
+- **The key never leaves the phone.** It's imported as a non-extractable WebCrypto key in IndexedDB, so it can sign requests but can't be read back out, not even by the app's own code. The pasted text is cleared right away.
+- Each request is signed on the phone (RSA-PSS, Kalshi's API-key method). The server only forwards the signature headers.
+- The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
+- **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
+
 ### Selling for profit (exit signals)
 
 The app can't see your Kalshi account. After you buy on Kalshi, tap **I bought it**. That's it: one tap, no typing. The app records the bot's side, Kalshi's live price and the exact time, and uses the bot's suggested amount. Set *Fixed trade amount* in Settings if you always buy the same dollar amount. An **Undo** bar appears for a few seconds in case of a mis-tap. Tap right after your Kalshi order fills so the recorded price matches your fill. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:

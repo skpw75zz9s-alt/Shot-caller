@@ -2,6 +2,7 @@ import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote } from './model.js'
 import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
+import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -51,7 +52,7 @@ if (store.get('settingsVersion', 1) < 6) {
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
-  positions: store.get('positions', []), trades: store.get('trades', []) };
+  positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null } };
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
 // Access lapsed (paywall): reload so the server shows the paywall page.
@@ -110,13 +111,14 @@ function openPosition(m, side, price, contracts, at = Date.now()) {
   return pos;
 }
 
-// exit = sale price in dollars, or 1/0 when it settled
-function closePosition(pos, exit, how, at = Date.now()) {
+// exit = sale price in dollars, or 1/0 when it settled. `contracts` < pos.contracts closes part of it.
+function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contracts) {
   const proceeds = how === 'settled' ? exit : exit - kalshiFee(exit);
-  const trade = { ...pos, exit, how, closedAt: at, pnl: (proceeds - entryCost(pos)) * pos.contracts };
+  const trade = { ...pos, contracts, exit, how, closedAt: at, pnl: (proceeds - entryCost(pos)) * contracts };
   state.trades.unshift(trade);
   state.trades = state.trades.slice(0, 500);
-  state.positions = state.positions.filter((p) => p.id !== pos.id);
+  if (contracts < pos.contracts - 1e-9) pos.contracts -= contracts;
+  else state.positions = state.positions.filter((p) => p.id !== pos.id);
   store.set('trades', state.trades);
   savePositions();
   pushSyncSoon();
@@ -153,9 +155,9 @@ function renderPositions(snap) {
         <div><label>Target sell</label><b>${ex.action === 'SELL' ? 'now' : pc(ex.target)}</b></div>
         <div><label>Pays if right</label><b>${dollars(pos.contracts)}</b></div>
       </div>
-      <div class="pos-where">Bought ${clock(pos.at)} · wins if BTC is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
+      <div class="pos-where">${pos.source === 'kalshi' ? '<span class="src-tag">From Kalshi</span> · ' : ''}Bought ${clock(pos.at)}${pos.source === 'kalshi' ? ` · ${+pos.contracts.toFixed(2)} contracts` : ''} · wins if BTC is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
       <ul class="flips"><span>Flip watch</span>${signs}</ul>
-      <div class="pos-btns"><button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button><button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
+      <div class="pos-btns">${pos.source === 'kalshi' ? '' : `<button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button>`}<button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
   }).join('');
   $('positions').innerHTML = html;
@@ -253,7 +255,9 @@ function render() {
   const sig = live ? buySignal(live, snap, settings, now) : null;
   renderDeep(live, sig);
   state.liveCall = live?.ev.side && sig?.confident ? { ...live, sig } : null;
-  $('boughtBtn').hidden = !state.liveCall || state.positions.some((p) => p.ticker === live.m.ticker);
+  const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
+  $('boughtBtn').hidden = !showBuy || !!state.kalshi.key; // linked: buys arrive from Kalshi on their own
+  $('autoNote').hidden = !showBuy || !state.kalshi.key;
   const card = $('callCard'), callEl = $('call'), entry = $('entry');
   card.className = 'card call-card';
   entry.className = 'entry';
@@ -778,7 +782,166 @@ if ('serviceWorker' in navigator) {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
   }).catch(() => {});
 }
+
+// ---------- Kalshi account link (read-only) ----------
+// The API key is kept in IndexedDB as a non-extractable CryptoKey: usable for signing, never readable.
+const idb = (mode, fn) => new Promise((resolve, reject) => {
+  const open = indexedDB.open('shot-caller', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('kv');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const tx = open.result.transaction('kv', mode), req = fn(tx.objectStore('kv'));
+    tx.oncomplete = () => { resolve(req?.result); open.result.close(); };
+    tx.onerror = () => { reject(tx.error); open.result.close(); };
+  };
+});
+const kalshiMarkets = {}; // ticker -> { close_time, title } for markets that are no longer listed as open
+let kalshiPrefix = null, kalshiBusy = false;
+
+async function kalshiGet(endpoint, params = {}) {
+  const { key, keyId } = state.kalshi;
+  if (!key) throw new Error('Kalshi not linked');
+  kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
+  const headers = await signHeaders(key, keyId, 'GET', kalshiPrefix + endpoint);
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+  const r = await fetch(`${API}/kalshi-auth/${endpoint}${q ? `?${q}` : ''}`, { headers });
+  paywalled(r);
+  const body = await r.json().catch(() => ({}));
+  if (r.status === 403) throw new Error('Kalshi rejected the key. Check the key ID and private key, or make a new key on Kalshi.');
+  if (!r.ok) throw new Error(body.error?.message || body.error || `Kalshi: HTTP ${r.status}`);
+  return body;
+}
+
+async function marketInfo(ticker) {
+  const open = state.markets.find((x) => x.ticker === ticker);
+  if (open) return open;
+  if (!kalshiMarkets[ticker]) kalshiMarkets[ticker] = (await getJSON(`kalshi/markets/${encodeURIComponent(ticker)}`)).market;
+  return kalshiMarkets[ticker];
+}
+
+// Pull new fills for this series and turn them into positions (buys) and trades (sales), exactly as filled.
+async function syncKalshi() {
+  if (!state.kalshi.key || kalshiBusy) return;
+  kalshiBusy = true;
+  try {
+    const seen = new Set(store.get('kalshiSeen', []));
+    const since = store.get('kalshiSince', Math.floor(Date.now() / 1000) - 24 * 3600); // first link: the last 24 hours
+    const fills = [];
+    let cursor = null, pages = 0;
+    do {
+      const page = await kalshiGet('fills', { min_ts: since, limit: 200, cursor });
+      fills.push(...(page.fills || []).map(parseFill));
+      cursor = page.cursor || null;
+    } while (cursor && ++pages < 5);
+    const mine = fills.filter((f) => f.ticker.startsWith(`${settings.series}-`) && !seen.has(f.id) && f.at);
+    if (mine.length) {
+      const linked = state.positions.filter((p) => p.source === 'kalshi');
+      const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at }]));
+      const { holdings: next, closes } = foldFills(holdings, mine);
+      for (const c of closes) {
+        const pos = state.positions.find((p) => p.source === 'kalshi' && p.ticker === c.ticker);
+        if (pos) closePosition({ ...pos, price: c.entry }, c.exit, 'sold', c.at, Math.min(c.contracts, pos.contracts)); // contracts left are set from `next` below
+      }
+      state.positions = state.positions.filter((p) => !(p.source === 'kalshi' && !next[p.ticker]));
+      for (const [ticker, h] of Object.entries(next)) {
+        let pos = state.positions.find((p) => p.source === 'kalshi' && p.ticker === ticker);
+        if (!pos) {
+          const m = await marketInfo(ticker).catch(() => null);
+          if (!m?.close_time) continue; // can't place it on the clock yet; retried next sync (fill stays unseen)
+          // Kalshi's record replaces a manual "I bought it" tap on the same market
+          state.positions = state.positions.filter((p) => p.ticker !== ticker);
+          pos = { id: `k-${ticker}`, source: 'kalshi', ticker, title: m.title, closeTime: m.close_time, peakBid: null, peakP: null };
+          state.positions.push(pos);
+        }
+        Object.assign(pos, { side: h.side, contracts: h.contracts, price: h.price, at: h.at });
+      }
+      const placed = new Set(state.positions.map((p) => p.ticker));
+      for (const f of mine) if (placed.has(f.ticker) || !next[f.ticker]) seen.add(f.id);
+      store.set('kalshiSeen', [...seen].slice(-2000));
+      savePositions();
+      store.set('trades', state.trades);
+      pushSyncSoon();
+      const n = mine.length;
+      toast(`Kalshi: ${n} new fill${n === 1 ? '' : 's'} synced`);
+    }
+    // Next time, start from the newest fill, or from the oldest one we couldn't place yet so it's retried
+    const waiting = mine.filter((f) => !seen.has(f.id)).map((f) => f.at);
+    const newest = waiting.length ? Math.min(...waiting) : Math.max(0, ...fills.map((f) => f.at || 0));
+    if (newest) store.set('kalshiSince', Math.max(since, Math.floor(newest / 1000) - 5));
+    state.kalshi.lastSync = Date.now(); state.kalshi.error = null;
+    if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > 60000) {
+      state.kalshi.balance = balanceDollars(await kalshiGet('balance')); state.kalshi.balanceAt = Date.now();
+    }
+  } catch (e) {
+    state.kalshi.error = e.message;
+  } finally {
+    kalshiBusy = false;
+    renderKalshi();
+    render();
+  }
+}
+
+function renderKalshi() {
+  const k = state.kalshi, linked = !!k.key;
+  $('kForm').hidden = linked;
+  $('kLinked').hidden = !linked;
+  $('kErr').textContent = k.error || '';
+  if (!linked) return;
+  const bal = k.balance != null ? ` · balance ${dollars(k.balance)}` : '';
+  const last = k.lastSync ? ` · synced ${clock(k.lastSync)}` : ' · syncing…';
+  $('kStatus').textContent = `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}. Your ${settings.series} buys and sells show up on their own.`;
+}
+
+async function loadKalshi() {
+  try {
+    const saved = await idb('readonly', (st) => st.get('kalshi'));
+    if (saved?.key && saved?.keyId) { state.kalshi.key = saved.key; state.kalshi.keyId = saved.keyId; syncKalshi(); }
+  } catch { /* private mode etc: linking just isn't available */ }
+  renderKalshi();
+}
+
+$('kFile').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  if (f) $('kPem').value = await f.text();
+  e.target.value = '';
+});
+$('kLink').addEventListener('click', async () => {
+  const keyId = $('kKeyId').value.trim(), pem = $('kPem').value;
+  $('kErr').textContent = '';
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(keyId)) { state.kalshi.error = 'Enter the API key ID from Kalshi'; return renderKalshi(); }
+  $('kLink').textContent = 'Linking…';
+  try {
+    const key = await importKey(pem);
+    state.kalshi = { key, keyId };
+    state.kalshi.balance = balanceDollars(await kalshiGet('balance')); // proves the key works before saving it
+    state.kalshi.balanceAt = Date.now();
+    await idb('readwrite', (st) => st.put({ key, keyId }, 'kalshi'));
+    $('kPem').value = ''; $('kKeyId').value = '';
+    store.set('kalshiSince', Math.floor(Date.now() / 1000) - 24 * 3600);
+    toast('Kalshi linked');
+    syncKalshi();
+  } catch (e) {
+    state.kalshi = { key: null, keyId: null, error: e.message };
+  } finally {
+    $('kLink').textContent = 'Link account';
+    renderKalshi();
+  }
+});
+$('kSync').addEventListener('click', () => { state.kalshi.balanceAt = 0; syncKalshi(); });
+$('kUnlink').addEventListener('click', async () => {
+  if (!confirm('Unlink Kalshi? The key is deleted from this phone. Positions already synced stay.')) return;
+  await idb('readwrite', (st) => st.delete('kalshi')).catch(() => {});
+  state.kalshi = { key: null, keyId: null };
+  store.set('kalshiSeen', []); store.set('kalshiSince', null);
+  for (const p of state.positions) if (p.source === 'kalshi') delete p.source; // keep tracking them by hand
+  savePositions();
+  renderKalshi(); render();
+});
+setInterval(() => { if (!document.hidden) syncKalshi(); }, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncKalshi(); });
+
 buildSettings();
+loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();
