@@ -342,7 +342,17 @@ $('clearHistory').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 setInterval(render, 1000); // keep the countdown ticking between polls
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+// Pick up new deploys: check for a new service worker on open and reload once it takes over.
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
 buildSettings();
 tick();
 schedule();
