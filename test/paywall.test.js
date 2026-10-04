@@ -176,3 +176,15 @@ test('buyer pays, admin approves from the app, buyer is unlocked', async () => {
   await admin('/api/admin/revoke', { code: st.code });
   assert.equal((await buyer('/app.js')).status, 401);
 });
+
+test('every user gets their own random payment code; the same user keeps theirs', async () => {
+  const a = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'u.json'), env: {}, log: { warn() {}, error() {} } });
+  await a.load();
+  const codes = [], tokens = [];
+  for (let i = 0; i < 500; i++) { const r = a.request(null, `10.1.${i >> 8}.${i & 255}`); codes.push(r.body.code); tokens.push(r.token); }
+  assert.equal(new Set(codes).size, 500, 'no two users share a code');
+  assert.ok(codes.every((c) => /^SC-[A-HJ-NP-Z2-9]{6}$/.test(c)));
+  const firstChars = new Set(codes.map((c) => c[3]));
+  assert.ok(firstChars.size > 20, 'characters are spread across the alphabet, not sequential');
+  assert.equal(a.request(tokens[0], '10.1.0.0').body.code, codes[0], 'reopening the paywall on the same phone shows the same code');
+});
