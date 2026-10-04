@@ -3,42 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0f14">
+  <meta name="theme-color" content="#06080c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Shot Caller</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <style>
     body { padding-bottom: 32px; }
     .pw { max-width: 480px; margin: 0 auto; padding: 0 16px; }
-    .hero { text-align: center; padding: 28px 0 8px; }
-    .hero img { width: 72px; height: 72px; border-radius: 18px; }
-    .hero h1 { font-size: 26px; margin: 10px 0 4px; }
-    .hero p { color: var(--muted); margin: 0; }
-    .feats { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 8px; }
-    .feats li { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
-    .feats b { color: var(--accent); }
-    .price { text-align: center; margin: 6px 0 2px; }
-    .price b { font-size: 40px; }
-    .price span { color: var(--muted); }
-    .step { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin: 14px 0 6px; }
-    .code { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: var(--bg); border: 1px dashed var(--accent); border-radius: 12px; }
-    .code b { font-size: 26px; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+    .hero { text-align: center; padding: 30px 0 6px; }
+    .hero img { width: 64px; height: 64px; border-radius: 16px; border: 1px solid var(--line-2); }
+    .hero h1 { justify-content: center; font-size: 18px; margin: 12px 0 4px; }
+    .hero h1::before { display: none; }
+    .hero p { color: var(--muted); margin: 0; font-size: 13px; }
+    .feats { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 6px; }
+    .feats li { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--muted); }
+    .feats b { color: var(--text); letter-spacing: .3px; }
+    #buy { border-color: var(--line-2); }
+    .price { text-align: center; margin: 4px 0 6px; }
+    .price b { font: 700 42px var(--mono); letter-spacing: -1px; }
+    .price span { color: var(--muted); font: 500 13px var(--mono); }
+    .step { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: var(--muted); text-transform: uppercase; margin: 16px 0 6px; }
+    .code { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: var(--bg); border: 1px dashed #3b82f688; border-radius: 8px; }
+    .code b { font: 700 24px var(--mono); letter-spacing: 3px; }
     .code button { width: auto; margin: 0; padding: 8px 14px; }
-    .cashapp { background: #00d632; color: #00140a; font-size: 17px; }
+    .cashapp { background: #00d632; color: #00140a; font-size: 14px; font-weight: 800; }
     .muted-sm { color: var(--muted); font-size: 12px; text-align: center; margin: 6px 0; }
+    .muted-sm b { font-family: var(--mono); color: var(--text); }
     .wait { text-align: center; padding: 8px 0; }
-    .spin { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 8px auto; animation: rot 1s linear infinite; }
+    .spin { width: 26px; height: 26px; border: 3px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; margin: 8px auto; animation: rot 1s linear infinite; }
     @keyframes rot { to { transform: rotate(360deg); } }
-    details { margin-top: 10px; }
-    summary { color: var(--muted); font-size: 13px; cursor: pointer; padding: 8px 0; }
+    details { margin-top: 10px; border-top: 1px solid var(--line); }
+    summary { color: var(--muted); font-size: 12px; cursor: pointer; padding: 10px 0; }
     .row { display: flex; gap: 8px; }
-    .row input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 16px; text-transform: uppercase; }
+    .row input { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px; font: 600 15px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+    .row input:focus { outline: none; border-color: var(--accent); }
     .row button { width: auto; margin: 0; }
-    .err { color: var(--no); font-size: 13px; min-height: 1.2em; margin: 4px 0; }
   </style>
 </head>
 <body>
