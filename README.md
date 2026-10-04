@@ -49,6 +49,25 @@ Flip signs: a reversal candle against you (shooting star or bearish engulfing fo
 
 On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** and enter how much of your stake you sold and at what %. Partial sales are supported. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
+### Push notifications (app closed)
+
+The server runs the same bot as the app, around the clock. It sends **Web Push** notifications for **BUY THE LOW** and **SELL NOW**, so you get them with the app closed and your phone locked.
+
+1. **iPhone:** iOS 16.4 or later. Add the app to your Home Screen and open it from there. Safari tabs can't receive push. **Android:** Chrome works, installed or not.
+2. Open **Settings → Turn on push notifications** and allow notifications.
+3. Tap **Send test**. You should get "Shot Caller ✓" within a few seconds.
+
+Your settings and tracked positions sync to the server whenever they change, so it watches the same thresholds and positions. Turn off either alert type with **Notify: buy the low** and **Notify: sell now**. With push on, the app only vibrates in the foreground; the server sends the notification, so you don't get duplicates.
+
+**Keep subscriptions across redeploys (Railway):** the server stores its push keys and subscribed phones in a small JSON file. Railway's disk resets on each deploy, so add a volume:
+
+- Service → **Settings → Volumes → + New Volume**, mount path `/data`
+- Service → **Variables → New Variable**: `DATA_DIR` = `/data`
+
+Without a volume, push still works, but after each redeploy you need to open the app once to resubscribe automatically. If you'd rather pin the keys, run `npm run vapid` and set `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` in Variables. `/healthz` shows how many phones are subscribed and when the bot last ran.
+
+How it's built: `push.js` implements VAPID (RFC 8292) and aes128gcm payload encryption (RFC 8291) with `node:crypto`, still with no dependencies. It's tested against the RFC's published test vector. The server only sends to real browser push services (Apple, Google, Mozilla, Microsoft).
+
 Every first call on a market goes into **History**. After the market settles, the app fetches the result and tracks hit rate and paper P&L.
 
 ## Run it
@@ -73,7 +92,7 @@ Choose one:
 - **Same Wi-Fi.** Run `npm start` on your computer, then open `http://<computer-ip>:8080` on your phone. Install and notifications need HTTPS, but the live view works.
 - **Android only, on the device.** Install Termux, then `pkg install nodejs git`, clone the repo, run `npm start`, and open `localhost:8080`.
 
-Tap **Settings → Enable call alerts** to get a vibration and notification when a new shot is called. Alerts only fire while the app is open. iOS needs the app on the Home Screen first.
+Tap **Settings → Turn on push notifications** to get alerts even when the app is closed. See *Push notifications* below.
 
 ## Settings
 
@@ -82,6 +101,7 @@ Tap **Settings → Enable call alerts** to get a vibration and notification when
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
+| Notify: buy the low / sell now | on / on | Which push alerts to send |
 | Min profit to lock | 1 pt | Profit per contract, after both fees, before flip signs trigger a sell |
 | Trailing drop | 6 pts | Sell-% drop from its peak that counts as a flip sign |
 | Odds drop | 8 pts | Bot odds drop from their peak that counts as a flip sign |

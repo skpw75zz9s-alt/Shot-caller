@@ -9,7 +9,7 @@
   <title>Shot Caller</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -20,6 +20,7 @@
 
   <main>
     <section id="view-live" class="view active">
+      <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
@@ -72,10 +73,15 @@
     </section>
 
     <section id="view-settings" class="view">
+      <div class="card push-card">
+        <h3>Notifications</h3>
+        <p id="pushStatus" class="push-status">Checking…</p>
+        <button id="pushOn" hidden>Turn on push notifications</button>
+        <div class="pos-btns"><button id="pushTest" hidden>Send test</button><button id="pushOff" class="ghost" hidden>Turn off</button></div>
+      </div>
       <form id="settingsForm" class="card settings"></form>
-      <button id="enableAlerts">Enable call alerts</button>
-      <p class="fine">Alerts fire while the app is open (iOS needs the app added to the Home Screen first). Settings are saved on this device.</p>
-      <p class="fine" id="version">Shot Caller v1.4 · $ at % tracking</p>
+      <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
+      <p class="fine" id="version">Shot Caller v1.5 · push notifications</p>
     </section>
   </main>
 

@@ -1,5 +1,6 @@
-import { DEFAULTS, EXIT_DEFAULTS, dipLimit, evaluate, exitSignal, kalshiFee, momentum, quote, realizedVol, settlePnl } from './model.js';
-import { entrySignal, flipSigns, patterns, withLiveBar } from './candles.js';
+import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote, settlePnl } from './model.js';
+import { patterns } from './candles.js';
+import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -12,6 +13,8 @@ const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, to call BUY THE LOW', 'cents'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
+  ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
+  ['notifySell', 'Notify: sell now', 'Alert when a tracked position should be sold', 'bool'],
   ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['maxMinutesLeft', 'Max minutes left', 'Don\'t call this early in the window', 'num'],
@@ -25,7 +28,7 @@ const SETTINGS_META = [
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
   ['refreshSec', 'Refresh (sec)', 'How often to poll', 'num'],
 ];
-const settings = { series: 'KXBTC15M', refreshSec: 5, waitForDip: false, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 5, waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 
@@ -41,8 +44,7 @@ async function getJSON(path) {
 // ---------- data ----------
 async function refreshCandles() {
   // Coinbase rows: [time, low, high, open, close, volume], newest first
-  const rows = await getJSON('coinbase/products/BTC-USD/candles?granularity=60');
-  state.candles = rows.map((r) => ({ t: r[0] * 1000, l: r[1], h: r[2], o: r[3], c: r[4] })).sort((a, b) => a.t - b.t);
+  state.candles = parseCandles(await getJSON('coinbase/products/BTC-USD/candles?granularity=60'));
   state.candlesAt = Date.now();
 }
 
@@ -55,16 +57,6 @@ async function refreshMarkets() {
 async function refreshSpot() {
   const t = await getJSON('coinbase/products/BTC-USD/ticker');
   state.spot = Number(t.price);
-}
-
-// Kalshi lists the strike as floor_strike. If it's missing, use the BTC price at the window open.
-function strikeFor(m) {
-  if (m.floor_strike != null || m.cap_strike != null) return Number(m.floor_strike ?? m.cap_strike);
-  if (state.strikes[m.ticker]) return state.strikes[m.ticker];
-  const open = Date.parse(m.open_time);
-  const c = state.candles.find((k) => k.t >= open - 30000);
-  if (c && Date.now() > open) state.strikes[m.ticker] = c.o;
-  return state.strikes[m.ticker] ?? null;
 }
 
 // ---------- history ----------
@@ -110,6 +102,7 @@ function savePositions() { store.set('positions', state.positions); }
 function openPosition(m, side, price, contracts) {
   state.positions.push({ id: String(Date.now()), ticker: m.ticker, title: m.title, closeTime: m.close_time, side, price, contracts, at: Date.now(), peakBid: null, peakP: null });
   savePositions();
+  pushSyncSoon();
 }
 
 // exit = sale price in dollars, or 1/0 when it settled
@@ -120,29 +113,20 @@ function closePosition(pos, exit, how) {
   state.positions = state.positions.filter((p) => p.id !== pos.id);
   store.set('trades', state.trades);
   savePositions();
+  pushSyncSoon();
 }
 
 function renderPositions(rows, bars, now) {
   const html = state.positions.map((pos) => {
-    const row = rows.find((r) => r.m.ticker === pos.ticker);
-    const minutesLeft = (Date.parse(pos.closeTime) - now) / 60000;
-    const pYes = row?.ev.pYes ?? null;
-    const pSide = pYes == null ? null : pos.side === 'YES' ? pYes : 1 - pYes;
-    const bid = row ? (pos.side === 'YES' ? row.ev.quote.yesBid : row.ev.quote.noBid) : null;
-    const flips = flipSigns(bars, pos.side, now);
-    const ex = exitSignal({ pos, bid, pSide, flips, minutesLeft, settings });
-
-    // Peaks update after the check, so a drop is measured from earlier highs
-    let changed = false;
-    if (bid != null && (pos.peakBid == null || bid > pos.peakBid)) { pos.peakBid = bid; changed = true; }
-    if (pSide != null && (pos.peakP == null || pSide > pos.peakP)) { pos.peakP = pSide; changed = true; }
-    if (changed) savePositions();
+    const check = positionCheck(pos, rows, bars, settings, now);
+    const { row, minutesLeft, pSide, bid, ex } = check;
+    if (check.changed) savePositions();
 
     if (ex.action === 'SELL') {
       const key = `${pos.id}:${ex.kind}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        alert(`sell-${pos.id}`, `SELL NOW: ${sideName(pos.side)} at ${pc(bid)} (${money(ex.pnl)})`, ex.why);
+        if (settings.notifySell) alert(sellMessage(pos, check));
       }
     }
 
@@ -207,9 +191,10 @@ $('sheetOk').addEventListener('click', () => {
 });
 
 // ---------- alerts ----------
-async function alert(tag, title, body) {
+// In-app alert. When push is on, the server sends the notification, so only vibrate here.
+async function alert({ tag, title, body }) {
   try { navigator.vibrate?.([200, 100, 200]); } catch { /* needs a tap first */ }
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (state.pushOn || !('Notification' in window) || Notification.permission !== 'granted') return;
   const reg = await navigator.serviceWorker?.getRegistration();
   if (reg) reg.showNotification(title, { body, tag, icon: 'icon.svg' });
   else new Notification(title, { body, tag });
@@ -220,24 +205,12 @@ const usd = (v, d = 2) => v == null ? '—' : `$${v.toLocaleString(undefined, { 
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
 const pc = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
 const dollars = (v) => `$${v.toFixed(2)}`;
-const sideName = (side) => (side === 'YES' ? 'YES · Above' : 'NO · Below');
 const money = (v) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
 const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle('neg', v < 0); };
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-function compute() {
-  const now = Date.now();
-  const bars = withLiveBar(state.candles, state.spot, now);
-  const closes = bars.map((c) => c.c);
-  const sigmaMin = realizedVol(closes.slice(-121));
-  const driftMin = momentum(closes, 10);
-  const rows = state.markets.map((m) => {
-    const strike = strikeFor(m);
-    return { m, strike, ev: evaluate({ market: m, strike, spot: state.spot, sigmaMin, driftMin, now, settings }) };
-  });
-  return { now, bars, sigmaMin, driftMin, rows };
-}
+const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes });
 
 // Kalshi % vs bot % for each side. "Low" = Kalshi's price is below the bot's odds by the min gap after fees.
 function oddsRows(ev, minEdge) {
@@ -257,11 +230,9 @@ function oddsRows(ev, minEdge) {
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
-const leanSide = (ev) => ev.side ?? (ev.evYes == null && ev.evNo == null ? null : (ev.evYes ?? -1) >= (ev.evNo ?? -1) ? 'YES' : 'NO');
 
 function render() {
-  const { now, bars, sigmaMin, driftMin, rows } = compute();
-  const live = rows.find((r) => r.ev.minutesLeft > 0);
+  const { now, bars, sigmaMin, driftMin, rows, live } = compute();
   renderPositions(rows, bars, now);
   state.liveCall = live?.ev.side ? live : null;
   $('boughtBtn').hidden = !state.liveCall || state.positions.some((p) => p.ticker === live.m.ticker);
@@ -277,8 +248,9 @@ function render() {
     entry.hidden = true;
   } else {
     const { m, ev, strike } = live;
-    const side = leanSide(ev);
-    timing = entrySignal(bars, side, now);
+    const sig = buySignal(live, bars, settings, now);
+    const { side, buyNow } = sig;
+    timing = sig.timing;
     const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings }) : null;
 
     $('marketTitle').textContent = m.title || m.ticker;
@@ -287,7 +259,6 @@ function render() {
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
 
     // Call + entry timing
-    const buyNow = ev.side && timing.state === 'NOW';
     const waiting = ev.side && !buyNow && settings.waitForDip;
     $('callLabel').textContent = ev.side ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : 'No low price';
     call.textContent = ev.call;
@@ -309,14 +280,12 @@ function render() {
     else $('order').textContent = limit ? `Limit ${dollars(ev.contracts * limit.price)} at ${pc(limit.price)} ${sideName(ev.side)} (now ${pc(ev.price)})` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
-    if (ev.side && (buyNow || !settings.waitForDip)) {
+    if (sig.fire) {
       const key = `${m.ticker}:${ev.side}:${buyNow ? 'low' : 'call'}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         recordCall(m, ev, buyNow ? 'low' : 'ask');
-        const bot = ev.side === 'YES' ? ev.pYes : 1 - ev.pYes;
-        alert(m.ticker, `Buy the low: ${sideName(ev.side)} at ${pc(ev.price)}`,
-          `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(ev.contracts * ev.price)}${buyNow ? ' · candle dip too' : ''}`);
+        if (settings.notifyBuy) alert(buyMessage(live, sig));
       }
     }
 
@@ -426,6 +395,86 @@ function renderHistory() {
   }).join('');
 }
 
+// ---------- push notifications ----------
+// The server runs the same bot and sends Web Push, so alerts arrive with the app closed.
+// iPhone needs iOS 16.4+ and the app opened from the Home Screen.
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone;
+const keyBytes = (b64) => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+let pushSub = null, syncTimer = null;
+
+async function postJSON(path, body) {
+  const r = await fetch(`${API}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+// Subscribe with the server's current key (resubscribing if the server's key changed).
+async function subscribe(reg) {
+  const { publicKey } = await getJSON('push/key');
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && store.get('pushKey', null) !== publicKey) { await sub.unsubscribe(); sub = null; }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  store.set('pushKey', publicKey);
+  return sub;
+}
+
+async function pushSync() {
+  if (!pushSub) return;
+  await postJSON('push/sync', { subscription: pushSub.toJSON(), settings, positions: state.positions });
+  state.pushOn = true;
+}
+function pushSyncSoon() {
+  if (!pushSub) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => pushSync().catch((e) => console.warn('push sync', e)), 800);
+}
+
+async function pushInit() {
+  try {
+    if (pushSupported() && Notification.permission === 'granted') {
+      const reg = await navigator.serviceWorker.ready;
+      if (await reg.pushManager.getSubscription()) { pushSub = await subscribe(reg); await pushSync(); }
+    }
+  } catch (e) { console.warn('push init', e); }
+  renderPush();
+}
+
+async function pushEnable() {
+  if ((await Notification.requestPermission()) !== 'granted') return renderPush('Notifications are blocked. Allow them for Shot Caller in your phone\'s Settings → Notifications.');
+  pushSub = await subscribe(await navigator.serviceWorker.ready);
+  await pushSync();
+  renderPush();
+}
+
+async function pushDisable() {
+  if (pushSub) {
+    await postJSON('push/unsubscribe', { endpoint: pushSub.endpoint }).catch(() => {});
+    await pushSub.unsubscribe().catch(() => {});
+  }
+  pushSub = null; state.pushOn = false;
+  renderPush();
+}
+
+function renderPush(msg) {
+  const on = !!pushSub && !!state.pushOn;
+  let text = msg;
+  if (!text && !pushSupported()) {
+    text = isIOS && !standalone
+      ? 'On iPhone: tap Share → Add to Home Screen, open Shot Caller from your Home Screen, then turn on notifications here.'
+      : 'This browser doesn\'t support push notifications.';
+  }
+  if (!text) text = on ? 'On ✓ BUY THE LOW and SELL NOW alerts arrive even with the app closed.' : 'Off. Alerts only show while the app is open.';
+  $('pushStatus').textContent = text;
+  $('pushStatus').classList.toggle('on', on && !msg);
+  $('pushOn').hidden = on || !pushSupported();
+  $('pushTest').hidden = !on;
+  $('pushOff').hidden = !on;
+  $('pushNudge').hidden = on || store.get('nudgeDismissed', false);
+}
+
 // ---------- settings ----------
 function buildSettings() {
   $('settingsForm').innerHTML = SETTINGS_META.map(([k, label, hint, kind]) => {
@@ -445,6 +494,7 @@ function buildSettings() {
       settings[k] = kind === 'cents' ? n / 100 : n;
     }
     store.set('settings', settings);
+    pushSyncSoon();
     if (k === 'series') { state.marketsAt = 0; state.markets = []; }
     if (k === 'refreshSec') schedule();
     render();
@@ -481,11 +531,16 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
   $(`view-${b.dataset.view}`).classList.add('active');
 }));
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
-$('enableAlerts').addEventListener('click', async () => {
-  if (!('Notification' in window)) return window.alert('Notifications are not supported here. On iOS, add the app to your Home Screen first.');
-  const p = await Notification.requestPermission();
-  $('enableAlerts').textContent = p === 'granted' ? 'Alerts enabled ✓' : 'Alerts blocked';
+$('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
+$('pushOff').addEventListener('click', () => pushDisable());
+$('pushTest').addEventListener('click', async () => {
+  $('pushTest').textContent = 'Sending…';
+  try { await postJSON('push/test', { endpoint: pushSub.endpoint }); $('pushTest').textContent = 'Sent ✓'; }
+  catch (e) { $('pushTest').textContent = 'Send test'; renderPush(`Test failed: ${e.message}`); }
+  setTimeout(() => { $('pushTest').textContent = 'Send test'; }, 3000);
 });
+$('nudgeGo').addEventListener('click', () => document.querySelector('nav button[data-view=settings]').click());
+$('nudgeX').addEventListener('click', () => { store.set('nudgeDismissed', true); renderPush(); });
 $('boughtBtn').addEventListener('click', () => {
   const live = state.liveCall;
   if (!live) return;
@@ -503,7 +558,7 @@ $('positions').addEventListener('click', (e) => {
   const pos = state.positions.find((p) => p.id === btn.dataset.id);
   if (!pos) return;
   if (btn.dataset.act === 'remove') {
-    if (confirm('Stop tracking this position? It won\'t be added to your trades.')) { state.positions = state.positions.filter((p) => p !== pos); savePositions(); render(); }
+    if (confirm('Stop tracking this position? It won\'t be added to your trades.')) { state.positions = state.positions.filter((p) => p !== pos); savePositions(); pushSyncSoon(); render(); }
     return;
   }
   const m = state.markets.find((x) => x.ticker === pos.ticker);
@@ -547,5 +602,6 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 buildSettings();
+pushInit();
 tick();
 schedule();

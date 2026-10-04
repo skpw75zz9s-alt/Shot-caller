@@ -1,0 +1,99 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createBot } from '../bot.js';
+import { fakeBrowser, fakePushService } from './helpers.js';
+
+const NOW = Math.floor(Date.now() / 60000) * 60000 + 20000;
+const quotes = { yes_bid: 38, yes_ask: 40 };
+
+// Fake Kalshi + Coinbase: quiet tape near 100,000, BTC 60 above a 100,000 strike, 6 minutes left.
+const upstream = http.createServer((req, res) => {
+  res.setHeader('content-type', 'application/json');
+  if (req.url.startsWith('/products/BTC-USD/candles')) {
+    const rows = [];
+    for (let i = 120; i >= 1; i--) {
+      const t = NOW - (NOW % 60000) - i * 60000, o = 100000 + Math.sin(i) * 10, c = 100000 + Math.sin(i - 1) * 10;
+      rows.push([t / 1000, Math.min(o, c) - 3, Math.max(o, c) + 3, o, c, 1]);
+    }
+    return res.end(JSON.stringify(rows.reverse()));
+  }
+  if (req.url.startsWith('/products/BTC-USD/ticker')) return res.end(JSON.stringify({ price: '100060' }));
+  if (req.url.startsWith('/markets?')) {
+    return res.end(JSON.stringify({ markets: [{
+      ticker: 'KXBTC15M-T1', title: 'BTC up?', strike_type: 'greater_or_equal', floor_strike: 100000,
+      open_time: new Date(NOW - 9 * 60000).toISOString(), close_time: new Date(NOW + 6 * 60000).toISOString(), ...quotes,
+    }] }));
+  }
+  res.statusCode = 404; res.end('{}');
+});
+await new Promise((r) => upstream.listen(0, r));
+const base = `http://127.0.0.1:${upstream.address().port}`;
+const svc = await fakePushService();
+const dataFile = join(await mkdtemp(join(tmpdir(), 'shot-')), 'data.json');
+const quiet = { log() {}, warn() {}, error() {} };
+const bot = createBot({ kalshi: base, coinbase: base, dataFile, env: { PUSH_HOST_ALLOW: '127.0.0.1' }, log: quiet });
+await bot.load();
+const phone = fakeBrowser();
+const subscription = { endpoint: `${svc.base}/push/phone1`, keys: phone.keys };
+const lastPush = () => JSON.parse(phone.decrypt(svc.received[svc.received.length - 1].body));
+
+test.after(() => { bot.stop(); upstream.close(); svc.server.close(); });
+
+test('rejects subscriptions that are not real push services', () => {
+  assert.equal(bot.sync({ subscription: { endpoint: 'https://evil.example.com/x', keys: phone.keys } }).status, 400);
+  assert.equal(bot.sync({ subscription: { endpoint: 'https://fcm.googleapis.com/x' } }).status, 400);
+});
+
+test('sends BUY THE LOW once when Kalshi is below the bot odds', async () => {
+  assert.equal(bot.sync({ subscription, settings: { minEdge: 0.04 }, positions: [] }).status, 200);
+  await bot.tick(NOW);
+  assert.equal(svc.received.length, 1);
+  const msg = lastPush();
+  assert.match(msg.title, /^Buy the low: YES · Above at 40%$/);
+  assert.match(msg.body, /Kalshi 40% vs bot \d+%.*BTC above \$100,000/);
+  assert.equal(svc.received[0].headers.urgency, 'high');
+  await bot.tick(NOW + 5000);
+  assert.equal(svc.received.length, 1, 'no duplicate alert');
+});
+
+test('respects notifyBuy = false', async () => {
+  const phone2 = fakeBrowser();
+  bot.sync({ subscription: { endpoint: `${svc.base}/push/phone2`, keys: phone2.keys }, settings: { notifyBuy: false } });
+  const before = svc.received.filter((r) => r.url === '/push/phone2').length;
+  await bot.tick(NOW + 6000);
+  assert.equal(svc.received.filter((r) => r.url === '/push/phone2').length, before);
+  bot.unsubscribe({ endpoint: `${svc.base}/push/phone2` });
+});
+
+test('sends SELL NOW for a tracked position when the bid catches up', async () => {
+  bot.sync({ subscription, settings: {}, positions: [{ id: 'p1', ticker: 'KXBTC15M-T1', side: 'YES', price: 0.40, contracts: 50, closeTime: new Date(NOW + 6 * 60000).toISOString() }] });
+  const before = svc.received.length;
+  await bot.tick(NOW + 10000);
+  assert.equal(svc.received.length, before, 'holds while the bid is low');
+  Object.assign(quotes, { yes_bid: 95, yes_ask: 97 });
+  await bot.tick(NOW + 15000);
+  const msg = lastPush();
+  assert.match(msg.title, /^SELL NOW: YES · Above at 95% \(\+\$\d+\.\d\d\)$/);
+  assert.match(msg.body, /take the profit|flipping/);
+});
+
+test('test endpoint pushes, and a 410 from the push service drops the device', async () => {
+  assert.equal((await bot.test({ endpoint: subscription.endpoint })).status, 200);
+  assert.match(lastPush().title, /Shot Caller/);
+  svc.status = 410;
+  await bot.test({ endpoint: subscription.endpoint });
+  assert.equal(bot.status().devices, 0);
+  svc.status = 201;
+});
+
+test('persists keys and devices to disk', async () => {
+  bot.sync({ subscription, settings: {}, positions: [] });
+  await bot.save();
+  const data = JSON.parse(await readFile(dataFile, 'utf8'));
+  assert.equal(data.devices.length, 1);
+  assert.equal(data.vapid.publicKey, bot.publicKey());
+});

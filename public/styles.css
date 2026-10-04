@@ -114,3 +114,9 @@ h2.sec { font-size: 14px; color: var(--muted); margin: 18px 0 4px; font-weight: 
 .side-toggle button.on[data-side=NO] { background: #ef444422; color: var(--no); border-color: var(--no); }
 .side-toggle.locked button:not(.on) { display: none; }
 .sheet-hint { font-size: 12px; color: var(--muted); margin: 4px 0 8px; min-height: 1.3em; }
+.push-card h3 { margin: 0 0 6px; font-size: 16px; }
+.push-status { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+.push-status.on { color: var(--yes); font-weight: 600; }
+.nudge { display: flex; gap: 8px; margin: 8px 0 0; }
+.nudge button { margin: 0; background: #38bdf81a; color: var(--accent); border: 1px solid #38bdf866; }
+.nudge .x { width: 48px; flex: none; background: transparent; color: var(--muted); border-color: var(--line); }

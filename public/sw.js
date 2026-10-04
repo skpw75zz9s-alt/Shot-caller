@@ -1,6 +1,6 @@
 // App-shell cache; API calls always go to the network.
-const CACHE = 'shot-caller-v6';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'model.js', 'candles.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'shot-caller-v7';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'model.js', 'candles.js', 'engine.js', 'icon-192.png', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(
@@ -18,4 +18,14 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   e.waitUntil(self.clients.matchAll({ type: 'window' }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow('./'))));
+});
+
+// Web Push from the server bot: show it even when the app is closed.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch { d = { body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Shot Caller', {
+    body: d.body, tag: d.tag, renotify: !!d.tag, icon: 'icon-192.png', badge: 'icon-192.png',
+    vibrate: [200, 100, 200], data: { url: d.url || './' },
+  }));
 });
