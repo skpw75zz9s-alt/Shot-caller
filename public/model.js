@@ -131,13 +131,13 @@ export const DEFAULTS = {
   reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
 };
 
-// Risk levels (Settings). All levels re-enter after selling. Aggressive also scales in as the gap grows,
-// which in simulation made more total profit than Safe in every market type that made money (instant fills
-// and ~10s hand fills), at a lower return per dollar and with bigger swings.
+// Risk levels (Settings). All levels re-enter after selling. Aggressive also scales in as the gap grows and
+// bets twice the size (half Kelly, $50 max). Simulated with instant fills it made 2-11x Safe's profit where
+// there was an edge, with ~2x its own swings; sizing multiplies losses by the same factor as wins.
 export const RISK_LEVELS = {
-  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, scaleIn: false, hint: 'Fewest calls, biggest gaps only' },
-  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, scaleIn: false, hint: 'About 2× the calls of Safe' },
-  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, scaleIn: true, hint: 'Most calls, adds as the gap grows, biggest swings' },
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, scaleIn: false, kellyFraction: 0.25, maxStake: 25, practiceMax: 5, practiceLoss: 20, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, scaleIn: false, kellyFraction: 0.25, maxStake: 25, practiceMax: 5, practiceLoss: 20, hint: 'About 2× the calls of Safe' },
+  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, scaleIn: true, kellyFraction: 0.5, maxStake: 50, practiceMax: 10, practiceLoss: 40, hint: 'Most calls, adds as the gap grows, double-size bets: biggest wins and biggest swings' },
 };
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
 

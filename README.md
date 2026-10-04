@@ -106,11 +106,11 @@ Security:
 
 Settings → **Risk level**:
 
-| Level | Min gap | Confidence | Practice buys at | Scales in |
-|---|---|---|---|---|
-| Safe | 8 pts | 60 | 70+ | no |
-| **Balanced (default)** | 6 pts | 55 | 60+ | no |
-| Aggressive | 4 pts | 50 | 55+ | **yes** |
+| Level | Min gap | Confidence | Bet size | Practice | Scales in |
+|---|---|---|---|---|---|
+| Safe | 8 pts | 60 | ¼ Kelly, up to $25 | conf 70+, $5/trade, $20/day | no |
+| **Balanced (default)** | 6 pts | 55 | ¼ Kelly, up to $25 | conf 60+, $5/trade, $20/day | no |
+| Aggressive | 4 pts | 50 | **½ Kelly, up to $50** | conf 55+, $10/trade, $40/day | **yes** |
 
 **Every level re-enters.** After you sell (or Practice sells), the call on that market is released. If a gap opens again after a 15-second cooldown, a new call fires, and its alert isn't deduped against the first. This was the biggest gain in the simulator for every level: Safe went from +$402 to +$1,136 over 200 windows.
 
@@ -124,6 +124,8 @@ Simulated results, Aggressive vs Safe, both re-entering:
 | ~10s by hand | More profit when the mispricing lasts (+$64 vs +$11, +$21 vs +$9), a few dollars worse per 100 windows when Kalshi is priced right, only noisy, or the edge is a seconds-long lag |
 
 The costs: a lower return per dollar (44–51% vs 67–76%) and bigger swings (worst stretch up to ~$150–180 vs ~$80–135).
+
+**Aggressive bets double size** (½ Kelly, $50 max). With instant fills that took it from 1.1–5× Safe's profit to **2–11×**: e.g. +$280 vs +$26, +$2,164 vs +$844, +$3,670 vs +$1,278 per 100 windows. It's the same edge with twice the money on it, so losses and swings double too: worst stretch ~$110–160 vs Safe's ~$15–35, and −$2.66 vs +$0.10 when Kalshi is priced right.
 
 Editing the gap or confidence by hand shows as *Custom*.
 

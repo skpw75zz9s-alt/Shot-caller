@@ -123,4 +123,9 @@ test('risk levels: Balanced is the default, presets are recognized, edits read a
   for (const k of Object.keys(RISK_LEVELS)) assert.equal(riskLevelOf({ ...DEFAULTS, ...RISK_LEVELS[k] }), k);
   assert.equal(riskLevelOf({ ...DEFAULTS, minEdge: 0.07 }), 'custom');
   assert.ok(RISK_LEVELS.safe.minEdge > RISK_LEVELS.balanced.minEdge && RISK_LEVELS.balanced.minEdge > RISK_LEVELS.aggressive.minEdge);
+  assert.equal(RISK_LEVELS.aggressive.kellyFraction, 2 * RISK_LEVELS.safe.kellyFraction, 'aggressive bets double size');
+  assert.equal(RISK_LEVELS.aggressive.maxStake, 2 * RISK_LEVELS.safe.maxStake);
+  const { contractsFor } = await import('../public/model.js');
+  const safeN = contractsFor(0.7, 0.5, { kellyFraction: 0.25, maxStake: 25 }), aggN = contractsFor(0.7, 0.5, { kellyFraction: 0.5, maxStake: 50 });
+  assert.ok(aggN >= 2 * safeN - 1, `double size: ${aggN} vs ${safeN}`);
 });
