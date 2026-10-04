@@ -137,3 +137,25 @@ export function entrySignal(candles, side, now = Date.now()) {
 
   return { state, score, reasons, rsi: r.value, bb, atr: a, support: lv.support, resistance: lv.resistance, dipLevel, pattern: pats[pats.length - 1] ?? null };
 }
+
+// Signs the move is flipping against an open position (YES wants BTC up, NO wants it down).
+export function flipSigns(candles, side, now = Date.now()) {
+  const closed = candles.filter((c) => c.t + 60000 <= now);
+  const closes = candles.map((c) => c.c);
+  const r = rsi(closes), bb = bollinger(closes), a = atr(closed), lv = levels(closed);
+  if (!side || !r || !bb || !a || !lv || closed.length < 3) return [];
+  const s = side === 'YES' ? 1 : -1;
+  const against = (c) => (s === 1 ? c.c < c.o : c.c > c.o);
+  const live = candles[candles.length - 1], last = closed[closed.length - 1], prev = closed[closed.length - 2];
+  const out = [];
+
+  const pats = [detectPattern(closed[closed.length - 3], prev), detectPattern(prev, last)].filter(Boolean);
+  const rev = pats.find((p) => p.dir === -s);
+  if (rev) out.push(rev.name);
+  if (s === 1 ? r.value > 65 && r.value < r.prev : r.value < 35 && r.value > r.prev) out.push(`RSI ${r.value.toFixed(0)} rolling over`);
+  if ((s === 1 ? bb.pctB > 0.9 : bb.pctB < 0.1) && against(last)) out.push(s === 1 ? 'Rejected at upper band' : 'Bounced off lower band');
+  const level = s === 1 ? lv.resistance : lv.support;
+  if (Math.abs(live.c - level) <= a * 0.6 && against(live)) out.push(s === 1 ? `Stalling at resistance $${level.toFixed(0)}` : `Bouncing at support $${level.toFixed(0)}`);
+  if (against(last) && against(prev) && Math.abs(last.c - prev.o) > a) out.push('Two strong candles against you');
+  return out;
+}

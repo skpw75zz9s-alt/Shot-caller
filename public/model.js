@@ -175,3 +175,49 @@ export function dipLimit({ market, strike, spot, dipLevel, sigmaMin, driftMin = 
   const limit = Math.min(Math.floor((ask + shift) * 100 + 1e-9) / 100, cap);
   return limit >= 0.01 ? { price: limit, dipLevel, fairAtDip: sideDip } : null;
 }
+
+// Lowest sell price whose proceeds after the exit fee are at least `value`.
+export function sellTarget(value) {
+  for (let c = 1; c <= 99; c++) {
+    const price = c / 100;
+    if (price - kalshiFee(price) >= value - 1e-9) return price;
+  }
+  return 0.99;
+}
+
+export const EXIT_DEFAULTS = {
+  minProfit: 0.01, // per contract after both fees, to count as "in profit"
+  trail: 0.06,     // bid falling this far from its peak is a flip sign
+  oddsDrop: 0.08,  // bot odds falling this far from their peak is a flip sign
+};
+
+// When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
+// bid is what the side sells for right now; pSide is the bot's current odds for that side.
+export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings = {} }) {
+  const s = { ...EXIT_DEFAULTS, ...settings };
+  if (minutesLeft <= 0) return { action: 'WAIT', kind: 'closed', why: 'Market closed. Settles at $1 or $0.', signs: [] };
+  if (pSide == null) return { action: 'HOLD', kind: 'nodata', why: 'Waiting for price data', signs: [] };
+  const entryCost = pos.price + kalshiFee(pos.price);
+  const target = sellTarget(Math.max(pSide, entryCost + s.minProfit));
+  if (bid == null || bid <= 0) return { action: 'HOLD', kind: 'nobid', why: 'No bids to sell into right now', holdEv: pSide, target, signs: [] };
+
+  const net = bid - kalshiFee(bid);
+  const pnlPer = net - entryCost;
+  const base = { bid, net, pnlPer, pnl: pnlPer * pos.contracts, holdEv: pSide, target };
+  const inProfit = pnlPer >= s.minProfit - 1e-9;
+  const signs = [...flips];
+  if (pos.peakP != null && pos.peakP - pSide >= s.oddsDrop) signs.push(`Bot odds down ${((pos.peakP - pSide) * 100).toFixed(0)} pts from peak`);
+  if (pos.peakBid != null && pos.peakBid - bid >= s.trail - 1e-9) signs.push(`Bid down ${((pos.peakBid - bid) * 100).toFixed(0)}¢ from its ${(pos.peakBid * 100).toFixed(0)}¢ peak`);
+  const c = (v) => `${(v * 100).toFixed(0)}¢`;
+
+  if (net >= pSide) {
+    return inProfit
+      ? { ...base, signs, action: 'SELL', kind: 'take', why: `Bid ${c(bid)} has caught up to the bot's ${(pSide * 100).toFixed(0)}%. The low is gone, so take the profit.` }
+      : { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it ${(pSide * 100).toFixed(0)}%, worth less than the ${c(bid)} bid. Cut it.` };
+  }
+  if (inProfit && signs.length) return { ...base, signs, action: 'SELL', kind: 'flip', why: `Price may be flipping: ${signs.join(' · ')}` };
+  return {
+    ...base, signs, action: 'HOLD', kind: 'hold',
+    why: `Holding is worth ${c(pSide)} vs ${c(net)} to sell now.${inProfit ? ' In profit, no flip signs.' : ''}`,
+  };
+}

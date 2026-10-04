@@ -20,6 +20,7 @@
 
   <main>
     <section id="view-live" class="view active">
+      <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
         <div class="countdown" id="countdown">--:--</div>
@@ -28,6 +29,7 @@
         <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
+        <button id="boughtBtn" class="buy-btn" hidden>I bought it: track my exit</button>
         <div class="entry" id="entry" hidden></div>
       </div>
 
@@ -57,6 +59,13 @@
         <div class="stat"><label>Candle-dip entries hit rate</label><b id="hLow">—</b></div>
         <div class="stat"><label>Pending</label><b id="hPending">0</b></div>
       </div>
+      <h2 class="sec">My trades</h2>
+      <div class="grid">
+        <div class="stat"><label>Realized P&amp;L</label><b id="tPnl">—</b></div>
+        <div class="stat"><label>Trades won</label><b id="tWins">—</b></div>
+      </div>
+      <ul id="tradeList" class="history"></ul>
+      <h2 class="sec">Bot calls (paper)</h2>
       <ul id="historyList" class="history"></ul>
       <button id="clearHistory" class="ghost">Clear history</button>
     </section>
@@ -65,9 +74,19 @@
       <form id="settingsForm" class="card settings"></form>
       <button id="enableAlerts">Enable call alerts</button>
       <p class="fine">Alerts fire while the app is open (iOS needs the app added to the Home Screen first). Settings are saved on this device.</p>
-      <p class="fine" id="version">Shot Caller v1.2 · buy the low vs bot odds</p>
+      <p class="fine" id="version">Shot Caller v1.3 · buy the low + sell signals</p>
     </section>
   </main>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <h3 id="sheetTitle"></h3>
+      <label>Contracts <input id="sheetQty" inputmode="numeric"></label>
+      <label>Price (¢) <input id="sheetPrice" inputmode="decimal"></label>
+      <button id="sheetOk">Save</button>
+      <button id="sheetCancel" class="ghost">Cancel</button>
+    </div>
+  </div>
 
   <nav>
     <button data-view="live" class="active">Live</button>
