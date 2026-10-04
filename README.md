@@ -142,6 +142,17 @@ Caveats:
 
 Run it for a few days and compare the practice P&L with what the market actually did before considering real auto-trading.
 
+### Range watch (experiment, inside Practice)
+
+The ceiling/floor chart rule runs side by side with the bot's practice trades on its own paper book:
+- **Ceiling and floor** are the highest high and lowest low of the last 20 one-minute candles, each touched at least twice, with a range at least 2× the average candle.
+- **Rejected at the ceiling:** paper-buy NO. **Rejected at the floor:** paper-buy YES.
+- One trade per window, held to settlement, sized like practice.
+
+It never changes the bot's calls or places orders. The Practice card shows Range watch next to the bot's practice results.
+
+Offline, on ~1,100 real candles from Oct 4, the rule was right about half the time overall. Floor bounces worked and ceiling rejections failed, likely because of that day's uptrend, so it's being measured live before it can influence anything.
+
 ### Trusting its gut
 
 The bot sticks with its calls instead of reacting to every tick:
