@@ -31,7 +31,7 @@ export function trackWindow(tr, snap, row, sig, settings, now = snap.now) {
   if (last && now - last.t < SAMPLE_MS) return false;
 
   const q = ev.quote;
-  const call = ev.side && sig?.confident ? ev.side : null;
+  const call = sig?.callSide ?? null;
   if (row.strike) w.strike = row.strike;
   w.samples.push({ t: now, p: r3(ev.pYes), call, conf: sig?.deep?.score ?? null, ya: q.yesAsk, yb: q.yesBid, na: q.noAsk, nb: q.noBid });
 

@@ -8,7 +8,7 @@ const snap = { bars: [] };
 // One sample: bot P(YES), its call (null = no call), and Kalshi quotes
 function feed(tr, t, pYes, call, q) {
   const ev = { pYes, side: call, minutesLeft: (CLOSE - t) / 60000, quote: q };
-  return trackWindow(tr, { ...snap, now: t }, { m, ev, strike: 100000 }, { confident: !!call, deep: { score: 70 } }, {}, t);
+  return trackWindow(tr, { ...snap, now: t }, { m, ev, strike: 100000 }, { confident: !!call, callSide: call, deep: { score: 70 } }, {}, t);
 }
 const Q = (yb, ya) => ({ yesBid: yb, yesAsk: ya, noBid: 1 - ya, noAsk: 1 - yb });
 

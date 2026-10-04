@@ -42,11 +42,39 @@ test('trailing bid and falling odds are listed as flip signs', () => {
   assert.ok(odds.signs.some((x) => /Bot odds down/.test(x)));
 });
 
-test('cuts when the bot odds fall below what it sells for', () => {
-  const ex = exitSignal({ pos, bid: 0.30, pSide: 0.25, minutesLeft: 6 });
+test('cuts only when Kalshi pays clearly more than the bot\'s odds (3-pt margin)', () => {
+  const ex = exitSignal({ pos, bid: 0.30, pSide: 0.22, minutesLeft: 6 });
   assert.equal(ex.action, 'SELL');
   assert.equal(ex.kind, 'cut');
   assert.ok(ex.pnl < 0);
+  // net 28% vs bot 27%: a hair over, not a reason to sell at a loss
+  assert.equal(exitSignal({ pos, bid: 0.30, pSide: 0.27, minutesLeft: 6 }).action, 'HOLD');
+});
+
+test('trusts the call: a losing sell has to hold for 30s before SELL NOW; profit-taking is instant', async () => {
+  const { positionCheck } = await import('../public/engine.js');
+  const close = new Date(Date.now() + 6 * 60000).toISOString();
+  const snapAt = (yb, pYes, now) => ({ now, bars: [], quoteLog: {}, rows: [{ m: { ticker: 'T' }, rej: null, ev: { pYes, quote: { yesBid: yb, noBid: 1 - yb - 0.02 } } }] });
+  const p = { id: 'a', ticker: 'T', side: 'YES', price: 0.40, contracts: 10, closeTime: close };
+  const t0 = Date.now();
+  let c = positionCheck(p, snapAt(0.30, 0.20, t0), {}, t0);
+  assert.equal(c.ex.action, 'HOLD');
+  assert.equal(c.ex.kind, 'steady');
+  assert.match(c.ex.why, /isn't a reason to bail/);
+  c = positionCheck(p, snapAt(0.30, 0.20, t0 + 15000), {}, t0 + 15000);
+  assert.equal(c.ex.kind, 'steady');
+  // the dip reverses: the countdown resets
+  c = positionCheck(p, snapAt(0.38, 0.45, t0 + 20000), {}, t0 + 20000);
+  assert.equal(c.ex.kind, 'hold');
+  assert.equal(p.sellSince, null);
+  c = positionCheck(p, snapAt(0.30, 0.20, t0 + 25000), {}, t0 + 25000);
+  assert.equal(c.ex.kind, 'steady');
+  c = positionCheck(p, snapAt(0.30, 0.20, t0 + 56000), {}, t0 + 56000);
+  assert.equal(c.ex.action, 'SELL', 'still true after 30s: sell');
+  assert.equal(c.ex.kind, 'cut');
+  // in profit and Kalshi caught up: no waiting
+  const q = { id: 'b', ticker: 'T', side: 'YES', price: 0.40, contracts: 10, closeTime: close };
+  assert.equal(positionCheck(q, snapAt(0.70, 0.66, t0), {}, t0).ex.kind, 'take');
 });
 
 test('closed market and no bids', () => {

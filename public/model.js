@@ -118,6 +118,10 @@ export const DEFAULTS = {
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
   minConfidence: 60,    // deep-dive score (0-100) a call needs before it fires: B or better
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
+  holdEdgeFrac: 0.5,    // once called, the call stands while the robust gap is at least half of minEdge...
+  holdConfDrop: 10,     // ...and confidence is no more than 10 below minConfidence
+  switchEdgeExtra: 0.04, // calling the OTHER side in the same window needs 4 pts more gap...
+  switchConfExtra: 15,   // ...and 15 more confidence
 };
 
 // Decide the call for one market.
@@ -145,6 +149,7 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
   out.callsAt = Math.max(Number.isNaN(opened) ? -Infinity : opened + s.waitMinutes * 60000, closes - s.maxMinutesLeft * 60000);
   if (now < out.callsAt) return { ...out, reason: `Watching the first ${s.waitMinutes} minutes before calling` };
   if (q.yesBid !== null && q.yesAsk !== null && q.yesAsk - q.yesBid > s.maxSpread) return { ...out, reason: 'Spread too wide' };
+  out.open = true; // past the time, spread and data gates: calls are allowed now
 
   const best = (out.evYes ?? -1) >= (out.evNo ?? -1)
     ? { side: 'YES', ev: out.evYes, price: q.yesAsk, prob: out.pYes }
@@ -153,17 +158,22 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
   out.edge = best.ev;
   if (best.ev < s.minEdge) return { ...out, reason: `Best gap ${(best.ev * 100).toFixed(1)} pts, need ${(s.minEdge * 100).toFixed(1)}` };
 
-  const cost = best.price + kalshiFee(best.price);
-  const kelly = Math.max(0, (best.prob - cost) / (1 - cost)) * s.kellyFraction;
-  const stake = Math.min(kelly * s.bankroll, s.maxStake);
   return {
     ...out,
     call: best.side,
     side: best.side,
     price: best.price,
-    contracts: Math.max(1, Math.floor(stake / cost)),
+    contracts: contractsFor(best.prob, best.price, s),
     reason: `Bot ${(best.prob * 100).toFixed(0)}% vs Kalshi ${(best.price * 100).toFixed(0)}%`,
   };
+}
+
+// Quarter-Kelly position size (in contracts) for win probability `prob` at `price`, capped at maxStake.
+export function contractsFor(prob, price, settings = {}) {
+  const s = { ...DEFAULTS, ...settings };
+  const cost = price + kalshiFee(price);
+  const kelly = Math.max(0, (prob - cost) / (1 - cost)) * s.kellyFraction;
+  return Math.max(1, Math.floor(Math.min(kelly * s.bankroll, s.maxStake) / cost));
 }
 
 // P&L per contract for a settled call.
@@ -215,6 +225,10 @@ export const EXIT_DEFAULTS = {
   minProfit: 0.01, // per contract after both fees, to count as "in profit"
   trail: 0.06,     // bid falling this far from its peak is a flip sign (shown, not a sell by itself)
   oddsDrop: 0.08,  // bot odds falling this far from their peak is a flip sign (shown, not a sell by itself)
+  cutMargin: 0.03,   // a losing sell needs Kalshi to pay this much MORE than the bot's odds
+  cutConfirmSec: 30, // ...and to keep doing so this long before SELL NOW (one bad tick isn't a reason)
+  takeConfirmSec: 0, // same wait for a profitable sell
+  smoothSec: 0,      // exit decisions use the bot's odds averaged over this many seconds
 };
 
 // When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
@@ -239,10 +253,11 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
   if (pos.peakBid != null && pos.peakBid - bid >= s.trail - 1e-9) signs.push(`Sell price down to ${(bid * 100).toFixed(0)}% from its ${(pos.peakBid * 100).toFixed(0)}% peak`);
   const c = (v) => `${(v * 100).toFixed(0)}%`;
 
-  if (net >= pSide) {
-    return inProfit
-      ? { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` }
-      : { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };
+  if (inProfit && net >= pSide) {
+    return { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` };
+  }
+  if (!inProfit && net >= pSide + s.cutMargin) {
+    return { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };
   }
   return {
     ...base, signs, action: 'HOLD', kind: 'hold',

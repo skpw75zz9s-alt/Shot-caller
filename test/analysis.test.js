@@ -206,3 +206,36 @@ test('robust edge: no call when the gap only exists at one volatility guess', as
   assert.equal(thin.fire, false);
   assert.equal(thin.robust, false);
 });
+
+test('sticks with its call: holds at a lower bar, and switching sides needs clearly stronger evidence', async () => {
+  const { snapshot, buySignal } = await import('../public/engine.js');
+  const OPEN3 = Date.parse('2026-10-04T13:00:00Z'), now = OPEN3 + 8 * 60000;
+  const bars = Array.from({ length: 130 }, (_, i) => { const t = now - (130 - i) * 60000, c = 100000 + Math.sin(i) * 12; return { t, o: c - 3, h: c + 8, l: c - 8, c }; });
+  const mk = (yb) => [{ ticker: 'S1', open_time: new Date(OPEN3).toISOString(), close_time: new Date(OPEN3 + 900000).toISOString(), strike_type: 'greater_or_equal', floor_strike: 100000, yes_bid: yb, yes_ask: yb + 2 }];
+  const S = { minConfidence: 0 };
+  const run = (yb, memory, spot = 100015) => { const snap = snapshot({ markets: mk(yb), candles: bars, spot, settings: S, now }); return buySignal(snap.live, snap, S, now, memory); };
+  const memory = {};
+  const first = run(20, memory);
+  assert.equal(first.callSide, 'YES');
+  assert.equal(first.fire, true);
+  assert.equal(memory.S1.side, 'YES');
+  // Raise Kalshi's YES price until a fresh call would no longer fire; the existing call still stands
+  let held = null;
+  for (let yb = 20; yb <= 90 && !held; yb++) {
+    const fresh = run(yb, {});
+    const sticky = run(yb, memory);
+    if (!fresh.callSide && sticky.callSide === 'YES') held = sticky;
+  }
+  assert.ok(held, 'call held where a fresh call would not fire');
+  assert.equal(held.stance, 'holding');
+  assert.equal(held.fire, false, 'holding does not re-alert');
+  // With BTC dropping under the target, NO looks a little cheap: not enough to flip the call
+  let flipped = false, sawSmallNo = false;
+  for (let yb = 30; yb <= 70; yb++) {
+    const fresh = run(yb, {}, 99990), sticky = run(yb, structuredClone(memory), 99990);
+    if (fresh.callSide === 'NO' && sticky.callSide !== 'NO') sawSmallNo = true;
+    if (sticky.callSide === 'NO' && sticky.stance === 'switching' && (sticky.edge < 0.12 - 1e-9)) flipped = true;
+  }
+  assert.ok(sawSmallNo, 'a NO edge that would be a fresh call is not enough to switch');
+  assert.equal(flipped, false, 'switching needs 12+ pts');
+});

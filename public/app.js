@@ -28,6 +28,8 @@ const SETTINGS_META = [
   ['minProfit', 'Min profit (pts)', 'Profit per contract (after fees) for a sell to count as taking profit', 'cents'],
   ['trail', 'Trailing drop (pts)', 'Flag a flip sign if the sell % falls this far from its peak (a warning, not a sell)', 'cents'],
   ['oddsDrop', 'Odds drop (pts)', 'Flag a flip sign if the bot\'s odds fall this far from their peak (a warning, not a sell)', 'cents'],
+  ['cutConfirmSec', 'Hold steady (sec)', 'A sell at a loss has to stay true this long before SELL NOW, so one jumpy tick doesn\'t shake you out', 'num'],
+  ['cutMargin', 'Cut margin (pts)', 'A sell at a loss needs Kalshi to pay at least this much more than the bot\'s odds', 'cents'],
   ['tradeAmount', 'Fixed trade amount ($)', 'What "I bought it" records each time. 0 = use the bot\'s suggested amount', 'num'],
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
@@ -52,7 +54,9 @@ if (store.get('settingsVersion', 1) < 6) {
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
-  positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null } };
+  positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
+  calls: store.get('calls', {}) }; // what the bot has called per window, so it sticks with its calls
+for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
 // Access lapsed (paywall): reload so the server shows the paywall page.
@@ -252,9 +256,10 @@ function render() {
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
-  const sig = live ? buySignal(live, snap, settings, now) : null;
+  const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
+  if (sig?.fire) store.set('calls', state.calls);
   renderDeep(live, sig);
-  state.liveCall = live?.ev.side && sig?.confident ? { ...live, sig } : null;
+  state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
   $('boughtBtn').hidden = !showBuy || !!state.kalshi.key; // linked: buys arrive from Kalshi on their own
   $('autoNote').hidden = !showBuy || !state.kalshi.key;
@@ -271,7 +276,7 @@ function render() {
   } else {
     const { m, ev, strike } = live;
     const { side, buyNow } = sig;
-    const call = ev.side && sig.confident ? ev.side : null; // a low price that also passed the deep dive
+    const call = sig.callSide; // a low price that passed the robust-edge and deep-dive checks (or a call it's sticking with)
     timing = sig.timing;
     const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings }) : null;
 
@@ -283,14 +288,21 @@ function render() {
       $('conf').className = 'conf';
       $('conf').textContent = `Preview · confidence ${sig.deep.score} · no call yet`;
     }
-    $('reason').textContent = call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
-      : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(settings.minEdge * 100).toFixed(0)})`
-      : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${settings.minConfidence}` : ev.reason;
+    const otherSide = sig.called === 'YES' ? 'NO' : 'YES';
+    const sticking = sig.stance === 'holding' && now - (sig.calledAt ?? now) > 60000; // the first minute of a call is just the call
+    $('reason').textContent = call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
+      : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
+      : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
+      : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
+      : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
+      : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
+      : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${sig.confNeed}` : ev.reason;
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
 
     // Call + entry timing
     const waiting = call && !buyNow && settings.waitForDip;
-    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW')
+    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
+      : sig.called ? `Called ${sig.called} earlier · no new buy`
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : ev.side && !sig.robust ? 'Low price, edge too thin' : ev.side ? 'Low price, not confident' : 'No low price';
     callEl.textContent = call ?? 'PASS';
     callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
@@ -307,12 +319,12 @@ function render() {
     }
 
     if (!call) $('order').textContent = '';
-    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(sig.contracts * ev.price)} at ${pc(ev.price)} ${sideName(ev.side)} · +${(ev.edge * 100).toFixed(0)} pts edge`;
-    else $('order').textContent = limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(ev.side)} (now ${pc(ev.price)})` : 'Hold off: no dip yet';
+    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)} · +${(sig.edge * 100).toFixed(0)} pts edge`;
+    else $('order').textContent = limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(call)} (now ${pc(sig.price)})` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
-      const key = `${m.ticker}:${ev.side}:${buyNow ? 'low' : 'call'}`;
+      const key = `${m.ticker}:${call}:${buyNow ? 'low' : 'call'}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
@@ -710,13 +722,13 @@ $('boughtBtn').addEventListener('click', () => {
   const live = state.liveCall;
   if (!live) return;
   const at = Date.now();
-  const { m, ev } = live;
+  const { m } = live, side = live.sig.callSide;
   const q = quote(state.markets.find((x) => x.ticker === m.ticker) ?? m); // freshest prices, locked at this tap
-  const price = ev.side === 'YES' ? q.yesAsk : q.noAsk;
-  if (!price) return toast(`No Kalshi price for ${sideName(ev.side)} right now`);
+  const price = side === 'YES' ? q.yesAsk : q.noAsk;
+  if (!price) return toast(`No Kalshi price for ${sideName(side)} right now`);
   const amount = settings.tradeAmount > 0 ? settings.tradeAmount : live.sig.contracts * price;
-  const pos = openPosition(m, ev.side, price, amount / price, at);
-  toast(`Tracking ${dollars(amount)} at ${pc(price)} ${sideName(ev.side)} · ${clock(at)}`, () => removePosition(pos.id));
+  const pos = openPosition(m, side, price, amount / price, at);
+  toast(`Tracking ${dollars(amount)} at ${pc(price)} ${sideName(side)} · ${clock(at)}`, () => removePosition(pos.id));
   render();
   window.scrollTo({ top: 0, behavior: 'smooth' }); // the new position card is at the top
 });

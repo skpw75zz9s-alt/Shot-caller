@@ -189,10 +189,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         };
 
         if (snap.live) {
-          const sig = buySignal(snap.live, snap, s, now);
+          d.calls ||= {}; // what this phone's bot has called per window, so it sticks with its calls
+          const sig = buySignal(snap.live, snap, s, now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
+          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
           if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
@@ -207,6 +208,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         // Drop positions 5 minutes after their market closes, and alert keys after 2 hours
         d.positions = d.positions.filter((p) => Date.parse(p.closeTime) > now - 5 * 60000);
         for (const [k, t] of Object.entries(d.alerted)) if (t < now - 2 * 3600000) delete d.alerted[k];
+        for (const [k, c] of Object.entries(d.calls || {})) if (!(c.at > now - 2 * 3600000)) delete d.calls[k];
       }
       await Promise.all(sends);
       if (sends.length) scheduleSave();

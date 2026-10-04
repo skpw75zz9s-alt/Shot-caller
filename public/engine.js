@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, effectiveVol, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
 
@@ -87,41 +87,104 @@ function edgeUnder(row, snap, s, side, volScale) {
 // 1) robust edge: the gap must clear minEdge even if volatility is 20% lower or 25% higher than measured
 //    (an edge that only exists at one vol guess is mostly model error, and those trades lost money);
 // 2) the deep dive's confidence must clear minConfidence. Position size scales with confidence.
-export function buySignal(row, snap, settings, now = snap.now) {
+// `memory` (per ticker, kept by the caller across ticks) makes the bot stick with its call: once it has
+// called a side this window, that call stands while the edge is still there (hysteresis), and switching
+// to the other side needs clearly stronger evidence instead of one tick's wiggle.
+export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const s = { ...DEFAULTS, ...settings };
-  const side = leanSide(row.ev);
-  const timing = entrySignal(snap.bars, side, now);
-  let stressEdge = null, robustEdge = null;
-  if (side && snap.sigmaMin && snap.spot && row.ev.minutesLeft > 0) {
-    const edges = [0.8, 1, 1.25].map((k) => edgeUnder(row, snap, s, side, k));
-    if (edges.every((e) => e != null)) { stressEdge = edges[2]; robustEdge = Math.min(...edges); }
+  const { ev } = row;
+  // Everything the bot knows about buying one side right now
+  const assess = (side) => {
+    const timing = entrySignal(snap.bars, side, now);
+    let stressEdge = null, robustEdge = null;
+    if (snap.sigmaMin && snap.spot && ev.minutesLeft > 0) {
+      const edges = [0.8, 1, 1.25].map((k) => edgeUnder(row, snap, s, side, k));
+      if (edges.every((e) => e != null)) { stressEdge = edges[2]; robustEdge = Math.min(...edges); }
+    }
+    const deep = deepDive({
+      ev: ev.side === side ? ev : { ...ev, side, edge: (side === 'YES' ? ev.evYes : ev.evNo) ?? 0 }, side, rej: row.rej, timing,
+      sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin, spot: snap.spot, strike: row.strike,
+      kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now), bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge, stressEdge,
+    });
+    const point = side === 'YES' ? ev.evYes : ev.evNo;
+    const price = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
+    return { side, timing, deep, robustEdge, point, price, score: deep?.score ?? -1 };
+  };
+  const passes = (a, edgeNeed, confNeed) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 &&
+    a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && a.score >= confNeed;
+
+  const mem = memory ? (memory[row.m.ticker] ||= {}) : {};
+  const called = mem.side ?? null, lean = leanSide(ev);
+  const need = {
+    new: [s.minEdge, s.minConfidence],
+    holding: [s.minEdge * s.holdEdgeFrac, s.minConfidence - s.holdConfDrop],
+    switching: [s.minEdge + s.switchEdgeExtra, s.minConfidence + s.switchConfExtra],
+  };
+  let pick = null, shown = null, stance = 'new';
+  if (called) {
+    const a = assess(called);
+    shown = a; stance = 'holding';
+    if (passes(a, ...need.holding)) pick = a;
+    if (lean && lean !== called) {
+      const b = assess(lean);
+      if (passes(b, ...need.switching)) { pick = b; stance = 'switching'; }
+      else if (!pick) { shown = b; stance = 'switching'; }
+    }
+  } else if (lean) {
+    shown = assess(lean);
+    if (passes(shown, ...need.new)) pick = shown;
   }
-  const deep = deepDive({
-    ev: row.ev, side, rej: row.rej, timing, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin,
-    spot: snap.spot, strike: row.strike, kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now),
-    bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge, stressEdge,
-  });
-  const robust = robustEdge != null && robustEdge >= s.minEdge - 1e-9;
-  const confident = !!deep && deep.score >= s.minConfidence && robust;
-  const buyNow = !!row.ev.side && timing.state === 'NOW';
-  const contracts = row.ev.side ? Math.max(1, Math.floor(row.ev.contracts * (deep ? deep.sizeMult : 0.5))) : 0;
-  return { side, timing, deep, robustEdge, robust, confident, buyNow, contracts, fire: !!row.ev.side && confident && (buyNow || !s.waitForDip) };
+  const a = pick ?? shown;
+  const [edgeNeed, confNeed] = need[stance];
+  const callSide = pick?.side ?? null;
+  const prob = callSide ? (callSide === 'YES' ? ev.pYes : 1 - ev.pYes) : null;
+  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5))) : 0;
+  const buyNow = !!callSide && pick.timing.state === 'NOW';
+  // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
+  const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
+  if (fire) { mem.side = callSide; mem.at = now; }
+  return {
+    side: a?.side ?? lean, callSide, price: pick?.price ?? null, edge: pick?.point ?? null,
+    timing: a?.timing ?? entrySignal(snap.bars, null, now), deep: a?.deep ?? null, robustEdge: a?.robustEdge ?? null,
+    robust: a?.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9, confident: !!callSide, buyNow, contracts, fire,
+    stance: callSide ? (callSide === called || !called ? (called ? 'holding' : 'new') : 'switching') : stance, called, calledAt: mem.at ?? null, edgeNeed, confNeed,
+    // the bot already called a side and is sticking with it while the other side wiggles
+    sticking: !!called && !!lean && lean !== called && callSide !== lean,
+  };
 }
 
 // Exit check for one tracked position. Updates pos.peakBid / pos.peakP after the check
 // (so drops are measured from earlier highs) and reports whether they changed.
 export function positionCheck(pos, snap, settings, now = snap.now) {
+  const s = { ...DEFAULTS, ...EXIT_DEFAULTS, ...settings };
   const { rows, bars } = snap;
   const row = rows.find((r) => r.m.ticker === pos.ticker) ?? null;
   const minutesLeft = (Date.parse(pos.closeTime) - now) / 60000;
-  const pYes = row?.ev.pYes ?? null;
+  let pYes = row?.ev.pYes ?? null;
+  // The bot's settled view: its odds averaged over the last smoothSec, so one jumpy tick doesn't move it
+  if (pYes != null && s.smoothSec > 0 && minutesLeft > 1) {
+    const recent = (snap.quoteLog?.[pos.ticker] || []).filter((e) => e.t >= now - s.smoothSec * 1000 && e.p != null).map((e) => e.p);
+    pYes = [...recent, pYes].reduce((a, b) => a + b, 0) / (recent.length + 1);
+  }
   const pSide = pYes == null ? null : pos.side === 'YES' ? pYes : 1 - pYes;
   const bid = row ? (pos.side === 'YES' ? row.ev.quote.yesBid : row.ev.quote.noBid) : null;
   const flips = flipSigns(bars, pos.side, now);
   const rejFlip = freshRejection(row?.rej, pos.side, now);
   if (rejFlip) flips.push(rejFlip);
-  const ex = exitSignal({ pos, bid, pSide, flips, minutesLeft, settings });
+  let ex = exitSignal({ pos, bid, pSide, flips, minutesLeft, settings: s });
   let changed = false;
+  // Hold steady: a sell has to stay a sell for a while before it's SELL NOW (no waiting in the last minute)
+  if (ex.action === 'SELL') {
+    const wait = (ex.kind === 'cut' ? s.cutConfirmSec : s.takeConfirmSec) * 1000;
+    if (pos.sellSince?.kind !== ex.kind) { pos.sellSince = { kind: ex.kind, t: now }; changed = true; }
+    const held = now - pos.sellSince.t;
+    if (held < wait && minutesLeft > 1) {
+      const left = Math.ceil((wait - held) / 1000);
+      ex = { ...ex, action: 'HOLD', kind: 'steady', why: ex.kind === 'cut'
+        ? `Kalshi pays a bit more than the bot's odds right now, but one move isn't a reason to bail. Holding the call; if it's still true in ${left}s, sell.`
+        : `In profit and Kalshi has caught up. Making sure it sticks for ${left}s before calling the sell.` };
+    }
+  } else if (pos.sellSince) { pos.sellSince = null; changed = true; }
   if (bid != null && (pos.peakBid == null || bid > pos.peakBid)) { pos.peakBid = bid; changed = true; }
   if (pSide != null && (pos.peakP == null || pSide > pos.peakP)) { pos.peakP = pSide; changed = true; }
   return { row, minutesLeft, pSide, bid, ex, changed };
@@ -136,12 +199,13 @@ const btc = (spot) => (spot ? ` · BTC $${Math.round(spot).toLocaleString('en-US
 
 export function buyMessage(row, sig, spot) {
   const { m, ev, strike } = row;
-  const bot = ev.side === 'YES' ? ev.pYes : 1 - ev.pYes;
-  const where = strike ? ` (BTC ${ev.side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
+  const side = sig.callSide ?? ev.side, price = sig.price ?? ev.price;
+  const bot = side === 'YES' ? ev.pYes : 1 - ev.pYes;
+  const where = strike ? ` (BTC ${side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
   return {
     tag: `buy-${m.ticker}`,
-    title: `Buy the low: ${sideName(ev.side)} at ${pc(ev.price)}`,
-    body: `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * ev.price)}${where}` +
+    title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}`,
+    body: `Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
       `${sig.deep ? ` · confidence ${sig.deep.score}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }
@@ -166,7 +230,7 @@ export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
   const lean = ev.pYes >= 0.5 ? `YES ${pc(ev.pYes)}` : `NO ${pc(1 - ev.pYes)}`;
   const diff = spot && strike ? ` (${spot >= strike ? '+' : '-'}${usd(Math.abs(spot - strike))})` : '';
   const startsLater = ev.callsAt && now < ev.callsAt ? ` · calls start ${hm(ev.callsAt, tz)}` : '';
-  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.fire ? ` · BUY THE LOW ${sideName(ev.side)} at ${pc(ev.price)}` : startsLater}.`);
+  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.callSide ? ` · BUY THE LOW ${sideName(sig.callSide)} at ${pc(sig.price)}` : startsLater}.`);
   return {
     tag: 'window-update',
     title: `🕒 ${hm(open, tz)}–${hm(close, tz)}${tz ? '' : ' UTC'} window · target ${strike ? usd(strike) : '—'}`,

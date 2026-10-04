@@ -102,6 +102,16 @@ Security:
 - The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
 
+### Trusting its gut
+
+The bot sticks with its calls instead of reacting to every tick:
+- **Once it calls a side, the call stands** while the robust gap is at least half of *Min gap* and confidence is within 10 of the cutoff. If the gap closes past that, the card says *Called YES earlier · no new buy*. It doesn't flip to PASS and back.
+- **Switching sides in the same window** needs a 12-pt gap (Min gap + 4) and confidence 75 (cutoff + 15). A switch push says **Switch:** so it's clear the bot changed its mind for a real reason.
+- **Selling at a loss** needs Kalshi to pay at least 3 pts more than the bot's odds, and that has to stay true for 30 seconds (*Hold steady*). In the meantime the position card says it's holding the call and counts down. A dip that reverses resets the clock. In the last minute there's no wait.
+- **Taking profit stays instant**, because Kalshi's lag closes fast.
+
+In the profit simulator this left profit unchanged and cut panic sells by 75–80%. The win rate rose 2–4 pts. The trade-off is a somewhat deeper worst losing stretch, because the bot now sits through more dips. Smoothing the bot's odds was also tested and dropped: it cost about 25% of profit.
+
 ### Selling for profit (exit signals)
 
 The app can't see your Kalshi account. After you buy on Kalshi, tap **I bought it**. That's it: one tap, no typing. The app records the bot's side, Kalshi's live price and the exact time, and uses the bot's suggested amount. Set *Fixed trade amount* in Settings if you always buy the same dollar amount. An **Undo** bar appears for a few seconds in case of a mis-tap. Tap right after your Kalshi order fills so the recorded price matches your fill. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
