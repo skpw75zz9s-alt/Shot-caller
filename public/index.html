@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Shot Caller</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Shot Caller <span class="tag">BTC · 15m</span></h1>
+    <span id="status" class="dot" title="connection"></span>
+  </header>
+
+  <main>
+    <section id="view-live" class="view active">
+      <div class="card call-card" id="callCard">
+        <div class="market-title" id="marketTitle">Loading markets…</div>
+        <div class="countdown" id="countdown">--:--</div>
+        <div class="call" id="call">—</div>
+        <div class="reason" id="reason"></div>
+        <div class="order" id="order"></div>
+      </div>
+
+      <div class="grid">
+        <div class="stat"><label>BTC spot</label><b id="spot">—</b></div>
+        <div class="stat"><label>Strike</label><b id="strike">—</b></div>
+        <div class="stat"><label>Distance</label><b id="dist">—</b></div>
+        <div class="stat"><label>Vol (1m)</label><b id="vol">—</b></div>
+        <div class="stat"><label>Model YES</label><b id="pModel">—</b></div>
+        <div class="stat"><label>Market YES</label><b id="pMarket">—</b></div>
+        <div class="stat"><label>EV YES</label><b id="evYes">—</b></div>
+        <div class="stat"><label>EV NO</label><b id="evNo">—</b></div>
+      </div>
+
+      <div class="card">
+        <canvas id="chart" height="140"></canvas>
+      </div>
+
+      <div id="others"></div>
+      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Past calls don't predict future results.</p>
+    </section>
+
+    <section id="view-history" class="view">
+      <div class="grid">
+        <div class="stat"><label>Calls</label><b id="hCount">0</b></div>
+        <div class="stat"><label>Hit rate</label><b id="hRate">—</b></div>
+        <div class="stat"><label>Paper P&amp;L</label><b id="hPnl">—</b></div>
+        <div class="stat"><label>Pending</label><b id="hPending">0</b></div>
+      </div>
+      <ul id="historyList" class="history"></ul>
+      <button id="clearHistory" class="ghost">Clear history</button>
+    </section>
+
+    <section id="view-settings" class="view">
+      <form id="settingsForm" class="card settings"></form>
+      <button id="enableAlerts">Enable call alerts</button>
+      <p class="fine">Alerts fire while the app is open (iOS needs the app added to the Home Screen first). Settings are saved on this device.</p>
+    </section>
+  </main>
+
+  <nav>
+    <button data-view="live" class="active">Live</button>
+    <button data-view="history">History</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

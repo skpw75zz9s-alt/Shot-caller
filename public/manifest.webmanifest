@@ -1,0 +1,10 @@
+{
+  "name": "Shot Caller",
+  "short_name": "ShotCaller",
+  "description": "Signal bot for Kalshi 15-minute Bitcoin markets",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
