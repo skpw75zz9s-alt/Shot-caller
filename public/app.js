@@ -3,6 +3,7 @@ import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
+import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, todayStats } from './practice.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -55,7 +56,9 @@ if (store.get('settingsVersion', 1) < 6) {
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
-  calls: store.get('calls', {}) }; // what the bot has called per window, so it sticks with its calls
+  calls: store.get('calls', {}), // what the bot has called per window, so it sticks with its calls
+  practice: store.get('practice', null) || newPractice(), practiceWhy: '' };
+const practiceCfg = { ...PRACTICE_DEFAULTS, ...store.get('practiceCfg', {}) };
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
@@ -91,6 +94,16 @@ async function refreshSpot() {
 
 // ---------- settlement ----------
 async function settlePositions() {
+  // Practice positions still open when their market settled
+  for (const t of [...new Set(state.practice.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).map((p) => p.ticker))].slice(0, 3)) {
+    try {
+      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(t)}`);
+      if (market && (market.result === 'yes' || market.result === 'no')) {
+        for (const e of practiceSettle(state.practice, t, market.result)) toast(`Practice: settled ${e.side} ${e.pnl >= 0 ? 'WIN' : 'LOSS'} ${money(e.pnl)}`);
+        store.set('practice', state.practice); renderPractice();
+      }
+    } catch { /* retry next cycle */ }
+  }
   // Positions still open when their market settled
   for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).slice(0, 3)) {
     try {
@@ -258,6 +271,7 @@ function render() {
   renderPositions(snap);
   const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
   if (sig?.fire) store.set('calls', state.calls);
+  if (practiceCfg.on || state.practice.positions.length) runPractice(snap, live, sig, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
@@ -956,7 +970,78 @@ $('kUnlink').addEventListener('click', async () => {
 setInterval(() => { if (!document.hidden) syncKalshi(); }, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) syncKalshi(); });
 
+
+// ---------- auto-trade practice (no orders, ever) ----------
+function runPractice(snap, live, sig, now) {
+  const { actions, why } = practiceStep(state.practice, { snap, row: live, sig, settings, cfg: practiceCfg, now });
+  if (why && why !== 'Waiting for a new call' && why !== 'Practice is off') state.practiceWhy = why;
+  for (const e of actions) {
+    state.practiceWhy = '';
+    toast(e.action === 'buy'
+      ? `Practice: bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)} (${dollars(e.cost)})`
+      : `Practice: sold at ${pc(e.price)} · ${money(e.pnl)}`);
+  }
+  if (actions.length) { store.set('practice', state.practice); renderPractice(); }
+  renderPracticeStrip(snap);
+}
+
+function renderPracticeStrip(snap) {
+  const el = $('practiceStrip');
+  const pos = state.practice.positions[0];
+  if (!practiceCfg.on && !pos) { el.hidden = true; return; }
+  el.hidden = false;
+  const t = todayStats(state.practice);
+  if (pos) {
+    const row = snap?.rows.find((r) => r.m.ticker === pos.ticker);
+    const bid = row ? (pos.side === 'YES' ? row.ev.quote.yesBid : row.ev.quote.noBid) : null;
+    const open = bid != null ? (bid - kalshiFee(bid)) * pos.contracts - pos.cost : null;
+    el.innerHTML = `<b>PRACTICE</b> · holding ${+pos.contracts.toFixed(0)} ${sideName(pos.side)} at ${pc(pos.price)}${open != null ? ` · now ${money(open)}` : ''} · today ${money(t.pnl)}`;
+  } else {
+    el.innerHTML = `<b>PRACTICE</b> · watching for a call${state.practiceWhy ? ` · last: ${esc(state.practiceWhy)}` : ''} · today ${money(t.pnl)}`;
+  }
+}
+
+function renderPractice() {
+  const pr = state.practice, t = todayStats(pr), a = allStats(pr);
+  $('prOn').checked = practiceCfg.on;
+  for (const [id, k] of [['prMax', 'maxPerTrade'], ['prLoss', 'dailyLoss'], ['prTrades', 'maxTrades'], ['prConf', 'minConfidence']]) {
+    if (document.activeElement !== $(id)) $(id).value = practiceCfg[k];
+  }
+  $('prToday').textContent = t.closed || t.buys ? `${money(t.pnl)} · ${t.wins}/${t.closed}` : '—';
+  $('prAll').textContent = a.trades ? `${money(a.pnl)} · ${a.wins}/${a.trades} won` : '—';
+  $('prWhy').textContent = practiceCfg.on ? (state.practiceWhy || 'Watching for a call…') : 'Off';
+  $('prLog').innerHTML = [...pr.log].reverse().slice(0, 30).map((e) => {
+    const what = e.action === 'buy' ? `Bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '')
+      : e.action === 'sell' ? `Sold ${+e.contracts.toFixed(0)} at ${pc(e.price)} (${e.kind === 'take' ? 'take profit' : 'cut'})`
+      : `Settled ${e.proceeds > 0 ? 'WIN' : 'LOSS'}`;
+    const val = e.action === 'buy' ? `<b>-${dollars(e.cost)}</b>` : `<b class="${e.pnl >= 0 ? 'pos' : 'neg'}">${money(e.pnl)}</b>`;
+    return `<li><span>${what}<small>${clock(e.at)} · ${esc(e.ticker)}</small></span>${val}</li>`;
+  }).join('') || '<li class="calm">No practice trades yet</li>';
+}
+
+$('prOn').addEventListener('change', (e) => {
+  practiceCfg.on = e.target.checked;
+  store.set('practiceCfg', practiceCfg);
+  state.practiceWhy = '';
+  renderPractice(); render();
+  toast(practiceCfg.on ? 'Practice auto-trading on: it logs trades, never places them' : 'Practice auto-trading off');
+});
+for (const [id, k, min, max] of [['prMax', 'maxPerTrade', 1, 1000], ['prLoss', 'dailyLoss', 1, 10000], ['prTrades', 'maxTrades', 1, 100], ['prConf', 'minConfidence', 0, 100]]) {
+  $(id).addEventListener('change', (e) => {
+    const v = Number(e.target.value);
+    if (Number.isFinite(v)) practiceCfg[k] = Math.min(max, Math.max(min, v));
+    store.set('practiceCfg', practiceCfg);
+    renderPractice();
+  });
+}
+$('prReset').addEventListener('click', () => {
+  if (!confirm('Reset practice? This clears the practice log and any practice positions.')) return;
+  state.practice = newPractice(); store.set('practice', state.practice); state.practiceWhy = '';
+  renderPractice(); render();
+});
+
 buildSettings();
+renderPractice();
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();

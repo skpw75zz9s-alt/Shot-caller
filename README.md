@@ -124,6 +124,24 @@ Things tested and left off by default:
 - **Blending in Kalshi's price** (*marketWeight*): fewer calls, no gain.
 - **Capping edges** that look too good (*maxEdge*): steadier, but not more profitable.
 
+### Auto-trade practice
+
+Settings → **Auto-trade practice**. Turn it on and the app runs the rules an auto-trader would use, on live Kalshi prices, and logs every trade it **would** make. **It never places an order.**
+
+The rules:
+- **Buy** on a new BUY THE LOW call with confidence at or above *Min confidence* (default 70), at Kalshi's ask, only if the ask is at or under the call's max price.
+- **One buy per window**, sized to *Max $ per trade* (default $5).
+- **Stop buying for the day** after *Max trades / day* (default 10) or the *Daily loss limit* (default $20). Open positions count as fully at risk, so the limit can't be overrun.
+- **Sell** on the same exits as real positions: take profit as soon as Kalshi pays what the bot thinks it's worth, and cut only after the hold-steady wait. Otherwise hold to settlement.
+
+A **PRACTICE** strip on the Live screen shows what it's holding and today's P&L. The card shows today's and all-time results and the log, including why it skipped a call.
+
+Caveats:
+- It only runs while the app is open on screen.
+- Fills assume the price on screen at that moment. Real orders can fill a bit worse.
+
+Run it for a few days and compare the practice P&L with what the market actually did before considering real auto-trading.
+
 ### Trusting its gut
 
 The bot sticks with its calls instead of reacting to every tick:

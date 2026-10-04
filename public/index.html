@@ -34,6 +34,7 @@
   <main>
     <section id="view-live" class="view active">
       <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
+      <div class="practice-strip" id="practiceStrip" hidden></div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
@@ -123,6 +124,21 @@
         <div id="kLinked" class="pos-btns" hidden><button id="kSync">Sync now</button><button id="kUnlink" class="ghost">Unlink</button></div>
         <p class="err" id="kErr"></p>
       </div>
+      <div class="card push-card practice-card">
+        <h3>Auto-trade practice</h3>
+        <p class="push-status">Runs the auto-trader's rules on live Kalshi prices and logs every trade it <b>would</b> make, with P&amp;L. It never places an order or touches your money. It only runs while the app is open on screen.</p>
+        <label class="practice-toggle"><input type="checkbox" id="prOn"> Practice auto-trading</label>
+        <div class="adm-row"><label>Max $ per trade<input id="prMax" inputmode="decimal"></label><label>Daily loss limit $<input id="prLoss" inputmode="decimal"></label></div>
+        <div class="adm-row"><label>Max trades / day<input id="prTrades" inputmode="numeric"></label><label>Min confidence<input id="prConf" inputmode="numeric"></label></div>
+        <div class="grid pr-stats">
+          <div class="stat"><label>Today P&amp;L</label><b id="prToday">—</b></div>
+          <div class="stat"><label>All practice</label><b id="prAll">—</b></div>
+        </div>
+        <p class="push-status" id="prWhy"></p>
+        <h4>Practice log</h4>
+        <ul id="prLog" class="history pr-log"></ul>
+        <div class="pos-btns"><button id="prReset" class="ghost">Reset practice</button></div>
+      </div>
       <div class="card push-card">
         <h3>Notifications</h3>
         <p id="pushStatus" class="push-status">Checking…</p>
@@ -131,7 +147,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v3.6 · max price on every call</p>
+      <p class="fine" id="version">Shot Caller v3.7 · auto-trade practice</p>
     </section>
   </main>
 
