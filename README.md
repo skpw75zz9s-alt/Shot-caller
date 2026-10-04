@@ -106,16 +106,24 @@ Security:
 
 Settings → **Risk level**:
 
-| Level | Min gap | Confidence | Practice buys at |
-|---|---|---|---|
-| Safe | 8 pts | 60 | 70+ |
-| **Balanced (default)** | 6 pts | 55 | 60+ |
-| Aggressive | 4 pts | 50 | 55+ |
+| Level | Min gap | Confidence | Practice buys at | Scales in |
+|---|---|---|---|---|
+| Safe | 8 pts | 60 | 70+ | no |
+| **Balanced (default)** | 6 pts | 55 | 60+ | no |
+| Aggressive | 4 pts | 50 | 55+ | **yes** |
 
-In the simulator with a ~10s human buy delay and max prices:
-- **Balanced** made about twice Safe's calls, and matched or beat Safe's profit in 4 of 6 market types.
-- **Aggressive** made 3–4× the calls, with similar totals and bigger swings.
-- **Safe** still has the best return per dollar when orders fill instantly.
+**Every level re-enters.** After you sell (or Practice sells), the call on that market is released. If a gap opens again after a 15-second cooldown, a new call fires, and its alert isn't deduped against the first. This was the biggest gain in the simulator for every level: Safe went from +$402 to +$1,136 over 200 windows.
+
+**Aggressive scales in.** It opens on a small gap (4 pts), then adds each time the gap clears +2, +4 and +8 pts (one add per tier, with full confidence). Phones holding the call get an **Add** push, and Practice averages the add into its position. So Aggressive makes every trade Safe would make, plus smaller early ones.
+
+Simulated results, Aggressive vs Safe, both re-entering:
+
+| Fill speed | Result |
+|---|---|
+| Instant (Practice, auto-trading) | **More profit in all 6 market types**: e.g. +$118 vs +$24, +$911 vs +$711, +$1,593 vs +$1,129 per 100 windows, and a tie when Kalshi is priced right |
+| ~10s by hand | More profit when the mispricing lasts (+$64 vs +$11, +$21 vs +$9), a few dollars worse per 100 windows when Kalshi is priced right, only noisy, or the edge is a seconds-long lag |
+
+The costs: a lower return per dollar (44–51% vs 67–76%) and bigger swings (worst stretch up to ~$150–180 vs ~$80–135).
 
 Editing the gap or confidence by hand shows as *Custom*.
 

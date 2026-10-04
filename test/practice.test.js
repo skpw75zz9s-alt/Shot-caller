@@ -118,3 +118,20 @@ test('Range watch uses the exact rule from the offline study (same events on the
   }
   assert.equal(events, STUDY_EVENTS);
 });
+
+test('practice scale-in averages into the position; after a sale it can buy the same market again', async () => {
+  const { newPractice, practiceStep } = await import('../public/practice.js');
+  const pr = newPractice(), r0 = row(0.40, 0.75), memory = {};
+  practiceStep(pr, { snap: snapOf(r0), row: r0, sig: call(), settings: {}, cfg, memory, now });
+  const r1 = row(0.35, 0.75);
+  const { actions } = practiceStep(pr, { snap: snapOf(r1), row: r1, sig: call({ fire: false, stance: 'holding', add: true, tier: 1 }), settings: {}, cfg, memory, now: now + 3000 });
+  assert.equal(actions[0].add, true);
+  assert.equal(pr.positions.length, 1);
+  assert.ok(pr.positions[0].contracts > 11 && pr.positions[0].price < 0.42, 'averaged in at the lower price');
+  // take profit, then a fresh call on the same market buys again
+  const up = row(0.80, 0.75);
+  assert.equal(practiceStep(pr, { snap: snapOf(up), row: up, sig: null, settings: {}, cfg, memory, now: now + 6000 }).actions[0].kind, 'take');
+  assert.ok(memory['KXBTC15M-A']?.cooldownUntil > now, 'the call was released for re-entry');
+  const again = practiceStep(pr, { snap: snapOf(r0), row: r0, sig: call(), settings: {}, cfg, memory, now: now + 30000 });
+  assert.equal(again.actions[0].action, 'buy', 're-entered');
+});

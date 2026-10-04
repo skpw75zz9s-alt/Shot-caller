@@ -3,7 +3,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS } from './public/model.js';
-import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, snapshot, updateMessage } from './public/engine.js';
+import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
 
@@ -29,6 +29,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings?.momentumWeight === 0.25) d.settings.momentumWeight = 0; // v3.3: profit tuning
       if (d.settings?.minEdge === 0.04) d.settings.minEdge = 0.08;
       if (d.settings?.minEdge === 0.08 && d.settings?.minConfidence === 60) Object.assign(d.settings, { minEdge: 0.06, minConfidence: 55 }); // v3.9: Balanced
+      if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50 && d.settings.scaleIn == null) d.settings.scaleIn = true; // v3.10: Aggressive scales in
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
@@ -194,7 +195,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const sig = buySignal(snap.live, snap, s, now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot), 45); // a buy call is stale within a minute: never deliver it late
+          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot), 45); // a buy call is stale within a minute: never deliver it late
+          // Aggressive scale-in: only phones holding that call hear about the add
+          if (s.notifyBuy && sig.add && d.positions.some((p) => p.ticker === snap.live.m.ticker && p.side === sig.callSide)) {
+            fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, market.spot), 45);
+          }
           if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
@@ -203,7 +208,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap, s, now);
-          if (s.notifySell && check.ex.action === 'SELL') fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot));
+          if (check.ex.action === 'SELL') {
+            if (s.notifySell) fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot));
+            releaseCall(d.calls, pos.ticker, now, s); // after the sell call, a fresh buy call on this market can fire again
+          }
         }
 
         // Drop positions 5 minutes after their market closes, and alert keys after 2 hours

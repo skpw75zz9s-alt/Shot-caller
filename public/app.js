@@ -1,6 +1,6 @@
 import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf } from './model.js';
 import { patterns } from './candles.js';
-import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
+import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
@@ -60,6 +60,12 @@ if (store.get('settingsVersion', 1) < 7) {
   const pc0 = store.get('practiceCfg', null);
   if (pc0 && pc0.minConfidence === 70) { pc0.minConfidence = RISK_LEVELS.balanced.practiceConfidence; store.set('practiceCfg', pc0); }
   store.set('settings', settings); store.set('settingsVersion', 7);
+}
+
+// v3.10: Aggressive scales in; anyone already on Aggressive gets it
+if (store.get('settingsVersion', 1) < 8) {
+  if (riskLevelOf(settings) === 'aggressive') settings.scaleIn = true;
+  store.set('settings', settings); store.set('settingsVersion', 8);
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
@@ -145,6 +151,7 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
   state.trades = state.trades.slice(0, 500);
   if (contracts < pos.contracts - 1e-9) pos.contracts -= contracts;
   else state.positions = state.positions.filter((p) => p.id !== pos.id);
+  if (how === 'sold') { releaseCall(state.calls, pos.ticker, at, settings); store.set('calls', state.calls); } // re-entry: a new call can fire after the cooldown
   store.set('trades', state.trades);
   savePositions();
   pushSyncSoon();
@@ -316,6 +323,7 @@ function render() {
     $('reason').textContent = call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
+      : sig.cooldown ? `Just sold on this market. A fresh call can come in ${sig.cooldown}s if the gap is still there.`
       : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
       : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
       : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
@@ -326,7 +334,7 @@ function render() {
     const waiting = call && !buyNow && settings.waitForDip;
     $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
-      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : ev.side && !sig.robust ? 'Low price, edge too thin' : ev.side ? 'Low price, not confident' : 'No low price';
+      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin' : ev.side ? 'Low price, not confident' : 'No low price';
     callEl.textContent = call ?? 'PASS';
     callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
     $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
@@ -351,10 +359,19 @@ function render() {
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
-      const key = `${m.ticker}:${call}:${buyNow ? 'low' : 'call'}`;
+      const key = `${m.ticker}:${call}:${sig.callN}:${buyNow ? 'low' : 'call'}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
+      }
+    }
+    // Aggressive scale-in: tell people who hold the call that the gap grew
+    if (sig.add) {
+      store.set('calls', state.calls);
+      const key = `add:${m.ticker}:${sig.tier}`;
+      if (state.positions.some((p) => p.ticker === m.ticker && p.side === call) && !state.alerted[key]) {
+        state.alerted[key] = true;
+        if (settings.notifyBuy) alert(addMessage(live, sig, state.spot));
       }
     }
 
@@ -982,7 +999,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 
 // ---------- auto-trade practice (no orders, ever) ----------
 function runPractice(snap, live, sig, now) {
-  const { actions, why } = practiceStep(state.practice, { snap, row: live, sig, settings, cfg: practiceCfg, now });
+  const { actions, why } = practiceStep(state.practice, { snap, row: live, sig, settings, cfg: practiceCfg, memory: state.calls, now });
   const rg = rangeStep(state.practice, { snap, row: live, cfg: practiceCfg, now });
   state.rangeRead = rg.read;
   for (const e of rg.actions) toast(`Range watch: ${e.why} → paper-bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}`);
@@ -991,7 +1008,7 @@ function runPractice(snap, live, sig, now) {
   for (const e of actions) {
     state.practiceWhy = '';
     toast(e.action === 'buy'
-      ? `Practice: bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)} (${dollars(e.cost)})`
+      ? `Practice: ${e.add ? 'added' : 'bought'} ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)} (${dollars(e.cost)})`
       : `Practice: sold at ${pc(e.price)} · ${money(e.pnl)}`);
   }
   if (actions.length) { store.set('practice', state.practice); renderPractice(); }
@@ -1032,7 +1049,7 @@ function renderPractice() {
   $('rgRead').textContent = practiceCfg.on ? `Now: ${state.rangeRead?.why ?? 'waiting for candles'}` : '';
   $('prLog').innerHTML = [...pr.log, ...(pr.range?.log || [])].sort((x, y) => y.at - x.at).slice(0, 30).map((e) => {
     const tag = e.range ? '<span class="src-tag">Range</span> ' : '';
-    const what = tag + (e.action === 'buy' ? `Bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '') + (e.why && e.range ? ` · ${esc(e.why)}` : '')
+    const what = tag + (e.action === 'buy' ? `${e.add ? 'Added' : 'Bought'} ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '') + (e.why && e.range ? ` · ${esc(e.why)}` : '')
       : e.action === 'sell' ? `Sold ${+e.contracts.toFixed(0)} at ${pc(e.price)} (${e.kind === 'take' ? 'take profit' : 'cut'})`
       : `Settled ${e.proceeds > 0 ? 'WIN' : 'LOSS'}`);
     const val = e.action === 'buy' ? `<b>-${dollars(e.cost)}</b>` : `<b class="${e.pnl >= 0 ? 'pos' : 'neg'}">${money(e.pnl)}</b>`;
@@ -1072,7 +1089,7 @@ $('riskBtns').addEventListener('click', (e) => {
   const k = e.target.closest('button[data-risk]')?.dataset.risk;
   if (!k) return;
   const r = RISK_LEVELS[k];
-  Object.assign(settings, { minEdge: r.minEdge, minConfidence: r.minConfidence });
+  Object.assign(settings, { minEdge: r.minEdge, minConfidence: r.minConfidence, scaleIn: !!r.scaleIn });
   practiceCfg.minConfidence = r.practiceConfidence;
   store.set('settings', settings); store.set('practiceCfg', practiceCfg);
   for (const [name, v] of [['minEdge', r.minEdge * 100], ['minConfidence', r.minConfidence]]) { const el = $('settingsForm').elements[name]; if (el) el.value = v; }

@@ -149,20 +149,32 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true)) pick = shown;
+    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
   const callSide = pick?.side ?? null;
   const prob = callSide ? (callSide === 'YES' ? ev.pYes : 1 - ev.pYes) : null;
-  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5))) : 0;
+  const firstOnly = s.scaleIn && callSide && callSide !== called; // a brand-new scaled call starts small
+  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5) * (firstOnly ? s.firstSize : 1))) : 0;
   const buyNow = !!callSide && pick.timing.state === 'NOW';
   // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
   const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
   // Max price: the most you can pay and still clear limitEdgeFrac × minEdge with vol 20% off either way
   const limit = callSide && pick.robustEdge != null ? maxPay(pick.robustEdge + pick.price + kalshiFee(pick.price), s.minEdge * s.limitEdgeFrac) : null;
-  if (fire) { mem.side = callSide; mem.at = now; }
+  // Scale-in tiers: a call opens at the first tier its gap clears; each time the gap later clears the next
+  // tier (with full confidence) it signals an add. Small early entries, bigger ones as the edge proves out.
+  const tiers = s.scaleIn ? [s.minEdge, s.minEdge + 0.02, s.minEdge + 0.04, s.minEdge + 0.08] : [s.minEdge];
+  const reached = (e) => tiers.reduce((k, t, i) => (e != null && e >= t - 1e-9 ? i : k), -1);
+  let add = false;
+  if (fire) { mem.side = callSide; mem.at = now; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
+  else if (callSide && callSide === called && tiers.length > 1 && pick.deep && pick.score >= s.minConfidence) {
+    const next = (mem.tier ?? 0) + 1;
+    if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
+  }
   return {
+    add, tier: mem.tier ?? null, callN: mem.n ?? 0,
+    cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
     side: a?.side ?? lean, callSide, price: pick?.price ?? null, limit, edge: pick?.point ?? null,
     timing: a?.timing ?? entrySignal(snap.bars, null, now), deep: a?.deep ?? null, robustEdge: a?.robustEdge ?? null,
     robust: a?.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9, confident: !!callSide, buyNow, contracts, fire,
@@ -170,6 +182,14 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     // the bot already called a side and is sticking with it while the other side wiggles
     sticking: !!called && !!lean && lean !== called && callSide !== lean,
   };
+}
+
+// After a sale, forget the call on that market so a fresh dislocation can be called again (re-entry),
+// after a short cooldown so it doesn't buy straight back at the price it just sold.
+export function releaseCall(memory, ticker, now = Date.now(), settings = {}) {
+  if (!memory) return;
+  const s = { ...DEFAULTS, ...settings };
+  memory[ticker] = { n: memory[ticker]?.n ?? 0, cooldownUntil: now + s.reentrySec * 1000, at: now };
 }
 
 // Exit check for one tracked position. Updates pos.peakBid / pos.peakP after the check
@@ -254,6 +274,18 @@ export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
     tag: 'window-update',
     title: `🕒 ${hm(open, tz)}–${hm(close, tz)}${tz ? '' : ' UTC'} window · target ${strike ? usd(strike) : '—'}`,
     body: parts.join(' '),
+  };
+}
+
+// Aggressive scale-in: the gap on a call you hold grew past the next tier
+export function addMessage(row, sig, spot) {
+  const { m, ev } = row;
+  const side = sig.callSide, price = sig.price;
+  const bot = side === 'YES' ? ev.pYes : 1 - ev.pYes;
+  return {
+    tag: `add-${m.ticker}`,
+    title: `Add: ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
+    body: `The gap grew to ${(sig.edge * 100).toFixed(0)} pts (Kalshi ${pc(price)} vs bot ${pc(bot)}) · add ${dollars(sig.contracts * price)}${btc(spot)}`,
   };
 }
 

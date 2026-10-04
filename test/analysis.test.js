@@ -248,3 +248,42 @@ test('sticks with its call: holds at a lower bar, and switching sides needs clea
   assert.ok(sawSmallNo, 'a NO edge that would be a fresh call is not enough to switch');
   assert.equal(flipped, false, 'switching needs min gap + 4 pts');
 });
+
+test('re-entry: after a sale the call is released, blocked for the cooldown, then a new call can fire', async () => {
+  const { snapshot, buySignal, releaseCall } = await import('../public/engine.js');
+  const OPEN4 = Date.parse('2026-10-04T14:00:00Z'), now = OPEN4 + 7 * 60000;
+  const bars = Array.from({ length: 130 }, (_, i) => { const t = now - (130 - i) * 60000, c = 100000 + Math.sin(i) * 12; return { t, o: c - 3, h: c + 8, l: c - 8, c }; });
+  const mk = [{ ticker: 'RE1', open_time: new Date(OPEN4).toISOString(), close_time: new Date(OPEN4 + 900000).toISOString(), strike_type: 'greater_or_equal', floor_strike: 100000, yes_bid: 20, yes_ask: 22 }];
+  const S = { minConfidence: 0 };
+  const run = (t, memory) => { const snap = snapshot({ markets: mk, candles: bars, spot: 100015, settings: S, now: t }); return buySignal(snap.live, snap, S, t, memory); };
+  const memory = {};
+  const a = run(now, memory);
+  assert.equal(a.fire, true); assert.equal(a.callN, 1);
+  assert.equal(run(now + 2000, memory).fire, false, 'holding: no re-alert');
+  releaseCall(memory, 'RE1', now + 3000);
+  assert.equal(run(now + 10000, memory).fire, false, 'cooling down for 15s after the sale');
+  const b = run(now + 19000, memory);
+  assert.equal(b.fire, true, 'a fresh call after the cooldown');
+  assert.equal(b.callN, 2, 'counted, so its alert is not deduped against the first');
+});
+
+test('Aggressive scale-in: one add per tier as the gap grows, none on Safe', async () => {
+  const { snapshot, buySignal } = await import('../public/engine.js');
+  const { RISK_LEVELS } = await import('../public/model.js');
+  const OPEN5 = Date.parse('2026-10-04T15:00:00Z'), now = OPEN5 + 7 * 60000;
+  const bars = Array.from({ length: 130 }, (_, i) => { const t = now - (130 - i) * 60000, c = 100000 + Math.sin(i) * 12; return { t, o: c - 3, h: c + 8, l: c - 8, c }; });
+  const mk = (yb) => [{ ticker: 'SC1', open_time: new Date(OPEN5).toISOString(), close_time: new Date(OPEN5 + 900000).toISOString(), strike_type: 'greater_or_equal', floor_strike: 100000, yes_bid: yb, yes_ask: yb + 2 }];
+  const fair = snapshot({ markets: mk(50), candles: bars, spot: 100015, settings: {}, now }).live.ev.pYes;
+  const go = (S, yb, memory, t) => { const snap = snapshot({ markets: mk(yb), candles: bars, spot: 100015, settings: S, now: t }); return buySignal(snap.live, snap, S, t, memory); };
+  for (const [level, expectAdds] of [['aggressive', true], ['safe', false]]) {
+    const r = RISK_LEVELS[level], S = { minEdge: r.minEdge, minConfidence: 0, scaleIn: !!r.scaleIn };
+    const memory = {}; let fired = 0, adds = 0, t = now;
+    // Kalshi's YES price falls step by step: the gap widens from just over the min gap to ~15 pts
+    for (let yb = Math.round(fair * 100) - 2 - Math.round(r.minEdge * 100) - 3; yb >= Math.round(fair * 100) - 20; yb--) {
+      const sg = go(S, yb, memory, (t += 3000)); if (sg.fire) fired++; if (sg.add) adds++;
+    }
+    assert.equal(fired, 1, `${level}: one call`);
+    if (expectAdds) assert.ok(adds >= 2 && adds <= 3, `aggressive adds once per tier (${adds})`);
+    else assert.equal(adds, 0, 'safe never adds');
+  }
+});

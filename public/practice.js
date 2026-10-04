@@ -2,7 +2,7 @@
 // the trades it WOULD make with their P&L. It never talks to Kalshi's order API; nothing here sends orders.
 // Fills are assumed at the quote shown at that moment (buys at the ask, sells at the bid), with Kalshi fees.
 import { kalshiFee } from './model.js';
-import { positionCheck } from './engine.js';
+import { positionCheck, releaseCall } from './engine.js';
 
 export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 60 };
 export const newPractice = () => ({ positions: [], log: [], since: Date.now(), range: { positions: [], log: [] } });
@@ -34,11 +34,13 @@ export function allStats(pr) {
 export function wouldBuy(pr, { row, sig, cfg, now = Date.now() }) {
   const c = { ...PRACTICE_DEFAULTS, ...cfg };
   if (!c.on) return { ok: false, why: 'Practice is off' };
-  if (!row || !sig?.fire || !sig.callSide || sig.stance !== 'new') return { ok: false, why: 'Waiting for a new call' };
-  const ticker = row.m.ticker;
+  const ticker = row?.m.ticker;
+  const held = row ? pr.positions.find((p) => p.ticker === ticker) : null;
+  // Aggressive scale-in: the call's gap grew past the next tier while we hold it, so add
+  const add = !!(held && sig?.add && sig.callSide === held.side);
+  if (!row || !sig?.callSide || (!add && (!sig.fire || sig.stance !== 'new'))) return { ok: false, why: 'Waiting for a new call' };
   if ((sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
-  if (pr.positions.some((p) => p.ticker === ticker)) return { ok: false, why: 'Already holding this market' };
-  if (pr.log.some((e) => e.ticker === ticker && e.action === 'buy')) return { ok: false, why: 'Already bought once this window' };
+  if (held && !add) return { ok: false, why: 'Already holding this market' };
   const t = todayStats(pr, now);
   if (t.buys >= c.maxTrades) return { ok: false, why: `Skipped: hit today's limit of ${c.maxTrades} trades` };
   if (t.atRisk >= c.dailyLoss) return { ok: false, why: `Skipped: hit today's $${c.dailyLoss} loss limit` };
@@ -50,12 +52,12 @@ export function wouldBuy(pr, { row, sig, cfg, now = Date.now() }) {
   const budget = Math.min(c.maxPerTrade, c.dailyLoss - t.atRisk);
   const count = Math.min(Math.floor(budget / per), Math.max(1, sig.contracts || 1));
   if (count < 1) return { ok: false, why: `Skipped: $${c.maxPerTrade} buys less than one contract at ${Math.round(price * 100)}¢` };
-  return { ok: true, count, price };
+  return { ok: true, count, price, add };
 }
 
 // One step: sell what the exit rules say to sell, then buy a new call if the rules allow.
 // Mutates `pr`; returns the actions taken (for toasts) and why it didn't buy (for the card).
-export function practiceStep(pr, { snap, row, sig, settings, cfg, now = Date.now() }) {
+export function practiceStep(pr, { snap, row, sig, settings, cfg, memory = null, now = Date.now() }) {
   const actions = [];
   for (const pos of [...pr.positions]) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
@@ -65,13 +67,20 @@ export function practiceStep(pr, { snap, row, sig, settings, cfg, now = Date.now
     const e = { at: now, ticker: pos.ticker, action: 'sell', kind: ch.ex.kind, side: pos.side, price: ch.bid, contracts: pos.contracts, proceeds: r2(proceeds), pnl: r2(proceeds - pos.cost), why: ch.ex.why };
     pr.log.push(e); actions.push(e);
     pr.positions = pr.positions.filter((p) => p !== pos);
+    releaseCall(memory, pos.ticker, now, settings); // sold: a fresh call on this market can fire again after the cooldown
   }
   const b = wouldBuy(pr, { row, sig, cfg, now });
   if (b.ok) {
     const cost = (b.price + kalshiFee(b.price)) * b.count;
-    const pos = { id: `pr-${now}`, ticker: row.m.ticker, side: sig.callSide, price: b.price, contracts: b.count, cost: r2(cost), closeTime: row.m.close_time, at: now, peakBid: null, peakP: null };
-    pr.positions.push(pos);
-    const e = { at: now, ticker: pos.ticker, action: 'buy', side: pos.side, price: b.price, contracts: b.count, cost: r2(cost), conf: sig.deep?.score ?? null, limit: sig.limit };
+    let pos = b.add ? pr.positions.find((p) => p.ticker === row.m.ticker) : null;
+    if (pos) { // average into the open position
+      pos.price = r2((pos.price * pos.contracts + b.price * b.count) / (pos.contracts + b.count) * 100) / 100;
+      pos.contracts += b.count; pos.cost = r2(pos.cost + cost);
+    } else {
+      pos = { id: `pr-${now}`, ticker: row.m.ticker, side: sig.callSide, price: b.price, contracts: b.count, cost: r2(cost), closeTime: row.m.close_time, at: now, peakBid: null, peakP: null };
+      pr.positions.push(pos);
+    }
+    const e = { at: now, ticker: pos.ticker, action: 'buy', add: b.add, side: pos.side, price: b.price, contracts: b.count, cost: r2(cost), conf: sig.deep?.score ?? null, limit: sig.limit };
     pr.log.push(e); actions.push(e);
   }
   if (pr.log.length > 500) pr.log = pr.log.slice(-500);

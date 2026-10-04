@@ -126,15 +126,18 @@ export const DEFAULTS = {
   limitEdgeFrac: 0.5,   // max price on a call: still clears this share of minEdge even with vol 20% off
   marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
   maxEdge: 1,           // a gap bigger than this is too good to be true (usually a lag that's gone before you can buy)
+  scaleIn: false,       // add to a call as its gap grows past minEdge +2, +4 and +8 pts (Aggressive)
+  firstSize: 1,         // with scaleIn, the first entry is this fraction of the normal size (adds carry the rest)
+  reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
 };
 
-// Risk levels (Settings). Simulated with a ~10s human buy delay and max prices: Balanced made about twice
-// Safe's calls and matched or beat its profit in most market types; Aggressive ~3-4x the calls, similar
-// totals, bigger swings. Safe has the best return per dollar when orders fill instantly.
+// Risk levels (Settings). All levels re-enter after selling. Aggressive also scales in as the gap grows,
+// which in simulation made more total profit than Safe in every market type that made money (instant fills
+// and ~10s hand fills), at a lower return per dollar and with bigger swings.
 export const RISK_LEVELS = {
-  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, hint: 'Fewest calls, biggest gaps only' },
-  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, hint: 'About 2× the calls of Safe' },
-  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, hint: 'Most calls, bigger swings' },
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, scaleIn: false, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, scaleIn: false, hint: 'About 2× the calls of Safe' },
+  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, scaleIn: true, hint: 'Most calls, adds as the gap grows, biggest swings' },
 };
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
 
