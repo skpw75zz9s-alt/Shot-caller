@@ -616,6 +616,7 @@ async function loadAccess() {
       : st.access ? `Active until ${day(st.expires)} · code ${st.code} (use it to unlock your other devices)`
       : 'No access';
     $('adminCard').hidden = st.role !== 'admin';
+    $('adminLogin').hidden = st.role === 'admin';
     if (st.role === 'admin') loadAdmin();
   } catch { /* offline */ }
 }
@@ -653,6 +654,12 @@ $('adminCard').addEventListener('click', (e) => {
 });
 $('admApprove').addEventListener('click', () => { if ($('admCode').value.trim()) adminAction('approve', { code: $('admCode').value }).then(() => { $('admCode').value = ''; }); });
 $('admSave').addEventListener('click', () => adminAction('config', { price: $('admPrice').value, days: $('admDays').value }).then(loadAccess));
+$('adminLogin').addEventListener('click', async () => {
+  const code = prompt('Admin code');
+  if (!code) return;
+  try { await postJSON('access/admin', { code }); location.reload(); }
+  catch (e) { window.alert(e.message); }
+});
 $('signOut').addEventListener('click', async () => {
   if (!confirm('Sign out on this device? You\'ll need your code (or the admin code) to get back in.')) return;
   await fetch(`${API}/access/logout`, { method: 'POST', body: '{}' }).catch(() => {});

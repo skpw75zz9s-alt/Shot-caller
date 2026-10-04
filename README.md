@@ -142,12 +142,12 @@ New visitors see a paywall instead of the app: **$20 for 30 days** by default, p
 
 Cash App has no API for personal $cashtags, so an admin has to approve each payment. The **Admin** panel lists people waiting for approval and active members (Approve, Deny, +days, Revoke), and lets you change the price and length. A paid code works on up to 3 devices: on a new phone, or in the iPhone Home Screen app, which keeps its own login, use *"Already paid? Enter your code"*. Renewals reuse the same code. When access ends, the app and push alerts stop until they renew.
 
-**Admin bypass:** tap *Admin* on the paywall and enter the admin code to get full access plus the Admin panel. The code is never in the source: the server reads it from the `ADMIN_CODE` variable (case-insensitive, rate-limited).
+**Admin bypass:** enter the admin code in either box on the paywall (*Admin* or *Already paid? Enter your code*), or tap **Admin code** in Settings if you're signed in as a member. You get full access with no expiry, plus the Admin panel. It works out of the box: the source holds only a slow scrypt hash of the built-in code, never the code itself. To use a different code, set the `ADMIN_CODE` variable in Railway, which replaces the built-in one. Codes are case-insensitive. Only wrong codes count toward the lockout (8 wrong codes per 15 minutes).
 
 Everything is enforced on the server: without access, it serves only the paywall. The app's code, market data, push and admin APIs all return 401 or 403. Set `PAYWALL=off` to disable it, for example locally.
 
 **Railway setup (required for the paywall):**
-- Service → **Variables**: add `ADMIN_CODE` = your admin code
+- Optional: Service → **Variables** → `ADMIN_CODE` to replace the built-in admin code
 - Service → **Settings → Volumes**: mount a volume at `/data` and add the variable `DATA_DIR` = `/data`. **Without it, every redeploy wipes all paid members.**
 - Optional: `PAYWALL_PRICE` / `ACCESS_DAYS` set the starting price and length (you can also change them in the Admin panel), and `CASHTAG` changes the $cashtag.
 

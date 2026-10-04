@@ -42,7 +42,7 @@ test('buyer flow: request, paid (admins pinged), approve, expire', async () => {
   assert.equal(a.hasAccess(r.token), true);
 });
 
-test('admin code: case-insensitive, rate limited, required for admin actions', async () => {
+test('admin code: built-in PROFITBB, override, both boxes, failure-only lockout', async () => {
   const a = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'a.json'), env: { ADMIN_CODE: 'PROFITBB' }, log: { warn() {}, error() {} } });
   await a.load();
   assert.equal(a.admin('nope', '2.2.2.2').status, 403);
@@ -52,9 +52,25 @@ test('admin code: case-insensitive, rate limited, required for admin actions', a
   assert.equal(a.hasAccess(ok.token), true);
   for (let i = 0; i < 10; i++) a.admin('x', '3.3.3.3');
   assert.equal(a.admin('PROFITBB', '3.3.3.3').status, 429, 'guessing is throttled per IP');
-  const none = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'b.json'), env: {}, log: { warn() {}, error() {} } });
-  await none.load();
-  assert.equal(none.admin('PROFITBB', '4.4.4.4').status, 503, 'no ADMIN_CODE set: bypass disabled');
+  // Built-in default works with no ADMIN_CODE set, in either box, any case, with spaces
+  const builtIn = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'b.json'), env: {}, log: { warn() {}, error() {} } });
+  await builtIn.load();
+  assert.equal(builtIn.admin(' ProfitBB ', '4.4.4.4').status, 200);
+  const viaRedeem = builtIn.redeem('profitbb', '4.4.4.5');
+  assert.equal(viaRedeem.status, 200);
+  assert.equal(builtIn.isAdminToken(viaRedeem.token), true, 'admin code also works in the "enter your code" box');
+  assert.equal(builtIn.admin('PROFITB', '4.4.4.4').status, 403);
+  // ADMIN_CODE overrides the built-in code
+  const custom = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'c.json'), env: { ADMIN_CODE: 'other' }, log: { warn() {}, error() {} } });
+  await custom.load();
+  assert.equal(custom.admin('PROFITBB', '5.5.5.5').status, 403);
+  assert.equal(custom.admin('OTHER', '5.5.5.5').status, 200);
+  // Only wrong codes count toward the lockout: 7 wrong + right still gets in
+  const lim = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'd.json'), env: {}, log: { warn() {}, error() {} } });
+  await lim.load();
+  for (let i = 0; i < 7; i++) lim.admin('nope', '6.6.6.6');
+  assert.equal(lim.admin('PROFITBB', '6.6.6.6').status, 200);
+  for (let i = 0; i < 5; i++) assert.equal(lim.admin('PROFITBB', '6.6.6.7').status, 200, 'successful logins never lock you out');
 });
 
 test('redeem on other devices (max 3), revoke kicks everyone, deny', async () => {

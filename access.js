@@ -10,14 +10,19 @@ const DAY = 86400000;
 const MAX_DEVICES = 3; // devices that can share one paid code
 const newCode = () => `SC-${Array.from(crypto.randomBytes(6), (b) => ALPHABET[b % ALPHABET.length]).join('')}`;
 const newToken = () => crypto.randomBytes(24).toString('base64url');
-const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
+// Admin bypass code. Only a slow scrypt hash is stored here (the repo is public), never the code
+// itself. The ADMIN_CODE environment variable overrides it.
+const DEFAULT_ADMIN = { salt: '8476f77c1ce5b79880664029ca7417ab', hash: '19f904f31dafbea22a54a1b5eaedbb4c17214282544fa1b295146c57e5fc5555' };
+const kdf = (code, salt) => crypto.scryptSync(String(code || '').trim().toUpperCase(), Buffer.from(salt, 'hex'), 32, { N: 16384, r: 8, p: 1 });
 export const normalizeCode = (c) => {
   const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   return s ? `SC-${s.replace(/^SC/, '')}` : '';
 };
 
 export function createAccess({ file, env = process.env, log = console, clock = () => Date.now(), onPaid = () => {} }) {
-  const adminHash = env.ADMIN_CODE ? sha(env.ADMIN_CODE.trim().toUpperCase()) : null;
+  const adminSalt = env.ADMIN_CODE ? crypto.randomBytes(16).toString('hex') : DEFAULT_ADMIN.salt;
+  const adminHash = env.ADMIN_CODE ? kdf(env.ADMIN_CODE, adminSalt) : Buffer.from(DEFAULT_ADMIN.hash, 'hex');
+  const isAdminCode = (code) => !!String(code || '').trim() && crypto.timingSafeEqual(kdf(code, adminSalt), adminHash);
   const db = {
     config: { price: Number(env.PAYWALL_PRICE || 20), days: Number(env.ACCESS_DAYS || 30), cashtag: (env.CASHTAG || 'Akizzle55').replace(/^\$/, '') },
     members: {}, // code -> { code, status: pending|active|denied|revoked, createdAt, paidAt, approvedAt, expires, tokens: [] }
@@ -33,7 +38,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
       db.members = saved.members || {};
       db.sessions = saved.sessions || {};
     } catch { /* first run */ }
-    if (!adminHash) log.warn('ADMIN_CODE is not set: nobody can log in as admin to approve payments.');
+    if (!env.ADMIN_CODE) log.log?.('Admin bypass: using the built-in admin code (set ADMIN_CODE to change it).');
   }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(save, 500); }
   async function save() {
@@ -44,13 +49,22 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     } catch (e) { log.error('access save failed', e.message); }
   }
 
-  // Simple per-IP rate limit for code guessing and request spam.
-  function limited(kind, ip, max, windowMs) {
-    const key = `${kind}:${ip}`, t = clock();
-    const list = (attempts.get(key) || []).filter((x) => t - x < windowMs);
-    if (list.length >= max) { attempts.set(key, list); return true; }
-    list.push(t); attempts.set(key, list);
+  // Simple per-IP rate limit for code guessing and request spam. `blocked` only looks;
+  // `strike` records an attempt (for guessing, only wrong codes are recorded).
+  function blocked(kind, ip, max, windowMs) {
+    const t = clock();
+    const list = (attempts.get(`${kind}:${ip}`) || []).filter((x) => t - x < windowMs);
+    attempts.set(`${kind}:${ip}`, list);
+    return list.length >= max;
+  }
+  function strike(kind, ip) {
+    const key = `${kind}:${ip}`;
+    attempts.set(key, [...(attempts.get(key) || []), clock()]);
     if (attempts.size > 5000) attempts.delete(attempts.keys().next().value);
+  }
+  function limited(kind, ip, max, windowMs) {
+    if (blocked(kind, ip, max, windowMs)) return true;
+    strike(kind, ip);
     return false;
   }
 
@@ -79,7 +93,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     return {
       access, role, ...db.config,
       code: member?.code ?? null, state: member ? (member.status === 'active' && member.expires <= clock() ? 'expired' : member.status) : null,
-      expires: member?.expires ?? null, paidAt: member?.paidAt ?? null, approvedAt: member?.approvedAt ?? null, adminReady: !!adminHash,
+      expires: member?.expires ?? null, paidAt: member?.paidAt ?? null, approvedAt: member?.approvedAt ?? null,
     };
   }
 
@@ -110,20 +124,24 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   }
 
   // Use a paid code on another device (or the Home Screen app, which has its own cookies on iPhone).
+  // The admin code works here too, so admins can't type it in the "wrong" box.
   function redeem(code, ip) {
-    if (limited('redeem', ip, 10, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
+    if (blocked('redeem', ip, 10, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
+    if (!blocked('admin', ip, 8, 900000) && isAdminCode(code)) return adminSession();
     const m = db.members[normalizeCode(code)];
-    if (!m || m.status === 'denied' || m.status === 'revoked') return { status: 404, body: { error: 'Code not found' } };
+    if (!m || m.status === 'denied' || m.status === 'revoked') { strike('redeem', ip); return { status: 404, body: { error: 'Code not found' } }; }
     const t = bind(m.code, 'member');
     return { status: 200, token: t, body: statusBody(t) };
   }
 
-  function admin(code, ip) {
-    if (limited('admin', ip, 8, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
-    if (!adminHash) return { status: 503, body: { error: 'Admin code is not set up on the server (ADMIN_CODE).' } };
-    if (!crypto.timingSafeEqual(sha(String(code || '').trim().toUpperCase()), adminHash)) return { status: 403, body: { error: 'Wrong admin code' } };
+  function adminSession() {
     const t = bind(null, 'admin');
     return { status: 200, token: t, body: statusBody(t) };
+  }
+  function admin(code, ip) {
+    if (blocked('admin', ip, 8, 900000)) return { status: 429, body: { error: 'Too many wrong codes. Wait 15 minutes.' } };
+    if (!isAdminCode(code)) { strike('admin', ip); return { status: 403, body: { error: 'Wrong admin code' } }; }
+    return adminSession();
   }
 
   function logout(token) {
