@@ -103,3 +103,14 @@ test('buySignal only fires when the deep dive clears minConfidence', () => {
   assert.equal(loose.fire, true);
   assert.ok(loose.contracts >= 1 && loose.contracts <= ev.contracts);
 });
+
+test('frozen tape: tiny wicks are not "pressure", and the ratio text stays sane', () => {
+  const flat = [...Array(8)].map((_, i) => bar(i, 99990, 99990.01, 99989.99 - (i % 2) * 0.01, 99990));
+  const r = rejections([...pre, ...flat], K, OPEN, afterAll(flat));
+  assert.equal(r.wickBias, 0);
+  assert.ok(!r.summary.some((s) => /wicks/.test(s)));
+  const real = [...Array(6)].map((_, i) => bar(i, 99950, 99951, 99920, 99951)); // no upper wicks, ~30-long lower wicks
+  const r2 = rejections([...pre, ...real], K, OPEN, afterAll(real));
+  assert.ok(r2.summary.some((s) => /lower wicks far longer than upper/.test(s)));
+  assert.ok(!r2.summary.some((s) => /\d{4,}\.\d×/.test(s)));
+});

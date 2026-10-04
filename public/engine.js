@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, evaluate, exitSignal, momentum, quote, realizedVol } from './model.js';
+import { DEFAULTS, effectiveVol, evaluate, exitSignal, momentum, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
 
@@ -37,8 +37,8 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   const s = { ...DEFAULTS, ...settings };
   const bars = withLiveBar(candles, spot, now);
   const closes = bars.map((c) => c.c);
-  const sigmaMin = realizedVol(closes.slice(-121));
   const sigmaLong = longVol(closes.slice(-121));
+  const sigmaMin = effectiveVol(realizedVol(closes.slice(-121)), sigmaLong, s.minVol);
   const driftMin = momentum(closes, 10);
   const rows = markets.map((m) => {
     const strike = strikeFor(m, candles, strikes, now);

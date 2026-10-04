@@ -77,3 +77,14 @@ test('settlePnl', () => {
   assert.equal(loss.won, false);
   assert.ok(Math.abs(loss.pnl + 5.2) < 1e-9);
 });
+
+test('effectiveVol floors frozen tapes so a $2 lead is not certainty', async () => {
+  const { effectiveVol } = await import('../public/model.js');
+  assert.equal(effectiveVol(0.000001, 0.000002), 0.00008);
+  assert.equal(effectiveVol(0.0002, 0.0001), 0.0002);
+  assert.ok(Math.abs(effectiveVol(0.0001, 0.0005) - 0.0003) < 1e-12);
+  assert.equal(effectiveVol(null, null), null);
+  // $1.78 above an $84,811 target with 1 minute left
+  const p = probAbove(84812.70, 84810.92, effectiveVol(0.000001, 0.000002) * 1.15, 1);
+  assert.ok(p > 0.55 && p < 0.8, `p=${p}`);
+});

@@ -9,6 +9,14 @@ export function normCdf(x) {
   return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
 
+// The volatility the model prices with: short-term EWMA vol, but never far below the 2-hour vol and
+// never below a floor. A few frozen minutes (thin overnight tape, stale ticks) would otherwise make
+// the bot ~100% sure of a $2 lead.
+export function effectiveVol(ewma, long, minVol = 0.00008) {
+  if (!ewma && !long) return null;
+  return Math.max(ewma || 0, 0.6 * (long || 0), minVol);
+}
+
 // Per-minute log-return volatility from a list of closes (oldest first), EWMA-weighted.
 export function realizedVol(closes, lambda = 0.94) {
   const rets = [];
@@ -99,6 +107,7 @@ export const DEFAULTS = {
   kellyFraction: 0.25,
   bankroll: 100,
   maxStake: 25,
+  minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
   minConfidence: 55,    // deep-dive score (0-100) a call needs before it fires
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
 };

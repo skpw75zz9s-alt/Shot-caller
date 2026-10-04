@@ -61,7 +61,9 @@ export function rejections(bars, strike, openTime, now = Date.now()) {
     const up = hi2 > hi1 + tol, dnH = hi2 < hi1 - tol, upL = lo2 > lo1 + tol, dnL = lo2 < lo1 - tol;
     structure = up && upL ? 'higher highs & lows' : dnH && dnL ? 'lower highs & lows' : dnH && upL ? 'squeezing' : upL ? 'higher lows' : dnH ? 'lower highs' : 'ranging';
   }
-  const wickBias = upper + lower > 0 ? (lower - upper) / (upper + lower) : 0;
+  // Wick pressure only counts when the wicks are real moves, not cent-wide ticks on a frozen tape
+  const wickBias = upper + lower > a * 0.5 ? (lower - upper) / (upper + lower) : 0;
+  const ratio = (x, y) => (y < a * 0.05 ? 'far longer than' : `${(x / y).toFixed(1)}×`);
 
   // Score: recent events weigh more; a broken level counts for the breakout side
   let score = 0;
@@ -84,7 +86,7 @@ export function rejections(bars, strike, openTime, now = Date.now()) {
   if (broken === 'floors') summary.push('Broke down through the target after holding: breakdown');
   if (count('high-reject')) summary.push(`Window high ${usd0(runHigh)} rejected ${count('high-reject')}×`);
   if (count('low-hold')) summary.push(`Window low ${usd0(runLow)} held ${count('low-hold')}×`);
-  if (Math.abs(wickBias) > 0.25) summary.push(wickBias > 0 ? `Buyers absorbing dips (lower wicks ${(lower / Math.max(upper, 1e-9)).toFixed(1)}× upper)` : `Sellers hitting rallies (upper wicks ${(upper / Math.max(lower, 1e-9)).toFixed(1)}× lower)`);
+  if (Math.abs(wickBias) > 0.25) summary.push(wickBias > 0 ? `Buyers absorbing dips (lower wicks ${ratio(lower, upper)} upper)` : `Sellers hitting rallies (upper wicks ${ratio(upper, lower)} lower)`);
   if (crosses >= 3) summary.push(`Chopping around the target (${crosses} crosses)`);
   if (structure !== 'forming' && structure !== 'ranging') summary.push(`Structure: ${structure}`);
   if (!summary.length) summary.push('No clear rejections yet this window');
