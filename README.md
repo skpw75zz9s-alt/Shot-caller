@@ -10,7 +10,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 ## How it calls shots
 
 1. **Data.** Kalshi's public API gives the open market, its strike and its YES/NO quotes. Coinbase gives BTC spot and 1-minute candles. Coinbase stands in for the CF Benchmarks index (BRTI) that Kalshi settles on.
-2. **Volatility.** Per-minute realized vol is an EWMA of the last 2 hours of 1-minute returns. The *Vol multiplier* setting scales it up to account for jumps.
+2. **Volatility.** Per-minute realized vol is an EWMA of the last 2 hours of 1-minute returns. The *Vol multiplier* setting scales it (default 1.0: a check against real BTC showed the old 1.15 overstated actual 15-minute swings by about 1.3×, which pulled the bot's odds toward 50/50).
 3. **Fair probability.** `P(YES) = Φ((ln(S/K) + drift·t) / σ_eff)`. The variance accounts for Kalshi settling on a 60-second average, not a single print. A small, damped momentum drift is optional.
 4. **Edge.** `EV = P(model) − ask − Kalshi fee` per contract, for both YES and NO. The fee is `ceil(0.07·p·(1−p))`.
 5. **Call.** Take the better side if its EV beats *Min edge*, the spread is tight enough, and the market is inside the time window. Otherwise PASS.
@@ -188,7 +188,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Max spread | 10¢ | Skip illiquid books |
 | Wait before calling | 5 min | Minutes into each window before any call |
 | Min minutes left | 0.5 | Stop calling this close to settlement |
-| Vol multiplier | 1.15 | Higher means fewer, more conservative calls |
+| Vol multiplier | 1.0 | 1 = measured volatility; higher expects bigger swings (odds closer to 50/50) |
 | Momentum weight | 0.25 | 0 means pure random walk |
 | Bankroll / Kelly fraction / Max stake | $100 / 0.25 / $25 | Position sizing |
 

@@ -22,7 +22,7 @@ const SETTINGS_META = [
   ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['waitMinutes', 'Wait before calling (min)', 'Minutes into each 15-minute window before the bot makes any call', 'num'],
-  ['volMultiplier', 'Vol multiplier', 'Above 1 means more conservative', 'num'],
+  ['volMultiplier', 'Vol multiplier', '1 = measured volatility. Above 1 expects bigger swings (odds closer to 50/50)', 'num'],
   ['momentumWeight', 'Momentum weight', 'How much of the 10-min drift to carry forward (0 to 1)', 'num'],
   ['minProfit', 'Min profit to lock (pts)', 'How far up (after fees) before flip signs trigger a sell', 'cents'],
   ['trail', 'Trailing drop (pts)', 'Sell if the sell % falls this far from its peak while in profit', 'cents'],
@@ -41,6 +41,8 @@ if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settin
 // v2.6: calls need confidence 60 or more
 if (store.get('settingsVersion', 1) < 4 && settings.minConfidence === 55) { settings.minConfidence = 60; store.set('settings', settings); }
 if (store.get('settingsVersion', 1) < 4) store.set('settingsVersion', 4);
+// v3.2: vol multiplier 1.15 -> 1.0 (it made the bot's odds too timid next to real BTC swings)
+if (store.get('settingsVersion', 1) < 5) { if (settings.volMultiplier === 1.15) { settings.volMultiplier = 1; store.set('settings', settings); } store.set('settingsVersion', 5); }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []) };
@@ -134,7 +136,7 @@ function renderPositions(snap) {
     const where = row?.strike ? ` ${pos.side === 'YES' ? 'above' : 'below'} ${usd(row.strike, 0)}` : '';
     const signs = ex.signs?.length ? ex.signs.map((x) => `<li>${esc(x)}</li>`).join('') : '<li class="calm">No flip signs</li>';
     return `<div class="card pos-card ${ex.action.toLowerCase()} ${ex.kind}">
-      <div class="pos-top"><span><b>${dollars(pos.contracts * pos.price)}</b> at <b>${pc(pos.price)}</b> <b class="side-tag ${pos.side.toLowerCase()}">${sideName(pos.side)}</b></span><span>${minutesLeft > 0 ? mmss(minutesLeft) : 'closed'}</span></div>
+      <div class="pos-top"><span><b>${dollars(pos.contracts * pos.price)}</b> at <b>${pc(pos.price)}</b> <b class="side-tag ${pos.side.toLowerCase()}">${sideName(pos.side)}</b></span><span class="pos-clock" data-close="${Date.parse(pos.closeTime)}">${minutesLeft > 0 ? mmss(minutesLeft) : 'closed'}</span></div>
       <div class="pos-action">${head}</div>
       <div class="pos-why">${esc(ex.why)}</div>
       <div class="pos-grid">
@@ -237,6 +239,8 @@ function oddsRows(ev, minEdge) {
 // The side the model leans to, even below the edge threshold, so timing has something to read.
 
 function render() {
+  state.renderedAt = Date.now();
+  state.clock = null;
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
@@ -264,6 +268,7 @@ function render() {
     $('marketTitle').textContent = m.title || m.ticker;
     $('countdown').textContent = `closes in ${mmss(ev.minutesLeft)}`;
     const waitingToCall = ev.callsAt && now < ev.callsAt;
+    state.clock = { close: Date.parse(m.close_time), callsAt: waitingToCall ? ev.callsAt : null };
     if (waitingToCall && sig.deep) { // a read on the window, not a call yet
       $('conf').className = 'conf';
       $('conf').textContent = `Preview · confidence ${sig.deep.score} · no call yet`;
@@ -329,7 +334,8 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   const cv = $('chart'), ctx = cv.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = 220, axis = 52;
-  cv.width = w * dpr; cv.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const bars = allBars.slice(-40);
   if (bars.length < 2) return;
@@ -737,7 +743,22 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) liveDisconnect();
   else { liveConnect(); tick(); }
 });
-setInterval(render, 1000); // keep the countdown ticking between polls
+// Between polls only the clocks move, so update just those each second (a full redraw every second
+// cost the most phone battery). Full redraw if no poll or price tick has rendered for ~3 seconds,
+// and when the opening wait ends so the call appears right on time.
+function tickClocks() {
+  const now = Date.now(), c = state.clock;
+  if (now - (state.renderedAt || 0) > 2900 || (c?.callsAt && now >= c.callsAt) || (c && now >= c.close)) return render();
+  if (c) {
+    $('countdown').textContent = `closes in ${mmss((c.close - now) / 60000)}`;
+    if (c.callsAt) $('reason').textContent = `Calls start in ${mmss((c.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`;
+  }
+  for (const el of document.querySelectorAll('.pos-clock')) {
+    const left = (Number(el.dataset.close) - now) / 60000;
+    el.textContent = left > 0 ? mmss(left) : 'closed';
+  }
+}
+setInterval(tickClocks, 1000);
 
 // Pick up new deploys: check for a new service worker on open and reload once it takes over.
 if ('serviceWorker' in navigator) {

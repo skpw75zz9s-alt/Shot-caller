@@ -103,7 +103,7 @@ export const DEFAULTS = {
   minMinutesLeft: 0.5,  // don't call shots in the last 30 seconds
   maxMinutesLeft: 14,   // or right after open when the strike is barely set
   waitMinutes: 5,       // watch the first 5 minutes of each window before making any call
-  volMultiplier: 1.15,  // fatten tails: realized vol underestimates jumps
+  volMultiplier: 1.0,   // 1 = price with measured vol (1.15 overstated real 15-min swings ~1.3x)
   momentumWeight: 0.25, // fraction of recent drift to carry forward
   kellyFraction: 0.25,
   bankroll: 100,

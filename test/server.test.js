@@ -67,3 +67,24 @@ test('rate limits use the proxy-added (last) X-Forwarded-For hop, not client-sup
   assert.deepEqual(codes.slice(0, 8), Array(8).fill(403));
   assert.equal(codes[8], 429, 'locked out after 8 wrong codes despite spoofed first hops');
 });
+
+test('compresses the app and market data when the phone accepts it, plain otherwise', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { brotliDecompressSync, gunzipSync } = await import('node:zlib');
+  const raw = (path, enc) => new Promise((ok) => http.get(app + path, { headers: enc ? { 'accept-encoding': enc } : {} }, (r) => {
+    const parts = []; r.on('data', (c) => parts.push(c)); r.on('end', () => ok({ h: r.headers, body: Buffer.concat(parts) }));
+  }));
+  const file = readFileSync(new URL('../public/app.js', import.meta.url));
+  const br = await raw('/app.js', 'gzip, deflate, br');
+  assert.equal(br.h['content-encoding'], 'br');
+  assert.ok(br.body.length < file.length * 0.4, `brotli ${br.body.length} vs ${file.length}`);
+  assert.deepEqual(brotliDecompressSync(br.body), file);
+  const gz = await raw('/app.js', 'gzip');
+  assert.equal(gz.h['content-encoding'], 'gzip');
+  assert.deepEqual(gunzipSync(gz.body), file);
+  const plain = await raw('/app.js');
+  assert.equal(plain.h['content-encoding'], undefined);
+  assert.deepEqual(plain.body, file);
+  assert.equal((await raw('/icon-192.png', 'br')).h['content-encoding'], undefined, 'PNGs are sent as-is');
+  assert.equal((await fetch(`${app}/api/kalshi/markets?series_ticker=KXBTC15M&status=open`)).status, 200); // fetch decodes it transparently
+});

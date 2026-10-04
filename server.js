@@ -1,7 +1,8 @@
 // Zero-dependency server: serves the PWA, proxies the public Kalshi and Coinbase market-data
 // APIs so the phone browser never hits CORS limits, runs the push bot, and enforces the paywall.
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBot } from './bot.js';
@@ -45,18 +46,34 @@ const OPEN_FILES = new Set(['/paywall.html', '/paywall.js', '/styles.css', '/ico
 
 const cache = new Map(); // tiny 2s cache so several open phones don't multiply upstream calls
 
-async function proxy(route, url, res) {
+// Compression: brotli or gzip when the phone accepts it (cuts the app's first download ~70%).
+// Compressed copies are kept on the cached entry so each body is compressed once.
+const encodingFor = (req) => { const a = req.headers['accept-encoding'] || ''; return /\bbr\b/.test(a) ? 'br' : /\bgzip\b/.test(a) ? 'gzip' : null; };
+function compressed(entry, enc) {
+  if (!enc || entry.raw.length < 1024) return null;
+  return (entry[enc] ||= enc === 'br'
+    ? brotliCompressSync(entry.raw, { params: { [zc.BROTLI_PARAM_QUALITY]: 5 } })
+    : gzipSync(entry.raw, { level: 6 }));
+}
+function sendEntry(req, res, status, entry, type, extra = {}) {
+  const enc = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? encodingFor(req) : null; // PNGs are already compressed
+  const body = compressed(entry, enc);
+  res.writeHead(status, { 'content-type': type, vary: 'accept-encoding', ...(body ? { 'content-encoding': enc } : {}), 'content-length': (body || entry.raw).length, ...extra });
+  res.end(body || entry.raw);
+}
+
+async function proxy(route, url, req, res) {
   const path = url.pathname.slice(route.prefix.length);
   if (!route.allow.test(path)) return send(res, 404, { error: 'not allowed' });
   const target = `${route.upstream}/${path}${url.search}`;
   const hit = cache.get(target);
-  if (hit && Date.now() - hit.at < 2000) return send(res, hit.status, hit.body);
+  if (hit && Date.now() - hit.at < 2000) return sendEntry(req, res, hit.status, hit, 'application/json', { 'cache-control': 'no-store' });
   try {
     const r = await fetch(target, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });
-    const body = await r.text();
-    cache.set(target, { at: Date.now(), status: r.status, body });
+    const entry = { at: Date.now(), status: r.status, raw: Buffer.from(await r.text()) };
+    cache.set(target, entry);
     if (cache.size > 200) cache.delete(cache.keys().next().value);
-    send(res, r.status, body);
+    sendEntry(req, res, r.status, entry, 'application/json', { 'cache-control': 'no-store' });
   } catch (e) {
     send(res, 502, { error: `upstream failed: ${e.message}` });
   }
@@ -126,11 +143,13 @@ async function pushApi(req, res, action, token) {
   send(res, out.status, out.body);
 }
 
-async function serveFile(res, rel) {
+const files = new Map(); // rel -> { mtime, raw, br?, gzip? }, refreshed when the file changes on disk
+async function serveFile(req, res, rel) {
   try {
-    const file = await readFile(join(PUBLIC, rel));
-    res.writeHead(200, { 'content-type': TYPES[extname(rel)] || 'application/octet-stream', 'cache-control': 'no-cache' });
-    res.end(file);
+    const path = join(PUBLIC, rel), { mtimeMs } = await stat(path);
+    let entry = files.get(rel);
+    if (!entry || entry.mtime !== mtimeMs) files.set(rel, (entry = { mtime: mtimeMs, raw: await readFile(path) }));
+    sendEntry(req, res, 200, entry, TYPES[extname(rel)] || 'application/octet-stream', { 'cache-control': 'no-cache' });
   } catch {
     send(res, 404, 'not found', 'text/plain');
   }
@@ -152,8 +171,8 @@ export const server = http.createServer(async (req, res) => {
     const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
     const allowed = !PAYWALL || access.hasAccess(token);
     if (!allowed) {
-      if (OPEN_FILES.has(rel) && req.method === 'GET') return serveFile(res, rel);
-      if (rel === '/index.html') return serveFile(res, '/paywall.html'); // the app's URL shows the paywall
+      if (OPEN_FILES.has(rel) && req.method === 'GET') return serveFile(req, res, rel);
+      if (rel === '/index.html') return serveFile(req, res, '/paywall.html'); // the app's URL shows the paywall
       return send(res, 401, { error: 'payment required', paywall: true });
     }
 
@@ -162,9 +181,9 @@ export const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
     const route = ROUTES.find((r) => path.startsWith(r.prefix));
-    if (route) return proxy(route, url, res);
-    if (rel === '/paywall.html') return serveFile(res, '/index.html'); // already paid: go straight to the app
-    return serveFile(res, rel);
+    if (route) return proxy(route, url, req, res);
+    if (rel === '/paywall.html') return serveFile(req, res, '/index.html'); // already paid: go straight to the app
+    return serveFile(req, res, rel);
   } catch (e) {
     send(res, e.status || 500, { error: e.status ? e.message : 'server error' });
   }

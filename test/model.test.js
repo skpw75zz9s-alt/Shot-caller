@@ -101,3 +101,8 @@ test('bot waits 5 minutes into the window before calling', () => {
   assert.equal(evaluate({ market: mk(5.5), spot: 100150, sigmaMin: 0.0008, now }).call, 'YES');
   assert.equal(evaluate({ market: mk(2), spot: 100150, sigmaMin: 0.0008, now, settings: { waitMinutes: 0 } }).call, 'YES');
 });
+
+test('default vol multiplier prices with measured volatility', async () => {
+  const { DEFAULTS } = await import('../public/model.js');
+  assert.equal(DEFAULTS.volMultiplier, 1);
+});

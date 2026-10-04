@@ -151,3 +151,17 @@ test('persists keys and devices to disk', async () => {
   assert.equal(data.devices.length, 1);
   assert.equal(data.vapid.publicKey, bot.publicKey());
 });
+
+test('saved devices on the old 1.15 vol multiplier move to measured vol; custom values stay', async () => {
+  const { writeFile } = await import('node:fs/promises');
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-mig-')), 'b.json');
+  await writeFile(file, JSON.stringify({ devices: [
+    { endpoint: 'https://fcm.googleapis.com/a', settings: { volMultiplier: 1.15 }, positions: [] },
+    { endpoint: 'https://fcm.googleapis.com/b', settings: { volMultiplier: 1.4 }, positions: [] },
+  ] }));
+  const b = createBot({ kalshi: 'http://127.0.0.1:1', coinbase: 'http://127.0.0.1:1', dataFile: file, log: { warn() {} } });
+  await b.load();
+  assert.equal(b.devices.get('https://fcm.googleapis.com/a').settings.volMultiplier, 1);
+  assert.equal(b.devices.get('https://fcm.googleapis.com/b').settings.volMultiplier, 1.4);
+  b.stop();
+});
