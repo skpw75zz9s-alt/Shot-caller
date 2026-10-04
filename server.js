@@ -77,7 +77,9 @@ function send(res, status, body, type = 'application/json', headers = {}) {
 }
 
 const cookieToken = (req) => (req.headers.cookie || '').split(/;\s*/).map((c) => c.split('=')).find(([k]) => k === 'sc_session')?.[1] || null;
-const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?';
+// The platform proxy (Railway) appends the real client address as the LAST X-Forwarded-For entry;
+// earlier entries are whatever the client sent, so trusting them would let anyone dodge rate limits.
+const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?';
 function sessionCookie(req, token) {
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
   return { 'set-cookie': `sc_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}` };

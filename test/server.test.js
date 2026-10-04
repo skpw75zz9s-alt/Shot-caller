@@ -56,3 +56,14 @@ test('push API: key, validation and method guards', async () => {
   assert.equal((await fetch(`${app}/api/push/nothing`, { method: 'POST', body: '{}' })).status, 404);
   assert.equal((await fetch(`${app}/api/kalshi/markets`, { method: 'POST' })).status, 405);
 });
+
+test('rate limits use the proxy-added (last) X-Forwarded-For hop, not client-supplied ones', async () => {
+  // Fake first hop changes every time; the last hop (what the platform proxy adds) stays the same
+  const codes = [];
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch(`${app}/api/access/admin`, { method: 'POST', headers: { 'x-forwarded-for': `6.6.6.${i}, 203.0.113.7` }, body: JSON.stringify({ code: 'nope' }) });
+    codes.push(r.status);
+  }
+  assert.deepEqual(codes.slice(0, 8), Array(8).fill(403));
+  assert.equal(codes[8], 429, 'locked out after 8 wrong codes despite spoofed first hops');
+});

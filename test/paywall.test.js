@@ -264,3 +264,33 @@ test('forgotten pending code: phone gets it back, and Approve recreates it', asy
   const back = b.redeem('SC-H3PPY9', 'ip', 'phone');
   assert.equal(b.hasAccess(back.token), true);
 });
+
+// ---------- v3.1 security fixes ----------
+test('changing the admin code signs out existing admin sessions', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'acc-')), 'fp.json');
+  const a = createAccess({ file, env: {}, log: quietLog }); await a.load();
+  const adm = a.admin('PROFITBB', 'ip', 'phone');
+  assert.equal(a.isAdminToken(adm.token), true);
+  await a.save();
+  const b = createAccess({ file, env: { ADMIN_CODE: 'NEWCODE' }, log: quietLog }); await b.load();
+  assert.equal(b.isAdminToken(adm.token), false, 'old admin session no longer works');
+  assert.equal(b.hasAccess(adm.token), false);
+  const same = createAccess({ file, env: {}, log: quietLog }); await same.load();
+  assert.equal(same.isAdminToken(adm.token), true, 'unchanged code keeps the session');
+});
+
+test('admin guessing is capped across all addresses', async () => {
+  const a = await fresh();
+  for (let i = 0; i < 40; i++) a.admin('WRONG', `10.9.${i}.1`);
+  assert.equal(a.admin('PROFITBB', '10.9.99.1').status, 429, 'global lockout after 40 wrong codes in 15 min');
+});
+
+test('a flood of unpaid requests cannot lock out a real buyer', async () => {
+  let t = 1_700_000_000_000;
+  const a = await fresh({}, () => t);
+  for (let i = 0; i < 1000; i++) a.request(null, `11.${i >> 8}.${i & 255}.1`);
+  t += 11 * 60000;
+  const real = a.request(null, '1.2.3.4');
+  assert.equal(real.status, 200);
+  assert.match(real.body.code, /^SC-/);
+});

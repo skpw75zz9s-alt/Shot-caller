@@ -126,7 +126,7 @@ export const confBucket = (score) => (score >= 80 ? '80+' : score >= 70 ? '70–
 // Multi-factor confidence for a call on `side`. Starts at 50 and adds or subtracts per factor.
 // `log` is this market's recent history [{ t, p (bot P(YES)), yesAsk, noAsk }] used for the
 // stability, odds-trend and edge-persistence checks; `bars` are 1-minute candles.
-export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin, spot, strike, kalshiDrift, bars, log, now = Date.now(), minEdge = 0.04 }) {
+export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin, spot, strike, kalshiDrift, bars, log, now = Date.now(), minEdge = 0.04, stressEdge = null }) {
   if (!side || ev.pYes == null) return null;
   const s = side === 'YES' ? 1 : -1;
   const checks = [];
@@ -153,6 +153,7 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   // How the bot's own read has behaved: steady or flipping, building or fading, edge lasting or a blip
   const sideP = (e) => (side === 'YES' ? e.p : 1 - e.p);
   const recent = (log || []).filter((e) => e.p != null && now - e.t <= 180000);
+  let botDelta = null; // change in the bot's own odds for this side over ~2 min
   if (recent.length >= 10) {
     const share = recent.filter((e) => sideP(e) >= 0.5).length / recent.length;
     if (share >= 0.9) add(6, `Bot has favored ${side} for 3 min straight`);
@@ -163,6 +164,7 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
       const k = Math.max(1, Math.floor(twoMin.length / 5));
       const avg = (xs) => xs.reduce((a, e) => a + sideP(e), 0) / xs.length;
       const delta = avg(twoMin.slice(-k)) - avg(twoMin.slice(0, k));
+      botDelta = delta;
       if (delta >= 0.05) add(4, `Odds building toward ${side} (+${(delta * 100).toFixed(0)} pts in 2 min)`);
       else if (delta <= -0.05) add(-6, `Odds fading (−${(-delta * 100).toFixed(0)} pts in 2 min)`);
     }
@@ -195,7 +197,6 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   }
 
   if (ev.minutesLeft < 3) add(5, 'Late in the window: model most accurate');
-  else if (ev.minutesLeft > 11) add(-5, 'Early in the window: lots can change');
 
   const q = ev.quote;
   if (q.yesBid != null && q.yesAsk != null) {
@@ -204,9 +205,21 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
     else if (spr >= 0.06) add(-5, `Wide Kalshi spread (${(spr * 100).toFixed(0)} pts)`);
   }
 
+  // Kalshi's price for this side dropping is usually what makes the "low", so it only counts against
+  // the call when the bot's own odds are fading too (then the market likely knows something).
   if (kalshiDrift != null && Math.abs(kalshiDrift) >= 0.03) {
-    if (kalshiDrift < 0) add(-5, `Kalshi moving against the call (${(kalshiDrift * 100).toFixed(0)} pts in 2 min)`);
-    else add(3, `Kalshi catching up to the bot (+${(kalshiDrift * 100).toFixed(0)} pts in 2 min)`);
+    if (kalshiDrift > 0) add(3, `Kalshi catching up to the bot (+${(kalshiDrift * 100).toFixed(0)} pts in 2 min)`);
+    else if (botDelta != null && botDelta <= -0.02) add(-5, `Kalshi and the bot both moving against the call (${(kalshiDrift * 100).toFixed(0)} pts in 2 min)`);
+    else add(0, `Kalshi dipped ${(-kalshiDrift * 100).toFixed(0)} pts while the bot's odds held: that's the low`);
+  }
+
+  // Stress test: re-price with 25% more volatility and no momentum/rejection tilt. A thinner edge is
+  // normal under stress; only an edge that clearly flips negative counts against the call.
+  if (stressEdge != null) {
+    if (stressEdge >= minEdge) add(6, `Edge holds under a stress test (+${(stressEdge * 100).toFixed(1)} pts with 25% more volatility)`);
+    else if (stressEdge > 0) add(2, `Edge survives a stress test (+${(stressEdge * 100).toFixed(1)} pts)`);
+    else if (stressEdge < -0.02) add(-4, 'Edge flips negative under a stress test: depends on optimistic assumptions');
+    else add(0, 'Edge thins out under a stress test');
   }
 
   score = clamp(Math.round(score), 0, 100);

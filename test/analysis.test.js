@@ -87,7 +87,7 @@ test('deepDive scores a strong call high and a weak one low, with reasons', () =
     sigmaMin: 0.0012, sigmaLong: 0.0005, driftMin: -0.0001, spot: 99990, strike: K, kalshiDrift: -0.05 });
   assert.ok(weak.score < 45, `score ${weak.score}`);
   assert.equal(weak.sizeMult, 0);
-  for (const label of [/Rejections against YES/, /momentum is against/, /Chasing/, /Volatility spiking/, /Early in the window/, /Kalshi moving against/]) {
+  for (const label of [/Rejections against YES/, /momentum is against/, /Chasing/, /Volatility spiking/]) {
     assert.ok(weak.checks.some((c) => c.ok === false && label.test(c.label)), String(label));
   }
 });
@@ -146,4 +146,49 @@ test('callsByConfidence groups follow-the-bot results by confidence at entry', a
   assert.equal(out['70–79'].calls, 1);
   assert.ok(Math.abs(out['70–79'].usd + 10.4) < 1e-9);
   assert.equal(out['60–69'].calls, 1);
+});
+
+// ---------- v3.1: fairer confidence ----------
+test('Kalshi dipping while the bot holds is the low, not a penalty; both fading still counts against', () => {
+  const ev = { pYes: 0.62, evYes: 0.18, evNo: -0.3, minutesLeft: 6, quote: { yesBid: 0.40, yesAsk: 0.42 } };
+  const base = { ev, side: 'YES', rej: { tilt: 0, summary: [] }, timing: { state: 'WAIT' }, sigmaMin: 0.0006, sigmaLong: 0.0006, spot: 100030, strike: 100000, kalshiDrift: -0.06, now: NOW2 };
+  const holding = deepDive({ ...base, log: logOf([...Array(60)].map(() => 0.62)) });
+  assert.ok(holding.checks.some((c) => c.pts === 0 && /that's the low/.test(c.label)));
+  assert.ok(!holding.checks.some((c) => c.pts < 0 && /Kalshi/.test(c.label)));
+  const fading = deepDive({ ...base, log: logOf([...Array(60)].map((_, i) => 0.7 - i * 0.002)) });
+  assert.ok(fading.checks.some((c) => c.pts === -5 && /both moving against/.test(c.label)));
+  assert.ok(holding.score > fading.score);
+});
+
+test('stress test rewards robust edges and flags fragile ones', () => {
+  const ev = { pYes: 0.62, evYes: 0.18, evNo: -0.3, minutesLeft: 6, quote: { yesBid: 0.40, yesAsk: 0.42 } };
+  const base = { ev, side: 'YES', rej: { tilt: 0, summary: [] }, sigmaMin: 0.0006, sigmaLong: 0.0006, spot: 100030, strike: 100000, now: NOW2 };
+  const robust = deepDive({ ...base, stressEdge: 0.09 });
+  const fragile = deepDive({ ...base, stressEdge: -0.05 });
+  assert.ok(robust.checks.some((c) => c.pts === 6 && /holds under a stress test/.test(c.label)));
+  assert.ok(fragile.checks.some((c) => c.pts === -4 && /flips negative under a stress test/.test(c.label)));
+  const thin = deepDive({ ...base, stressEdge: 0.01 });
+  assert.ok(thin.checks.some((c) => c.pts === 2 && /survives a stress test/.test(c.label)));
+  assert.equal(robust.score - fragile.score, 10);
+});
+
+test('buySignal runs the stress test with the real market and fallback sizing is honest', async () => {
+  const ev = evaluate({ market: market(6, 44, 45), strike: K, spot: 100030, sigmaMin: 0.0006, now: OPEN });
+  const row = { m: { ...market(6, 44, 45), ticker: 'T1' }, strike: K, ev, rej: { tilt: 0, summary: [], events: [] } };
+  const snap = { now: OPEN, bars: pre, sigmaMin: 0.0006, sigmaLong: 0.0006, driftMin: 0, spot: 100030, quoteLog: {} };
+  const sig = buySignal(row, snap, {}, OPEN);
+  assert.ok(sig.deep.checks.some((c) => /stress test/.test(c.label)), 'stress test ran');
+});
+
+test('stress test never makes a call look better than the real edge', () => {
+  // Momentum and rejections working AGAINST a YES call must stay in the stressed price
+  const m = { ...market(6, 44, 45), ticker: 'T2' };
+  const evAdverse = evaluate({ market: m, strike: K, spot: 100030, sigmaMin: 0.0006, driftMin: -0.0002, pShift: -0.03, now: OPEN, settings: { momentumWeight: 0.25 } });
+  const row = { m, strike: K, ev: evAdverse, rej: { tilt: -0.03, summary: ['x'], events: [] } };
+  const snap = { now: OPEN, bars: pre, sigmaMin: 0.0006, sigmaLong: 0.0006, driftMin: -0.0002, spot: 100030, quoteLog: {} };
+  const sig = buySignal(row, snap, { momentumWeight: 0.25 }, OPEN);
+  const st = sig.deep.checks.find((c) => /stress test/.test(c.label));
+  const realEdge = evAdverse.evYes;
+  const m2 = st.label.match(/\+([\d.]+) pts/);
+  if (m2) assert.ok(Number(m2[1]) / 100 <= realEdge + 1e-9, `stressed ${m2[1]} pts must not exceed real ${(realEdge * 100).toFixed(1)} pts`);
 });

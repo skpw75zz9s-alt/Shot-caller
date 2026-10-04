@@ -94,7 +94,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     if (!m && dev && role === 'admin') {
       for (const [t, s] of Object.entries(db.sessions)) if (s.role === 'admin' && s.device === dev) delete db.sessions[t];
     }
-    db.sessions[token] = { code, role, device: dev, at: clock() };
+    db.sessions[token] = { code, role, device: dev, at: clock(), ...(role === 'admin' ? { fp: adminFp } : {}) };
     if (m) {
       m.tokens.push(token);
       while (m.tokens.length > MAX_DEVICES) delete db.sessions[m.tokens.shift()];
@@ -123,7 +123,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   function check(token) {
     const s = token && db.sessions[token];
     if (!s) return { access: false, role: null, member: null };
-    if (s.role === 'admin') return { access: true, role: 'admin', member: null };
+    if (s.role === 'admin') return s.fp === adminFp ? { access: true, role: 'admin', member: null } : { access: false, role: null, member: null }; // admin code changed
     const m = db.members[s.code];
     return { access: !!m && m.status === 'active' && m.expires > clock(), role: 'member', member: m || null };
   }
@@ -146,7 +146,13 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     const cur = check(token);
     if (cur.role === 'admin' || (cur.member && cur.member.status !== 'denied' && cur.member.status !== 'revoked')) return { status: 200, body: statusBody(token) };
     if (limited('request', ip, 5, 3600000)) return { status: 429, body: { error: 'Too many requests. Try again later.' } };
-    if (Object.values(db.members).filter((m) => m.status === 'pending').length >= 1000) return { status: 503, body: { error: 'Too many pending payments. Try again later.' } };
+    const pending = Object.values(db.members).filter((m) => m.status === 'pending');
+    if (pending.length >= 1000) {
+      // Make room by dropping the oldest requests nobody paid for (10+ minutes old) instead of turning buyers away
+      const stale = pending.filter((m) => !m.paidAt && clock() - m.createdAt > 600000).sort((a, b) => a.createdAt - b.createdAt).slice(0, 100);
+      if (!stale.length) return { status: 503, body: { error: 'Too many pending payments. Try again later.' } };
+      for (const m of stale) { for (const t of m.tokens) delete db.sessions[t]; delete db.members[m.code]; }
+    }
     let code = normalizeCode(wanted);
     if (!CODE_RE.test(code) || db.members[code]) do code = newCode(); while (db.members[code]);
     db.members[code] = { code, status: 'pending', createdAt: clock(), paidAt: null, approvedAt: null, expires: 0, tokens: [] };
@@ -170,7 +176,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   // The admin code works here too, so admins can't type it in the "wrong" box.
   function redeem(code, ip, device) {
     if (blocked('redeem', ip, 10, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
-    if (!blocked('admin', ip, 8, 900000) && isAdminCode(code)) return adminSession(device);
+    if (!blocked('admin', ip, 8, 900000) && !blocked('admin', '*', 40, 900000) && isAdminCode(code)) return adminSession(device);
     const m = db.members[normalizeCode(code)];
     if (!m || m.status === 'denied' || m.status === 'revoked') { strike('redeem', ip); return { status: 404, body: { error: 'Code not found' } }; }
     const t = bind(m.code, 'member', device);
@@ -197,8 +203,9 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     return { status: 200, token: t, body: statusBody(t) };
   }
   function admin(code, ip, device) {
-    if (blocked('admin', ip, 8, 900000)) return { status: 429, body: { error: 'Too many wrong codes. Wait 15 minutes.' } };
-    if (!isAdminCode(code)) { strike('admin', ip); return { status: 403, body: { error: 'Wrong admin code' } }; }
+    // Per address, plus a cap across ALL addresses so guessing from many IPs can't brute-force the code
+    if (blocked('admin', ip, 8, 900000) || blocked('admin', '*', 40, 900000)) return { status: 429, body: { error: 'Too many wrong codes. Wait 15 minutes.' } };
+    if (!isAdminCode(code)) { strike('admin', ip); strike('admin', '*'); return { status: 403, body: { error: 'Wrong admin code' } }; }
     return adminSession(device);
   }
 

@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, effectiveVol, evaluate, exitSignal, momentum, quote, realizedVol } from './model.js';
+import { DEFAULTS, effectiveVol, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
 
@@ -65,14 +65,29 @@ export function buySignal(row, snap, settings, now = snap.now) {
   const s = { ...DEFAULTS, ...settings };
   const side = leanSide(row.ev);
   const timing = entrySignal(snap.bars, side, now);
+  // Stress test: would the edge survive 25% more volatility with any momentum or rejection tilt that
+  // HELPS the call removed? (Adverse momentum/tilt is kept: a stress test should only make it harder.)
+  let stressEdge = null;
+  if (side && snap.sigmaMin && snap.spot && row.ev.minutesLeft > 0) {
+    const dir = side === 'YES' ? 1 : -1;
+    const drift = (snap.driftMin || 0) * s.momentumWeight;
+    const keptDrift = drift * dir > 0 ? 0 : drift;
+    const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
+    const p0 = probYes(row.m, row.strike, snap.spot, snap.sigmaMin * s.volMultiplier * 1.25, row.ev.minutesLeft, keptDrift);
+    const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
+    if (p0 != null && ask != null) {
+      const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));
+      stressEdge = (side === 'YES' ? pS : 1 - pS) - ask - kalshiFee(ask);
+    }
+  }
   const deep = deepDive({
     ev: row.ev, side, rej: row.rej, timing, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin,
     spot: snap.spot, strike: row.strike, kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now),
-    bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge,
+    bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge, stressEdge,
   });
   const confident = !!deep && deep.score >= s.minConfidence;
   const buyNow = !!row.ev.side && timing.state === 'NOW';
-  const contracts = row.ev.side ? Math.max(1, Math.floor(row.ev.contracts * (deep?.sizeMult || 0.5))) : 0;
+  const contracts = row.ev.side ? Math.max(1, Math.floor(row.ev.contracts * (deep ? deep.sizeMult : 0.5))) : 0;
   return { side, timing, deep, confident, buyNow, contracts, fire: !!row.ev.side && confident && (buyNow || !s.waitForDip) };
 }
 
