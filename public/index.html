@@ -38,11 +38,29 @@
         <div class="call-label" id="callLabel"></div>
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
+        <div class="conf" id="conf" hidden></div>
         <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
         <button id="boughtBtn" class="buy-btn" hidden>I bought it: track my exit</button>
         <div class="entry" id="entry" hidden></div>
+      </div>
+
+      <div class="card deep" id="deepCard" hidden>
+        <div class="deep-head"><span>Deep dive</span><b id="deepScore"></b></div>
+        <ul id="deepChecks" class="checks"></ul>
+      </div>
+
+      <div class="card deep" id="rejCard" hidden>
+        <div class="deep-head"><span>Rejections this window</span><b id="rejBias"></b></div>
+        <div class="rej-grid">
+          <div><label>Target rejected</label><b id="rejCaps" class="neg">0</b></div>
+          <div><label>Target held</label><b id="rejFloors" class="pos">0</b></div>
+          <div><label>High rejected</label><b id="rejHigh">0</b></div>
+          <div><label>Low held</label><b id="rejLow">0</b></div>
+        </div>
+        <div class="wick"><span>Sellers</span><span class="wick-bar"><i id="wickFill"></i><i class="mid"></i></span><span>Buyers</span></div>
+        <ul id="rejSummary" class="rej-sum"></ul>
       </div>
 
       <div class="grid">
@@ -55,7 +73,7 @@
       </div>
 
       <div class="card">
-        <div class="chart-head"><span>1-min candles</span><span><i class="lg up">▲</i> reversal up <i class="lg dn">▼</i> reversal down</span></div>
+        <div class="chart-head"><span>1-min candles</span><span><i class="lg up">▲</i>/<i class="lg dn">▼</i> reversal <i class="lg rj">✕</i> rejection</span></div>
         <canvas id="chart" height="220"></canvas>
       </div>
 
@@ -91,7 +109,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v1.7 · auto price + time</p>
+      <p class="fine" id="version">Shot Caller v1.8 · deep dive + rejections</p>
     </section>
   </main>
 

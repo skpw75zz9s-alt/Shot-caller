@@ -12,6 +12,8 @@ const store = {
 const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, to call BUY THE LOW', 'cents'],
+  ['minConfidence', 'Min confidence (0-100)', 'Deep-dive score a call needs before BUY THE LOW fires', 'num'],
+  ['rejectionWeight', 'Rejection weight', 'How much rejection trends move the bot\'s odds (0 = off, 1 = up to ±5 pts)', 'num'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
   ['notifySell', 'Notify: sell now', 'Alert when a tracked position should be sold', 'bool'],
@@ -34,7 +36,7 @@ if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.se
 // v1.6: Kalshi prices refresh every 3s (was 5s)
 if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settings.refreshSec = 3; store.set('settings', settings); store.set('settingsVersion', 3); }
 
-const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, alerted: {}, history: store.get('history', []),
+const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {}, history: store.get('history', []),
   positions: store.get('positions', []), trades: store.get('trades', []) };
 
 async function getJSON(path) {
@@ -62,11 +64,11 @@ async function refreshSpot() {
 }
 
 // ---------- history ----------
-function recordCall(m, ev, entry) {
+function recordCall(m, ev, entry, deep) {
   if (state.history.some((h) => h.ticker === m.ticker)) return false; // first call per market only
   state.history.unshift({
     ticker: m.ticker, title: m.title, side: ev.side, price: ev.price, contracts: ev.contracts, entry,
-    pModel: ev.side === 'YES' ? ev.pYes : 1 - ev.pYes, at: Date.now(), closeTime: m.close_time, result: null,
+    pModel: ev.side === 'YES' ? ev.pYes : 1 - ev.pYes, conf: deep?.score ?? null, at: Date.now(), closeTime: m.close_time, result: null,
   });
   state.history = state.history.slice(0, 500);
   store.set('history', state.history);
@@ -118,9 +120,9 @@ function closePosition(pos, exit, how, at = Date.now()) {
   pushSyncSoon();
 }
 
-function renderPositions(rows, bars, now) {
+function renderPositions(snap) {
   const html = state.positions.map((pos) => {
-    const check = positionCheck(pos, rows, bars, settings, now);
+    const check = positionCheck(pos, snap, settings);
     const { row, minutesLeft, pSide, bid, ex } = check;
     if (check.changed) savePositions();
 
@@ -217,7 +219,34 @@ const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes });
+const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes, quoteLog: state.quoteLog });
+
+// Deep dive (confidence and its reasons) and the window's rejection trends.
+function renderDeep(row, sig) {
+  const deep = sig?.deep, rej = row?.rej;
+  $('deepCard').hidden = !deep;
+  $('conf').hidden = !deep;
+  if (deep) {
+    $('conf').className = `conf g${deep.grade}`;
+    $('conf').textContent = `Confidence ${deep.score} · ${deep.grade} · ${deep.verdict}`;
+    $('deepScore').textContent = `${deep.score}/100 · ${deep.grade}`;
+    $('deepScore').className = `g${deep.grade}`;
+    $('deepChecks').innerHTML = deep.checks.map((c) =>
+      `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('');
+  }
+  $('rejCard').hidden = !rej;
+  if (!rej) return;
+  const shift = row.ev.pShift || 0;
+  $('rejBias').textContent = `${rej.bias[0].toUpperCase()}${rej.bias.slice(1)}${Math.abs(shift) >= 0.005 ? ` · ${shift > 0 ? '+' : '−'}${Math.abs(shift * 100).toFixed(1)} pts on YES` : ''}`;
+  $('rejBias').className = rej.bias === 'bullish' ? 'pos' : rej.bias === 'bearish' ? 'neg' : '';
+  $('rejCaps').textContent = rej.strikeCaps;
+  $('rejFloors').textContent = rej.strikeFloors;
+  $('rejHigh').textContent = rej.highRejects;
+  $('rejLow').textContent = rej.lowHolds;
+  const w = (rej.wickBias + 1) / 2; // 0 = all upper wicks (sellers), 1 = all lower wicks (buyers)
+  $('wickFill').style.cssText = w >= 0.5 ? `left:50%;width:${(w - 0.5) * 100}%;background:var(--yes)` : `left:${w * 100}%;width:${(0.5 - w) * 100}%;background:var(--no)`;
+  $('rejSummary').innerHTML = rej.summary.map((x) => `<li>${esc(x)}</li>`).join('');
+}
 
 // Kalshi % vs bot % for each side. "Low" = Kalshi's price is below the bot's odds by the min gap after fees.
 function oddsRows(ev, minEdge) {
@@ -239,39 +268,42 @@ function oddsRows(ev, minEdge) {
 // The side the model leans to, even below the edge threshold, so timing has something to read.
 
 function render() {
-  const { now, bars, sigmaMin, driftMin, rows, live } = compute();
-  renderPositions(rows, bars, now);
-  state.liveCall = live?.ev.side ? live : null;
+  const snap = compute();
+  const { now, bars, sigmaMin, driftMin, rows, live } = snap;
+  renderPositions(snap);
+  const sig = live ? buySignal(live, snap, settings, now) : null;
+  renderDeep(live, sig);
+  state.liveCall = live?.ev.side && sig?.confident ? { ...live, sig } : null;
   $('boughtBtn').hidden = !state.liveCall || state.positions.some((p) => p.ticker === live.m.ticker);
-  const card = $('callCard'), call = $('call'), entry = $('entry');
+  const card = $('callCard'), callEl = $('call'), entry = $('entry');
   card.className = 'card call-card';
   entry.className = 'entry';
   let timing = null;
 
   if (!live) {
     $('marketTitle').textContent = state.marketsAt ? `No open ${settings.series} markets` : 'Loading markets…';
-    call.textContent = '—'; call.className = 'call pass';
+    callEl.textContent = '—'; callEl.className = 'call pass';
     ['countdown', 'reason', 'order', 'entry', 'callLabel', 'odds'].forEach((id) => { $(id).textContent = ''; });
     entry.hidden = true;
   } else {
     const { m, ev, strike } = live;
-    const sig = buySignal(live, bars, settings, now);
     const { side, buyNow } = sig;
+    const call = ev.side && sig.confident ? ev.side : null; // a low price that also passed the deep dive
     timing = sig.timing;
     const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings }) : null;
 
     $('marketTitle').textContent = m.title || m.ticker;
     $('countdown').textContent = `closes in ${mmss(ev.minutesLeft)}`;
-    $('reason').textContent = ev.side ? '' : ev.reason;
+    $('reason').textContent = call ? '' : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${settings.minConfidence}` : ev.reason;
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
 
     // Call + entry timing
-    const waiting = ev.side && !buyNow && settings.waitForDip;
-    $('callLabel').textContent = ev.side ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : 'No low price';
-    call.textContent = ev.call;
-    call.className = `call ${ev.call.toLowerCase()}`;
-    $('callSub').textContent = ev.side && strike ? `BTC ${ev.side === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
-    if (ev.side) card.classList.add(ev.side.toLowerCase());
+    const waiting = call && !buyNow && settings.waitForDip;
+    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : ev.side ? 'Low price, not confident' : 'No low price';
+    callEl.textContent = call ?? 'PASS';
+    callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
+    $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
+    if (call) card.classList.add(call.toLowerCase());
     if (waiting) card.classList.add('waiting');
 
     entry.hidden = !side;
@@ -282,16 +314,16 @@ function render() {
         (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : '');
     }
 
-    if (!ev.side) $('order').textContent = '';
-    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(ev.contracts * ev.price)} at ${pc(ev.price)} ${sideName(ev.side)} · +${(ev.edge * 100).toFixed(0)} pts edge`;
-    else $('order').textContent = limit ? `Limit ${dollars(ev.contracts * limit.price)} at ${pc(limit.price)} ${sideName(ev.side)} (now ${pc(ev.price)})` : 'Hold off: no dip yet';
+    if (!call) $('order').textContent = '';
+    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(sig.contracts * ev.price)} at ${pc(ev.price)} ${sideName(ev.side)} · +${(ev.edge * 100).toFixed(0)} pts edge`;
+    else $('order').textContent = limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(ev.side)} (now ${pc(ev.price)})` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
       const key = `${m.ticker}:${ev.side}:${buyNow ? 'low' : 'call'}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        recordCall(m, ev, buyNow ? 'low' : 'ask');
+        recordCall(m, { ...ev, contracts: sig.contracts }, buyNow ? 'low' : 'ask', sig.deep);
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
       }
     }
@@ -300,7 +332,7 @@ function render() {
     const d = state.spot && strike ? state.spot - strike : null;
     $('dist').textContent = d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`;
     sign($('dist'), d);
-    drawChart(bars, strike, Date.parse(m.open_time), timing, limit);
+    drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
 
   $('spot').textContent = usd(state.spot);
@@ -318,7 +350,7 @@ function render() {
 }
 
 // ---------- candlestick chart ----------
-function drawChart(allBars, strike, openTime, timing, limit) {
+function drawChart(allBars, strike, openTime, timing, limit, rej) {
   const cv = $('chart'), ctx = cv.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = 220, axis = 52;
@@ -368,6 +400,14 @@ function drawChart(allBars, strike, openTime, timing, limit) {
     ctx.fillStyle = p.dir > 0 ? '#22c55e' : '#ef4444';
     ctx.fillText(p.dir > 0 ? '▲' : '▼', X(i), p.dir > 0 ? Math.min(h - 2, Y(bars[i].l) + 12) : Math.max(10, Y(bars[i].h) - 4));
   });
+  // Rejection markers: ✕ at the wick tip that got rejected
+  (rej?.events || []).forEach((e) => {
+    const i = bars.findIndex((b) => b.t === e.t);
+    if (i < 0) return;
+    ctx.fillStyle = '#f59e0b';
+    ctx.font = 'bold 11px system-ui';
+    ctx.fillText('✕', X(i), e.dir < 0 ? Math.max(10, Y(e.price) - 6) : Math.min(h - 2, Y(e.price) + 14));
+  });
   ctx.textAlign = 'start';
 
   // Last price tag
@@ -399,7 +439,7 @@ function renderHistory() {
   $('historyList').innerHTML = state.history.slice(0, 100).map((h) => {
     const res = h.result ? `<b class="${h.won ? 'pos' : 'neg'}">${h.won ? 'WIN' : 'LOSS'} ${h.pnl >= 0 ? '+' : '-'}$${Math.abs(h.pnl).toFixed(2)}</b>` : '<b>pending</b>';
     const tag = h.entry === 'low' ? ' · candle dip' : '';
-    return `<li><span><b>${dollars(h.contracts * h.price)}</b> at ${pc(h.price)} ${sideName(h.side)}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
+    return `<li><span><b>${dollars(h.contracts * h.price)}</b> at ${pc(h.price)} ${sideName(h.side)}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${h.conf != null ? ` · conf ${h.conf}` : ''}${tag}</small></span>${res}</li>`;
   }).join('');
 }
 
@@ -617,7 +657,7 @@ $('boughtBtn').addEventListener('click', () => {
   const strike = live.strike;
   const q = quote(state.markets.find((x) => x.ticker === m.ticker) ?? m); // freshest prices, locked at this tap
   openSheet({
-    title: 'How much did you buy?', side: ev.side, amount: ev.contracts * ev.price, verb: 'Bought',
+    title: 'How much did you buy?', side: ev.side, amount: live.sig.contracts * ev.price, verb: 'Bought',
     prices: { YES: q.yesAsk, NO: q.noAsk }, at: Date.now(),
     hint: ({ side, amount, price }) => `${(amount / price).toFixed(1)} contracts · pays ${dollars(amount / price)} if BTC is ${side === 'YES' ? 'above' : 'below'} ${strike ? usd(strike, 0) : 'the target'} at close`,
     onOk: ({ side, amount, price, at }) => openPosition(m, side, price, amount / price, at),

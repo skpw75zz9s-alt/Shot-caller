@@ -24,6 +24,35 @@ A sticky ticker at the top streams every BTC trade from Coinbase's public WebSoc
 
 "Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (4¢ by default).
 
+### Rejection trends (inside each 15-minute window)
+
+The bot tracks how price behaves around the target since the window opened:
+
+| Event | What happened | Reads as |
+|---|---|---|
+| **Target rejected** | Wicked up to the target and closed back below it | Sellers capping it: bearish |
+| **Target held** | Wicked down to the target and closed back above it | Buyers defending it: bullish |
+| **High rejected / Low held** | Retested the window's high or low and got pushed back | Bearish / bullish |
+| **Breakout / breakdown** | Closed through the target after rejecting it | Old rejections no longer count; this counts the other way |
+
+It also weighs wick pressure (long upper wicks mean sellers hit rallies, long lower wicks mean buyers absorb dips), the window's structure (higher lows, lower highs, squeezing) and chop around the target. Recent events count more. The result nudges the bot's odds by up to ±5 pts (*Rejection weight*, 0 = off). The **Rejections this window** card shows the counts and summary, and the chart marks each rejected wick with an orange ✕. A fresh rejection against an open position also counts as a flip sign for **SELL NOW**.
+
+### Deep dive (confidence score)
+
+Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtracts points per factor:
+
+- Edge after fees (up to +25 / −20)
+- Rejection trend for or against the side (+10 / −15)
+- 10-minute momentum with or against you (±6)
+- Candle timing: dip now (+8) or chasing (−10)
+- How far BTC already is on your side, in volatility units (±8)
+- Volatility spiking vs its 2-hour norm (−8) or calm (+4)
+- Time left: late in the window (+5) or early (−5)
+- Kalshi spread: tight (+3) or wide (−5)
+- Kalshi's price moving with or against the call over the last 2 minutes (+3 / −5)
+
+The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (55). The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History records each call's confidence so you can check whether high scores really win more.
+
 ### Candle timing (optional)
 
 When the model likes a side, the app reads the last 2 hours of 1-minute candles and checks whether right now is a cheap entry:
@@ -103,6 +132,8 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Setting | Default | Meaning |
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
+| Min confidence | 55 | Deep-dive score a call needs to fire |
+| Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
 | Notify: buy the low / sell now | on / on | Which push alerts to send |

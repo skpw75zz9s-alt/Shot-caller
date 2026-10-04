@@ -99,19 +99,24 @@ export const DEFAULTS = {
   kellyFraction: 0.25,
   bankroll: 100,
   maxStake: 25,
+  minConfidence: 55,    // deep-dive score (0-100) a call needs before it fires
+  rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
 };
 
 // Decide the call for one market.
-export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, now = Date.now(), settings = {} }) {
+// pShift nudges P(YES) by evidence the price model can't see (e.g. rejection trends), in probability points.
+export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift = 0, now = Date.now(), settings = {} }) {
   const s = { ...DEFAULTS, ...settings };
   const minutesLeft = (Date.parse(market.close_time) - now) / 60000;
   const q = quote(market);
-  const out = { minutesLeft, quote: q, pYes: null, evYes: null, evNo: null, call: 'PASS', reason: '', side: null, price: null, contracts: 0, edge: 0 };
+  const out = { minutesLeft, quote: q, pYes: null, pBase: null, pShift: 0, evYes: null, evNo: null, call: 'PASS', reason: '', side: null, price: null, contracts: 0, edge: 0 };
 
   if (!spot || !sigmaMin) return { ...out, reason: 'Waiting for price data' };
   const p = probYes(market, strike, spot, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight);
   if (p === null) return { ...out, reason: 'Unknown strike' };
-  out.pYes = Math.min(Math.max(p, 0.001), 0.999);
+  out.pBase = p;
+  out.pShift = pShift;
+  out.pYes = Math.min(Math.max(p + pShift, 0.001), 0.999);
 
   if (q.yesAsk !== null) out.evYes = out.pYes - q.yesAsk - kalshiFee(q.yesAsk);
   if (q.noAsk !== null) out.evNo = (1 - out.pYes) - q.noAsk - kalshiFee(q.noAsk);

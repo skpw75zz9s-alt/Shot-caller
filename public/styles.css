@@ -134,3 +134,25 @@ h2.sec { font-size: 14px; color: var(--muted); margin: 18px 0 4px; font-weight: 
 .locked-price { padding: 10px 12px; margin: 8px 0 2px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 15px; }
 .locked-price small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 button:disabled { opacity: .4; }
+.conf { display: inline-block; margin-top: 8px; padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--line); color: var(--muted); }
+.conf.gA, .deep-head b.gA { color: var(--yes); } .conf.gA { background: #22c55e22; }
+.conf.gB, .deep-head b.gB { color: #86efac; } .conf.gB { background: #22c55e14; }
+.conf.gC, .deep-head b.gC { color: #facc15; } .conf.gC { background: #facc1514; }
+.conf.gD, .deep-head b.gD { color: var(--no); } .conf.gD { background: #ef444414; }
+.deep-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.deep-head b { font-size: 14px; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: start; }
+.checks li i { font-style: normal; font-weight: 800; text-align: center; }
+.checks li.ok i { color: var(--yes); } .checks li.bad i { color: var(--no); } .checks li.meh i { color: var(--muted); }
+.checks li b { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.checks li.ok b { color: var(--yes); } .checks li.bad b { color: var(--no); }
+.rej-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; margin-bottom: 10px; }
+.rej-grid label { display: block; font-size: 10px; color: var(--muted); }
+.rej-grid b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.wick { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.wick-bar { flex: 1; position: relative; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.wick-bar i { position: absolute; top: 0; bottom: 0; }
+.wick-bar i.mid { left: 50%; width: 1px; background: var(--muted); }
+.rej-sum { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 3px; }
+.lg.rj { color: #f59e0b; margin-left: 6px; }

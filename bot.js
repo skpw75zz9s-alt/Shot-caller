@@ -15,7 +15,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false;
-  const market = { spot: null, candles: [], candlesAt: 0, markets: {}, strikes: {}, lastTick: 0, lastError: null };
+  const market = { spot: null, candles: [], candlesAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
 
   // ---------- storage ----------
   async function load() {
@@ -151,7 +151,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       const sends = [];
       for (const d of devices.values()) {
         const s = d.settings;
-        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, now });
+        const quoteLog = (market.quoteLogs[s.series] ||= {});
+        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, now });
         const fire = (key, msg) => {
           if (d.alerted[key]) return;
           d.alerted[key] = now;
@@ -159,11 +160,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         };
 
         if (s.notifyBuy && snap.live) {
-          const sig = buySignal(snap.live, snap.bars, s, now);
+          const sig = buySignal(snap.live, snap, s, now);
           if (sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
         }
         for (const pos of d.positions) {
-          const check = positionCheck(pos, snap.rows, snap.bars, s, now);
+          const check = positionCheck(pos, snap, s, now);
           if (s.notifySell && check.ex.action === 'SELL') fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot));
         }
 
