@@ -16,6 +16,21 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 5. **Call.** Take the better side if its EV beats *Min edge*, the spread is tight enough, and the market is inside the time window. Otherwise PASS.
 6. **Size.** Fractional Kelly on your bankroll, capped by *Max stake*.
 
+### Buying the low (candlestick timing)
+
+When the model likes a side, the app reads the last 2 hours of 1-minute candles and checks whether right now is a cheap entry:
+
+| Signal | YES (wants BTC up) | NO (wants BTC down) |
+|---|---|---|
+| RSI(14) | under 35 and turning up | over 65 and turning down |
+| Bollinger Bands (20, 2σ) | at the lower band | at the upper band |
+| Support / resistance (30-min low/high) | testing support | testing resistance |
+| Reversal candle | hammer, bullish engulfing | shooting star, bearish engulfing |
+
+Two or more of these, after subtracting reversal candles pointing the other way, gives **BUY THE LOW**. If price has just run in your favor, you get **CHASING**: you'd be buying the high. Otherwise you get **WAIT FOR THE LOW**, with a limit price to rest. That price is where the contract should trade if BTC reaches the dip level, capped so a fill still clears *Min edge*. The chart shows the candles, support, resistance, the strike, the buy-low level, and ▲/▼ markers on reversal candles.
+
+With **Wait for the low** on (the default), alerts and History entries only fire on a confirmed low. Turn it off to get alerted on every call. History tracks a separate "bought the low" hit rate so you can see whether the timing actually helps. 1-minute candle patterns are weak signals, so judge them by that number.
+
 Every first call on a market goes into **History**. After the market settles, the app fetches the result and tracks hit rate and paper P&L.
 
 ## Run it

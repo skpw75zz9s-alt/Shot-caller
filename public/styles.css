@@ -44,3 +44,14 @@ nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: 
 nav button { background: none; color: var(--muted); margin: 0; border-radius: 0; font-weight: 600; }
 nav button.active { color: var(--accent); }
 .fine { color: var(--muted); font-size: 11px; text-align: center; margin: 14px 4px; }
+.call-card.waiting { border-style: dashed; box-shadow: none; }
+.entry { margin-top: 12px; padding: 10px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+.entry b { color: var(--text); }
+.entry > b:first-child { font-size: 15px; letter-spacing: .5px; }
+.entry.now { border-color: var(--yes); background: #22c55e14; } .entry.now > b:first-child { color: var(--yes); }
+.entry.wait { border-color: #facc1566; } .entry.wait > b:first-child { color: #facc15; }
+.entry.chase { border-color: var(--no); background: #ef444414; } .entry.chase > b:first-child { color: var(--no); }
+.stat b.small { font-size: 14px; }
+.chart-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.lg { font-style: normal; } .lg.up { color: var(--yes); } .lg.dn { color: var(--no); margin-left: 6px; }
+#status { cursor: pointer; }

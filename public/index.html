@@ -26,6 +26,7 @@
         <div class="call" id="call">—</div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
+        <div class="entry" id="entry" hidden></div>
       </div>
 
       <div class="grid">
@@ -37,14 +38,17 @@
         <div class="stat"><label>Market YES</label><b id="pMarket">—</b></div>
         <div class="stat"><label>EV YES</label><b id="evYes">—</b></div>
         <div class="stat"><label>EV NO</label><b id="evNo">—</b></div>
+        <div class="stat"><label>RSI (14, 1m)</label><b id="rsi">—</b></div>
+        <div class="stat"><label>Support / resist</label><b id="levels" class="small">—</b></div>
       </div>
 
       <div class="card">
-        <canvas id="chart" height="140"></canvas>
+        <div class="chart-head"><span>1-min candles</span><span><i class="lg up">▲</i> reversal up <i class="lg dn">▼</i> reversal down</span></div>
+        <canvas id="chart" height="220"></canvas>
       </div>
 
       <div id="others"></div>
-      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Past calls don't predict future results.</p>
+      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Candlestick patterns on 1-minute bars are weak signals. Check the "bought the low" hit rate in History before you trust them. Past calls don't predict future results.</p>
     </section>
 
     <section id="view-history" class="view">
@@ -52,6 +56,7 @@
         <div class="stat"><label>Calls</label><b id="hCount">0</b></div>
         <div class="stat"><label>Hit rate</label><b id="hRate">—</b></div>
         <div class="stat"><label>Paper P&amp;L</label><b id="hPnl">—</b></div>
+        <div class="stat"><label>"Bought the low" hit rate</label><b id="hLow">—</b></div>
         <div class="stat"><label>Pending</label><b id="hPending">0</b></div>
       </div>
       <ul id="historyList" class="history"></ul>

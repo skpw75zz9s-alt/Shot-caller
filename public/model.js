@@ -146,3 +146,32 @@ export function settlePnl(call, result) {
   const won = call.side.toLowerCase() === String(result).toLowerCase();
   return { won, pnl: ((won ? 1 : 0) - call.price - fee) * call.contracts };
 }
+
+// Most you can pay for a side with win probability p and still clear minEdge after fees.
+export function maxPay(p, minEdge) {
+  for (let c = 99; c >= 1; c--) {
+    const price = c / 100;
+    if (p - price - kalshiFee(price) >= minEdge - 1e-9) return price;
+  }
+  return null;
+}
+
+// Limit price for buying the low: the side's ask, shifted by how far the model's fair value
+// moves if BTC reaches dipLevel, capped so a fill still clears minEdge at that level.
+export function dipLimit({ market, strike, spot, dipLevel, sigmaMin, driftMin = 0, side, now = Date.now(), settings = {} }) {
+  const s = { ...DEFAULTS, ...settings };
+  if (!side || !spot || !dipLevel || !sigmaMin) return null;
+  const minutesLeft = (Date.parse(market.close_time) - now) / 60000;
+  const p = (S) => probYes(market, strike, S, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight);
+  const pNow = p(spot), pDip = p(dipLevel);
+  if (pNow === null || pDip === null) return null;
+  const q = quote(market);
+  const ask = side === 'YES' ? q.yesAsk ?? (q.noBid !== null ? 1 - q.noBid : null) : q.noAsk ?? (q.yesBid !== null ? 1 - q.yesBid : null);
+  if (ask === null) return null;
+  const sideDip = side === 'YES' ? pDip : 1 - pDip;
+  const shift = side === 'YES' ? pDip - pNow : pNow - pDip;
+  const cap = maxPay(sideDip, s.minEdge);
+  if (cap === null) return null;
+  const limit = Math.min(Math.floor((ask + shift) * 100 + 1e-9) / 100, cap);
+  return limit >= 0.01 ? { price: limit, dipLevel, fairAtDip: sideDip } : null;
+}
