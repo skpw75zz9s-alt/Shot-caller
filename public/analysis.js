@@ -2,6 +2,7 @@
 //   rejections() – how price has behaved around the target inside the current 15-minute window
 //   deepDive()   – a multi-factor confidence score for a call, with the reasoning behind it
 import { atr } from './candles.js';
+import { kalshiFee } from './model.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const usd0 = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
@@ -111,8 +112,18 @@ export function quoteTrend(log, side, now = Date.now(), secs = 120) {
   return past && last[k] != null && last.t - past.t >= 30000 ? last[k] - past[k] : null;
 }
 
+// Log return over the last `mins` 1-minute bars.
+function ret(bars, mins) {
+  const n = bars?.length || 0;
+  return n > mins && bars[n - 1 - mins].c > 0 ? Math.log(bars[n - 1].c / bars[n - 1 - mins].c) : null;
+}
+
+export const gradeOf = (score) => (score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 45 ? 'C' : 'D');
+
 // Multi-factor confidence for a call on `side`. Starts at 50 and adds or subtracts per factor.
-export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin, spot, strike, kalshiDrift }) {
+// `log` is this market's recent history [{ t, p (bot P(YES)), yesAsk, noAsk }] used for the
+// stability, odds-trend and edge-persistence checks; `bars` are 1-minute candles.
+export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin, spot, strike, kalshiDrift, bars, log, now = Date.now(), minEdge = 0.04 }) {
   if (!side || ev.pYes == null) return null;
   const s = side === 'YES' ? 1 : -1;
   const checks = [];
@@ -127,7 +138,38 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   else if (rt < -0.008) add(-15, `Rejections against ${side}: ${rej.summary[0]}`);
   else add(0, 'Rejection trend neutral');
 
-  if (driftMin) add(driftMin * s > 0 ? 6 : -6, driftMin * s > 0 ? '10-min momentum is with you' : '10-min momentum is against you');
+  // Trend on several timeframes (falls back to 10-min momentum without candles)
+  const rs = [3, 10, 30].map((m) => ret(bars, m)).filter((r) => r != null && r !== 0);
+  if (rs.length >= 2) {
+    const agree = rs.filter((r) => r * s > 0).length, against = rs.length - agree;
+    if (!against) add(8, `Trend lines up with ${side} on 3/10/30 min`);
+    else if (!agree) add(-8, `Trend is against ${side} on 3/10/30 min`);
+    else add(agree > against ? 3 : -3, agree > against ? 'Trend mostly with you' : 'Trend mostly against you');
+  } else if (driftMin) add(driftMin * s > 0 ? 6 : -6, driftMin * s > 0 ? '10-min momentum is with you' : '10-min momentum is against you');
+
+  // How the bot's own read has behaved: steady or flipping, building or fading, edge lasting or a blip
+  const sideP = (e) => (side === 'YES' ? e.p : 1 - e.p);
+  const recent = (log || []).filter((e) => e.p != null && now - e.t <= 180000);
+  if (recent.length >= 10) {
+    const share = recent.filter((e) => sideP(e) >= 0.5).length / recent.length;
+    if (share >= 0.9) add(6, `Bot has favored ${side} for 3 min straight`);
+    else if (share < 0.6) add(-8, 'Bot\'s read keeps flipping');
+    const twoMin = recent.filter((e) => now - e.t <= 120000);
+    if (twoMin.length >= 5) {
+      // Average the first and last few readings so a single noisy tick can't fake (or hide) a trend
+      const k = Math.max(1, Math.floor(twoMin.length / 5));
+      const avg = (xs) => xs.reduce((a, e) => a + sideP(e), 0) / xs.length;
+      const delta = avg(twoMin.slice(-k)) - avg(twoMin.slice(0, k));
+      if (delta >= 0.05) add(4, `Odds building toward ${side} (+${(delta * 100).toFixed(0)} pts in 2 min)`);
+      else if (delta <= -0.05) add(-6, `Odds fading (−${(-delta * 100).toFixed(0)} pts in 2 min)`);
+    }
+    const askKey = side === 'YES' ? 'yesAsk' : 'noAsk';
+    const last30 = recent.filter((e) => now - e.t <= 30000 && e[askKey] != null);
+    if (last30.length >= 5) {
+      const held = last30.every((e) => sideP(e) - e[askKey] - kalshiFee(e[askKey]) >= minEdge);
+      add(held ? 4 : -3, held ? 'Edge has held for 30+ seconds' : 'Edge just appeared: could be a stale quote');
+    }
+  }
 
   if (timing) {
     if (timing.state === 'NOW') add(8, 'Candles show a dip to buy');
@@ -137,7 +179,8 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   if (sigmaMin && spot && strike && ev.minutesLeft > 0) {
     const z = Math.log(spot / strike) / (sigmaMin * Math.sqrt(Math.max(ev.minutesLeft, 0.25)));
     const zs = z * s;
-    if (zs > 1) add(8, `BTC already on your side by ${zs.toFixed(1)}σ`);
+    if (zs > 1.5) add(10, `BTC well on your side (${zs.toFixed(1)}σ)`);
+    else if (zs > 1) add(6, `BTC already on your side by ${zs.toFixed(1)}σ`);
     else if (zs < -1.5) add(-8, `BTC needs a ${(-zs).toFixed(1)}σ move to win`);
     else add(0, `BTC ${Math.abs(z).toFixed(1)}σ from the target`);
   }
@@ -164,7 +207,7 @@ export function deepDive({ ev, side, rej, timing, sigmaMin, sigmaLong, driftMin,
   }
 
   score = clamp(Math.round(score), 0, 100);
-  const grade = score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 45 ? 'C' : 'D';
+  const grade = gradeOf(score);
   const verdict = { A: 'Strong call', B: 'Good call', C: 'Marginal: size down', D: 'Weak: skip' }[grade];
   const sizeMult = { A: 1, B: 0.75, C: 0.5, D: 0 }[grade];
   return { score, grade, verdict, sizeMult, checks };

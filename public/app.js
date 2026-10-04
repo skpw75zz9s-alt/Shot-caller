@@ -38,6 +38,9 @@ const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyB
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
 if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settings.refreshSec = 3; store.set('settings', settings); store.set('settingsVersion', 3); }
+// v2.6: calls need a B grade or better
+if (store.get('settingsVersion', 1) < 4 && settings.minConfidence === 55) { settings.minConfidence = 60; store.set('settings', settings); }
+if (store.get('settingsVersion', 1) < 4) store.set('settingsVersion', 4);
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), tracker: store.get('tracker', null) || newTracker(), serverReports: [], trackerSavedAt: 0 };
@@ -426,6 +429,11 @@ function renderReports() {
   $('rPnl').textContent = sum ? money(sum.paperUsd) : '—';
   sign($('rPnl'), sum?.paperUsd ?? 0);
   $('rGrades').innerHTML = sum ? sum.grades.map((n, i) => `<span class="g${'ABCD'[i]}">${'ABCD'[i]} <b>${n}</b></span>`).join('') : '';
+  const bg = sum?.byCallGrade || {};
+  $('rByGrade').innerHTML = Object.keys(bg).length
+    ? `<div class="bg-head">Calls by confidence grade</div>` + ['A', 'B', 'C', 'D'].filter((g) => bg[g]).map((g) =>
+      `<div class="bg-row"><span class="grade g${g}">${g}</span><span>${bg[g].calls} call${bg[g].calls === 1 ? '' : 's'} · won ${pc(bg[g].wins / bg[g].calls)}</span><b class="${bg[g].usd >= 0 ? 'pos' : 'neg'}">${money(bg[g].usd)}</b></div>`).join('')
+    : '';
   const pending = Object.values(state.tracker.windows).filter((w) => w.samples.length);
   $('reportList').innerHTML = pending.map((w) => `<li class="report pending"><div class="rp-top"><b>${hm(w.openTime)}–${hm(w.closeTime)}</b><span class="muted">${w.closeTime > Date.now() ? 'in progress' : 'waiting for Kalshi result'} · tracking ${Math.max(1, Math.round((w.samples[w.samples.length - 1].t - w.samples[0].t) / 60000))} min</span></div></li>`).join('') +
     reports.slice(0, 60).map((r) => `<li class="report">

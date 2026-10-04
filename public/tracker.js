@@ -4,6 +4,7 @@
 // and when Kalshi settles the window it turns that into a report card.
 import { exitSignal, kalshiFee } from './model.js';
 import { flipSigns } from './candles.js';
+import { gradeOf } from './analysis.js';
 
 const SAMPLE_MS = 5000;
 const STAKE = 10; // paper P&L is reported per $10 call
@@ -15,7 +16,7 @@ function closePaper(w, price, how, now) {
   const p = w.paper;
   const proceeds = how === 'settled' ? price : price - kalshiFee(price);
   const pts = proceeds - (p.price + kalshiFee(p.price));
-  w.trades.push({ side: p.side, entry: p.price, exit: price, how, at: p.at, exitAt: now, pts: r3(pts) });
+  w.trades.push({ side: p.side, entry: p.price, exit: price, how, at: p.at, exitAt: now, pts: r3(pts), conf: p.conf ?? null });
   w.paper = null;
 }
 
@@ -50,7 +51,7 @@ export function trackWindow(tr, snap, row, sig, settings, now = snap.now) {
   }
   // Enter on a call; after cashing out, wait a minute before re-entering the same side
   if (!w.paper && call && ask(call) != null && !w.trades.some((t) => t.side === call && now - t.exitAt < 60000)) {
-    w.paper = { side: call, price: ask(call), contracts: 1, at: now, peakBid: null, peakP: null };
+    w.paper = { side: call, price: ask(call), contracts: 1, at: now, peakBid: null, peakP: null, conf: sig?.deep?.score ?? null };
   }
   return true;
 }
@@ -108,7 +109,22 @@ export function summarize(reports) {
     windows: n, avgWinnerOdds: mean('avgWinnerOdds'), timeRight: mean('timeRight'),
     calls: reports.reduce((a, r) => a + r.calls, 0), paperUsd: reports.reduce((a, r) => a + r.paperUsd, 0),
     grades: ['A', 'B', 'C', 'D'].map((g) => reports.filter((r) => r.grade === g).length),
+    byCallGrade: callsByGrade(reports),
   };
+}
+
+// Follow-the-bot results split by the confidence grade each call had when it was made.
+export function callsByGrade(reports) {
+  const out = {};
+  for (const t of reports.flatMap((r) => r.trades || [])) {
+    if (t.conf == null) continue;
+    const g = gradeOf(t.conf);
+    const b = (out[g] ||= { calls: 0, wins: 0, usd: 0 });
+    b.calls++;
+    if (t.pts > 0) b.wins++;
+    b.usd += (t.pts * 10) / t.entry;
+  }
+  return out;
 }
 
 // Prefer whichever copy of a window's report watched more of it (server vs this phone).

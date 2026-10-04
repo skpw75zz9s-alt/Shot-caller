@@ -23,7 +23,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   async function load() {
     let data = {};
     try { data = JSON.parse(await readFile(dataFile, 'utf8')); } catch { /* first run */ }
-    for (const d of data.devices || []) devices.set(d.endpoint, d);
+    for (const d of data.devices || []) {
+      if (d.settings?.minConfidence === 55) d.settings.minConfidence = 60; // v2.6: calls need B or better
+      devices.set(d.endpoint, d);
+    }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
     else if (data.vapid) vapid = data.vapid;
     else {

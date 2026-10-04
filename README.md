@@ -47,15 +47,17 @@ Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtract
 
 - Edge after fees (up to +25 / −20)
 - Rejection trend for or against the side (+10 / −15)
-- 10-minute momentum with or against you (±6)
+- Trend on 3, 10 and 30 minutes all with you (+8), mostly with you (+3), mostly against (−3) or all against (−8)
+- The bot's own read: favored the side steadily for 3 minutes (+6) or keeps flipping (−8); odds building toward the side over 2 minutes (+4) or fading (−6)
+- Edge has held for 30+ seconds (+4), or just appeared and could be a stale quote (−3)
 - Candle timing: dip now (+8) or chasing (−10)
-- How far BTC already is on your side, in volatility units (±8)
+- How far BTC already is on your side, in volatility units: well past the target (+10), past it (+6), or needing a big move (−8)
 - Volatility spiking vs its 2-hour norm (−8) or calm (+4)
 - Time left: late in the window (+5) or early (−5)
 - Kalshi spread: tight (+3) or wide (−5)
 - Kalshi's price moving with or against the call over the last 2 minutes (+3 / −5)
 
-The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (55). The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History's report cards show whether the bot's calls held up across each whole window.
+The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (60, so B or better). A C setup isn't called: the bot keeps watching and calls if it upgrades. The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History also splits follow-the-bot results **by the grade each call had** (calls, win rate, P&L for A, B and C), so you can check that A calls really do better.
 
 ### Candle timing (optional)
 
@@ -181,7 +183,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
 | Fixed trade amount | 0 | What one-tap "I bought it" records ($). 0 = the bot's suggested amount |
-| Min confidence | 55 | Deep-dive score a call needs to fire |
+| Min confidence | 60 | Deep-dive score a call needs to fire (60 = B or better) |
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |

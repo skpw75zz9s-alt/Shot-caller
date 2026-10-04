@@ -186,3 +186,9 @@ button.link { width: auto; margin: 0; padding: 0; background: none; color: var(-
 .adm-btns { display: flex; gap: 6px; }
 .adm-btns button { width: auto; margin: 0; padding: 6px 10px; font-size: 13px; }
 .err { color: var(--no); font-size: 13px; min-height: 1.2em; margin: 4px 0; }
+
+.by-grade { margin: 0 0 10px; display: flex; flex-direction: column; gap: 4px; }
+.bg-head { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.bg-row { display: flex; align-items: center; gap: 10px; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.bg-row .grade { margin: 0; width: 22px; height: 22px; }
+.bg-row span:nth-child(2) { flex: 1; }

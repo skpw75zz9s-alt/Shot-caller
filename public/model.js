@@ -109,7 +109,7 @@ export const DEFAULTS = {
   bankroll: 100,
   maxStake: 25,
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
-  minConfidence: 55,    // deep-dive score (0-100) a call needs before it fires
+  minConfidence: 60,    // deep-dive score (0-100) a call needs before it fires: B or better
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
 };
 

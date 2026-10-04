@@ -45,10 +45,11 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     const rej = rejections(bars, strike, Date.parse(m.open_time), now);
     const pShift = rej.tilt * s.rejectionWeight * tiltSign(m);
     const q = quote(m);
+    const ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, now, settings: s });
     const log = (quoteLog[m.ticker] ||= []);
-    if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk });
+    if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
-    return { m, strike, rej, ev: evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, now, settings: s }) };
+    return { m, strike, rej, ev };
   });
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   return { now, bars, spot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
@@ -67,6 +68,7 @@ export function buySignal(row, snap, settings, now = snap.now) {
   const deep = deepDive({
     ev: row.ev, side, rej: row.rej, timing, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin,
     spot: snap.spot, strike: row.strike, kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now),
+    bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge,
   });
   const confident = !!deep && deep.score >= s.minConfidence;
   const buyNow = !!row.ev.side && timing.state === 'NOW';
