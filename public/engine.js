@@ -112,6 +112,33 @@ export function buyMessage(row, sig, spot) {
   };
 }
 
+// Clock time in the phone's time zone (the server doesn't know it otherwise).
+function hm(t, tz) {
+  try { return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz || 'UTC' }); }
+  catch { return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }); }
+}
+
+// The every-15-minutes update: how the last window went, and the read on the new one.
+export function updateMessage({ prev, row, sig, spot, tz }) {
+  const { m, ev, strike } = row;
+  const open = Date.parse(m.open_time), close = Date.parse(m.close_time);
+  const usd = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+  const parts = [];
+  if (prev) {
+    const money = `${prev.paperUsd >= 0 ? '+' : '-'}$${Math.abs(prev.paperUsd).toFixed(2)}`;
+    parts.push(`${hm(prev.openTime, tz)} window settled ${prev.result.toUpperCase()} · bot grade ${prev.grade} (${pc(prev.avgWinnerOdds)} on the winner)` +
+      `${prev.calls ? ` · follow-the-bot ${money}` : ''}.`);
+  }
+  const lean = ev.pYes >= 0.5 ? `YES ${pc(ev.pYes)}` : `NO ${pc(1 - ev.pYes)}`;
+  const diff = spot && strike ? ` (${spot >= strike ? '+' : '-'}${usd(Math.abs(spot - strike))})` : '';
+  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.fire ? ` · BUY THE LOW ${sideName(ev.side)} at ${pc(ev.price)}` : ''}.`);
+  return {
+    tag: 'window-update',
+    title: `🕒 ${hm(open, tz)}–${hm(close, tz)}${tz ? '' : ' UTC'} window · target ${strike ? usd(strike) : '—'}`,
+    body: parts.join(' '),
+  };
+}
+
 export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;

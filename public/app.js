@@ -18,6 +18,7 @@ const SETTINGS_META = [
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
   ['notifySell', 'Notify: sell now', 'Alert when a tracked position should be sold', 'bool'],
+  ['notifyUpdates', 'Notify: 15-minute updates', 'Each new window: last window\'s result and the bot\'s read on the new one', 'bool'],
   ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['maxMinutesLeft', 'Max minutes left', 'Don\'t call this early in the window', 'num'],
@@ -32,7 +33,7 @@ const SETTINGS_META = [
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
   ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (BTC streams live)', 'num'],
 ];
-const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
@@ -543,7 +544,8 @@ async function subscribe(reg) {
 
 async function pushSync() {
   if (!pushSub) return;
-  await postJSON('push/sync', { subscription: pushSub.toJSON(), settings, positions: state.positions });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone; // so update times show in local time
+  await postJSON('push/sync', { subscription: pushSub.toJSON(), settings, positions: state.positions, tz });
   state.pushOn = true;
 }
 function pushSyncSoon() {

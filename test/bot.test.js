@@ -9,6 +9,7 @@ import { fakeBrowser, fakePushService } from './helpers.js';
 
 const NOW = Math.floor(Date.now() / 60000) * 60000 + 20000;
 const quotes = { yes_bid: 38, yes_ask: 40 };
+let nextWindow = false; // flip to serve the following 15-minute window
 
 // Fake Kalshi + Coinbase: quiet tape near 100,000, BTC 60 above a 100,000 strike, 6 minutes left.
 const upstream = http.createServer((req, res) => {
@@ -23,6 +24,12 @@ const upstream = http.createServer((req, res) => {
   }
   if (req.url.startsWith('/products/BTC-USD/ticker')) return res.end(JSON.stringify({ price: '100060' }));
   if (req.url.startsWith('/markets/KXBTC15M-T1')) return res.end(JSON.stringify({ market: { ticker: 'KXBTC15M-T1', result: 'yes' } }));
+  if (req.url.startsWith('/markets?') && nextWindow) {
+    return res.end(JSON.stringify({ markets: [{
+      ticker: 'KXBTC15M-T2', title: 'BTC up?', strike_type: 'greater_or_equal', floor_strike: 100050,
+      open_time: new Date(NOW + 6 * 60000).toISOString(), close_time: new Date(NOW + 21 * 60000).toISOString(), yes_bid: 50, yes_ask: 52,
+    }] }));
+  }
   if (req.url.startsWith('/markets?')) {
     return res.end(JSON.stringify({ markets: [{
       ticker: 'KXBTC15M-T1', title: 'BTC up?', strike_type: 'greater_or_equal', floor_strike: 100000,
@@ -94,6 +101,35 @@ test('grades the whole window on the server and serves the report card', async (
   assert.ok(r.avgWinnerOdds > 0.5 && r.timeRight === 1, 'bot favored YES the whole time');
   assert.ok(r.calls >= 1, 'followed its call');
   assert.equal(bot.report({ endpoint: 'nope' }).status, 404);
+});
+
+test('every new 15-minute window sends one update with the last result, in local time', async () => {
+  bot.sync({ subscription, settings: {}, positions: [], tz: 'America/New_York' });
+  const before = svc.received.length;
+  nextWindow = true;
+  await bot.tick(NOW + 8 * 60000 + 30000); // T2 is live, T1 already graded
+  const fresh = svc.received.slice(before).map((r) => JSON.parse(phone.decrypt(r.body)));
+  const updates = fresh.filter((x) => x.tag === 'window-update');
+  assert.equal(updates.length, 1); // (a BUY THE LOW for the new window may also fire)
+  const msg = updates[0];
+  assert.match(msg.title, /^🕒 \d{1,2}:\d\d (AM|PM)–\d{1,2}:\d\d (AM|PM) window · target \$100,050$/);
+  assert.doesNotMatch(msg.title, /UTC/);
+  assert.match(msg.body, /window settled YES · bot grade [A-D] \(\d+% on the winner\)/);
+  assert.match(msg.body, /Now BTC \$100,060 \(\+\$10\) · bot leans (YES|NO) \d+%/);
+  const local = new Date(NOW + 6 * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+  assert.ok(msg.title.includes(local), `${msg.title} should start at ${local} New York time`);
+
+  await bot.tick(NOW + 9 * 60000);
+  assert.equal(svc.received.filter((r) => JSON.parse(phone.decrypt(r.body)).tag === 'window-update').length, 1, 'one update per window');
+});
+
+test('updates can be turned off', async () => {
+  const p2 = fakeBrowser();
+  const ep = `${svc.base}/push/quiet`;
+  bot.sync({ subscription: { endpoint: ep, keys: p2.keys }, settings: { notifyUpdates: false, notifyBuy: false } });
+  await bot.tick(NOW + 9 * 60000 + 10000); // first sight of T2: no update right after subscribing anyway
+  assert.equal(svc.received.filter((r) => r.url === '/push/quiet').length, 0);
+  bot.unsubscribe({ endpoint: ep });
 });
 
 test('test endpoint pushes, and a 410 from the push service drops the device', async () => {

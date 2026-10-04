@@ -107,6 +107,13 @@ The server runs the same bot as the app, around the clock. It sends **Web Push**
 2. Open **Settings → Turn on push notifications** and allow notifications.
 3. Tap **Send test**. You should get "Shot Caller ✓" within a few seconds.
 
+**15-minute updates:** each time a new window opens, every subscribed phone gets one push. It covers how the last window went (settled YES or NO, the bot's grade, follow-the-bot result) and the read on the new one (target, where BTC is versus it, which way the bot leans, and BUY THE LOW if it's already a call). For example:
+
+> 🕒 3:30 AM–3:45 AM window · target $84,812
+> 3:15 AM window settled YES · bot grade B (67% on the winner) · follow-the-bot +$3.20. Now BTC $84,820 (+$8) · bot leans YES 58% · BUY THE LOW YES · Above at 52%.
+
+The server waits up to 4 minutes for Kalshi to settle the last window so the result is included. Times use the phone's time zone. Each update replaces the previous one in the notification list, and there's no update right after you first turn on push. Turn it off with **Notify: 15-minute updates**.
+
 Your settings and tracked positions sync to the server whenever they change, so it watches the same thresholds and positions. Turn off either alert type with **Notify: buy the low** and **Notify: sell now**. With push on, the app only vibrates in the foreground; the server sends the notification, so you don't get duplicates.
 
 **Keep subscriptions across redeploys (Railway):** the server stores its push keys and subscribed phones in a small JSON file. Railway's disk resets on each deploy, so add a volume:
@@ -174,7 +181,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
-| Notify: buy the low / sell now | on / on | Which push alerts to send |
+| Notify: buy the low / sell now / 15-minute updates | on / on / on | Which push alerts to send |
 | Min profit to lock | 1 pt | Profit per contract, after both fees, before flip signs trigger a sell |
 | Trailing drop | 6 pts | Sell-% drop from its peak that counts as a flip sign |
 | Odds drop | 8 pts | Bot odds drop from their peak that counts as a flip sign |

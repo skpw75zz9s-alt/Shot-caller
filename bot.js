@@ -3,11 +3,11 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS } from './public/model.js';
-import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, snapshot } from './public/engine.js';
+import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
 
-const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS };
+const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, ...DEFAULTS, ...EXIT_DEFAULTS };
 const MAX_DEVICES = 100;
 // Only send to real browser push services (stops the server being used to POST anywhere).
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
@@ -77,7 +77,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   // Phone sends its subscription, settings and open positions; we keep the highest peaks seen.
-  function sync({ subscription, settings, positions }, ctx = {}) {
+  const validTz = (tz) => {
+    if (typeof tz !== 'string' || tz.length > 64) return null;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return null; }
+  };
+
+  function sync({ subscription, settings, positions, tz }, ctx = {}) {
     if (!validSubscription(subscription)) return { status: 400, body: { error: 'invalid subscription' } };
     const prev = devices.get(subscription.endpoint);
     if (!prev && devices.size >= MAX_DEVICES) return { status: 429, body: { error: 'too many devices' } };
@@ -89,6 +94,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       endpoint: subscription.endpoint, keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
       settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
       token: ctx.token ?? prev?.token ?? null, // paywall session, so alerts stop if access lapses
+      tz: validTz(tz) ?? prev?.tz ?? null, lastWindow: prev?.lastWindow ?? null,
       createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(),
     });
     scheduleSave();
@@ -163,6 +169,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     try {
       await refresh(now);
       market.lastTick = now; market.lastError = null;
+      await gradeClosedWindows(now); // first, so the 15-minute update can include the result
       const sends = [];
       for (const d of devices.values()) {
         if (!canNotify(d)) continue; // paywall: no access, no bot
@@ -180,6 +187,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
           if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
+          if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
+            const open = Date.parse(snap.live.m.open_time);
+            const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
+            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz }));
+          }
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap, s, now);
@@ -192,7 +204,6 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       }
       await Promise.all(sends);
       if (sends.length) scheduleSave();
-      await gradeClosedWindows(now);
       if (dirty && now - lastSave > 30000) { dirty = false; lastSave = now; scheduleSave(); }
     } catch (e) {
       market.lastError = e.message;
@@ -200,6 +211,21 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     } finally {
       busy = false;
     }
+  }
+
+  // A new 15-minute window has opened for this phone: time for an update. Waits up to 4 minutes
+  // for Kalshi to settle the previous window so its result rides along. The window that was open
+  // when the phone subscribed doesn't count (no update right after turning push on).
+  function windowUpdate(d, snap, sig, now) {
+    const ticker = snap.live.m.ticker;
+    if (d.lastWindow === ticker) return false;
+    if (d.lastWindow == null) { d.lastWindow = ticker; return false; }
+    const open = Date.parse(snap.live.m.open_time);
+    const settling = Object.values(d.tracker.windows).some((w) => w.closeTime === open);
+    if (settling && now - open < 4 * 60000) return false;
+    d.lastWindow = ticker;
+    dirty = true;
+    return true;
   }
 
   // Fetch results for closed windows (a few per tick) and grade every phone's tracker.
