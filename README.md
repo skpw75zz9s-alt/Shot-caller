@@ -1,6 +1,6 @@
 # Shot Caller
 
-A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M`). It's a phone-installable web app (PWA). It watches the open market, prices it with a volatility model and calls a shot: **YES**, **NO** or **PASS**. Each call comes with a suggested size.
+A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M`). It's a phone-installable web app (PWA). It watches the open market, prices it with a volatility model and calls a shot: **YES** (BTC above the target at close), **NO** (below) or **PASS**. Each call comes with a suggested size.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/skpw75zz9s-alt/Shot-caller)
 
@@ -37,7 +37,7 @@ Alerts fire on every BUY THE LOW. Turn on **Also wait for candle dip** to alert 
 
 ### Selling for profit (exit signals)
 
-The app can't see your Kalshi account. After you buy, tap **I bought it: track my exit** and confirm your contracts and fill price. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
+The app can't see your Kalshi account. After you buy, tap **I bought it: track my exit** and enter the trade the way Kalshi shows it: **$ amount at %**, and **YES · Above** or **NO · Below**. For example, $20 at 40% YES is 50 contracts that pay $50 if BTC finishes above the target. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
 
 | Signal | When | Why |
 |---|---|---|
@@ -47,7 +47,7 @@ The app can't see your Kalshi account. After you buy, tap **I bought it: track m
 
 Flip signs: a reversal candle against you (shooting star or bearish engulfing for YES, the mirror for NO), RSI rolling over from overbought or oversold, rejection at the Bollinger band, stalling at resistance or support, two strong candles against you, the bot's odds down *Odds drop* from their peak, or the bid down *Trailing drop* from its peak.
 
-On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** to log the fill. Partial sales are supported. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
+On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** and enter how much of your stake you sold and at what %. Partial sales are supported. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
 Every first call on a market goes into **History**. After the market settles, the app fetches the result and tracks hit rate and paper P&L.
 
@@ -80,10 +80,10 @@ Tap **Settings → Enable call alerts** to get a vibration and notification when
 | Setting | Default | Meaning |
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
-| Min gap | 4¢ | How far Kalshi's price must be below the bot's odds, after fees |
+| Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
-| Min profit to lock | 1¢ | Profit per contract, after both fees, before flip signs trigger a sell |
-| Trailing drop | 6¢ | Bid drop from its peak that counts as a flip sign |
+| Min profit to lock | 1 pt | Profit per contract, after both fees, before flip signs trigger a sell |
+| Trailing drop | 6 pts | Sell-% drop from its peak that counts as a flip sign |
 | Odds drop | 8 pts | Bot odds drop from their peak that counts as a flip sign |
 | Max spread | 10¢ | Skip illiquid books |
 | Min / max minutes left | 0.5 / 14 | Window where calls are allowed |

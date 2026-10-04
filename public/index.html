@@ -26,6 +26,7 @@
         <div class="countdown" id="countdown">--:--</div>
         <div class="call-label" id="callLabel"></div>
         <div class="call" id="call">—</div>
+        <div class="call-sub" id="callSub"></div>
         <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
@@ -74,15 +75,20 @@
       <form id="settingsForm" class="card settings"></form>
       <button id="enableAlerts">Enable call alerts</button>
       <p class="fine">Alerts fire while the app is open (iOS needs the app added to the Home Screen first). Settings are saved on this device.</p>
-      <p class="fine" id="version">Shot Caller v1.3 · buy the low + sell signals</p>
+      <p class="fine" id="version">Shot Caller v1.4 · $ at % tracking</p>
     </section>
   </main>
 
   <div id="sheet" class="sheet" hidden>
     <div class="sheet-card">
       <h3 id="sheetTitle"></h3>
-      <label>Contracts <input id="sheetQty" inputmode="numeric"></label>
-      <label>Price (¢) <input id="sheetPrice" inputmode="decimal"></label>
+      <div class="side-toggle" id="sheetSide">
+        <button type="button" data-side="YES">YES · Above</button>
+        <button type="button" data-side="NO">NO · Below</button>
+      </div>
+      <label><span id="amtLabel">Amount ($)</span><input id="sheetAmt" inputmode="decimal"></label>
+      <label>At (%)<input id="sheetPct" inputmode="decimal"></label>
+      <p class="sheet-hint" id="sheetHint"></p>
       <button id="sheetOk">Save</button>
       <button id="sheetCancel" class="ghost">Cancel</button>
     </div>

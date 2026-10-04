@@ -102,3 +102,15 @@ h2.sec { font-size: 14px; color: var(--muted); margin: 18px 0 4px; font-weight: 
 .sheet-card h3 { margin: 0 0 10px; font-size: 16px; }
 .sheet-card label { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
 .sheet-card input { width: 120px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 16px; text-align: right; }
+.call-sub { color: var(--text); font-size: 14px; font-weight: 600; margin-top: -2px; }
+.odds-row .side small { display: block; font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .5px; }
+.side-tag { font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-left: 4px; }
+.side-tag.yes { background: #22c55e22; color: var(--yes); } .side-tag.no { background: #ef444422; color: var(--no); }
+.pos-grid { grid-template-columns: repeat(3, 1fr); row-gap: 10px; }
+.pos-where { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.side-toggle { display: flex; gap: 8px; margin-bottom: 4px; }
+.side-toggle button { margin: 0; background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.side-toggle button.on[data-side=YES] { background: #22c55e22; color: var(--yes); border-color: var(--yes); }
+.side-toggle button.on[data-side=NO] { background: #ef444422; color: var(--no); border-color: var(--no); }
+.side-toggle.locked button:not(.on) { display: none; }
+.sheet-hint { font-size: 12px; color: var(--muted); margin: 4px 0 8px; min-height: 1.3em; }

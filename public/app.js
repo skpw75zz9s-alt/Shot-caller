@@ -10,15 +10,15 @@ const store = {
 
 const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
-  ['minEdge', 'Min gap (¢)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, to call BUY THE LOW', 'cents'],
+  ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, to call BUY THE LOW', 'cents'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
-  ['maxSpread', 'Max spread (¢)', 'Skip markets with a wider yes spread', 'cents'],
+  ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['maxMinutesLeft', 'Max minutes left', 'Don\'t call this early in the window', 'num'],
   ['volMultiplier', 'Vol multiplier', 'Above 1 means more conservative', 'num'],
   ['momentumWeight', 'Momentum weight', 'How much of the 10-min drift to carry forward (0 to 1)', 'num'],
-  ['minProfit', 'Min profit to lock (¢)', 'Per contract after fees before flip signs trigger a sell', 'cents'],
-  ['trail', 'Trailing drop (¢)', 'Sell if the bid falls this far from its peak while in profit', 'cents'],
+  ['minProfit', 'Min profit to lock (pts)', 'How far up (after fees) before flip signs trigger a sell', 'cents'],
+  ['trail', 'Trailing drop (pts)', 'Sell if the sell % falls this far from its peak while in profit', 'cents'],
   ['oddsDrop', 'Odds drop (pts)', 'Sell if the bot\'s odds fall this far from their peak while in profit', 'cents'],
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
@@ -142,23 +142,27 @@ function renderPositions(rows, bars, now) {
       const key = `${pos.id}:${ex.kind}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        alert(`sell-${pos.id}`, `SELL NOW: ${pos.side} @ ${(bid * 100).toFixed(0)}¢ (${money(ex.pnl)})`, ex.why);
+        alert(`sell-${pos.id}`, `SELL NOW: ${sideName(pos.side)} at ${pc(bid)} (${money(ex.pnl)})`, ex.why);
       }
     }
 
-    const c = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}¢`);
-    const head = ex.action === 'SELL' ? `SELL NOW @ ${c(bid)}` : ex.action === 'WAIT' ? 'SETTLING' : 'HOLD';
+    const head = ex.action === 'SELL' ? `SELL NOW at ${pc(bid)}` : ex.action === 'WAIT' ? 'SETTLING' : 'HOLD';
+    const worth = ex.net != null ? ex.net * pos.contracts : null;
+    const where = row?.strike ? ` ${pos.side === 'YES' ? 'above' : 'below'} ${usd(row.strike, 0)}` : '';
     const signs = ex.signs?.length ? ex.signs.map((x) => `<li>${esc(x)}</li>`).join('') : '<li class="calm">No flip signs</li>';
     return `<div class="card pos-card ${ex.action.toLowerCase()} ${ex.kind}">
-      <div class="pos-top"><span><b>${pos.side}</b> ×${pos.contracts} @ ${c(pos.price)}</span><span>${minutesLeft > 0 ? mmss(minutesLeft) : 'closed'}</span></div>
+      <div class="pos-top"><span><b>${dollars(pos.contracts * pos.price)}</b> at <b>${pc(pos.price)}</b> <b class="side-tag ${pos.side.toLowerCase()}">${sideName(pos.side)}</b></span><span>${minutesLeft > 0 ? mmss(minutesLeft) : 'closed'}</span></div>
       <div class="pos-action">${head}</div>
       <div class="pos-why">${esc(ex.why)}</div>
       <div class="pos-grid">
-        <div><label>Sell now</label><b>${c(bid)}</b></div>
+        <div><label>Sell at</label><b>${pc(bid)}</b></div>
+        <div><label>Worth now</label><b>${worth == null ? '—' : dollars(worth)}</b></div>
         <div><label>P&amp;L</label><b class="${ex.pnl > 0 ? 'pos' : ex.pnl < 0 ? 'neg' : ''}">${ex.pnl == null ? '—' : money(ex.pnl)}</b></div>
-        <div><label>Bot odds</label><b>${pSide == null ? '—' : `${(pSide * 100).toFixed(0)}%`}</b></div>
-        <div><label>Target sell</label><b>${ex.action === 'SELL' ? 'now' : c(ex.target)}</b></div>
+        <div><label>Bot odds</label><b>${pc(pSide)}</b></div>
+        <div><label>Target sell</label><b>${ex.action === 'SELL' ? 'now' : pc(ex.target)}</b></div>
+        <div><label>Pays if right</label><b>${dollars(pos.contracts)}</b></div>
       </div>
+      <div class="pos-where">Wins if BTC is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
       <ul class="flips"><span>Flip watch</span>${signs}</ul>
       <div class="pos-btns"><button data-act="sell" data-id="${pos.id}">I sold</button><button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
@@ -167,20 +171,38 @@ function renderPositions(rows, bars, now) {
 }
 
 // ---------- bottom sheet for entering fills ----------
-let sheetOk = null;
-function openSheet(title, qty, priceCents, onOk) {
+// Trades are entered the way Kalshi shows them: "$20 at 40% YES".
+let sheet = null;
+function openSheet({ title, side, sideLocked, amount, pct, amtLabel = 'Amount ($)', hint, onOk }) {
+  sheet = { side, hint, onOk };
   $('sheetTitle').textContent = title;
-  $('sheetQty').value = qty;
-  $('sheetPrice').value = priceCents;
-  sheetOk = onOk;
+  $('amtLabel').textContent = amtLabel;
+  $('sheetAmt').value = amount.toFixed(2);
+  $('sheetPct').value = Math.round(pct);
+  $('sheetSide').classList.toggle('locked', !!sideLocked);
+  sheetSync();
   $('sheet').hidden = false;
 }
+function sheetRead() {
+  return { side: sheet.side, amount: Number($('sheetAmt').value), price: Number($('sheetPct').value) / 100 };
+}
+function sheetSync() {
+  $('sheetSide').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.side === sheet.side));
+  const v = sheetRead();
+  $('sheetHint').textContent = v.amount > 0 && v.price > 0 && v.price < 1 ? sheet.hint(v) : 'Enter an amount and a % between 1 and 99';
+}
+$('sheetSide').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-side]');
+  if (b && !$('sheetSide').classList.contains('locked')) { sheet.side = b.dataset.side; sheetSync(); }
+});
+$('sheetAmt').addEventListener('input', sheetSync);
+$('sheetPct').addEventListener('input', sheetSync);
 $('sheetCancel').addEventListener('click', () => { $('sheet').hidden = true; });
 $('sheetOk').addEventListener('click', () => {
-  const qty = Math.floor(Number($('sheetQty').value)), price = Number($('sheetPrice').value) / 100;
-  if (!(qty > 0) || !(price > 0 && price < 1)) return window.alert('Enter contracts and a price between 1 and 99¢.');
+  const v = sheetRead();
+  if (!(v.amount > 0) || !(v.price > 0 && v.price < 1)) return window.alert('Enter a dollar amount and a % between 1 and 99.');
   $('sheet').hidden = true;
-  sheetOk?.(qty, price);
+  sheet.onOk(v);
   render();
 });
 
@@ -196,6 +218,9 @@ async function alert(tag, title, body) {
 // ---------- render helpers ----------
 const usd = (v, d = 2) => v == null ? '—' : `$${v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })}`;
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
+const pc = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
+const dollars = (v) => `$${v.toFixed(2)}`;
+const sideName = (side) => (side === 'YES' ? 'YES · Above' : 'NO · Below');
 const money = (v) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
 const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle('neg', v < 0); };
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
@@ -227,7 +252,7 @@ function oddsRows(ev, minEdge) {
       `<span class="track"><i class="fill" style="left:${a}%;width:${b - a}%"></i><i class="mk kalshi" style="left:${kalshi * 100}%"></i><i class="mk bot" style="left:${bot * 100}%"></i></span>` +
       `<span class="status">${status[1]}</span></div>`;
   };
-  return row('YES', ev.quote.yesAsk, ev.pYes, ev.evYes) + row('NO', ev.quote.noAsk, 1 - ev.pYes, ev.evNo) +
+  return row('YES<small>Above</small>', ev.quote.yesAsk, ev.pYes, ev.evYes) + row('NO<small>Below</small>', ev.quote.noAsk, 1 - ev.pYes, ev.evNo) +
     '<div class="odds-legend"><i class="mk kalshi"></i> Kalshi price <i class="mk bot"></i> Bot odds</div>';
 }
 
@@ -267,6 +292,7 @@ function render() {
     $('callLabel').textContent = ev.side ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : 'No low price';
     call.textContent = ev.call;
     call.className = `call ${ev.call.toLowerCase()}`;
+    $('callSub').textContent = ev.side && strike ? `BTC ${ev.side === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
     if (ev.side) card.classList.add(ev.side.toLowerCase());
     if (waiting) card.classList.add('waiting');
 
@@ -275,12 +301,12 @@ function render() {
       const label = timing.state === 'NOW' ? `Candles: dip now, good timing for ${side}` : timing.state === 'CHASE' ? 'Candles: chasing, price just ran' : `Candles: no dip yet for ${side}`;
       entry.classList.add(timing.state.toLowerCase());
       entry.innerHTML = `<b>${label}</b><span>${esc(timing.reasons.slice(0, 4).join(' · '))}</span>` +
-        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${side} at <b>${(limit.price * 100).toFixed(0)}¢</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : '');
+        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : '');
     }
 
     if (!ev.side) $('order').textContent = '';
-    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${ev.contracts} ${ev.side} @ ${(ev.price * 100).toFixed(0)}¢ · +${(ev.edge * 100).toFixed(0)}¢ edge`;
-    else $('order').textContent = limit ? `Rest ${ev.contracts} ${ev.side} at ${(limit.price * 100).toFixed(0)}¢ (ask ${(ev.price * 100).toFixed(0)}¢)` : 'Hold off: no dip yet';
+    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(ev.contracts * ev.price)} at ${pc(ev.price)} ${sideName(ev.side)} · +${(ev.edge * 100).toFixed(0)} pts edge`;
+    else $('order').textContent = limit ? `Limit ${dollars(ev.contracts * limit.price)} at ${pc(limit.price)} ${sideName(ev.side)} (now ${pc(ev.price)})` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (ev.side && (buyNow || !settings.waitForDip)) {
@@ -289,8 +315,8 @@ function render() {
         state.alerted[key] = true;
         recordCall(m, ev, buyNow ? 'low' : 'ask');
         const bot = ev.side === 'YES' ? ev.pYes : 1 - ev.pYes;
-        alert(m.ticker, `Buy the low: ${ev.side} @ ${(ev.price * 100).toFixed(0)}¢`,
-          `Kalshi ${(ev.price * 100).toFixed(0)}% vs bot ${(bot * 100).toFixed(0)}% · buy ${ev.contracts}${buyNow ? ' · candle dip too' : ''}`);
+        alert(m.ticker, `Buy the low: ${sideName(ev.side)} at ${pc(ev.price)}`,
+          `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(ev.contracts * ev.price)}${buyNow ? ' · candle dip too' : ''}`);
       }
     }
 
@@ -390,13 +416,13 @@ function renderHistory() {
   sign($('tPnl'), tp);
   $('tWins').textContent = state.trades.length ? `${tw}/${state.trades.length}` : '—';
   $('tradeList').innerHTML = state.trades.slice(0, 50).map((t) =>
-    `<li><span><b>${t.side}</b> ${(t.price * 100).toFixed(0)}¢ → ${t.how === 'settled' ? (t.exit ? 'settled $1' : 'settled $0') : `sold ${(t.exit * 100).toFixed(0)}¢`} ×${t.contracts}` +
+    `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>${esc(t.ticker)} · ${new Date(t.closedAt).toLocaleTimeString()}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
     '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
   $('historyList').innerHTML = state.history.slice(0, 100).map((h) => {
     const res = h.result ? `<b class="${h.won ? 'pos' : 'neg'}">${h.won ? 'WIN' : 'LOSS'} ${h.pnl >= 0 ? '+' : '-'}$${Math.abs(h.pnl).toFixed(2)}</b>` : '<b>pending</b>';
     const tag = h.entry === 'low' ? ' · candle dip' : '';
-    return `<li><span><b>${h.side}</b> @ ${(h.price * 100).toFixed(0)}¢ ×${h.contracts}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
+    return `<li><span><b>${dollars(h.contracts * h.price)}</b> at ${pc(h.price)} ${sideName(h.side)}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
   }).join('');
 }
 
@@ -464,7 +490,12 @@ $('boughtBtn').addEventListener('click', () => {
   const live = state.liveCall;
   if (!live) return;
   const { m, ev } = live;
-  openSheet(`Bought ${ev.side}: ${m.ticker}`, ev.contracts, Math.round(ev.price * 100), (qty, price) => openPosition(m, ev.side, price, qty));
+  const strike = live.strike;
+  openSheet({
+    title: 'What did you buy?', side: ev.side, amount: ev.contracts * ev.price, pct: ev.price * 100,
+    hint: ({ side, amount, price }) => `${(amount / price).toFixed(1)} contracts · pays ${dollars(amount / price)} if BTC is ${side === 'YES' ? 'above' : 'below'} ${strike ? usd(strike, 0) : 'the target'} at close`,
+    onOk: ({ side, amount, price }) => openPosition(m, side, price, amount / price),
+  });
 });
 $('positions').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-act]');
@@ -478,16 +509,26 @@ $('positions').addEventListener('click', (e) => {
   const m = state.markets.find((x) => x.ticker === pos.ticker);
   const q = m ? quote(m) : {};
   const bid = (pos.side === 'YES' ? q.yesBid : q.noBid) ?? pos.price;
-  openSheet(`Sold ${pos.side}: ${pos.ticker}`, pos.contracts, Math.round(bid * 100), (qty, price) => {
-    if (qty < pos.contracts) {
-      // Partial sale: book the sold part, keep the rest open
-      const sold = { ...pos, id: `${pos.id}-p${Date.now()}`, contracts: qty };
-      state.positions.push(sold);
-      pos.contracts -= qty;
-      closePosition(sold, price, 'sold');
-    } else closePosition(pos, price, 'sold');
+  const stake = pos.contracts * pos.price;
+  openSheet({
+    title: `Sold ${sideName(pos.side)}`, side: pos.side, sideLocked: true, amount: stake, pct: bid * 100,
+    amtLabel: `How much of your ${dollars(stake)}`,
+    hint: ({ amount, price }) => {
+      const qty = Math.min(amount, stake) / pos.price;
+      return `Cashes out ≈ ${dollars(qty * (price - kalshiFee(price)))} · ${money((price - kalshiFee(price) - entryCost(pos)) * qty)}`;
+    },
+    onOk: ({ amount, price }) => sellPosition(pos, Math.min(amount, stake) / pos.price, price),
   });
 });
+function sellPosition(pos, qty, price) {
+  if (qty < pos.contracts - 1e-9) {
+    // Partial sale: book the sold part, keep the rest open
+    const sold = { ...pos, id: `${pos.id}-p${Date.now()}`, contracts: qty };
+    state.positions.push(sold);
+    pos.contracts -= qty;
+    closePosition(sold, price, 'sold');
+  } else closePosition(pos, price, 'sold');
+}
 $('clearHistory').addEventListener('click', () => {
   if (confirm('Clear all call history?')) { state.history = []; store.set('history', []); render(); }
 });

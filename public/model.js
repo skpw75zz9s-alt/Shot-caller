@@ -125,7 +125,7 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, now = D
     : { side: 'NO', ev: out.evNo, price: q.noAsk, prob: 1 - out.pYes };
   if (best.ev === null || best.price === null) return { ...out, reason: 'No liquidity' };
   out.edge = best.ev;
-  if (best.ev < s.minEdge) return { ...out, reason: `Best edge ${(best.ev * 100).toFixed(1)}¢ < ${(s.minEdge * 100).toFixed(1)}¢` };
+  if (best.ev < s.minEdge) return { ...out, reason: `Best gap ${(best.ev * 100).toFixed(1)} pts, need ${(s.minEdge * 100).toFixed(1)}` };
 
   const cost = best.price + kalshiFee(best.price);
   const kelly = Math.max(0, (best.prob - cost) / (1 - cost)) * s.kellyFraction;
@@ -136,7 +136,7 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, now = D
     side: best.side,
     price: best.price,
     contracts: Math.max(1, Math.floor(stake / cost)),
-    reason: `Model ${(best.prob * 100).toFixed(0)}% vs ${(best.price * 100).toFixed(0)}¢`,
+    reason: `Bot ${(best.prob * 100).toFixed(0)}% vs Kalshi ${(best.price * 100).toFixed(0)}%`,
   };
 }
 
@@ -207,17 +207,17 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
   const inProfit = pnlPer >= s.minProfit - 1e-9;
   const signs = [...flips];
   if (pos.peakP != null && pos.peakP - pSide >= s.oddsDrop) signs.push(`Bot odds down ${((pos.peakP - pSide) * 100).toFixed(0)} pts from peak`);
-  if (pos.peakBid != null && pos.peakBid - bid >= s.trail - 1e-9) signs.push(`Bid down ${((pos.peakBid - bid) * 100).toFixed(0)}¢ from its ${(pos.peakBid * 100).toFixed(0)}¢ peak`);
-  const c = (v) => `${(v * 100).toFixed(0)}¢`;
+  if (pos.peakBid != null && pos.peakBid - bid >= s.trail - 1e-9) signs.push(`Sell price down to ${(bid * 100).toFixed(0)}% from its ${(pos.peakBid * 100).toFixed(0)}% peak`);
+  const c = (v) => `${(v * 100).toFixed(0)}%`;
 
   if (net >= pSide) {
     return inProfit
-      ? { ...base, signs, action: 'SELL', kind: 'take', why: `Bid ${c(bid)} has caught up to the bot's ${(pSide * 100).toFixed(0)}%. The low is gone, so take the profit.` }
-      : { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it ${(pSide * 100).toFixed(0)}%, worth less than the ${c(bid)} bid. Cut it.` };
+      ? { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` }
+      : { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };
   }
   if (inProfit && signs.length) return { ...base, signs, action: 'SELL', kind: 'flip', why: `Price may be flipping: ${signs.join(' · ')}` };
   return {
     ...base, signs, action: 'HOLD', kind: 'hold',
-    why: `Holding is worth ${c(pSide)} vs ${c(net)} to sell now.${inProfit ? ' In profit, no flip signs.' : ''}`,
+    why: `Bot gives it ${c(pSide)}. Selling now gets you ${c(net)} after fees.${inProfit ? ' In profit, no flip signs.' : ''}`,
   };
 }
