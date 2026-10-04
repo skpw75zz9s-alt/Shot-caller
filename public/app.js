@@ -549,10 +549,19 @@ function renderPush(msg) {
 const day = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 let adminTimer = null;
 
+// Remember this phone's code and signed pass so access survives a cleared cookie or a server reset.
+function rememberAccess(st) {
+  try {
+    if (st.code) localStorage.setItem('sc_code', st.code);
+    if (st.pass) localStorage.setItem('sc_pass', st.pass);
+  } catch { /* storage blocked */ }
+}
+
 async function loadAccess() {
   try {
     const st = await getJSON('access/status');
     state.access = st;
+    rememberAccess(st);
     $('accessLine').textContent = st.role === 'admin' ? 'Admin (no expiry)'
       : st.access ? `Active until ${day(st.expires)} · code ${st.code} (use it to unlock your other devices)`
       : 'No access';
@@ -598,11 +607,12 @@ $('admSave').addEventListener('click', () => adminAction('config', { price: $('a
 $('adminLogin').addEventListener('click', async () => {
   const code = prompt('Admin code');
   if (!code) return;
-  try { await postJSON('access/admin', { code }); location.reload(); }
+  try { rememberAccess(await postJSON('access/admin', { code, device: localStorage.getItem('sc_device') })); location.reload(); }
   catch (e) { window.alert(e.message); }
 });
 $('signOut').addEventListener('click', async () => {
   if (!confirm('Sign out on this device? You\'ll need your code (or the admin code) to get back in.')) return;
+  try { localStorage.removeItem('sc_pass'); localStorage.removeItem('sc_code'); } catch { /* storage blocked */ }
   await fetch(`${API}/access/logout`, { method: 'POST', body: '{}' }).catch(() => {});
   location.reload();
 });
@@ -741,6 +751,7 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 buildSettings();
+try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();
 pushInit();

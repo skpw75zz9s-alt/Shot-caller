@@ -14,6 +14,8 @@ const newToken = () => crypto.randomBytes(24).toString('base64url');
 // itself. The ADMIN_CODE environment variable overrides it.
 const DEFAULT_ADMIN = { salt: '8476f77c1ce5b79880664029ca7417ab', hash: '19f904f31dafbea22a54a1b5eaedbb4c17214282544fa1b295146c57e5fc5555' };
 const kdf = (code, salt) => crypto.scryptSync(String(code || '').trim().toUpperCase(), Buffer.from(salt, 'hex'), 32, { N: 16384, r: 8, p: 1 });
+const CODE_RE = /^SC-[A-HJ-NP-Z2-9]{6}$/;
+const cleanDevice = (d) => (typeof d === 'string' && d ? d.slice(0, 64) : null);
 export const normalizeCode = (c) => {
   const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   return s ? `SC-${s.replace(/^SC/, '')}` : '';
@@ -26,8 +28,15 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   const db = {
     config: { price: Number(env.PAYWALL_PRICE || 20), days: Number(env.ACCESS_DAYS || 30), cashtag: (env.CASHTAG || 'Akizzle55').replace(/^\$/, '') },
     members: {}, // code -> { code, status: pending|active|denied|revoked, createdAt, paidAt, approvedAt, expires, tokens: [] }
-    sessions: {}, // token -> { code, role: member|admin, at }
+    sessions: {}, // token -> { code, role: member|admin, device, at }
+    secret: null, // only used when no ACCESS_SECRET / Railway IDs are available
   };
+  // Signed access passes let a phone get back in after the server forgets it (redeploy without a
+  // volume) or the phone loses its cookie. The signing secret must survive redeploys, so it comes
+  // from ACCESS_SECRET, else Railway's stable project/service IDs (not in the public repo), else
+  // a random secret saved with the data.
+  let passKey = null;
+  const adminFp = crypto.createHash('sha256').update(adminHash).digest('hex').slice(0, 12); // changes if the admin code changes
   const attempts = new Map(); // `${kind}:${ip}` -> timestamps
   let saveTimer = null;
 
@@ -37,7 +46,11 @@ export function createAccess({ file, env = process.env, log = console, clock = (
       Object.assign(db.config, saved.config || {});
       db.members = saved.members || {};
       db.sessions = saved.sessions || {};
+      db.secret = saved.secret || null;
     } catch { /* first run */ }
+    const envSecret = env.ACCESS_SECRET || (env.RAILWAY_PROJECT_ID && env.RAILWAY_SERVICE_ID ? `${env.RAILWAY_PROJECT_ID}:${env.RAILWAY_SERVICE_ID}` : null);
+    if (!envSecret && !db.secret) { db.secret = crypto.randomBytes(32).toString('hex'); scheduleSave(); }
+    passKey = crypto.createHash('sha256').update(`shot-caller-pass:${envSecret || db.secret}`).digest();
     if (!env.ADMIN_CODE) log.log?.('Admin bypass: using the built-in admin code (set ADMIN_CODE to change it).');
   }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(save, 500); }
@@ -68,10 +81,20 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     return false;
   }
 
-  function bind(code, role) {
+  // New session for a phone. Signing in again on the same device replaces its old session
+  // instead of using up another of the code's device slots.
+  function bind(code, role, device) {
     const token = newToken();
-    db.sessions[token] = { code, role, at: clock() };
+    const dev = cleanDevice(device);
     const m = code && db.members[code];
+    if (m && dev) {
+      for (const t of m.tokens.filter((x) => db.sessions[x]?.device === dev)) delete db.sessions[t];
+      m.tokens = m.tokens.filter((x) => db.sessions[x]);
+    }
+    if (!m && dev && role === 'admin') {
+      for (const [t, s] of Object.entries(db.sessions)) if (s.role === 'admin' && s.device === dev) delete db.sessions[t];
+    }
+    db.sessions[token] = { code, role, device: dev, at: clock() };
     if (m) {
       m.tokens.push(token);
       while (m.tokens.length > MAX_DEVICES) delete db.sessions[m.tokens.shift()];
@@ -79,6 +102,23 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     scheduleSave();
     return token;
   }
+
+  // ---------- signed passes ----------
+  function sign(payload) {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return `${body}.${crypto.createHmac('sha256', passKey).update(body).digest('base64url').slice(0, 32)}`;
+  }
+  function verify(pass) {
+    if (typeof pass !== 'string' || pass.length > 600) return null;
+    const [body, mac] = pass.split('.');
+    if (!body || !mac) return null;
+    const good = crypto.createHmac('sha256', passKey).update(body).digest('base64url').slice(0, 32);
+    if (mac.length !== good.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(good))) return null;
+    try { return JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { return null; }
+  }
+  const passFor = ({ access, role, member }) => (!access ? null
+    : role === 'admin' ? sign({ t: 'a', f: adminFp, e: clock() + 365 * DAY })
+    : sign({ t: 'm', c: member.code, e: member.expires }));
 
   function check(token) {
     const s = token && db.sessions[token];
@@ -89,8 +129,10 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   }
 
   function statusBody(token) {
-    const { access, role, member } = check(token);
+    const cur = check(token);
+    const { access, role, member } = cur;
     return {
+      pass: passFor(cur),
       access, role, ...db.config,
       code: member?.code ?? null, state: member ? (member.status === 'active' && member.expires <= clock() ? 'expired' : member.status) : null,
       expires: member?.expires ?? null, paidAt: member?.paidAt ?? null, approvedAt: member?.approvedAt ?? null,
@@ -99,15 +141,16 @@ export function createAccess({ file, env = process.env, log = console, clock = (
 
   // ---------- public actions ----------
   // Start (or resume) a purchase: returns a code to put in the Cash App note.
-  function request(token, ip) {
+  // `wanted` lets a phone that remembers its code (from before the server forgot it) get the same one back.
+  function request(token, ip, wanted, device) {
     const cur = check(token);
     if (cur.role === 'admin' || (cur.member && cur.member.status !== 'denied' && cur.member.status !== 'revoked')) return { status: 200, body: statusBody(token) };
     if (limited('request', ip, 5, 3600000)) return { status: 429, body: { error: 'Too many requests. Try again later.' } };
     if (Object.values(db.members).filter((m) => m.status === 'pending').length >= 1000) return { status: 503, body: { error: 'Too many pending payments. Try again later.' } };
-    let code;
-    do code = newCode(); while (db.members[code]);
+    let code = normalizeCode(wanted);
+    if (!CODE_RE.test(code) || db.members[code]) do code = newCode(); while (db.members[code]);
     db.members[code] = { code, status: 'pending', createdAt: clock(), paidAt: null, approvedAt: null, expires: 0, tokens: [] };
-    const t = bind(code, 'member');
+    const t = bind(code, 'member', device);
     return { status: 200, token: t, body: statusBody(t) };
   }
 
@@ -125,23 +168,38 @@ export function createAccess({ file, env = process.env, log = console, clock = (
 
   // Use a paid code on another device (or the Home Screen app, which has its own cookies on iPhone).
   // The admin code works here too, so admins can't type it in the "wrong" box.
-  function redeem(code, ip) {
+  function redeem(code, ip, device) {
     if (blocked('redeem', ip, 10, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
-    if (!blocked('admin', ip, 8, 900000) && isAdminCode(code)) return adminSession();
+    if (!blocked('admin', ip, 8, 900000) && isAdminCode(code)) return adminSession(device);
     const m = db.members[normalizeCode(code)];
     if (!m || m.status === 'denied' || m.status === 'revoked') { strike('redeem', ip); return { status: 404, body: { error: 'Code not found' } }; }
-    const t = bind(m.code, 'member');
+    const t = bind(m.code, 'member', device);
     return { status: 200, token: t, body: statusBody(t) };
   }
 
-  function adminSession() {
-    const t = bind(null, 'admin');
+  // Get back in with a saved pass (phone lost its cookie, or the server lost its data).
+  function restore(pass, ip, device) {
+    if (blocked('redeem', ip, 10, 900000)) return { status: 429, body: { error: 'Too many tries. Wait 15 minutes.' } };
+    const p = verify(pass);
+    if (!p || !(p.e > clock())) { strike('redeem', ip); return { status: 401, body: { error: 'Saved access is no longer valid' } }; }
+    if (p.t === 'a') return p.f === adminFp ? adminSession(device) : { status: 401, body: { error: 'Admin code changed: enter it again' } };
+    if (p.t !== 'm' || !CODE_RE.test(p.c)) return { status: 401, body: { error: 'Saved access is no longer valid' } };
+    let m = db.members[p.c];
+    if (m && (m.status === 'revoked' || m.status === 'denied')) return { status: 403, body: { error: 'Access was revoked' } };
+    if (!m) m = db.members[p.c] = { code: p.c, status: 'active', createdAt: clock(), paidAt: null, approvedAt: clock(), expires: p.e, tokens: [], restored: true };
+    else if (m.status !== 'active' || m.expires < p.e) { m.status = 'active'; m.expires = Math.max(m.expires || 0, p.e); }
+    const t = bind(m.code, 'member', device);
     return { status: 200, token: t, body: statusBody(t) };
   }
-  function admin(code, ip) {
+
+  function adminSession(device) {
+    const t = bind(null, 'admin', device);
+    return { status: 200, token: t, body: statusBody(t) };
+  }
+  function admin(code, ip, device) {
     if (blocked('admin', ip, 8, 900000)) return { status: 429, body: { error: 'Too many wrong codes. Wait 15 minutes.' } };
     if (!isAdminCode(code)) { strike('admin', ip); return { status: 403, body: { error: 'Wrong admin code' } }; }
-    return adminSession();
+    return adminSession(device);
   }
 
   function logout(token) {
@@ -167,7 +225,13 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     scheduleSave();
     return { status: 200, body: { ok: true, member: { ...m, tokens: undefined, devices: m.tokens.length } } };
   }
-  const approve = ({ code, days }) => setStatus(code, (m) => {
+  // Approving a code the server no longer knows (data wiped before approval) recreates it.
+  const approve = ({ code, days }) => {
+    const c = normalizeCode(code);
+    if (!db.members[c] && CODE_RE.test(c)) db.members[c] = { code: c, status: 'pending', createdAt: clock(), paidAt: null, approvedAt: null, expires: 0, tokens: [] };
+    return approveExisting({ code: c, days });
+  };
+  const approveExisting = ({ code, days }) => setStatus(code, (m) => {
     const d = Number(days) > 0 ? Number(days) : db.config.days;
     m.status = 'active';
     m.approvedAt = clock();
@@ -199,5 +263,5 @@ export function createAccess({ file, env = process.env, log = console, clock = (
 
   const isAdminToken = (token) => check(token).role === 'admin';
   const hasAccess = (token) => check(token).access;
-  return { load, save, check, statusBody, request, paid, redeem, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
+  return { load, save, check, statusBody, request, paid, redeem, restore, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
 }

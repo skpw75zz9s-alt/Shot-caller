@@ -188,3 +188,79 @@ test('every user gets their own random payment code; the same user keeps theirs'
   assert.ok(firstChars.size > 20, 'characters are spread across the alphabet, not sequential');
   assert.equal(a.request(tokens[0], '10.1.0.0').body.code, codes[0], 'reopening the paywall on the same phone shows the same code');
 });
+
+// ---------- remembering paid devices ----------
+const quietLog = { log() {}, warn() {}, error() {} };
+const fresh = async (env = {}, clock) => { const a = createAccess({ file: join(mkdtempSync(join(tmpdir(), 'acc-')), 'r.json'), env, log: quietLog, clock }); await a.load(); return a; };
+
+test('a saved pass gets an approved buyer back in after the server forgets everything', async () => {
+  const env = { RAILWAY_PROJECT_ID: 'p1', RAILWAY_SERVICE_ID: 's1' }; // stable across redeploys
+  const before = await fresh(env);
+  const r = before.request(null, 'ip', undefined, 'phone-1');
+  before.approve({ code: r.body.code });
+  const st = before.statusBody(r.token);
+  assert.ok(st.pass, 'active members get a signed pass');
+  // Redeploy without a volume: brand-new empty data
+  const after = await fresh(env);
+  assert.equal(after.hasAccess(r.token), false, 'old cookie is gone');
+  const back = after.restore(st.pass, 'ip', 'phone-1');
+  assert.equal(back.status, 200);
+  assert.equal(after.hasAccess(back.token), true);
+  assert.equal(back.body.code, r.body.code, 'same code');
+  assert.equal(back.body.expires, st.expires, 'same expiry');
+});
+
+test('passes cannot be forged, reused after expiry, or used once revoked', async () => {
+  let t = 1_700_000_000_000;
+  const env = { ACCESS_SECRET: 'x' };
+  const a = await fresh(env, () => t);
+  const r = a.request(null, 'ip');
+  a.approve({ code: r.body.code, days: 1 });
+  const pass = a.statusBody(r.token).pass;
+  const [body, mac] = pass.split('.');
+  const forged = `${Buffer.from(JSON.stringify({ t: 'm', c: r.body.code, e: t + 9e12 })).toString('base64url')}.${mac}`;
+  assert.equal(a.restore(forged, 'ip2').status, 401, 'changed payload breaks the signature');
+  assert.equal((await fresh({ ACCESS_SECRET: 'other' }, () => t)).restore(pass, 'ip3').status, 401, 'different server secret');
+  t += 2 * 86400000;
+  assert.equal(a.restore(pass, 'ip4').status, 401, 'expired');
+  t -= 2 * 86400000;
+  a.revoke({ code: r.body.code });
+  assert.equal(a.restore(pass, 'ip5').status, 403, 'revoked stays revoked');
+  assert.ok(body);
+});
+
+test('admin pass restores admin, and dies if the admin code changes', async () => {
+  const a = await fresh({ ACCESS_SECRET: 'x' });
+  const adm = a.admin('PROFITBB', 'ip', 'owner-phone');
+  const pass = a.statusBody(adm.token).pass;
+  const wiped = await fresh({ ACCESS_SECRET: 'x' });
+  assert.equal(wiped.isAdminToken(wiped.restore(pass, 'ip', 'owner-phone').token), true);
+  const changed = await fresh({ ACCESS_SECRET: 'x', ADMIN_CODE: 'NEWCODE' });
+  assert.equal(changed.restore(pass, 'ip').status, 401);
+});
+
+test('signing back in on the same phone does not use up device slots', async () => {
+  const a = await fresh();
+  const r = a.request(null, 'ip', undefined, 'phone-A');
+  a.approve({ code: r.body.code });
+  const b = a.redeem(r.body.code, 'ip', 'phone-B').token;
+  const c = a.redeem(r.body.code, 'ip', 'phone-C').token;
+  let last;
+  for (let i = 0; i < 6; i++) last = a.redeem(r.body.code, 'ip', 'phone-A').token;
+  assert.equal(a.hasAccess(b), true, 'phone B still signed in');
+  assert.equal(a.hasAccess(c), true, 'phone C still signed in');
+  assert.equal(a.hasAccess(last), true);
+  assert.equal(a.listMembers().body.members[0].devices, 3);
+});
+
+test('forgotten pending code: phone gets it back, and Approve recreates it', async () => {
+  const a = await fresh();
+  const again = a.request(null, 'ip', 'SC-K7Q2X4', 'phone');
+  assert.equal(again.body.code, 'SC-K7Q2X4', 'remembered code is reused when free');
+  assert.notEqual(a.request(null, 'ip2', 'SC-K7Q2X4').body.code, 'SC-K7Q2X4', 'never hands out a code someone has');
+  assert.notEqual(a.request(null, 'ip3', 'not-a-code').body.code, 'not-a-code');
+  const b = await fresh();
+  assert.equal(b.approve({ code: 'sc-h3ppy9' }).status, 200, 'admin can approve a code the server forgot');
+  const back = b.redeem('SC-H3PPY9', 'ip', 'phone');
+  assert.equal(b.hasAccess(back.token), true);
+});

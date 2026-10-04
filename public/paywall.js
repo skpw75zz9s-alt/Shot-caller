@@ -3,6 +3,22 @@
 const $ = (id) => document.getElementById(id);
 let st = null, poll = null;
 
+// The phone remembers its code and signed pass so a paid user never has to re-enter anything:
+// if the cookie is gone or the server forgot them, the pass gets them straight back in.
+const ls = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* storage blocked */ } },
+};
+const device = ls.get('sc_device') || (() => {
+  const d = (crypto.randomUUID?.() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
+  ls.set('sc_device', d);
+  return d;
+})();
+function remember(s) {
+  if (s?.code) ls.set('sc_code', s.code);
+  if (s?.pass) ls.set('sc_pass', s.pass);
+}
+
 async function api(path, body) {
   const r = await fetch(`./api/access/${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
@@ -22,6 +38,7 @@ function render() {
   $('price').textContent = `$${st.price}`;
   $('days').textContent = `/ ${st.days} days`;
   const s = $('stage');
+  remember(st);
   if (st.access) { location.reload(); return; }
 
   const pay = (label) => `
@@ -36,7 +53,7 @@ function render() {
   if (!st.code || st.state === 'denied' || st.state === 'revoked') {
     s.innerHTML = (st.state === 'denied' ? `<p class="muted-sm">Your last code was declined. If you think that's a mistake, message $${esc(st.cashtag)} on Cash App.</p>` : '') +
       '<button id="startBtn">Get started</button>';
-    $('startBtn').onclick = () => run(async () => { st = await api('request', {}); render(); });
+    $('startBtn').onclick = () => run(async () => { st = await api('request', { device }); render(); });
     return;
   }
   // Waiting = they've said they paid since the last approval (covers renewals with the same code)
@@ -65,7 +82,33 @@ async function refresh() {
   try { st = await api('status'); render(); } catch { /* try again next tick */ }
 }
 
-$('redeemBtn').onclick = () => run(async () => { st = await api('redeem', { code: $('redeemCode').value }); if (!st.access) render(); else location.reload(); });
-$('adminBtn').onclick = () => run(async () => { await api('admin', { code: $('adminCode').value }); location.reload(); });
+$('redeemBtn').onclick = () => run(async () => { st = await api('redeem', { code: $('redeemCode').value, device }); remember(st); if (!st.access) render(); else location.reload(); });
+$('adminBtn').onclick = () => run(async () => { remember(await api('admin', { code: $('adminCode').value, device })); location.reload(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-refresh();
+
+// Sign back in automatically with what this phone remembers. The app clears the flag when it loads;
+// if we land back here without the app ever loading, the browser isn't keeping the cookie, so stop
+// for 30 seconds instead of looping.
+const justRestored = () => { try { return Number(sessionStorage.getItem('sc_restore') || 0) > Date.now() - 30000; } catch { return false; } };
+const reloadAfterRestore = (r) => {
+  remember(r);
+  try { sessionStorage.setItem('sc_restore', String(Date.now())); } catch { /* no storage */ }
+  location.reload();
+};
+async function boot() {
+  try { st = await api('status'); } catch { st = null; }
+  if (st?.access) { remember(st); location.reload(); return; }
+  if (!justRestored()) {
+    const pass = ls.get('sc_pass'), code = ls.get('sc_code');
+    if (pass) {
+      try { const r = await api('restore', { pass, device }); if (r.access) return reloadAfterRestore(r); }
+      catch (e) { if (/revoked|no longer valid|changed/i.test(e.message)) ls.set('sc_pass', null); }
+    }
+    if (code && !st?.code) {
+      try { st = await api('redeem', { code, device }); if (st.access) return reloadAfterRestore(st); }
+      catch { try { st = await api('request', { code, device }); } catch { /* render the plain paywall */ } }
+    }
+  }
+  if (st) render(); else refresh();
+}
+boot();

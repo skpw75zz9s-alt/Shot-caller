@@ -135,12 +135,14 @@ New visitors see a paywall instead of the app: **$20 for 30 days** by default, p
 
 Cash App has no API for personal $cashtags, so an admin has to approve each payment. The **Admin** panel lists people waiting for approval and active members (Approve, Deny, +days, Revoke), and lets you change the price and length. A paid code works on up to 3 devices: on a new phone, or in the iPhone Home Screen app, which keeps its own login, use *"Already paid? Enter your code"*. Renewals reuse the same code. When access ends, the app and push alerts stop until they renew.
 
+**Paid devices are remembered:** once you approve someone, their phone keeps its code and a **signed access pass**. If the phone loses its cookie, or the server loses its data (for example a redeploy without a volume), the app signs them back in automatically with the same code and expiry. They don't type anything. Passes can't be forged or edited. A revoked member stays locked out as long as the server still has its data (after a wipe, an old pass works until its expiry date). Signing back in on the same phone reuses that phone's device slot. The admin's phone is remembered the same way, and changing `ADMIN_CODE` cancels saved admin passes. Pending codes survive too: the phone gets its same code back, and **Approve code** works even if the server forgot it. The signing secret comes from `ACCESS_SECRET` if you set one, otherwise from Railway's built-in project and service IDs, which stay the same across redeploys.
+
 **Admin bypass:** enter the admin code in either box on the paywall (*Admin* or *Already paid? Enter your code*), or tap **Admin code** in Settings if you're signed in as a member. You get full access with no expiry, plus the Admin panel. It works out of the box: the source holds only a slow scrypt hash of the built-in code, never the code itself. To use a different code, set the `ADMIN_CODE` variable in Railway, which replaces the built-in one. Codes are case-insensitive. Only wrong codes count toward the lockout (8 wrong codes per 15 minutes).
 
 Everything is enforced on the server: without access, it serves only the paywall. The app's code, market data, push and admin APIs all return 401 or 403. Set `PAYWALL=off` to disable it, for example locally.
 
 **Railway setup (required for the paywall):**
-- Optional: Service → **Variables** → `ADMIN_CODE` to replace the built-in admin code
+- Optional: Service → **Variables** → `ADMIN_CODE` to replace the built-in admin code, `ACCESS_SECRET` (any long random text) to sign access passes with your own secret
 - Service → **Settings → Volumes**: mount a volume at `/data` and add the variable `DATA_DIR` = `/data`. **Without it, every redeploy wipes all paid members.**
 - Optional: `PAYWALL_PRICE` / `ACCESS_DAYS` set the starting price and length (you can also change them in the Admin panel), and `CASHTAG` changes the $cashtag.
 

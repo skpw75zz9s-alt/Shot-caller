@@ -93,10 +93,11 @@ async function accessApi(req, res, action, token) {
   const body = await readBody(req);
   const ip = clientIp(req);
   const actions = {
-    request: () => access.request(token, ip),
+    request: () => access.request(token, ip, body.code, body.device),
     paid: () => access.paid(token),
-    redeem: () => access.redeem(body.code, ip),
-    admin: () => access.admin(body.code, ip),
+    redeem: () => access.redeem(body.code, ip, body.device),
+    restore: () => access.restore(body.pass, ip, body.device),
+    admin: () => access.admin(body.code, ip, body.device),
     logout: () => access.logout(token),
   };
   if (!actions[action]) return send(res, 404, { error: 'not found' });
