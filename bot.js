@@ -160,11 +160,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
         if (s.notifyBuy && snap.live) {
           const sig = buySignal(snap.live, snap.bars, s, now);
-          if (sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig));
+          if (sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap.rows, snap.bars, s, now);
-          if (s.notifySell && check.ex.action === 'SELL') fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check));
+          if (s.notifySell && check.ex.action === 'SELL') fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot));
         }
 
         // Drop positions 5 minutes after their market closes, and alert keys after 2 hours

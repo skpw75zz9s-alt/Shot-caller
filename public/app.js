@@ -26,11 +26,13 @@ const SETTINGS_META = [
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
-  ['refreshSec', 'Refresh (sec)', 'How often to poll', 'num'],
+  ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (BTC streams live)', 'num'],
 ];
-const settings = { series: 'KXBTC15M', refreshSec: 5, waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
+// v1.6: Kalshi prices refresh every 3s (was 5s)
+if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settings.refreshSec = 3; store.set('settings', settings); store.set('settingsVersion', 3); }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, alerted: {}, history: store.get('history', []),
   positions: store.get('positions', []), trades: store.get('trades', []) };
@@ -126,7 +128,7 @@ function renderPositions(rows, bars, now) {
       const key = `${pos.id}:${ex.kind}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        if (settings.notifySell) alert(sellMessage(pos, check));
+        if (settings.notifySell) alert(sellMessage(pos, check, state.spot));
       }
     }
 
@@ -285,7 +287,7 @@ function render() {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         recordCall(m, ev, buyNow ? 'low' : 'ask');
-        if (settings.notifyBuy) alert(buyMessage(live, sig));
+        if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
       }
     }
 
@@ -297,6 +299,7 @@ function render() {
   }
 
   $('spot').textContent = usd(state.spot);
+  renderTicker(live?.strike ?? null);
   $('vol').textContent = sigmaMin ? `${(sigmaMin * 100).toFixed(3)}%` : '—';
   const r = timing?.rsi;
   $('rsi').textContent = r == null ? '—' : r.toFixed(0);
@@ -393,6 +396,67 @@ function renderHistory() {
     const tag = h.entry === 'low' ? ' · candle dip' : '';
     return `<li><span><b>${dollars(h.contracts * h.price)}</b> at ${pc(h.price)} ${sideName(h.side)}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
   }).join('');
+}
+
+// ---------- live BTC price ----------
+// Streams every trade from Coinbase's public WebSocket. Falls back to polling if it drops.
+const LIVE_WS = 'wss://ws-feed.exchange.coinbase.com';
+let ws = null, wsRetry = 0, wsTimer = null, renderQueued = false, shownSpot = null, flashTimer = null;
+const isLive = () => !!state.liveAt && Date.now() - state.liveAt < 10000;
+
+function liveConnect() {
+  if (ws || document.hidden || typeof WebSocket === 'undefined') return;
+  try { ws = new WebSocket(LIVE_WS); } catch { ws = null; return; }
+  ws.onopen = () => {
+    wsRetry = 0;
+    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker', 'heartbeat'] }));
+  };
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'heartbeat') { state.liveAt = Date.now(); return; }
+    if (m.type !== 'ticker' || !m.price) return;
+    state.spot = Number(m.price);
+    state.open24h = Number(m.open_24h) || state.open24h;
+    state.liveAt = Date.now();
+    queueRender();
+  };
+  ws.onclose = () => {
+    ws = null; state.liveAt = 0;
+    clearTimeout(wsTimer);
+    if (!document.hidden) wsTimer = setTimeout(liveConnect, Math.min(30000, 1000 * 2 ** wsRetry++));
+  };
+  ws.onerror = () => ws?.close();
+}
+function liveDisconnect() { clearTimeout(wsTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; } state.liveAt = 0; }
+
+// Price ticks arrive many times a second; redraw at most 4 times a second.
+function queueRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  setTimeout(() => { renderQueued = false; render(); }, 250);
+}
+
+function renderTicker(strike) {
+  const live = isLive(), spot = state.spot;
+  $('liveBadge').textContent = live ? 'LIVE' : spot ? 'DELAYED' : '…';
+  $('liveBadge').className = `tk-badge ${live ? 'live' : ''}`;
+  $('livePrice').textContent = spot ? `BTC ${usd(spot)}` : 'BTC —';
+  if (spot && shownSpot && spot !== shownSpot) {
+    const el = $('ticker');
+    el.classList.remove('up', 'down');
+    void el.offsetWidth; // restart the flash animation
+    el.classList.add(spot > shownSpot ? 'up' : 'down');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.remove('up', 'down'), 600);
+  }
+  shownSpot = spot;
+  const day = spot && state.open24h ? spot - state.open24h : null;
+  $('liveMove').textContent = day == null ? '' : `24h ${day >= 0 ? '+' : '-'}${usd(Math.abs(day), 0)} (${((day / state.open24h) * 100).toFixed(2)}%)`;
+  $('liveMove').className = `tk-move ${day > 0 ? 'pos' : day < 0 ? 'neg' : ''}`;
+  const d = spot && strike ? spot - strike : null;
+  $('liveTarget').textContent = d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${usd(Math.abs(d), 0)} ${d >= 0 ? 'above' : 'below'} target`;
+  $('liveTarget').className = `tk-target ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
 }
 
 // ---------- push notifications ----------
@@ -505,7 +569,7 @@ function buildSettings() {
 let timer;
 async function tick() {
   try {
-    const jobs = [refreshSpot()];
+    const jobs = isLive() ? [] : [refreshSpot()];
     if (Date.now() - state.candlesAt > 20000) jobs.push(refreshCandles());
     const closed = state.markets.length && Date.parse(state.markets[0].close_time) < Date.now();
     if (Date.now() - state.marketsAt > settings.refreshSec * 1000 || closed) jobs.push(refreshMarkets());
@@ -587,7 +651,10 @@ function sellPosition(pos, qty, price) {
 $('clearHistory').addEventListener('click', () => {
   if (confirm('Clear all call history?')) { state.history = []; store.set('history', []); render(); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) liveDisconnect();
+  else { liveConnect(); tick(); }
+});
 setInterval(render, 1000); // keep the countdown ticking between polls
 
 // Pick up new deploys: check for a new service worker on open and reload once it takes over.
@@ -602,6 +669,7 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 buildSettings();
+liveConnect();
 pushInit();
 tick();
 schedule();

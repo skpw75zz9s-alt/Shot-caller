@@ -63,19 +63,21 @@ const pc = (v) => `${(v * 100).toFixed(0)}%`;
 const dollars = (v) => `$${v.toFixed(2)}`;
 export const sideName = (side) => (side === 'YES' ? 'YES · Above' : 'NO · Below');
 
-export function buyMessage(row, sig) {
+const btc = (spot) => (spot ? ` · BTC $${Math.round(spot).toLocaleString('en-US')}` : '');
+
+export function buyMessage(row, sig, spot) {
   const { m, ev, strike } = row;
   const bot = ev.side === 'YES' ? ev.pYes : 1 - ev.pYes;
   const where = strike ? ` (BTC ${ev.side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
   return {
     tag: `buy-${m.ticker}`,
     title: `Buy the low: ${sideName(ev.side)} at ${pc(ev.price)}`,
-    body: `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(ev.contracts * ev.price)}${where}${sig.buyNow ? ' · candle dip too' : ''}`,
+    body: `Kalshi ${pc(ev.price)} vs bot ${pc(bot)} · buy ${dollars(ev.contracts * ev.price)}${where}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }
 
-export function sellMessage(pos, check) {
+export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;
-  return { tag: `sell-${pos.id}`, title: `SELL NOW: ${sideName(pos.side)} at ${pc(bid)} (${money})`, body: ex.why };
+  return { tag: `sell-${pos.id}`, title: `SELL NOW: ${sideName(pos.side)} at ${pc(bid)} (${money})`, body: `${ex.why}${btc(spot)}` };
 }

@@ -55,6 +55,7 @@ test('sends BUY THE LOW once when Kalshi is below the bot odds', async () => {
   const msg = lastPush();
   assert.match(msg.title, /^Buy the low: YES · Above at 40%$/);
   assert.match(msg.body, /Kalshi 40% vs bot \d+%.*BTC above \$100,000/);
+  assert.match(msg.body, /BTC \$100,060$/);
   assert.equal(svc.received[0].headers.urgency, 'high');
   await bot.tick(NOW + 5000);
   assert.equal(svc.received.length, 1, 'no duplicate alert');

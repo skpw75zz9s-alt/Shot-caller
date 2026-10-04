@@ -17,6 +17,16 @@
     <h1>Shot Caller <span class="tag">BTC · 15m</span></h1>
     <span id="status" class="dot" title="connection"></span>
   </header>
+  <div class="ticker" id="ticker">
+    <div class="tk-left">
+      <span class="tk-badge" id="liveBadge">…</span>
+      <span class="tk-price" id="livePrice">BTC —</span>
+    </div>
+    <div class="tk-right">
+      <span id="liveMove" class="tk-move"></span>
+      <span id="liveTarget" class="tk-target"></span>
+    </div>
+  </div>
 
   <main>
     <section id="view-live" class="view active">
@@ -81,7 +91,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v1.5 · push notifications</p>
+      <p class="fine" id="version">Shot Caller v1.6 · live price</p>
     </section>
   </main>
 
