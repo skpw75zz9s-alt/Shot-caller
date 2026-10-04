@@ -115,5 +115,6 @@ export function buyMessage(row, sig, spot) {
 export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;
-  return { tag: `sell-${pos.id}`, title: `SELL NOW: ${sideName(pos.side)} at ${pc(bid)} (${money})`, body: `${ex.why}${btc(spot)}` };
+  const cashOut = ex.net != null ? ` · cash out ${dollars(ex.net * pos.contracts)}` : '';
+  return { tag: `sell-${pos.id}`, title: `SELL NOW: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
 }

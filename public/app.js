@@ -1,6 +1,7 @@
-import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote, settlePnl } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, dipLimit, kalshiFee, quote } from './model.js';
 import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
+import { gradeWindow, mergeReports, newTracker, pendingWindows, pruneWindows, summarize, trackWindow } from './tracker.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -36,8 +37,8 @@ if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.se
 // v1.6: Kalshi prices refresh every 3s (was 5s)
 if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settings.refreshSec = 3; store.set('settings', settings); store.set('settingsVersion', 3); }
 
-const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {}, history: store.get('history', []),
-  positions: store.get('positions', []), trades: store.get('trades', []) };
+const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
+  positions: store.get('positions', []), trades: store.get('trades', []), tracker: store.get('tracker', null) || newTracker(), serverReports: [], trackerSavedAt: 0 };
 
 async function getJSON(path) {
   const r = await fetch(`${API}/${path}`);
@@ -63,29 +64,21 @@ async function refreshSpot() {
   state.spot = Number(t.price);
 }
 
-// ---------- history ----------
-function recordCall(m, ev, entry, deep) {
-  if (state.history.some((h) => h.ticker === m.ticker)) return false; // first call per market only
-  state.history.unshift({
-    ticker: m.ticker, title: m.title, side: ev.side, price: ev.price, contracts: ev.contracts, entry,
-    pModel: ev.side === 'YES' ? ev.pYes : 1 - ev.pYes, conf: deep?.score ?? null, at: Date.now(), closeTime: m.close_time, result: null,
-  });
-  state.history = state.history.slice(0, 500);
-  store.set('history', state.history);
-  return true;
+// ---------- 15-minute report cards ----------
+// The bot is graded on the whole window (see tracker.js), not on its first call.
+function saveTracker(force) {
+  if (force || Date.now() - state.trackerSavedAt > 15000) { state.trackerSavedAt = Date.now(); store.set('tracker', state.tracker); }
 }
 
-async function settleHistory() {
-  const pending = state.history.filter((h) => !h.result && Date.parse(h.closeTime) < Date.now() - 60000).slice(0, 5);
-  for (const h of pending) {
+async function settleWindows() {
+  for (const w of pendingWindows(state.tracker).slice(0, 3)) {
     try {
-      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(h.ticker)}`);
-      if (market && (market.result === 'yes' || market.result === 'no')) {
-        Object.assign(h, { result: market.result }, settlePnl(h, market.result));
-      }
+      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(w.ticker)}`);
+      if (market && (market.result === 'yes' || market.result === 'no')) gradeWindow(state.tracker, w.ticker, market.result);
     } catch { /* retry next cycle */ }
   }
-  if (pending.length) store.set('history', state.history);
+  pruneWindows(state.tracker);
+  saveTracker(true);
 
   // Positions still open when their market settled
   for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).slice(0, 3)) {
@@ -143,8 +136,8 @@ function renderPositions(snap) {
       <div class="pos-action">${head}</div>
       <div class="pos-why">${esc(ex.why)}</div>
       <div class="pos-grid">
-        <div><label>Sell at</label><b>${pc(bid)}</b></div>
-        <div><label>Worth now</label><b>${worth == null ? '—' : dollars(worth)}</b></div>
+        <div><label>Cash out at</label><b>${pc(bid)}</b></div>
+        <div><label>Cash out value</label><b>${worth == null ? '—' : dollars(worth)}</b></div>
         <div><label>P&amp;L</label><b class="${ex.pnl > 0 ? 'pos' : ex.pnl < 0 ? 'neg' : ''}">${ex.pnl == null ? '—' : money(ex.pnl)}</b></div>
         <div><label>Bot odds</label><b>${pc(pSide)}</b></div>
         <div><label>Target sell</label><b>${ex.action === 'SELL' ? 'now' : pc(ex.target)}</b></div>
@@ -163,6 +156,7 @@ function renderPositions(snap) {
 // automatically at the moment you tap "I bought it" / "I sold".
 let sheet = null;
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+const hm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 function openSheet({ title, side, sideLocked, amount, prices, at, verb, amtLabel = 'Amount ($)', hint, onOk }) {
   sheet = { side, prices, at, verb, hint, onOk };
   $('sheetTitle').textContent = title;
@@ -251,18 +245,19 @@ function renderDeep(row, sig) {
 // Kalshi % vs bot % for each side. "Low" = Kalshi's price is below the bot's odds by the min gap after fees.
 function oddsRows(ev, minEdge) {
   if (ev.pYes == null) return '';
-  const row = (side, kalshi, bot, edge) => {
-    if (kalshi == null) return `<div class="odds-row"><span class="side">${side}</span><span class="muted">no offers</span></div>`;
+  const row = (side, kalshi, bot, edge, cashOut) => {
+    if (kalshi == null) return `<div class="odds-row"><span class="side">${side}</span><span class="muted">no offers${cashOut != null ? ` · cash out ${pc(cashOut)}` : ''}</span></div>`;
     const gap = (bot - kalshi) * 100;
     const status = edge != null && edge >= minEdge ? ['low', `LOW by ${gap.toFixed(0)} pts`] : gap > 0 ? ['near', `${gap.toFixed(0)} pts low, not enough after fees`] : ['high', `${Math.abs(gap).toFixed(0)} pts high`];
     const a = Math.min(kalshi, bot) * 100, b = Math.max(kalshi, bot) * 100;
     return `<div class="odds-row ${status[0]}"><span class="side">${side}</span>` +
       `<span class="nums">Kalshi <b>${(kalshi * 100).toFixed(0)}%</b> · Bot <b>${(bot * 100).toFixed(0)}%</b></span>` +
       `<span class="track"><i class="fill" style="left:${a}%;width:${b - a}%"></i><i class="mk kalshi" style="left:${kalshi * 100}%"></i><i class="mk bot" style="left:${bot * 100}%"></i></span>` +
-      `<span class="status">${status[1]}</span></div>`;
+      `<span class="status">${status[1]}<em class="cash">Cash out ${cashOut != null ? `<b>${pc(cashOut)}</b>` : '—'}${cashOut != null ? ` · $10 → ${dollars((10 / kalshi) * (cashOut - kalshiFee(cashOut)))} now` : ''}</em></span></div>`;
   };
-  return row('YES<small>Above</small>', ev.quote.yesAsk, ev.pYes, ev.evYes) + row('NO<small>Below</small>', ev.quote.noAsk, 1 - ev.pYes, ev.evNo) +
-    '<div class="odds-legend"><i class="mk kalshi"></i> Kalshi price <i class="mk bot"></i> Bot odds</div>';
+  const q = ev.quote;
+  return row('YES<small>Above</small>', q.yesAsk, ev.pYes, ev.evYes, q.yesBid) + row('NO<small>Below</small>', q.noAsk, 1 - ev.pYes, ev.evNo, q.noBid) +
+    '<div class="odds-legend"><i class="mk kalshi"></i> Kalshi buy price <i class="mk bot"></i> Bot odds · cash out = sell now</div>';
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
@@ -272,6 +267,7 @@ function render() {
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
   const sig = live ? buySignal(live, snap, settings, now) : null;
+  if (live && trackWindow(state.tracker, snap, live, sig, settings, now)) saveTracker();
   renderDeep(live, sig);
   state.liveCall = live?.ev.side && sig?.confident ? { ...live, sig } : null;
   $('boughtBtn').hidden = !state.liveCall || state.positions.some((p) => p.ticker === live.m.ticker);
@@ -323,7 +319,6 @@ function render() {
       const key = `${m.ticker}:${ev.side}:${buyNow ? 'low' : 'call'}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        recordCall(m, { ...ev, contracts: sig.contracts }, buyNow ? 'low' : 'ask', sig.deep);
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
       }
     }
@@ -416,18 +411,48 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   ctx.fillText(Math.round(last).toLocaleString(), w - axis + 4, Math.min(h - 4, Math.max(10, Y(last) + 3)));
 }
 
+// Tiny chart of the bot's YES odds across the window; green when it ended on the winner.
+function sparkline(r) {
+  const W = 300, H = 44, yes = r.result === 'yes';
+  const pts = r.spark.map(([min, p]) => `${((min / 15) * W).toFixed(1)},${((1 - p) * H).toFixed(1)}`).join(' ');
+  const marks = (r.trades || []).map((t) => {
+    const x = ((t.at - r.openTime) / 900000) * W;
+    return `<circle cx="${x.toFixed(1)}" cy="${t.side === 'YES' ? 4 : H - 4}" r="3" class="${t.pts >= 0 ? 'win' : 'loss'}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="spark ${r.finalOdds >= 0.5 ? 'right' : 'wrong'}">
+    <rect x="0" y="0" width="${W}" height="${H / 2}" class="${yes ? 'zone-win' : 'zone-lose'}"/>
+    <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" class="mid"/>
+    <polyline points="${pts}"/>${marks}</svg>`;
+}
+
+function renderReports() {
+  const reports = mergeReports(state.tracker.reports, state.serverReports);
+  const sum = summarize(reports);
+  $('rCount').textContent = sum ? sum.windows : 0;
+  $('rOdds').textContent = sum ? pc(sum.avgWinnerOdds) : '—';
+  $('rRight').textContent = sum ? pc(sum.timeRight) : '—';
+  $('rPnl').textContent = sum ? money(sum.paperUsd) : '—';
+  sign($('rPnl'), sum?.paperUsd ?? 0);
+  $('rGrades').innerHTML = sum ? sum.grades.map((n, i) => `<span class="g${'ABCD'[i]}">${'ABCD'[i]} <b>${n}</b></span>`).join('') : '';
+  const pending = Object.values(state.tracker.windows).filter((w) => w.samples.length);
+  $('reportList').innerHTML = pending.map((w) => `<li class="report pending"><div class="rp-top"><b>${hm(w.openTime)}–${hm(w.closeTime)}</b><span class="muted">${w.closeTime > Date.now() ? 'in progress' : 'waiting for Kalshi result'} · tracking ${Math.max(1, Math.round((w.samples[w.samples.length - 1].t - w.samples[0].t) / 60000))} min</span></div></li>`).join('') +
+    reports.slice(0, 60).map((r) => `<li class="report">
+      <div class="rp-top"><b>${hm(r.openTime)}–${hm(r.closeTime)}</b>
+        <span class="pill ${r.result}">Settled ${r.result.toUpperCase()}${r.result === 'yes' ? ' · above' : ' · below'}</span>
+        <span class="grade g${r.grade}">${r.grade}</span></div>
+      ${sparkline(r)}
+      <div class="rp-stats">
+        <span>Odds on winner <b>${pc(r.avgWinnerOdds)}</b></span>
+        <span>Right side <b>${pc(r.timeRight)}</b> of the time</span>
+        <span>${r.calls} call${r.calls === 1 ? '' : 's'}${r.callsRight != null ? `, right ${pc(r.callsRight)}` : ''}</span>
+        <span>Follow-the-bot <b class="${r.paperUsd >= 0 ? 'pos' : 'neg'}">${money(r.paperUsd)}</b></span>
+        <span class="muted">Ended at ${pc(r.finalOdds)} on the winner · ${r.flips} flip${r.flips === 1 ? '' : 's'} · watched ${Math.round(r.coverage * 15)} of 15 min</span>
+      </div></li>`).join('') ||
+    '<li class="muted">Report cards appear here after each 15-minute window settles. The bot is graded on every sample across the window, not just its first call.</li>';
+}
+
 function renderHistory() {
-  const done = state.history.filter((h) => h.result);
-  const wins = done.filter((h) => h.won).length;
-  const pnl = done.reduce((a, h) => a + h.pnl, 0);
-  const lows = done.filter((h) => h.entry === 'low');
-  const lowWins = lows.filter((h) => h.won).length;
-  $('hCount').textContent = state.history.length;
-  $('hRate').textContent = done.length ? `${((wins / done.length) * 100).toFixed(0)}% (${wins}/${done.length})` : '—';
-  $('hPnl').textContent = done.length ? `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}` : '—';
-  sign($('hPnl'), pnl);
-  $('hLow').textContent = lows.length ? `${((lowWins / lows.length) * 100).toFixed(0)}% (${lowWins}/${lows.length})` : '—';
-  $('hPending').textContent = state.history.length - done.length;
+  renderReports();
   const tp = state.trades.reduce((a, t) => a + t.pnl, 0), tw = state.trades.filter((t) => t.pnl > 0).length;
   $('tPnl').textContent = state.trades.length ? money(tp) : '—';
   sign($('tPnl'), tp);
@@ -436,11 +461,12 @@ function renderHistory() {
     `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
     '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
-  $('historyList').innerHTML = state.history.slice(0, 100).map((h) => {
-    const res = h.result ? `<b class="${h.won ? 'pos' : 'neg'}">${h.won ? 'WIN' : 'LOSS'} ${h.pnl >= 0 ? '+' : '-'}$${Math.abs(h.pnl).toFixed(2)}</b>` : '<b>pending</b>';
-    const tag = h.entry === 'low' ? ' · candle dip' : '';
-    return `<li><span><b>${dollars(h.contracts * h.price)}</b> at ${pc(h.price)} ${sideName(h.side)}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${h.conf != null ? ` · conf ${h.conf}` : ''}${tag}</small></span>${res}</li>`;
-  }).join('');
+}
+
+// Server report cards cover windows while the phone was closed (needs push on).
+async function fetchServerReports() {
+  if (!pushSub || !state.pushOn) return;
+  try { state.serverReports = (await postJSON('push/report', { endpoint: pushSub.endpoint })).reports || []; } catch { /* keep last */ }
 }
 
 // ---------- live BTC price ----------
@@ -621,7 +647,8 @@ async function tick() {
     await Promise.all(jobs);
     $('status').className = 'dot ok';
     $('status').title = 'connected';
-    settleHistory();
+    settleWindows();
+    if (Date.now() - (state.reportsAt || 0) > 60000) { state.reportsAt = Date.now(); fetchServerReports(); }
   } catch (e) {
     console.warn(e);
     $('status').className = 'dot err';
@@ -697,7 +724,7 @@ function sellPosition(pos, qty, price, at) {
   } else closePosition(pos, price, 'sold', at);
 }
 $('clearHistory').addEventListener('click', () => {
-  if (confirm('Clear all call history?')) { state.history = []; store.set('history', []); render(); }
+  if (confirm('Clear the report cards stored on this phone? (Server report cards stay.)')) { state.tracker.reports = []; saveTracker(true); render(); }
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) liveDisconnect();

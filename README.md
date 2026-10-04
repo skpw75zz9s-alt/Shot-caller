@@ -51,7 +51,7 @@ Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtract
 - Kalshi spread: tight (+3) or wide (−5)
 - Kalshi's price moving with or against the call over the last 2 minutes (+3 / −5)
 
-The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (55). The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History records each call's confidence so you can check whether high scores really win more.
+The result is a 0–100 score with a grade: **A** (75+) strong, **B** (60+) good, **C** (45+) marginal, **D** weak. A call only fires, on screen and as a push, when the score is at least *Min confidence* (55). The suggested size scales with the grade (A 100%, B 75%, C 50%). The **Deep dive** card lists every factor with its points, and History's report cards show whether the bot's calls held up across each whole window.
 
 ### Candle timing (optional)
 
@@ -67,6 +67,23 @@ When the model likes a side, the app reads the last 2 hours of 1-minute candles 
 Two or more of these, after subtracting reversal candles pointing the other way, gives **dip now**. If price has just run in your favor, you get **CHASING**: you'd be buying the high. Otherwise you get **no dip yet**, with an even lower limit price to rest. That price is where the contract should trade if BTC reaches the dip level, capped so a fill still clears *Min edge*. The chart shows the candles, support, resistance, the strike, the buy-low level, and ▲/▼ markers on reversal candles.
 
 Alerts fire on every BUY THE LOW. Turn on **Also wait for candle dip** to alert only when the candles agree. History tracks a separate candle-dip hit rate so you can see whether the timing actually helps. 1-minute candle patterns are weak signals, so judge them by that number.
+
+### Cash-out prices
+
+Next to each side's buy price, the app shows Kalshi's **cash-out price**: the live bid, which is what you get if you sell right now. It also shows what $10 bought this second would cash out for after fees, so you can see the round-trip cost. Open positions show **Cash out at** (the bid) and **Cash out value** (your contracts × bid after fees), and SELL NOW alerts include the cash-out value.
+
+### 15-minute report cards (whole-window grading)
+
+The bot isn't judged on its first call. Every 5 seconds through each window it records its odds and its call, and it paper-trades **follow the bot**: buy at the ask on each call, cash out at the bid on a sell signal or when the call flips, otherwise hold to settlement. When Kalshi settles the window, it becomes a report card:
+
+- **Odds on the winner:** the average probability the bot gave the side that won, across the whole window
+- **Right side:** the share of the window the bot favored the eventual winner
+- **Calls:** how many calls it made and how many were on the winning side
+- **Follow-the-bot P&L:** paper result per $10 call, after fees on both sides
+- **Grade:** A ≥ 70% odds on the winner, B ≥ 60%, C ≥ 50%, D below
+- A sparkline of its YES odds over the 15 minutes, with dots for each paper trade
+
+History shows the totals and every card. With push on, the server grades every window even while your phone is closed, and the app merges those cards with its own, keeping whichever watched more of the window.
 
 ### Selling for profit (exit signals)
 

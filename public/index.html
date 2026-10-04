@@ -82,22 +82,22 @@
     </section>
 
     <section id="view-history" class="view">
+      <h2 class="sec">How the bot did, whole 15 minutes</h2>
       <div class="grid">
-        <div class="stat"><label>Calls</label><b id="hCount">0</b></div>
-        <div class="stat"><label>Hit rate</label><b id="hRate">—</b></div>
-        <div class="stat"><label>Paper P&amp;L</label><b id="hPnl">—</b></div>
-        <div class="stat"><label>Candle-dip entries hit rate</label><b id="hLow">—</b></div>
-        <div class="stat"><label>Pending</label><b id="hPending">0</b></div>
+        <div class="stat"><label>Windows graded</label><b id="rCount">0</b></div>
+        <div class="stat"><label>Avg odds on the winner</label><b id="rOdds">—</b></div>
+        <div class="stat"><label>Time on the right side</label><b id="rRight">—</b></div>
+        <div class="stat"><label>Follow-the-bot P&amp;L <small>($10/call)</small></label><b id="rPnl">—</b></div>
       </div>
+      <div class="grades" id="rGrades"></div>
+      <ul id="reportList" class="reports"></ul>
       <h2 class="sec">My trades</h2>
       <div class="grid">
         <div class="stat"><label>Realized P&amp;L</label><b id="tPnl">—</b></div>
         <div class="stat"><label>Trades won</label><b id="tWins">—</b></div>
       </div>
       <ul id="tradeList" class="history"></ul>
-      <h2 class="sec">Bot calls (paper)</h2>
-      <ul id="historyList" class="history"></ul>
-      <button id="clearHistory" class="ghost">Clear history</button>
+      <button id="clearHistory" class="ghost">Clear report cards on this phone</button>
     </section>
 
     <section id="view-settings" class="view">
@@ -109,7 +109,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v1.8 · deep dive + rejections</p>
+      <p class="fine" id="version">Shot Caller v1.9 · cash out + 15-min report cards</p>
     </section>
   </main>
 

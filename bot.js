@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS } from './public/model.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, snapshot } from './public/engine.js';
+import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
 
 const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS };
@@ -14,7 +15,8 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
-  let vapid = null, saveTimer = null, timer = null, busy = false;
+  let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
+  const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
   const market = { spot: null, candles: [], candlesAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
 
   // ---------- storage ----------
@@ -85,7 +87,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     });
     devices.set(subscription.endpoint, {
       endpoint: subscription.endpoint, keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
-      settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, fails: 0,
+      settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
       createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(),
     });
     scheduleSave();
@@ -112,6 +114,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (device.fails >= 20) { devices.delete(device.endpoint); scheduleSave(); }
       return false;
     }
+  }
+
+  // Report cards for the windows this phone's bot was graded on (whole 15 minutes each).
+  function report({ endpoint }) {
+    const d = devices.get(endpoint);
+    if (!d) return { status: 404, body: { error: 'not subscribed' } };
+    return { status: 200, body: { reports: d.tracker?.reports ?? [] } };
   }
 
   async function test({ endpoint }) {
@@ -159,9 +168,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           sends.push(notify(d, msg, key));
         };
 
-        if (s.notifyBuy && snap.live) {
+        if (snap.live) {
           const sig = buySignal(snap.live, snap, s, now);
-          if (sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
+          d.tracker ||= newTracker();
+          if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
+          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${snap.live.ev.side}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap, s, now);
@@ -174,6 +185,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       }
       await Promise.all(sends);
       if (sends.length) scheduleSave();
+      await gradeClosedWindows(now);
+      if (dirty && now - lastSave > 30000) { dirty = false; lastSave = now; scheduleSave(); }
     } catch (e) {
       market.lastError = e.message;
       log.warn('bot tick failed', e.message);
@@ -182,11 +195,29 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
   }
 
+  // Fetch results for closed windows (a few per tick) and grade every phone's tracker.
+  async function gradeClosedWindows(now) {
+    const pending = new Set();
+    for (const d of devices.values()) if (d.tracker) for (const w of pendingWindows(d.tracker, now)) pending.add(w.ticker);
+    for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
+      try {
+        const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
+        if (mk?.result === 'yes' || mk?.result === 'no') results.set(t, mk.result);
+      } catch { /* retry next tick */ }
+    }
+    for (const d of devices.values()) {
+      if (!d.tracker) continue;
+      for (const w of pendingWindows(d.tracker, now)) if (results.has(w.ticker)) { gradeWindow(d.tracker, w.ticker, results.get(w.ticker)); dirty = true; }
+      pruneWindows(d.tracker, now);
+    }
+    if (results.size > 500) results.delete(results.keys().next().value);
+  }
+
   function start(intervalMs = Number(env.BOT_INTERVAL_MS || 5000)) {
     if (!timer) timer = setInterval(() => tick(), intervalMs);
   }
   function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); }
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError });
-  return { load, save, start, stop, tick, sync, unsubscribe, test, status, publicKey: () => vapid.publicKey, devices };
+  return { load, save, start, stop, tick, sync, unsubscribe, test, report, status, publicKey: () => vapid.publicKey, devices };
 }

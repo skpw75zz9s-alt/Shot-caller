@@ -48,7 +48,7 @@ async function proxy(route, url, res) {
 
 // POST /api/push/{sync,test,unsubscribe} with a small JSON body
 async function pushApi(req, res, action) {
-  const handlers = { sync: bot.sync, test: bot.test, unsubscribe: bot.unsubscribe };
+  const handlers = { sync: bot.sync, test: bot.test, unsubscribe: bot.unsubscribe, report: bot.report };
   if (!handlers[action]) return send(res, 404, { error: 'not found' });
   let raw = '';
   for await (const chunk of req) {

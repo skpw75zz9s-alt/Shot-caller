@@ -22,6 +22,7 @@ const upstream = http.createServer((req, res) => {
     return res.end(JSON.stringify(rows.reverse()));
   }
   if (req.url.startsWith('/products/BTC-USD/ticker')) return res.end(JSON.stringify({ price: '100060' }));
+  if (req.url.startsWith('/markets/KXBTC15M-T1')) return res.end(JSON.stringify({ market: { ticker: 'KXBTC15M-T1', result: 'yes' } }));
   if (req.url.startsWith('/markets?')) {
     return res.end(JSON.stringify({ markets: [{
       ticker: 'KXBTC15M-T1', title: 'BTC up?', strike_type: 'greater_or_equal', floor_strike: 100000,
@@ -78,8 +79,21 @@ test('sends SELL NOW for a tracked position when the bid catches up', async () =
   Object.assign(quotes, { yes_bid: 95, yes_ask: 97 });
   await bot.tick(NOW + 15000);
   const msg = lastPush();
-  assert.match(msg.title, /^SELL NOW: YES · Above at 95% \(\+\$\d+\.\d\d\)$/);
+  assert.match(msg.title, /^SELL NOW: YES · Above at 95% · cash out \$47\.\d\d \(\+\$\d+\.\d\d\)$/);
   assert.match(msg.body, /take the profit|flipping/);
+});
+
+test('grades the whole window on the server and serves the report card', async () => {
+  assert.equal(bot.report({ endpoint: subscription.endpoint }).body.reports.length, 0);
+  await bot.tick(NOW + 8 * 60000); // after close + 1 minute: fetch the result and grade
+  const { reports } = bot.report({ endpoint: subscription.endpoint }).body;
+  assert.equal(reports.length, 1);
+  const r = reports[0];
+  assert.equal(r.ticker, 'KXBTC15M-T1');
+  assert.equal(r.result, 'yes');
+  assert.ok(r.avgWinnerOdds > 0.5 && r.timeRight === 1, 'bot favored YES the whole time');
+  assert.ok(r.calls >= 1, 'followed its call');
+  assert.equal(bot.report({ endpoint: 'nope' }).status, 404);
 });
 
 test('test endpoint pushes, and a 410 from the push service drops the device', async () => {
