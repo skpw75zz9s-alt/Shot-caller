@@ -21,7 +21,7 @@ const SETTINGS_META = [
   ['notifyUpdates', 'Notify: 15-minute updates', 'Each new window: last window\'s result and the bot\'s read on the new one', 'bool'],
   ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
-  ['maxMinutesLeft', 'Max minutes left', 'Don\'t call this early in the window', 'num'],
+  ['waitMinutes', 'Wait before calling (min)', 'Minutes into each 15-minute window before the bot makes any call', 'num'],
   ['volMultiplier', 'Vol multiplier', 'Above 1 means more conservative', 'num'],
   ['momentumWeight', 'Momentum weight', 'How much of the 10-min drift to carry forward (0 to 1)', 'num'],
   ['minProfit', 'Min profit to lock (pts)', 'How far up (after fees) before flip signs trigger a sell', 'cents'],
@@ -275,12 +275,19 @@ function render() {
 
     $('marketTitle').textContent = m.title || m.ticker;
     $('countdown').textContent = `closes in ${mmss(ev.minutesLeft)}`;
-    $('reason').textContent = call ? '' : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${settings.minConfidence}` : ev.reason;
+    const waitingToCall = ev.callsAt && now < ev.callsAt;
+    if (waitingToCall && sig.deep) { // a read on the window, not a call yet
+      $('conf').className = 'conf';
+      $('conf').textContent = `Preview · confidence ${sig.deep.score} (${sig.deep.grade}) · no call yet`;
+    }
+    $('reason').textContent = call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
+      : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${settings.minConfidence}` : ev.reason;
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
 
     // Call + entry timing
     const waiting = call && !buyNow && settings.waitForDip;
-    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : ev.side ? 'Low price, not confident' : 'No low price';
+    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW')
+      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : ev.side ? 'Low price, not confident' : 'No low price';
     callEl.textContent = call ?? 'PASS';
     callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
     $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';

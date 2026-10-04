@@ -102,6 +102,7 @@ export const DEFAULTS = {
   maxSpread: 0.10,      // skip markets with a wider yes spread
   minMinutesLeft: 0.5,  // don't call shots in the last 30 seconds
   maxMinutesLeft: 14,   // or right after open when the strike is barely set
+  waitMinutes: 5,       // watch the first 5 minutes of each window before making any call
   volMultiplier: 1.15,  // fatten tails: realized vol underestimates jumps
   momentumWeight: 0.25, // fraction of recent drift to carry forward
   kellyFraction: 0.25,
@@ -131,7 +132,11 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
   if (q.noAsk !== null) out.evNo = (1 - out.pYes) - q.noAsk - kalshiFee(q.noAsk);
 
   if (minutesLeft < s.minMinutesLeft) return { ...out, reason: 'Too close to settlement' };
-  if (minutesLeft > s.maxMinutesLeft) return { ...out, reason: 'Too early in the window' };
+  // No calls until waitMinutes into the window (early calls are mostly momentum guesses at the target)
+  const opened = Date.parse(market.open_time);
+  const closes = Date.parse(market.close_time);
+  out.callsAt = Math.max(Number.isNaN(opened) ? -Infinity : opened + s.waitMinutes * 60000, closes - s.maxMinutesLeft * 60000);
+  if (now < out.callsAt) return { ...out, reason: `Watching the first ${s.waitMinutes} minutes before calling` };
   if (q.yesBid !== null && q.yesAsk !== null && q.yesAsk - q.yesBid > s.maxSpread) return { ...out, reason: 'Spread too wide' };
 
   const best = (out.evYes ?? -1) >= (out.evNo ?? -1)

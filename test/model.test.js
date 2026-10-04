@@ -88,3 +88,16 @@ test('effectiveVol floors frozen tapes so a $2 lead is not certainty', async () 
   const p = probAbove(84812.70, 84810.92, effectiveVol(0.000001, 0.000002) * 1.15, 1);
   assert.ok(p > 0.55 && p < 0.8, `p=${p}`);
 });
+
+test('bot waits 5 minutes into the window before calling', () => {
+  const now = Date.parse('2026-10-04T04:00:00Z');
+  const mk = (minIn) => ({ open_time: new Date(now - minIn * 60000).toISOString(), close_time: new Date(now + (15 - minIn) * 60000).toISOString(),
+    strike_type: 'greater', floor_strike: 100000, yes_bid: 30, yes_ask: 32 });
+  const early = evaluate({ market: mk(2), spot: 100150, sigmaMin: 0.0008, now });
+  assert.equal(early.call, 'PASS');
+  assert.match(early.reason, /Watching the first 5 minutes/);
+  assert.equal(early.callsAt, now + 3 * 60000);
+  assert.ok(early.evYes > 0.1, 'still prices the edge while waiting');
+  assert.equal(evaluate({ market: mk(5.5), spot: 100150, sigmaMin: 0.0008, now }).call, 'YES');
+  assert.equal(evaluate({ market: mk(2), spot: 100150, sigmaMin: 0.0008, now, settings: { waitMinutes: 0 } }).call, 'YES');
+});

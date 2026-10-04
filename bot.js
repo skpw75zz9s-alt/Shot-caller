@@ -190,7 +190,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
-            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz }));
+            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz, now }));
           }
         }
         for (const pos of d.positions) {

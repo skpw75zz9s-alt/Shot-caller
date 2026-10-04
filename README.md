@@ -16,6 +16,10 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 5. **Call.** Take the better side if its EV beats *Min edge*, the spread is tight enough, and the market is inside the time window. Otherwise PASS.
 6. **Size.** Fractional Kelly on your bankroll, capped by *Max stake*.
 
+### 5-minute wait
+
+The bot watches the first **5 minutes** of every window before it makes any call. Early in a window BTC sits near the target, so calls there are mostly momentum guesses, and the paper test lost money on exactly those. During the wait, the call card shows *Watching the first 5 minutes* with a countdown, and the confidence badge is labeled as a preview. No BUY THE LOW alerts go out, follow-the-bot report cards don't trade, and the 15-minute update says when calls start. Sell signals for positions you already hold keep working the whole time. Change it with *Wait before calling* in Settings (0 = no wait).
+
 ### Live price
 
 A sticky ticker at the top streams every BTC trade from Coinbase's public WebSocket. It shows a **LIVE** badge, flashes green or red on each move, and shows the 24h change and how far BTC is **above or below the target**. The candles, odds and sell signals update with it, up to 4 times a second. If the stream drops, it falls back to polling every few seconds and shows **DELAYED**. Kalshi's own prices reload every 3 seconds (*Kalshi refresh*), because Kalshi's live feed requires an account login. Push notifications include the BTC price at the moment they fire.
@@ -186,7 +190,8 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Trailing drop | 6 pts | Sell-% drop from its peak that counts as a flip sign |
 | Odds drop | 8 pts | Bot odds drop from their peak that counts as a flip sign |
 | Max spread | 10¢ | Skip illiquid books |
-| Min / max minutes left | 0.5 / 14 | Window where calls are allowed |
+| Wait before calling | 5 min | Minutes into each window before any call |
+| Min minutes left | 0.5 | Stop calling this close to settlement |
 | Vol multiplier | 1.15 | Higher means fewer, more conservative calls |
 | Momentum weight | 0.25 | 0 means pure random walk |
 | Bankroll / Kelly fraction / Max stake | $100 / 0.25 / $25 | Position sizing |

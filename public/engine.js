@@ -119,7 +119,7 @@ function hm(t, tz) {
 }
 
 // The every-15-minutes update: how the last window went, and the read on the new one.
-export function updateMessage({ prev, row, sig, spot, tz }) {
+export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
   const { m, ev, strike } = row;
   const open = Date.parse(m.open_time), close = Date.parse(m.close_time);
   const usd = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
@@ -131,7 +131,8 @@ export function updateMessage({ prev, row, sig, spot, tz }) {
   }
   const lean = ev.pYes >= 0.5 ? `YES ${pc(ev.pYes)}` : `NO ${pc(1 - ev.pYes)}`;
   const diff = spot && strike ? ` (${spot >= strike ? '+' : '-'}${usd(Math.abs(spot - strike))})` : '';
-  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.fire ? ` · BUY THE LOW ${sideName(ev.side)} at ${pc(ev.price)}` : ''}.`);
+  const startsLater = ev.callsAt && now < ev.callsAt ? ` · calls start ${hm(ev.callsAt, tz)}` : '';
+  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.fire ? ` · BUY THE LOW ${sideName(ev.side)} at ${pc(ev.price)}` : startsLater}.`);
   return {
     tag: 'window-update',
     title: `🕒 ${hm(open, tz)}–${hm(close, tz)}${tz ? '' : ' UTC'} window · target ${strike ? usd(strike) : '—'}`,

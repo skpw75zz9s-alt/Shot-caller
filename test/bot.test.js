@@ -110,12 +110,14 @@ test('every new 15-minute window sends one update with the last result, in local
   await bot.tick(NOW + 8 * 60000 + 30000); // T2 is live, T1 already graded
   const fresh = svc.received.slice(before).map((r) => JSON.parse(phone.decrypt(r.body)));
   const updates = fresh.filter((x) => x.tag === 'window-update');
-  assert.equal(updates.length, 1); // (a BUY THE LOW for the new window may also fire)
+  assert.equal(updates.length, 1);
   const msg = updates[0];
   assert.match(msg.title, /^🕒 \d{1,2}:\d\d (AM|PM)–\d{1,2}:\d\d (AM|PM) window · target \$100,050$/);
   assert.doesNotMatch(msg.title, /UTC/);
   assert.match(msg.body, /window settled YES · bot grade [A-D] \(\d+% on the winner\)/);
   assert.match(msg.body, /Now BTC \$100,060 \(\+\$10\) · bot leans (YES|NO) \d+%/);
+  assert.match(msg.body, /calls start \d{1,2}:\d\d (AM|PM)\.$/, 'new window is 2.5 min old: bot is still watching');
+  assert.equal(fresh.filter((x) => /^Buy the low/.test(x.title)).length, 0, 'no calls in the first 5 minutes');
   const local = new Date(NOW + 6 * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
   assert.ok(msg.title.includes(local), `${msg.title} should start at ${local} New York time`);
 
