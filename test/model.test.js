@@ -106,3 +106,13 @@ test('default vol multiplier prices with measured volatility', async () => {
   const { DEFAULTS } = await import('../public/model.js');
   assert.equal(DEFAULTS.volMultiplier, 1);
 });
+
+test('final minute: the already-printed part of the settlement average counts', () => {
+  // 30s left, BTC just jumped $40 above the strike, but the first 30s of the average sat $40 below it.
+  const naive = probAbove(100040, 100000, 0.0002, 0.5);
+  const fixed = probAbove(100040, 100000, 0.0002, 0.5, 0, 1, 99960);
+  assert.ok(naive > 0.95, `naive ${naive}`);
+  assert.ok(Math.abs(fixed - 0.5) < 0.02, `average so far cancels the jump: ${fixed}`);
+  // Before the last minute the average doesn't apply
+  assert.equal(probAbove(100040, 100000, 0.0002, 3, 0, 1, 99960), probAbove(100040, 100000, 0.0002, 3));
+});

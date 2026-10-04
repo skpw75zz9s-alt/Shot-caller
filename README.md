@@ -11,7 +11,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 
 1. **Data.** Kalshi's public API gives the open market, its strike and its YES/NO quotes. Coinbase gives BTC spot and 1-minute candles. Coinbase stands in for the CF Benchmarks index (BRTI) that Kalshi settles on.
 2. **Volatility.** Per-minute realized vol is an EWMA of the last 2 hours of 1-minute returns. The *Vol multiplier* setting scales it (default 1.0: a check against real BTC showed the old 1.15 overstated actual 15-minute swings by about 1.3×, which pulled the bot's odds toward 50/50).
-3. **Fair probability.** `P(YES) = Φ((ln(S/K) + drift·t) / σ_eff)`. The variance accounts for Kalshi settling on a 60-second average, not a single print. A small, damped momentum drift is optional.
+3. **Fair probability.** `P(YES) = Φ((ln(S/K) + drift·t) / σ_eff)`. The variance accounts for Kalshi settling on a 60-second average, not a single print, and inside that last minute the part of the average already printed counts at face value. Momentum drift is off by default (real BTC/ETH/SOL candles showed recent drift doesn't carry forward).
 4. **Edge.** `EV = P(model) − ask − Kalshi fee` per contract, for both YES and NO. The fee is `ceil(0.07·p·(1−p))`.
 5. **Call.** Take the better side if its EV beats *Min edge*, the spread is tight enough, and the market is inside the time window. Otherwise PASS.
 6. **Size.** Fractional Kelly on your bankroll, capped by *Max stake*.
@@ -26,7 +26,7 @@ A sticky ticker at the top streams every BTC trade from Coinbase's public WebSoc
 
 ### Buying the low
 
-"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (4¢ by default).
+"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (8¢ by default) **even if volatility is 20% lower or 25% higher than measured** (the robust edge), and the deep-dive confidence clears 60. An edge that only exists at one volatility guess is mostly model error; in the profit simulator those trades lost money.
 
 ### Rejection trends (inside each 15-minute window)
 
@@ -90,10 +90,9 @@ The app can't see your Kalshi account. After you buy on Kalshi, tap **I bought i
 | Signal | When | Why |
 |---|---|---|
 | **Take profit** | The bid, after the sell fee, is at or above the bot's odds | The low is gone. Holding is worth no more than selling |
-| **Flip warning** | You're up at least *Min profit to lock* and any flip sign shows | Lock it in before it turns |
 | **Cut** | The bot's odds fall below what you could sell for, even at a loss | Holding is now worse than selling |
 
-Flip signs: a reversal candle against you (shooting star or bearish engulfing for YES, the mirror for NO), RSI rolling over from overbought or oversold, rejection at the Bollinger band, stalling at resistance or support, two strong candles against you, the bot's odds down *Odds drop* from their peak, or the bid down *Trailing drop* from its peak.
+There's no sell on flip signs alone. They're listed on the position card as a **Flip watch**, but selling below what the contract is worth gave up profit in testing (higher win rate, less money), and holding to settlement also skips Kalshi's exit fee. Flip signs: a reversal candle against you (shooting star or bearish engulfing for YES, the mirror for NO), RSI rolling over from overbought or oversold, rejection at the Bollinger band, stalling at resistance or support, two strong candles against you, the bot's odds down *Odds drop* from their peak, or the bid down *Trailing drop* from its peak.
 
 On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold at 72%** right after cashing out. It's also one tap: the whole position is closed at Kalshi's live cash-out price and the time is recorded, with Undo. History shows when you bought and sold. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
@@ -179,17 +178,17 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Fixed trade amount | 0 | What one-tap "I bought it" records ($). 0 = the bot's suggested amount |
 | Min confidence | 60 | Confidence (0–100) a call needs to fire |
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
-| Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
+| Min gap | 8 pts | How far Kalshi's price must be below the bot's odds, after fees, even with volatility 20% off either way |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
 | Notify: buy the low / sell now / 15-minute updates | on / on / on | Which push alerts to send |
-| Min profit to lock | 1 pt | Profit per contract, after both fees, before flip signs trigger a sell |
-| Trailing drop | 6 pts | Sell-% drop from its peak that counts as a flip sign |
-| Odds drop | 8 pts | Bot odds drop from their peak that counts as a flip sign |
+| Min profit | 1 pt | Profit per contract, after both fees, for a sell to count as taking profit |
+| Trailing drop | 6 pts | Sell-% drop from its peak that shows as a flip sign (warning only) |
+| Odds drop | 8 pts | Bot odds drop from their peak that shows as a flip sign (warning only) |
 | Max spread | 10¢ | Skip illiquid books |
 | Wait before calling | 5 min | Minutes into each window before any call |
 | Min minutes left | 0.5 | Stop calling this close to settlement |
 | Vol multiplier | 1.0 | 1 = measured volatility; higher expects bigger swings (odds closer to 50/50) |
-| Momentum weight | 0.25 | 0 means pure random walk |
+| Momentum weight | 0 | Fraction of the 10-min drift carried forward (0 = pure random walk) |
 | Bankroll / Kelly fraction / Max stake | $100 / 0.25 / $25 | Position sizing |
 
 Configure the upstream APIs with the `KALSHI_API` and `COINBASE_API` env vars.

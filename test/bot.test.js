@@ -78,16 +78,19 @@ test('respects notifyBuy = false', async () => {
   bot.unsubscribe({ endpoint: `${svc.base}/push/phone2` });
 });
 
-test('sends SELL NOW for a tracked position when the bid catches up', async () => {
+test('sends SELL NOW for a tracked position only once the bid pays what it is worth', async () => {
   bot.sync({ subscription, settings: {}, positions: [{ id: 'p1', ticker: 'KXBTC15M-T1', side: 'YES', price: 0.40, contracts: 50, closeTime: new Date(NOW + 6 * 60000).toISOString() }] });
   const before = svc.received.length;
   await bot.tick(NOW + 10000);
   assert.equal(svc.received.length, before, 'holds while the bid is low');
   Object.assign(quotes, { yes_bid: 95, yes_ask: 97 });
   await bot.tick(NOW + 15000);
+  assert.equal(svc.received.length, before, 'in profit at 95%, but still worth more than that: hold');
+  Object.assign(quotes, { yes_bid: 99, yes_ask: 100 });
+  await bot.tick(NOW + 20000);
   const msg = lastPush();
-  assert.match(msg.title, /^SELL NOW: YES · Above at 95% · cash out \$47\.\d\d \(\+\$\d+\.\d\d\)$/);
-  assert.match(msg.body, /take the profit|flipping/);
+  assert.match(msg.title, /^SELL NOW: YES · Above at 99% · cash out \$49\.\d\d \(\+\$\d+\.\d\d\)$/);
+  assert.match(msg.body, /take the profit/);
 });
 
 test('grades the whole window on the server and serves the report card', async () => {

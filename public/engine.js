@@ -31,6 +31,15 @@ function longVol(closes) {
 // Rejections are measured against "above the target"; flip them for markets where YES means below.
 const tiltSign = (m) => (/^less/.test(m.strike_type || '') ? -1 : m.strike_type === 'between' ? 0 : 1);
 
+// Kalshi settles on the average price over the last minute. Inside that minute, average what has
+// printed so far (BTC prices logged with each quote, plus the current one); before it, null.
+function settlementSoFar(log, close, spot, now) {
+  if (!spot || Number.isNaN(close) || now < close - 60000 || now >= close) return null;
+  const xs = log.filter((e) => e.t >= close - 60000 && e.s > 0).map((e) => e.s);
+  xs.push(spot);
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
 // Everything the bot knows at one moment: candles with the live bar, vol, drift, rejection trends
 // and a call per market. `quoteLog` (ticker -> [{ t, yesAsk, noAsk }]) collects Kalshi prices over time.
 export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, now = Date.now() }) {
@@ -45,11 +54,12 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     const rej = rejections(bars, strike, Date.parse(m.open_time), now);
     const pShift = rej.tilt * s.rejectionWeight * tiltSign(m);
     const q = quote(m);
-    const ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, now, settings: s });
     const log = (quoteLog[m.ticker] ||= []);
-    if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes });
+    const settleAvg = settlementSoFar(log, Date.parse(m.close_time), spot, now);
+    const ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, settleAvg, now, settings: s });
+    if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes, s: spot });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
-    return { m, strike, rej, ev };
+    return { m, strike, rej, ev, settleAvg };
   });
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   return { now, bars, spot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
@@ -59,36 +69,43 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
 export const leanSide = (ev) =>
   ev.side ?? (ev.evYes == null && ev.evNo == null ? null : (ev.evYes ?? -1) >= (ev.evNo ?? -1) ? 'YES' : 'NO');
 
-// Should this market fire a BUY THE LOW alert right now? Runs the deep dive and only fires when the
-// confidence score clears minConfidence; position size scales with confidence.
+// Edge for `side` priced with `volScale` × the bot's volatility, keeping only drift and rejection tilt
+// that work AGAINST the call (anything that helps it is dropped), so it can only be harder than the real edge.
+function edgeUnder(row, snap, s, side, volScale) {
+  const dir = side === 'YES' ? 1 : -1;
+  const drift = (snap.driftMin || 0) * s.momentumWeight;
+  const keptDrift = drift * dir > 0 ? 0 : drift;
+  const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
+  const p0 = probYes(row.m, row.strike, snap.spot, snap.sigmaMin * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg);
+  const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
+  if (p0 == null || ask == null) return null;
+  const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));
+  return (side === 'YES' ? pS : 1 - pS) - ask - kalshiFee(ask);
+}
+
+// Should this market fire a BUY THE LOW alert right now? Two gates, both tested for profit:
+// 1) robust edge: the gap must clear minEdge even if volatility is 20% lower or 25% higher than measured
+//    (an edge that only exists at one vol guess is mostly model error, and those trades lost money);
+// 2) the deep dive's confidence must clear minConfidence. Position size scales with confidence.
 export function buySignal(row, snap, settings, now = snap.now) {
   const s = { ...DEFAULTS, ...settings };
   const side = leanSide(row.ev);
   const timing = entrySignal(snap.bars, side, now);
-  // Stress test: would the edge survive 25% more volatility with any momentum or rejection tilt that
-  // HELPS the call removed? (Adverse momentum/tilt is kept: a stress test should only make it harder.)
-  let stressEdge = null;
+  let stressEdge = null, robustEdge = null;
   if (side && snap.sigmaMin && snap.spot && row.ev.minutesLeft > 0) {
-    const dir = side === 'YES' ? 1 : -1;
-    const drift = (snap.driftMin || 0) * s.momentumWeight;
-    const keptDrift = drift * dir > 0 ? 0 : drift;
-    const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
-    const p0 = probYes(row.m, row.strike, snap.spot, snap.sigmaMin * s.volMultiplier * 1.25, row.ev.minutesLeft, keptDrift);
-    const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
-    if (p0 != null && ask != null) {
-      const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));
-      stressEdge = (side === 'YES' ? pS : 1 - pS) - ask - kalshiFee(ask);
-    }
+    const edges = [0.8, 1, 1.25].map((k) => edgeUnder(row, snap, s, side, k));
+    if (edges.every((e) => e != null)) { stressEdge = edges[2]; robustEdge = Math.min(...edges); }
   }
   const deep = deepDive({
     ev: row.ev, side, rej: row.rej, timing, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin,
     spot: snap.spot, strike: row.strike, kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now),
     bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge, stressEdge,
   });
-  const confident = !!deep && deep.score >= s.minConfidence;
+  const robust = robustEdge != null && robustEdge >= s.minEdge - 1e-9;
+  const confident = !!deep && deep.score >= s.minConfidence && robust;
   const buyNow = !!row.ev.side && timing.state === 'NOW';
   const contracts = row.ev.side ? Math.max(1, Math.floor(row.ev.contracts * (deep ? deep.sizeMult : 0.5))) : 0;
-  return { side, timing, deep, confident, buyNow, contracts, fire: !!row.ev.side && confident && (buyNow || !s.waitForDip) };
+  return { side, timing, deep, robustEdge, robust, confident, buyNow, contracts, fire: !!row.ev.side && confident && (buyNow || !s.waitForDip) };
 }
 
 // Exit check for one tracked position. Updates pos.peakBid / pos.peakP after the check

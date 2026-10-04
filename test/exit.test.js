@@ -24,19 +24,22 @@ test('takes profit when the bid catches up to the bot odds', () => {
   assert.ok(ex.pnl > 2.5);
 });
 
-test('sells on any flip sign while in profit, but not at a loss', () => {
+test('flip signs are shown but never force a sale below what the contract is worth', () => {
   const win = exitSignal({ pos, bid: 0.50, pSide: 0.66, flips: ['Shooting star'], minutesLeft: 6 });
-  assert.equal(win.action, 'SELL');
-  assert.equal(win.kind, 'flip');
-  const lose = exitSignal({ pos, bid: 0.38, pSide: 0.66, flips: ['Shooting star'], minutesLeft: 6 });
-  assert.equal(lose.action, 'HOLD');
+  assert.equal(win.action, 'HOLD');
+  assert.deepEqual(win.signs, ['Shooting star']);
+  assert.match(win.why, /flip signs/);
+  const caught = exitSignal({ pos, bid: 0.70, pSide: 0.66, flips: ['Shooting star'], minutesLeft: 6 });
+  assert.equal(caught.action, 'SELL');
+  assert.equal(caught.kind, 'take');
 });
 
-test('trailing bid and falling odds count as flip signs', () => {
+test('trailing bid and falling odds are listed as flip signs', () => {
   const trail = exitSignal({ pos: { ...pos, peakBid: 0.58 }, bid: 0.52, pSide: 0.70, minutesLeft: 6 });
-  assert.equal(trail.kind, 'flip');
+  assert.equal(trail.action, 'HOLD');
+  assert.ok(trail.signs.some((x) => /peak/.test(x)));
   const odds = exitSignal({ pos: { ...pos, peakP: 0.80 }, bid: 0.50, pSide: 0.70, minutesLeft: 6 });
-  assert.equal(odds.kind, 'flip');
+  assert.ok(odds.signs.some((x) => /Bot odds down/.test(x)));
 });
 
 test('cuts when the bot odds fall below what it sells for', () => {

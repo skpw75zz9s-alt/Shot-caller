@@ -192,3 +192,17 @@ test('stress test never makes a call look better than the real edge', () => {
   const m2 = st.label.match(/\+([\d.]+) pts/);
   if (m2) assert.ok(Number(m2[1]) / 100 <= realEdge + 1e-9, `stressed ${m2[1]} pts must not exceed real ${(realEdge * 100).toFixed(1)} pts`);
 });
+
+test('robust edge: no call when the gap only exists at one volatility guess', async () => {
+  const { snapshot, buySignal } = await import('../public/engine.js');
+  const OPEN2 = Date.parse('2026-10-04T12:00:00Z'), now = OPEN2 + 8 * 60000;
+  const bars = Array.from({ length: 130 }, (_, i) => { const t = now - (130 - i) * 60000, c = 100000 + Math.sin(i) * 12; return { t, o: c - 3, h: c + 8, l: c - 8, c }; });
+  const mk = (yb) => [{ ticker: 'R1', open_time: new Date(OPEN2).toISOString(), close_time: new Date(OPEN2 + 900000).toISOString(), strike_type: 'greater_or_equal', floor_strike: 100000, yes_bid: yb, yes_ask: yb + 2 }];
+  const at = (yb) => { const snap = snapshot({ markets: mk(yb), candles: bars, spot: 100060, settings: {}, now }); return buySignal(snap.live, snap, {}, now); };
+  // Find a price where the point estimate clears 8 pts but the robust edge doesn't
+  let thin = null;
+  for (let yb = 90; yb >= 40 && !thin; yb--) { const s = at(yb); if (s.side && s.robustEdge != null && s.robustEdge < 0.08) { const snap = snapshot({ markets: mk(yb), candles: bars, spot: 100060, settings: {}, now }); if (snap.live.ev.edge >= 0.08) thin = s; } }
+  assert.ok(thin, 'found a gap that only exists at the point estimate');
+  assert.equal(thin.fire, false);
+  assert.equal(thin.robust, false);
+});

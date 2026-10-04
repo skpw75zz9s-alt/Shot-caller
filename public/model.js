@@ -45,10 +45,17 @@ export function settleVariance(sigmaMin, minutesLeft, w = 1) {
   return (sigmaMin * sigmaMin * t ** 3) / (3 * w * w);
 }
 
-// P(settlement value > K)
-export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1) {
+// P(settlement value > K). In the final `w` minutes part of the settlement average is already printed:
+// pass `settleAvg` (the average of prices since close − w) so the locked-in part counts at face value.
+export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1, settleAvg = null) {
+  const t = Math.max(minutesLeft, 0);
+  if (settleAvg != null && t < w) {
+    const mean = (1 - t / w) * settleAvg + (t / w) * S * Math.exp(driftMin * t);
+    const sd = S * Math.sqrt(settleVariance(sigmaMin, t, w));
+    return sd > 0 ? normCdf((mean - K) / sd) : mean > K ? 1 : mean < K ? 0 : 0.5;
+  }
   const variance = settleVariance(sigmaMin, minutesLeft, w);
-  const mu = Math.log(S / K) + driftMin * Math.max(minutesLeft, 0);
+  const mu = Math.log(S / K) + driftMin * t;
   if (variance <= 0) return mu > 0 ? 1 : mu < 0 ? 0 : 0.5;
   return normCdf(mu / Math.sqrt(variance));
 }
@@ -78,11 +85,11 @@ export function quote(m) {
 }
 
 // Model probability that the market resolves YES, based on its strike definition.
-export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin) {
+export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin, settleAvg = null) {
   const type = m.strike_type || 'greater';
   const floor = num(m.floor_strike) ?? strike;
   const cap = num(m.cap_strike);
-  const above = (k) => probAbove(S, k, sigmaMin, minutesLeft, driftMin);
+  const above = (k) => probAbove(S, k, sigmaMin, minutesLeft, driftMin, 1, settleAvg);
   switch (type) {
     case 'greater':
     case 'greater_or_equal':
@@ -98,13 +105,13 @@ export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin) {
 }
 
 export const DEFAULTS = {
-  minEdge: 0.04,        // required EV per contract after fees, in dollars
+  minEdge: 0.08,        // required EV per contract after fees, in dollars, even with vol 20% off either way
   maxSpread: 0.10,      // skip markets with a wider yes spread
   minMinutesLeft: 0.5,  // don't call shots in the last 30 seconds
   maxMinutesLeft: 14,   // or right after open when the strike is barely set
   waitMinutes: 5,       // watch the first 5 minutes of each window before making any call
   volMultiplier: 1.0,   // 1 = price with measured vol (1.15 overstated real 15-min swings ~1.3x)
-  momentumWeight: 0.25, // fraction of recent drift to carry forward
+  momentumWeight: 0,    // fraction of recent drift to carry forward (real BTC/ETH/SOL data: drift doesn't carry)
   kellyFraction: 0.25,
   bankroll: 100,
   maxStake: 25,
@@ -115,14 +122,14 @@ export const DEFAULTS = {
 
 // Decide the call for one market.
 // pShift nudges P(YES) by evidence the price model can't see (e.g. rejection trends), in probability points.
-export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift = 0, now = Date.now(), settings = {} }) {
+export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift = 0, settleAvg = null, now = Date.now(), settings = {} }) {
   const s = { ...DEFAULTS, ...settings };
   const minutesLeft = (Date.parse(market.close_time) - now) / 60000;
   const q = quote(market);
   const out = { minutesLeft, quote: q, pYes: null, pBase: null, pShift: 0, evYes: null, evNo: null, call: 'PASS', reason: '', side: null, price: null, contracts: 0, edge: 0 };
 
   if (!spot || !sigmaMin) return { ...out, reason: 'Waiting for price data' };
-  const p = probYes(market, strike, spot, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight);
+  const p = probYes(market, strike, spot, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight, settleAvg);
   if (p === null) return { ...out, reason: 'Unknown strike' };
   out.pBase = p;
   out.pShift = pShift;
@@ -206,12 +213,15 @@ export function sellTarget(value) {
 
 export const EXIT_DEFAULTS = {
   minProfit: 0.01, // per contract after both fees, to count as "in profit"
-  trail: 0.06,     // bid falling this far from its peak is a flip sign
-  oddsDrop: 0.08,  // bot odds falling this far from their peak is a flip sign
+  trail: 0.06,     // bid falling this far from its peak is a flip sign (shown, not a sell by itself)
+  oddsDrop: 0.08,  // bot odds falling this far from their peak is a flip sign (shown, not a sell by itself)
 };
 
 // When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
 // bid is what the side sells for right now; pSide is the bot's current odds for that side.
+// Sells only when Kalshi pays at least what holding is worth (net >= pSide). Flip signs are shown as a
+// watch list but never force a sale below value: in testing, those early sells raised the win rate and
+// lowered the profit (holding to settlement also skips the exit fee).
 export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings = {} }) {
   const s = { ...EXIT_DEFAULTS, ...settings };
   if (minutesLeft <= 0) return { action: 'WAIT', kind: 'closed', why: 'Market closed. Settles at $1 or $0.', signs: [] };
@@ -234,9 +244,8 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
       ? { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` }
       : { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };
   }
-  if (inProfit && signs.length) return { ...base, signs, action: 'SELL', kind: 'flip', why: `Price may be flipping: ${signs.join(' · ')}` };
   return {
     ...base, signs, action: 'HOLD', kind: 'hold',
-    why: `Bot gives it ${c(pSide)}. Selling now gets you ${c(net)} after fees.${inProfit ? ' In profit, no flip signs.' : ''}`,
+    why: `Bot gives it ${c(pSide)}. Selling now gets you ${c(net)} after fees, less than it's worth${signs.length ? ', even with flip signs showing' : ''}. Sell at ${c(target)} or hold to settlement.`,
   };
 }
