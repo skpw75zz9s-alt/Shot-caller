@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
 
@@ -56,7 +56,12 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     const q = quote(m);
     const log = (quoteLog[m.ticker] ||= []);
     const settleAvg = settlementSoFar(log, Date.parse(m.close_time), spot, now);
-    const ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, settleAvg, now, settings: s });
+    let ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, settleAvg, now, settings: s });
+    // Respect the market: pull the bot's odds part of the way toward Kalshi's mid
+    if (s.marketWeight > 0 && ev.pYes != null && q.yesBid != null && q.yesAsk != null) {
+      const mid = (q.yesBid + q.yesAsk) / 2;
+      ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift: pShift + s.marketWeight * (mid - ev.pYes), settleAvg, now, settings: s });
+    }
     if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes, s: spot });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
     return { m, strike, rej, ev, settleAvg };
@@ -110,8 +115,20 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const price = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     return { side, timing, deep, robustEdge, point, price, score: deep?.score ?? -1 };
   };
-  const passes = (a, edgeNeed, confNeed) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 &&
-    a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && a.score >= confNeed;
+  // Has the gap for `side` held for persistSec? (quoteLog keeps Kalshi asks and the bot's odds every ~2s)
+  const persisted = (side, edgeNeed) => {
+    if (!(s.persistSec > 0)) return true;
+    const log = snap.quoteLog?.[row.m.ticker] || [];
+    const since = now - s.persistSec * 1000;
+    if (!log.length || log[0].t > since + 2500) return false; // not watched long enough yet
+    return log.filter((e) => e.t >= since).every((e) => {
+      const ask = side === 'YES' ? e.yesAsk : e.noAsk;
+      const p = side === 'YES' ? e.p : 1 - e.p;
+      return ask != null && p != null && p - ask - kalshiFee(ask) >= edgeNeed - 1e-9;
+    });
+  };
+  const passes = (a, edgeNeed, confNeed, persist = false) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 && a.point <= s.maxEdge &&
+    a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && a.score >= confNeed && (!persist || persisted(a.side, edgeNeed));
 
   const mem = memory ? (memory[row.m.ticker] ||= {}) : {};
   const called = mem.side ?? null, lean = leanSide(ev);
@@ -127,12 +144,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (passes(b, ...need.switching)) { pick = b; stance = 'switching'; }
+      if (passes(b, ...need.switching, true)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new)) pick = shown;
+    if (passes(shown, ...need.new, true)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
@@ -142,9 +159,11 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const buyNow = !!callSide && pick.timing.state === 'NOW';
   // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
   const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
+  // Max price: the most you can pay and still clear limitEdgeFrac × minEdge with vol 20% off either way
+  const limit = callSide && pick.robustEdge != null ? maxPay(pick.robustEdge + pick.price + kalshiFee(pick.price), s.minEdge * s.limitEdgeFrac) : null;
   if (fire) { mem.side = callSide; mem.at = now; }
   return {
-    side: a?.side ?? lean, callSide, price: pick?.price ?? null, edge: pick?.point ?? null,
+    side: a?.side ?? lean, callSide, price: pick?.price ?? null, limit, edge: pick?.point ?? null,
     timing: a?.timing ?? entrySignal(snap.bars, null, now), deep: a?.deep ?? null, robustEdge: a?.robustEdge ?? null,
     robust: a?.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9, confident: !!callSide, buyNow, contracts, fire,
     stance: callSide ? (callSide === called || !called ? (called ? 'holding' : 'new') : 'switching') : stance, called, calledAt: mem.at ?? null, edgeNeed, confNeed,
@@ -204,8 +223,8 @@ export function buyMessage(row, sig, spot) {
   const where = strike ? ` (BTC ${side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
   return {
     tag: `buy-${m.ticker}`,
-    title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}`,
-    body: `Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
+    title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
+    body: `${sig.limit ? `Act now: buy only at ${pc(sig.limit)} or less, skip if it's higher. ` : ''}Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
       `${sig.deep ? ` · confidence ${sig.deep.score}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }

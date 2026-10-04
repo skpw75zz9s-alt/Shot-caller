@@ -319,7 +319,11 @@ function render() {
     }
 
     if (!call) $('order').textContent = '';
-    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)} · +${(sig.edge * 100).toFixed(0)} pts edge`;
+    else if (buyNow || !settings.waitForDip) {
+      const age = sig.calledAt ? Math.round((now - sig.calledAt) / 1000) : 0;
+      $('order').textContent = `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)}` +
+        `${sig.limit ? ` · max ${pc(sig.limit)}, skip if higher` : ''} · +${(sig.edge * 100).toFixed(0)} pts edge${age >= 5 ? ` · called ${age}s ago` : ''}`;
+    }
     else $('order').textContent = limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(call)} (now ${pc(sig.price)})` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip

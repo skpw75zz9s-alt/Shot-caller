@@ -102,6 +102,28 @@ Security:
 - The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
 
+### Max price and speed (why calls can lose money by hand)
+
+Every call now comes with a **max price**: *"Buy YES at 40% · max 47%, skip if higher."* That's the most you can pay and still clear half the min gap with volatility 20% off either way. If Kalshi's price has run past it by the time you get there, skip the trade. Buy pushes say *"Act now"* and expire after 45 seconds, so a stale call never arrives late. The call card shows how long ago the call was made.
+
+Why this matters: in the profit simulator, the same calls that made **+$459 per 200 windows when bought instantly lost $193 when bought 5 seconds later**. Much of the bot's edge is Kalshi lagging BTC by a few seconds, and that's gone by the time a person opens Kalshi.
+
+Results with the max price, by how fast you buy:
+
+| Buy within | Simulator result |
+|---|---|
+| ~5s | Profitable |
+| ~10s | Modest profit in most market types |
+| ~30s | Roughly break-even |
+| ~60s | Losing |
+
+Without the max price, every delay lost more.
+
+Things tested and left off by default:
+- **Requiring the edge to hold 30–60s** before calling: almost no calls left.
+- **Blending in Kalshi's price** (*marketWeight*): fewer calls, no gain.
+- **Capping edges** that look too good (*maxEdge*): steadier, but not more profitable.
+
 ### Trusting its gut
 
 The bot sticks with its calls instead of reacting to every tick:

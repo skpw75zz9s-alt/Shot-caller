@@ -122,6 +122,10 @@ export const DEFAULTS = {
   holdConfDrop: 10,     // ...and confidence is no more than 10 below minConfidence
   switchEdgeExtra: 0.04, // calling the OTHER side in the same window needs 4 pts more gap...
   switchConfExtra: 15,   // ...and 15 more confidence
+  persistSec: 0,        // a new call needs its gap to have held this long (edges that last survive your reaction time)
+  limitEdgeFrac: 0.5,   // max price on a call: still clears this share of minEdge even with vol 20% off
+  marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
+  maxEdge: 1,           // a gap bigger than this is too good to be true (usually a lag that's gone before you can buy)
 };
 
 // Decide the call for one market.

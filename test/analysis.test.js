@@ -219,6 +219,12 @@ test('sticks with its call: holds at a lower bar, and switching sides needs clea
   assert.equal(first.callSide, 'YES');
   assert.equal(first.fire, true);
   assert.equal(memory.S1.side, 'YES');
+  // Max price: at or above today's price, and buying there still clears half the min gap with vol 20% off
+  assert.ok(first.limit >= first.price, `limit ${first.limit} vs price ${first.price}`);
+  const { kalshiFee } = await import('../public/model.js');
+  const pRobust = first.robustEdge + first.price + kalshiFee(first.price);
+  assert.ok(pRobust - first.limit - kalshiFee(first.limit) >= 0.04 - 1e-9);
+  assert.ok(pRobust - (first.limit + 0.01) - kalshiFee(first.limit + 0.01) < 0.04, 'and it is the highest such price');
   // Raise Kalshi's YES price until a fresh call would no longer fire; the existing call still stands
   let held = null;
   for (let yb = 20; yb <= 90 && !held; yb++) {

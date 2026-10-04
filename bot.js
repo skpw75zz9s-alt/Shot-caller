@@ -114,9 +114,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     return { status: 200, body: { ok: true } };
   }
 
-  async function notify(device, msg, topic) {
+  async function notify(device, msg, topic, ttl = 300) {
     try {
-      const status = await sendPush(device, { ...msg, url: './' }, vapid, { topic });
+      const status = await sendPush(device, { ...msg, url: './' }, vapid, { topic, ttl });
       if (status === 404 || status === 410) { devices.delete(device.endpoint); scheduleSave(); return false; }
       if (status >= 400) throw new Error(`push service ${status}`);
       device.fails = 0;
@@ -182,10 +182,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, now });
-        const fire = (key, msg) => {
+        const fire = (key, msg, ttl) => {
           if (d.alerted[key]) return;
           d.alerted[key] = now;
-          sends.push(notify(d, msg, key));
+          sends.push(notify(d, msg, key, ttl));
         };
 
         if (snap.live) {
@@ -193,7 +193,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const sig = buySignal(snap.live, snap, s, now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot));
+          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot), 45); // a buy call is stale within a minute: never deliver it late
           if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;

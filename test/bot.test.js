@@ -61,10 +61,11 @@ test('sends BUY THE LOW once when Kalshi is below the bot odds', async () => {
   await bot.tick(NOW);
   assert.equal(svc.received.length, 1);
   const msg = lastPush();
-  assert.match(msg.title, /^Buy the low: YES · Above at 40%$/);
-  assert.match(msg.body, /Kalshi 40% vs bot \d+%.*BTC above \$100,000/);
+  assert.match(msg.title, /^Buy the low: YES · Above at 40% · max \d+%$/);
+  assert.match(msg.body, /^Act now: buy only at \d+% or less, skip if it's higher\. Kalshi 40% vs bot \d+%.*BTC above \$100,000/);
   assert.match(msg.body, /BTC \$100,060$/);
   assert.equal(svc.received[0].headers.urgency, 'high');
+  assert.equal(svc.received[0].headers.ttl, '45', 'a late buy alert is worse than none: expires in 45s');
   await bot.tick(NOW + 5000);
   assert.equal(svc.received.length, 1, 'no duplicate alert');
 });
