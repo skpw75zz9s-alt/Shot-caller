@@ -42,7 +42,7 @@
         <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
-        <button id="boughtBtn" class="buy-btn" hidden>I bought it: track my exit</button>
+        <button id="boughtBtn" class="buy-btn" hidden>I bought it</button>
         <div class="entry" id="entry" hidden></div>
       </div>
 
@@ -109,24 +109,11 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v1.9 · cash out + 15-min report cards</p>
+      <p class="fine" id="version">Shot Caller v2.0 · one-tap tracking</p>
     </section>
   </main>
 
-  <div id="sheet" class="sheet" hidden>
-    <div class="sheet-card">
-      <h3 id="sheetTitle"></h3>
-      <div class="side-toggle" id="sheetSide">
-        <button type="button" data-side="YES">YES · Above</button>
-        <button type="button" data-side="NO">NO · Below</button>
-      </div>
-      <label><span id="amtLabel">Amount ($)</span><input id="sheetAmt" inputmode="decimal"></label>
-      <div class="locked-price" id="sheetLocked"></div>
-      <p class="sheet-hint" id="sheetHint"></p>
-      <button id="sheetOk">Save</button>
-      <button id="sheetCancel" class="ghost">Cancel</button>
-    </div>
-  </div>
+  <div id="toast" class="toast" hidden><span id="toastText"></span><button id="toastUndo">Undo</button></div>
 
   <nav>
     <button data-view="live" class="active">Live</button>

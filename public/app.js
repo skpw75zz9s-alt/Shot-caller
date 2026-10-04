@@ -26,12 +26,13 @@ const SETTINGS_META = [
   ['minProfit', 'Min profit to lock (pts)', 'How far up (after fees) before flip signs trigger a sell', 'cents'],
   ['trail', 'Trailing drop (pts)', 'Sell if the sell % falls this far from its peak while in profit', 'cents'],
   ['oddsDrop', 'Odds drop (pts)', 'Sell if the bot\'s odds fall this far from their peak while in profit', 'cents'],
+  ['tradeAmount', 'Fixed trade amount ($)', 'What "I bought it" records each time. 0 = use the bot\'s suggested amount', 'num'],
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
   ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (BTC streams live)', 'num'],
 ];
-const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
@@ -97,20 +98,24 @@ const entryCost = (pos) => pos.price + kalshiFee(pos.price);
 function savePositions() { store.set('positions', state.positions); }
 
 function openPosition(m, side, price, contracts, at = Date.now()) {
-  state.positions.push({ id: String(at), ticker: m.ticker, title: m.title, closeTime: m.close_time, side, price, contracts, at, peakBid: null, peakP: null });
+  const pos = { id: String(at), ticker: m.ticker, title: m.title, closeTime: m.close_time, side, price, contracts, at, peakBid: null, peakP: null };
+  state.positions.push(pos);
   savePositions();
   pushSyncSoon();
+  return pos;
 }
 
 // exit = sale price in dollars, or 1/0 when it settled
 function closePosition(pos, exit, how, at = Date.now()) {
   const proceeds = how === 'settled' ? exit : exit - kalshiFee(exit);
-  state.trades.unshift({ ...pos, exit, how, closedAt: at, pnl: (proceeds - entryCost(pos)) * pos.contracts });
+  const trade = { ...pos, exit, how, closedAt: at, pnl: (proceeds - entryCost(pos)) * pos.contracts };
+  state.trades.unshift(trade);
   state.trades = state.trades.slice(0, 500);
   state.positions = state.positions.filter((p) => p.id !== pos.id);
   store.set('trades', state.trades);
   savePositions();
   pushSyncSoon();
+  return trade;
 }
 
 function renderPositions(snap) {
@@ -145,53 +150,26 @@ function renderPositions(snap) {
       </div>
       <div class="pos-where">Bought ${clock(pos.at)} · wins if BTC is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
       <ul class="flips"><span>Flip watch</span>${signs}</ul>
-      <div class="pos-btns"><button data-act="sell" data-id="${pos.id}">I sold</button><button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
+      <div class="pos-btns"><button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button><button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
   }).join('');
   $('positions').innerHTML = html;
 }
 
-// ---------- bottom sheet for entering fills ----------
-// Trades are entered as just a dollar amount. The Kalshi % and the time are locked in
-// automatically at the moment you tap "I bought it" / "I sold".
-let sheet = null;
+// ---------- one-tap tracking ----------
+// "I bought it" / "I sold" are single taps: side, Kalshi's live price and the time are locked in
+// automatically, and the amount is the bot's suggestion (or the fixed amount from Settings).
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 const hm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-function openSheet({ title, side, sideLocked, amount, prices, at, verb, amtLabel = 'Amount ($)', hint, onOk }) {
-  sheet = { side, prices, at, verb, hint, onOk };
-  $('sheetTitle').textContent = title;
-  $('amtLabel').textContent = amtLabel;
-  $('sheetAmt').value = amount.toFixed(2);
-  $('sheetSide').classList.toggle('locked', !!sideLocked);
-  sheetSync();
-  $('sheet').hidden = false;
+let undoTimer = null;
+function toast(text, undo) {
+  $('toastText').textContent = text;
+  $('toastUndo').hidden = !undo;
+  $('toastUndo').onclick = () => { undo?.(); $('toast').hidden = true; render(); };
+  $('toast').hidden = false;
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => { $('toast').hidden = true; }, 7000);
 }
-function sheetRead() {
-  return { side: sheet.side, amount: Number($('sheetAmt').value), price: sheet.prices[sheet.side] ?? null, at: sheet.at };
-}
-function sheetSync() {
-  $('sheetSide').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.side === sheet.side));
-  const v = sheetRead();
-  $('sheetLocked').innerHTML = v.price
-    ? `${sheet.verb} at <b>${pc(v.price)}</b> · <b>${clock(v.at)}</b><small>Kalshi's live price when you tapped</small>`
-    : `<span class="neg">No Kalshi price for ${sideName(sheet.side)} right now</span>`;
-  $('sheetOk').disabled = !v.price;
-  $('sheetHint').textContent = v.amount > 0 && v.price ? sheet.hint(v) : v.price ? 'Enter how many dollars' : '';
-}
-$('sheetSide').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-side]');
-  if (b && !$('sheetSide').classList.contains('locked')) { sheet.side = b.dataset.side; sheetSync(); }
-});
-$('sheetAmt').addEventListener('input', sheetSync);
-$('sheetCancel').addEventListener('click', () => { $('sheet').hidden = true; });
-$('sheetOk').addEventListener('click', () => {
-  const v = sheetRead();
-  if (!v.price) return;
-  if (!(v.amount > 0)) return window.alert('Enter a dollar amount.');
-  $('sheet').hidden = true;
-  sheet.onOk(v);
-  render();
-});
 
 // ---------- alerts ----------
 // In-app alert. When push is on, the server sends the notification, so only vibrate here.
@@ -680,15 +658,16 @@ $('nudgeX').addEventListener('click', () => { store.set('nudgeDismissed', true);
 $('boughtBtn').addEventListener('click', () => {
   const live = state.liveCall;
   if (!live) return;
+  const at = Date.now();
   const { m, ev } = live;
-  const strike = live.strike;
   const q = quote(state.markets.find((x) => x.ticker === m.ticker) ?? m); // freshest prices, locked at this tap
-  openSheet({
-    title: 'How much did you buy?', side: ev.side, amount: live.sig.contracts * ev.price, verb: 'Bought',
-    prices: { YES: q.yesAsk, NO: q.noAsk }, at: Date.now(),
-    hint: ({ side, amount, price }) => `${(amount / price).toFixed(1)} contracts · pays ${dollars(amount / price)} if BTC is ${side === 'YES' ? 'above' : 'below'} ${strike ? usd(strike, 0) : 'the target'} at close`,
-    onOk: ({ side, amount, price, at }) => openPosition(m, side, price, amount / price, at),
-  });
+  const price = ev.side === 'YES' ? q.yesAsk : q.noAsk;
+  if (!price) return toast(`No Kalshi price for ${sideName(ev.side)} right now`);
+  const amount = settings.tradeAmount > 0 ? settings.tradeAmount : live.sig.contracts * price;
+  const pos = openPosition(m, ev.side, price, amount / price, at);
+  toast(`Tracking ${dollars(amount)} at ${pc(price)} ${sideName(ev.side)} · ${clock(at)}`, () => removePosition(pos.id));
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' }); // the new position card is at the top
 });
 $('positions').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-act]');
@@ -696,32 +675,29 @@ $('positions').addEventListener('click', (e) => {
   const pos = state.positions.find((p) => p.id === btn.dataset.id);
   if (!pos) return;
   if (btn.dataset.act === 'remove') {
-    if (confirm('Stop tracking this position? It won\'t be added to your trades.')) { state.positions = state.positions.filter((p) => p !== pos); savePositions(); pushSyncSoon(); render(); }
+    if (confirm('Stop tracking this position? It won\'t be added to your trades.')) { removePosition(pos.id); render(); }
     return;
   }
+  // One tap: cash out the whole position at Kalshi's live price
+  const at = Date.now();
   const m = state.markets.find((x) => x.ticker === pos.ticker);
   const q = m ? quote(m) : {};
   const bid = pos.side === 'YES' ? q.yesBid : q.noBid;
-  const stake = pos.contracts * pos.price;
-  openSheet({
-    title: `Sold ${sideName(pos.side)}`, side: pos.side, sideLocked: true, amount: stake, verb: 'Sold',
-    prices: { [pos.side]: bid }, at: Date.now(),
-    amtLabel: `How much of your ${dollars(stake)}`,
-    hint: ({ amount, price }) => {
-      const qty = Math.min(amount, stake) / pos.price;
-      return `Cashes out ≈ ${dollars(qty * (price - kalshiFee(price)))} · ${money((price - kalshiFee(price) - entryCost(pos)) * qty)}`;
-    },
-    onOk: ({ amount, price, at }) => sellPosition(pos, Math.min(amount, stake) / pos.price, price, at),
+  if (!bid) return toast(`No Kalshi cash-out price for ${sideName(pos.side)} right now`);
+  const trade = closePosition(pos, bid, 'sold', at);
+  toast(`Sold at ${pc(bid)} · ${clock(at)} · ${money(trade.pnl)}`, () => {
+    state.trades = state.trades.filter((t) => t !== trade);
+    store.set('trades', state.trades);
+    state.positions.push(pos);
+    savePositions();
+    pushSyncSoon();
   });
+  render();
 });
-function sellPosition(pos, qty, price, at) {
-  if (qty < pos.contracts - 1e-9) {
-    // Partial sale: book the sold part, keep the rest open
-    const sold = { ...pos, id: `${pos.id}-p${Date.now()}`, contracts: qty };
-    state.positions.push(sold);
-    pos.contracts -= qty;
-    closePosition(sold, price, 'sold', at);
-  } else closePosition(pos, price, 'sold', at);
+function removePosition(id) {
+  state.positions = state.positions.filter((p) => p.id !== id);
+  savePositions();
+  pushSyncSoon();
 }
 $('clearHistory').addEventListener('click', () => {
   if (confirm('Clear the report cards stored on this phone? (Server report cards stay.)')) { state.tracker.reports = []; saveTracker(true); render(); }

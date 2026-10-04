@@ -87,7 +87,7 @@ History shows the totals and every card. With push on, the server grades every w
 
 ### Selling for profit (exit signals)
 
-The app can't see your Kalshi account. After you buy, tap **I bought it: track my exit**, pick **YES · Above** or **NO · Below**, and enter only the **$ amount**. The app locks in Kalshi's live price for that side and the exact time at the moment you tap. For example, $20 bought when YES is 40% is 50 contracts that pay $50 if BTC finishes above the target. Tap right after your Kalshi order fills so the locked price matches your fill. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
+The app can't see your Kalshi account. After you buy on Kalshi, tap **I bought it**. That's it: one tap, no typing. The app records the bot's side, Kalshi's live price and the exact time, and uses the bot's suggested amount. Set *Fixed trade amount* in Settings if you always buy the same dollar amount. An **Undo** bar appears for a few seconds in case of a mis-tap. Tap right after your Kalshi order fills so the recorded price matches your fill. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
 
 | Signal | When | Why |
 |---|---|---|
@@ -97,7 +97,7 @@ The app can't see your Kalshi account. After you buy, tap **I bought it: track m
 
 Flip signs: a reversal candle against you (shooting star or bearish engulfing for YES, the mirror for NO), RSI rolling over from overbought or oversold, rejection at the Bollinger band, stalling at resistance or support, two strong candles against you, the bot's odds down *Odds drop* from their peak, or the bid down *Trailing drop* from its peak.
 
-On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** right after selling. The live sell price and time lock in automatically, and you enter how much of your stake you sold. Partial sales are supported. History shows when you bought and sold. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
+On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold at 72%** right after cashing out. It's also one tap: the whole position is closed at Kalshi's live cash-out price and the time is recorded, with Undo. History shows when you bought and sold. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
 ### Push notifications (app closed)
 
@@ -149,6 +149,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Setting | Default | Meaning |
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
+| Fixed trade amount | 0 | What one-tap "I bought it" records ($). 0 = the bot's suggested amount |
 | Min confidence | 55 | Deep-dive score a call needs to fire |
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 4 pts | How far Kalshi's price must be below the bot's odds, after fees |
