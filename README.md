@@ -126,10 +126,10 @@ Every first call on a market goes into **History**. After the market settles, th
 
 ## Paywall (Cash App)
 
-New visitors see a paywall instead of the app: **$20 for 30 days** by default, paid to **$Akizzle55** on Cash App.
+New visitors see a paywall instead of the app: **$5 for 30 days** by default, paid to **$Akizzle55** on Cash App.
 
 1. The buyer taps **Get started** and gets a personal code like `SC-7KQ2X4`.
-2. **Pay on Cash App** opens `cash.app/$Akizzle55/20` with the amount filled in and copies the code. The buyer pastes it in the payment note.
+2. **Pay on Cash App** opens `cash.app/$Akizzle55/5` with the amount filled in and copies the code. The buyer pastes it in the payment note.
 3. The buyer taps **I've paid**. Every admin phone with push on gets *"💵 Payment to verify: SC-7KQ2X4"*.
 4. The admin checks Cash App for a payment with that note and taps **Approve** in **Settings → Admin**. The buyer's page unlocks by itself within about 10 seconds.
 

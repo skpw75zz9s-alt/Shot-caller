@@ -22,7 +22,7 @@ test('buyer flow: request, paid (admins pinged), approve, expire', async () => {
   const r = a.request(null, '1.1.1.1');
   assert.match(r.body.code, /^SC-[A-HJ-NP-Z2-9]{6}$/);
   assert.equal(r.body.access, false);
-  assert.equal(r.body.price, 20);
+  assert.equal(r.body.price, 5);
   assert.equal(r.body.cashtag, 'Akizzle55');
   assert.equal(a.request(r.token, '1.1.1.1').body.code, r.body.code, 'same visitor keeps their code');
 
@@ -155,7 +155,7 @@ test('buyer pays, admin approves from the app, buyer is unlocked', async () => {
   await new Promise((r) => setTimeout(r, 50));
   const ping = JSON.parse(phone.decrypt(svc.received.at(-1).body));
   assert.match(ping.title, new RegExp(`Payment to verify: ${st.code}`));
-  assert.match(ping.body, /\$20 to \$Akizzle55/);
+  assert.match(ping.body, /\$5 to \$Akizzle55/);
 
   const list = await (await admin('/api/admin/members')).json();
   assert.ok(list.members.some((m) => m.code === st.code && m.paidAt));

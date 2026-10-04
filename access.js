@@ -26,7 +26,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   const adminHash = env.ADMIN_CODE ? kdf(env.ADMIN_CODE, adminSalt) : Buffer.from(DEFAULT_ADMIN.hash, 'hex');
   const isAdminCode = (code) => !!String(code || '').trim() && crypto.timingSafeEqual(kdf(code, adminSalt), adminHash);
   const db = {
-    config: { price: Number(env.PAYWALL_PRICE || 20), days: Number(env.ACCESS_DAYS || 30), cashtag: (env.CASHTAG || 'Akizzle55').replace(/^\$/, '') },
+    config: { price: Number(env.PAYWALL_PRICE || 5), days: Number(env.ACCESS_DAYS || 30), cashtag: (env.CASHTAG || 'Akizzle55').replace(/^\$/, '') },
     members: {}, // code -> { code, status: pending|active|denied|revoked, createdAt, paidAt, approvedAt, expires, tokens: [] }
     sessions: {}, // token -> { code, role: member|admin, device, at }
     secret: null, // only used when no ACCESS_SECRET / Railway IDs are available
