@@ -3,7 +3,7 @@ import { patterns } from './candles.js';
 import { buyMessage, buySignal, parseCandles, positionCheck, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
-import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, todayStats } from './practice.js';
+import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -95,11 +95,12 @@ async function refreshSpot() {
 // ---------- settlement ----------
 async function settlePositions() {
   // Practice positions still open when their market settled
-  for (const t of [...new Set(state.practice.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).map((p) => p.ticker))].slice(0, 3)) {
+  const openPractice = [...state.practice.positions, ...(state.practice.range?.positions || [])];
+  for (const t of [...new Set(openPractice.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).map((p) => p.ticker))].slice(0, 3)) {
     try {
       const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(t)}`);
       if (market && (market.result === 'yes' || market.result === 'no')) {
-        for (const e of practiceSettle(state.practice, t, market.result)) toast(`Practice: settled ${e.side} ${e.pnl >= 0 ? 'WIN' : 'LOSS'} ${money(e.pnl)}`);
+        for (const e of practiceSettle(state.practice, t, market.result)) toast(`${e.range ? 'Range watch' : 'Practice'}: settled ${e.side} ${e.pnl >= 0 ? 'WIN' : 'LOSS'} ${money(e.pnl)}`);
         store.set('practice', state.practice); renderPractice();
       }
     } catch { /* retry next cycle */ }
@@ -271,7 +272,7 @@ function render() {
   renderPositions(snap);
   const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
   if (sig?.fire) store.set('calls', state.calls);
-  if (practiceCfg.on || state.practice.positions.length) runPractice(snap, live, sig, now);
+  if (practiceCfg.on || state.practice.positions.length || state.practice.range?.positions.length) runPractice(snap, live, sig, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
@@ -974,6 +975,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 // ---------- auto-trade practice (no orders, ever) ----------
 function runPractice(snap, live, sig, now) {
   const { actions, why } = practiceStep(state.practice, { snap, row: live, sig, settings, cfg: practiceCfg, now });
+  const rg = rangeStep(state.practice, { snap, row: live, cfg: practiceCfg, now });
+  state.rangeRead = rg.read;
+  for (const e of rg.actions) toast(`Range watch: ${e.why} → paper-bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}`);
+  if (rg.actions.length) { store.set('practice', state.practice); renderPractice(); }
   if (why && why !== 'Waiting for a new call' && why !== 'Practice is off') state.practiceWhy = why;
   for (const e of actions) {
     state.practiceWhy = '';
@@ -999,6 +1004,9 @@ function renderPracticeStrip(snap) {
   } else {
     el.innerHTML = `<b>PRACTICE</b> · watching for a call${state.practiceWhy ? ` · last: ${esc(state.practiceWhy)}` : ''} · today ${money(t.pnl)}`;
   }
+  const rp = state.practice.range?.positions[0];
+  if (rp) el.innerHTML += `<br><b>RANGE</b> · holding ${+rp.contracts.toFixed(0)} ${sideName(rp.side)} at ${pc(rp.price)} to settlement`;
+  else if (state.rangeRead?.ranged) el.innerHTML += `<br><b>RANGE</b> · ${esc(state.rangeRead.why)}`;
 }
 
 function renderPractice() {
@@ -1010,10 +1018,15 @@ function renderPractice() {
   $('prToday').textContent = t.closed || t.buys ? `${money(t.pnl)} · ${t.wins}/${t.closed}` : '—';
   $('prAll').textContent = a.trades ? `${money(a.pnl)} · ${a.wins}/${a.trades} won` : '—';
   $('prWhy').textContent = practiceCfg.on ? (state.practiceWhy || 'Watching for a call…') : 'Off';
-  $('prLog').innerHTML = [...pr.log].reverse().slice(0, 30).map((e) => {
-    const what = e.action === 'buy' ? `Bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '')
+  const rs = rangeStats(pr);
+  $('rgAll').textContent = rs.trades ? `${money(rs.pnl)} · ${rs.wins}/${rs.trades} won` : rs.open ? `${rs.open} open` : '—';
+  $('rgBot').textContent = a.trades ? `${money(a.pnl)} · ${a.wins}/${a.trades} won` : '—';
+  $('rgRead').textContent = practiceCfg.on ? `Now: ${state.rangeRead?.why ?? 'waiting for candles'}` : '';
+  $('prLog').innerHTML = [...pr.log, ...(pr.range?.log || [])].sort((x, y) => y.at - x.at).slice(0, 30).map((e) => {
+    const tag = e.range ? '<span class="src-tag">Range</span> ' : '';
+    const what = tag + (e.action === 'buy' ? `Bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '') + (e.why && e.range ? ` · ${esc(e.why)}` : '')
       : e.action === 'sell' ? `Sold ${+e.contracts.toFixed(0)} at ${pc(e.price)} (${e.kind === 'take' ? 'take profit' : 'cut'})`
-      : `Settled ${e.proceeds > 0 ? 'WIN' : 'LOSS'}`;
+      : `Settled ${e.proceeds > 0 ? 'WIN' : 'LOSS'}`);
     const val = e.action === 'buy' ? `<b>-${dollars(e.cost)}</b>` : `<b class="${e.pnl >= 0 ? 'pos' : 'neg'}">${money(e.pnl)}</b>`;
     return `<li><span>${what}<small>${clock(e.at)} · ${esc(e.ticker)}</small></span>${val}</li>`;
   }).join('') || '<li class="calm">No practice trades yet</li>';

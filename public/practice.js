@@ -5,7 +5,7 @@ import { kalshiFee } from './model.js';
 import { positionCheck } from './engine.js';
 
 export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 70 };
-export const newPractice = () => ({ positions: [], log: [], since: Date.now() });
+export const newPractice = () => ({ positions: [], log: [], since: Date.now(), range: { positions: [], log: [] } });
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -78,9 +78,16 @@ export function practiceStep(pr, { snap, row, sig, settings, cfg, now = Date.now
   return { actions, why: b.ok ? null : b.why };
 }
 
-// A market settled: practice positions in it pay $1 or $0.
+// A market settled: practice positions in it pay $1 or $0 (the bot's and Range watch's).
 export function practiceSettle(pr, ticker, result, now = Date.now()) {
   const out = [];
+  const rg = (pr.range ||= { positions: [], log: [] });
+  for (const pos of rg.positions.filter((p) => p.ticker === ticker)) {
+    const proceeds = pos.side.toLowerCase() === result ? pos.contracts : 0;
+    const e = { at: now, ticker, action: 'settle', side: pos.side, price: proceeds ? 1 : 0, contracts: pos.contracts, proceeds: r2(proceeds), pnl: r2(proceeds - pos.cost), range: true };
+    rg.log.push(e); out.push(e);
+  }
+  rg.positions = rg.positions.filter((p) => p.ticker !== ticker);
   for (const pos of pr.positions.filter((p) => p.ticker === ticker)) {
     const proceeds = pos.side.toLowerCase() === result ? pos.contracts : 0;
     const e = { at: now, ticker, action: 'settle', side: pos.side, price: proceeds ? 1 : 0, contracts: pos.contracts, proceeds: r2(proceeds), pnl: r2(proceeds - pos.cost) };
@@ -88,4 +95,61 @@ export function practiceSettle(pr, ticker, result, now = Date.now()) {
   }
   pr.positions = pr.positions.filter((p) => p.ticker !== ticker);
   return out;
+}
+
+// ---------- Range watch (experiment) ----------
+// The ceiling/floor rule from the user's chart guideline, tracked side by side with the bot so a week of live
+// data can show whether it helps. Ceiling = highest high of the last `lookback` closed 1-minute candles,
+// floor = lowest low; each must be touched at least `minTouches` times (within tol × ATR) and the range
+// must be at least minRange × ATR wide. Rejected at the ceiling (poked up, closed back below) = expect down;
+// rejected at the floor = expect up. Same test as the offline study on ~1,100 real candles.
+export const RANGE_DEFAULTS = { lookback: 20, tol: 0.3, minTouches: 2, minRange: 2 };
+
+export function rangeRead(bars, params = {}) {
+  const p = { ...RANGE_DEFAULTS, ...params };
+  if (!bars || bars.length < p.lookback + 1) return null;
+  const look = bars.slice(-p.lookback - 1, -1), cur = bars[bars.length - 1];
+  const atr = look.reduce((a, b) => a + (b.h - b.l), 0) / look.length;
+  if (!(atr > 0)) return null;
+  const ceil = Math.max(...look.map((b) => b.h)), floor = Math.min(...look.map((b) => b.l));
+  const t = p.tol * atr;
+  const ceilTouches = look.filter((b) => b.h >= ceil - t).length, floorTouches = look.filter((b) => b.l <= floor + t).length;
+  const ranged = ceil - floor >= p.minRange * atr && ceilTouches >= p.minTouches && floorTouches >= p.minTouches;
+  const base = { ranged, ceil, floor, ceilTouches, floorTouches, at: cur.t };
+  if (!ranged) return { ...base, dir: 0, why: 'No clear ceiling and floor right now' };
+  const usd = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+  if (cur.h >= ceil - t && cur.c < ceil - t / 2) return { ...base, dir: -1, why: `Rejected at the ceiling ${usd(ceil)}: expect down` };
+  if (cur.l <= floor + t && cur.c > floor + t / 2) return { ...base, dir: 1, why: `Rejected at the floor ${usd(floor)}: expect up` };
+  return { ...base, dir: 0, why: `Ranging between ${usd(floor)} and ${usd(ceil)}` };
+}
+
+// One Range watch step: on a fresh rejection inside the calling window, paper-buy the side it points to
+// (down = NO, up = YES) at Kalshi's ask, sized like practice, once per window, held to settlement.
+export function rangeStep(pr, { snap, row, cfg, now = Date.now() }) {
+  const c = { ...PRACTICE_DEFAULTS, ...cfg };
+  const rg = (pr.range ||= { positions: [], log: [] });
+  const closed = (snap?.bars || []).filter((b) => b.t + 60000 <= now);
+  const read = rangeRead(closed);
+  if (!c.on || !row || !row.ev.open || !read?.dir) return { actions: [], read };
+  const ticker = row.m.ticker;
+  if (rg.log.some((e) => e.ticker === ticker && e.action === 'buy')) return { actions: [], read };
+  const side = read.dir > 0 ? 'YES' : 'NO';
+  const q = row.ev.quote, price = side === 'YES' ? q.yesAsk : q.noAsk;
+  if (price == null) return { actions: [], read };
+  const spentToday = rg.log.filter((e) => e.action === 'buy' && e.at >= dayStart(now)).reduce((a, e) => a + e.cost, 0);
+  const backToday = rg.log.filter((e) => e.action !== 'buy' && e.at >= dayStart(now)).reduce((a, e) => a + e.proceeds, 0);
+  const budget = Math.min(c.maxPerTrade, c.dailyLoss - (spentToday - backToday));
+  const per = price + kalshiFee(price), count = Math.floor(budget / per);
+  if (count < 1) return { actions: [], read };
+  const cost = per * count;
+  rg.positions.push({ ticker, side, price, contracts: count, cost: r2(cost), closeTime: row.m.close_time, at: now });
+  const e = { at: now, ticker, action: 'buy', side, price, contracts: count, cost: r2(cost), why: read.why, range: true };
+  rg.log.push(e);
+  if (rg.log.length > 500) rg.log = rg.log.slice(-500);
+  return { actions: [e], read };
+}
+
+export function rangeStats(pr) {
+  const closes = (pr.range?.log || []).filter((e) => e.action !== 'buy');
+  return { trades: closes.length, wins: closes.filter((e) => e.pnl > 0).length, pnl: r2(closes.reduce((a, e) => a + e.pnl, 0)), open: pr.range?.positions.length || 0 };
 }

@@ -70,3 +70,51 @@ test('takes profit when Kalshi pays what the bot thinks it is worth, and settles
   assert.equal(a.wins, 1);
   assert.ok(Math.abs(a.pnl - t.pnl) < 1e-9);
 });
+
+test('Range watch reads ceiling and floor rejections like the chart guideline', async () => {
+  const { rangeRead } = await import('../public/practice.js');
+  // 20 candles bouncing between a 100 floor and a 110 ceiling, each touched several times
+  const bars = Array.from({ length: 20 }, (_, i) => { const up = i % 4 === 0, dn = i % 4 === 2; return { t: i * 60000, o: 105, h: up ? 110 : 106, l: dn ? 100 : 104, c: 105 }; });
+  const ceilRej = rangeRead([...bars, { t: 20 * 60000, o: 107, h: 110.2, l: 106, c: 107 }]);
+  assert.equal(ceilRej.ranged, true);
+  assert.equal(ceilRej.dir, -1);
+  assert.match(ceilRej.why, /ceiling \$110: expect down/);
+  assert.equal(rangeRead([...bars, { t: 20 * 60000, o: 103, h: 104, l: 99.9, c: 103 }]).dir, 1);
+  assert.equal(rangeRead([...bars, { t: 20 * 60000, o: 105, h: 106, l: 104, c: 105 }]).dir, 0);
+  // a trend with no repeated touches is not a range
+  const trend = Array.from({ length: 21 }, (_, i) => ({ t: i * 60000, o: 100 + i, h: 101 + i, l: 99.5 + i, c: 100.8 + i }));
+  assert.equal(rangeRead(trend).ranged, false);
+});
+
+test('Range watch paper-trades its own book: ceiling rejection buys NO once per window, settles separately', async () => {
+  const { rangeStep, rangeStats, newPractice, practiceSettle } = await import('../public/practice.js');
+  const t0 = Date.parse('2026-10-04T12:08:30Z');
+  const bars = Array.from({ length: 20 }, (_, i) => { const up = i % 4 === 0, dn = i % 4 === 2; return { t: t0 - (21 - i) * 60000, o: 105, h: up ? 110 : 106, l: dn ? 100 : 104, c: 105 }; });
+  bars.push({ t: t0 - 60000, o: 107, h: 110.2, l: 106, c: 107 }); // last closed candle: rejected at the ceiling
+  bars.push({ t: t0, o: 107, h: 107, l: 107, c: 107 });             // live candle (ignored)
+  const r = { m: { ticker: 'KXBTC15M-R', close_time: new Date(t0 + 6 * 60000).toISOString() }, ev: { open: true, quote: { yesBid: 0.55, yesAsk: 0.57, noBid: 0.43, noAsk: 0.45 } } };
+  const pr = newPractice();
+  const { actions, read } = rangeStep(pr, { snap: { bars }, row: r, cfg: { on: true }, now: t0 });
+  assert.equal(read.dir, -1);
+  assert.equal(actions[0].side, 'NO');
+  assert.equal(actions[0].price, 0.45);
+  assert.equal(pr.positions.length, 0, "the bot's own practice book is untouched");
+  assert.equal(rangeStep(pr, { snap: { bars }, row: r, cfg: { on: true }, now: t0 + 5000 }).actions.length, 0, 'once per window');
+  assert.equal(rangeStep(newPractice(), { snap: { bars }, row: r, cfg: { on: false }, now: t0 }).actions.length, 0, 'off = nothing');
+  practiceSettle(pr, 'KXBTC15M-R', 'no', t0 + 600000);
+  const st = rangeStats(pr);
+  assert.equal(st.trades, 1);
+  assert.equal(st.wins, 1);
+  assert.ok(st.pnl > 0);
+});
+
+test('Range watch uses the exact rule from the offline study (same events on the real-candle sample)', async () => {
+  const { rangeRead } = await import('../public/practice.js');
+  const { STUDY_SAMPLE, STUDY_EVENTS } = await import('./fixtures/range-sample.js');
+  let events = 0;
+  for (const series of STUDY_SAMPLE) {
+    const B = series.map(([o, h, l, c], i) => ({ t: i * 60000, o, h, l, c }));
+    for (let i = 20; i < B.length - 1; i++) if (rangeRead(B.slice(0, i + 1))?.dir) events++;
+  }
+  assert.equal(events, STUDY_EVENTS);
+});
