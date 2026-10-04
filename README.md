@@ -120,6 +120,26 @@ How it's built: `push.js` implements VAPID (RFC 8292) and aes128gcm payload encr
 
 Every first call on a market goes into **History**. After the market settles, the app fetches the result and tracks hit rate and paper P&L.
 
+## Paywall (Cash App)
+
+New visitors see a paywall instead of the app: **$20 for 30 days** by default, paid to **$Akizzle55** on Cash App.
+
+1. The buyer taps **Get started** and gets a personal code like `SC-7KQ2X4`.
+2. **Pay on Cash App** opens `cash.app/$Akizzle55/20` with the amount filled in and copies the code. The buyer pastes it in the payment note.
+3. The buyer taps **I've paid**. Every admin phone with push on gets *"💵 Payment to verify: SC-7KQ2X4"*.
+4. The admin checks Cash App for a payment with that note and taps **Approve** in **Settings → Admin**. The buyer's page unlocks by itself within about 10 seconds.
+
+Cash App has no API for personal $cashtags, so an admin has to approve each payment. The **Admin** panel lists people waiting for approval and active members (Approve, Deny, +days, Revoke), and lets you change the price and length. A paid code works on up to 3 devices: on a new phone, or in the iPhone Home Screen app, which keeps its own login, use *"Already paid? Enter your code"*. Renewals reuse the same code. When access ends, the app and push alerts stop until they renew.
+
+**Admin bypass:** tap *Admin* on the paywall and enter the admin code to get full access plus the Admin panel. The code is never in the source: the server reads it from the `ADMIN_CODE` variable (case-insensitive, rate-limited).
+
+Everything is enforced on the server: without access, it serves only the paywall. The app's code, market data, push and admin APIs all return 401 or 403. Set `PAYWALL=off` to disable it, for example locally.
+
+**Railway setup (required for the paywall):**
+- Service → **Variables**: add `ADMIN_CODE` = your admin code
+- Service → **Settings → Volumes**: mount a volume at `/data` and add the variable `DATA_DIR` = `/data`. **Without it, every redeploy wipes all paid members.**
+- Optional: `PAYWALL_PRICE` / `ACCESS_DAYS` set the starting price and length (you can also change them in the Admin panel), and `CASHTAG` changes the $cashtag.
+
 ## Run it
 
 Needs Node 18+ and nothing else (no dependencies).

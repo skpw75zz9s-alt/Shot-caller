@@ -12,7 +12,7 @@ const MAX_DEVICES = 100;
 // Only send to real browser push services (stops the server being used to POST anywhere).
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
 
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -77,7 +77,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   // Phone sends its subscription, settings and open positions; we keep the highest peaks seen.
-  function sync({ subscription, settings, positions }) {
+  function sync({ subscription, settings, positions }, ctx = {}) {
     if (!validSubscription(subscription)) return { status: 400, body: { error: 'invalid subscription' } };
     const prev = devices.get(subscription.endpoint);
     if (!prev && devices.size >= MAX_DEVICES) return { status: 429, body: { error: 'too many devices' } };
@@ -88,6 +88,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     devices.set(subscription.endpoint, {
       endpoint: subscription.endpoint, keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
       settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
+      token: ctx.token ?? prev?.token ?? null, // paywall session, so alerts stop if access lapses
       createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(),
     });
     scheduleSave();
@@ -121,6 +122,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const d = devices.get(endpoint);
     if (!d) return { status: 404, body: { error: 'not subscribed' } };
     return { status: 200, body: { reports: d.tracker?.reports ?? [] } };
+  }
+
+  // Send one message to every device matching `pred` (e.g. admins' phones).
+  async function notifyWhere(pred, msg) {
+    await Promise.all([...devices.values()].filter(pred).map((d) => notify(d, msg, msg.tag)));
   }
 
   async function test({ endpoint }) {
@@ -159,6 +165,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       market.lastTick = now; market.lastError = null;
       const sends = [];
       for (const d of devices.values()) {
+        if (!canNotify(d)) continue; // paywall: no access, no bot
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, now });
@@ -219,5 +226,5 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); }
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError });
-  return { load, save, start, stop, tick, sync, unsubscribe, test, report, status, publicKey: () => vapid.publicKey, devices };
+  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices };
 }

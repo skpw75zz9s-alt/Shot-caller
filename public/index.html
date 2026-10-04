@@ -101,6 +101,20 @@
     </section>
 
     <section id="view-settings" class="view">
+      <div class="card access-card">
+        <div class="deep-head"><span>Your access</span><button id="signOut" class="link">Sign out</button></div>
+        <p id="accessLine" class="push-status"></p>
+      </div>
+      <div class="card admin-card" id="adminCard" hidden>
+        <h3>Admin</h3>
+        <div class="adm-row"><label>Price ($)<input id="admPrice" inputmode="decimal"></label><label>Days<input id="admDays" inputmode="numeric"></label><button id="admSave">Save</button></div>
+        <div class="adm-row"><input id="admCode" placeholder="SC-XXXXXX" autocomplete="off"><button id="admApprove">Approve code</button></div>
+        <p class="err" id="admErr"></p>
+        <h4>Waiting for approval</h4>
+        <ul id="admPending" class="adm-list"></ul>
+        <h4>Members</h4>
+        <ul id="admMembers" class="adm-list"></ul>
+      </div>
       <div class="card push-card">
         <h3>Notifications</h3>
         <p id="pushStatus" class="push-status">Checking…</p>
@@ -109,7 +123,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v2.0 · one-tap tracking</p>
+      <p class="fine" id="version">Shot Caller v2.1 · Cash App paywall</p>
     </section>
   </main>
 

@@ -41,8 +41,14 @@ if (store.get('settingsVersion', 1) < 3) { if (settings.refreshSec === 5) settin
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), tracker: store.get('tracker', null) || newTracker(), serverReports: [], trackerSavedAt: 0 };
 
+// Access lapsed (paywall): reload so the server shows the paywall page.
+function paywalled(r) {
+  if (r.status === 401) { location.reload(); throw new Error('payment required'); }
+}
+
 async function getJSON(path) {
   const r = await fetch(`${API}/${path}`);
+  paywalled(r);
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return r.json();
 }
@@ -519,6 +525,7 @@ let pushSub = null, syncTimer = null;
 
 async function postJSON(path, body) {
   const r = await fetch(`${API}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  paywalled(r);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
@@ -588,6 +595,65 @@ function renderPush(msg) {
   $('pushNudge').hidden = on || store.get('nudgeDismissed', false);
 }
 
+// ---------- access & admin ----------
+const day = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+let adminTimer = null;
+
+async function loadAccess() {
+  try {
+    const st = await getJSON('access/status');
+    state.access = st;
+    $('accessLine').textContent = st.role === 'admin' ? 'Admin (no expiry)'
+      : st.access ? `Active until ${day(st.expires)} · code ${st.code} (use it to unlock your other devices)`
+      : 'No access';
+    $('adminCard').hidden = st.role !== 'admin';
+    if (st.role === 'admin') loadAdmin();
+  } catch { /* offline */ }
+}
+
+async function loadAdmin() {
+  try {
+    const { config, members } = await getJSON('admin/members');
+    if (document.activeElement !== $('admPrice')) $('admPrice').value = config.price;
+    if (document.activeElement !== $('admDays')) $('admDays').value = config.days;
+    const now = Date.now();
+    const pending = members.filter((m) => m.status === 'pending' || (m.paidAt && m.paidAt > (m.approvedAt || 0) && m.status !== 'denied' && m.status !== 'revoked'));
+    const others = members.filter((m) => !pending.includes(m) && m.status !== 'pending');
+    $('admPending').innerHTML = pending.map((m) => `<li><span><b>${m.code}</b><small>${m.paidAt ? `says paid ${clock(m.paidAt)} · ${day(m.paidAt)}` : 'hasn\'t tapped "I\'ve paid" yet'}${m.expires > now ? ' · renewing' : ''}</small></span>
+      <span class="adm-btns"><button data-adm="approve" data-code="${m.code}">Approve</button><button data-adm="deny" data-code="${m.code}" class="ghost">Deny</button></span></li>`).join('') ||
+      '<li class="muted">Nobody waiting. You\'ll get a push when someone taps "I\'ve paid" (turn on notifications).</li>';
+    $('admMembers').innerHTML = others.map((m) => {
+      const active = m.status === 'active' && m.expires > now;
+      const label = active ? `active until ${day(m.expires)}` : m.status === 'active' ? `expired ${day(m.expires)}` : m.status;
+      return `<li><span><b>${m.code}</b><small>${label} · ${m.devices} device${m.devices === 1 ? '' : 's'}</small></span>
+        <span class="adm-btns">${active ? `<button data-adm="approve" data-code="${m.code}" class="ghost">+${state.access?.days ?? ''}d</button><button data-adm="revoke" data-code="${m.code}" class="ghost">Revoke</button>` : `<button data-adm="approve" data-code="${m.code}">Approve</button>`}</span></li>`;
+    }).join('') || '<li class="muted">No members yet.</li>';
+  } catch (e) { $('admErr').textContent = e.message; }
+}
+
+async function adminAction(action, body) {
+  $('admErr').textContent = '';
+  try { await postJSON(`admin/${action}`, body); await loadAdmin(); }
+  catch (e) { $('admErr').textContent = e.message; }
+}
+$('adminCard').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-adm]');
+  if (!b) return;
+  if (b.dataset.adm === 'revoke' && !confirm(`Revoke ${b.dataset.code}? They lose access right away.`)) return;
+  adminAction(b.dataset.adm, { code: b.dataset.code });
+});
+$('admApprove').addEventListener('click', () => { if ($('admCode').value.trim()) adminAction('approve', { code: $('admCode').value }).then(() => { $('admCode').value = ''; }); });
+$('admSave').addEventListener('click', () => adminAction('config', { price: $('admPrice').value, days: $('admDays').value }).then(loadAccess));
+$('signOut').addEventListener('click', async () => {
+  if (!confirm('Sign out on this device? You\'ll need your code (or the admin code) to get back in.')) return;
+  await fetch(`${API}/access/logout`, { method: 'POST', body: '{}' }).catch(() => {});
+  location.reload();
+});
+function adminPolling(on) {
+  clearInterval(adminTimer);
+  if (on && state.access?.role === 'admin') adminTimer = setInterval(loadAdmin, 20000);
+}
+
 // ---------- settings ----------
 function buildSettings() {
   $('settingsForm').innerHTML = SETTINGS_META.map(([k, label, hint, kind]) => {
@@ -643,6 +709,8 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
   document.querySelectorAll('nav button, .view').forEach((el) => el.classList.remove('active'));
   b.classList.add('active');
   $(`view-${b.dataset.view}`).classList.add('active');
+  if (b.dataset.view === 'settings') loadAccess();
+  adminPolling(b.dataset.view === 'settings');
 }));
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
 $('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
@@ -720,6 +788,7 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 buildSettings();
+loadAccess();
 liveConnect();
 pushInit();
 tick();

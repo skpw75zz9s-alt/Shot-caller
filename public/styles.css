@@ -170,3 +170,19 @@ button:disabled { opacity: .4; }
 .toast[hidden] { display: none; }
 .toast span { flex: 1; }
 .toast button { width: auto; margin: 0; padding: 6px 14px; background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+.access-card .deep-head { margin-bottom: 2px; }
+button.link { width: auto; margin: 0; padding: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 600; }
+.admin-card h3 { margin: 0 0 8px; font-size: 16px; }
+.admin-card h4 { margin: 12px 0 6px; font-size: 13px; color: var(--muted); }
+.adm-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+.adm-row label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); gap: 3px; flex: 1; }
+.adm-row input { width: 100%; min-width: 0; flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font-size: 16px; }
+.adm-row button { width: auto; margin: 0; white-space: nowrap; }
+.adm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.adm-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.adm-list li b { font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+.adm-list small { display: block; color: var(--muted); font-size: 11px; }
+.adm-btns { display: flex; gap: 6px; }
+.adm-btns button { width: auto; margin: 0; padding: 6px 10px; font-size: 13px; }
+.err { color: var(--no); font-size: 13px; min-height: 1.2em; margin: 4px 0; }

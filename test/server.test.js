@@ -5,6 +5,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'shot-srv-'));
+process.env.PAYWALL = 'off'; // paywall has its own tests
 
 // Mock upstream standing in for both Kalshi and Coinbase.
 const upstream = http.createServer((req, res) => {
