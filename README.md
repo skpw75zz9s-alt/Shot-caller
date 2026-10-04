@@ -2,6 +2,8 @@
 
 A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M`). It's a phone-installable web app (PWA). It watches the open market, prices it with a volatility model and calls a shot: **YES**, **NO** or **PASS**. Each call comes with a suggested size.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/skpw75zz9s-alt/Shot-caller)
+
 > **Signals only.** It never logs in to Kalshi and never places orders. You place trades yourself.
 > No model reliably beats these markets. Watch the paper P&L in the History tab before you risk real money.
 
@@ -31,7 +33,7 @@ The small Node server serves the app and proxies Kalshi and Coinbase market data
 
 Choose one:
 
-- **Host it** (best). Deploy the repo to any Node host: Render, Railway or Fly.io. Start command `npm start`. The host sets `PORT`. Open the HTTPS URL on your phone, then:
+- **Host it** (best). Tap the **Deploy to Render** button above, sign in to Render with GitHub (free plan, no card), and tap **Apply**. Render reads `render.yaml`, builds the app, gives you a `https://shot-caller-xxxx.onrender.com` URL, and redeploys on every push to `master`. The free plan sleeps after 15 minutes idle, so the first load after a break takes about 30–60 seconds. Railway and Fly.io work too, with start command `npm start`. Open the HTTPS URL on your phone, then:
   - **iPhone:** Safari → Share → *Add to Home Screen*
   - **Android:** Chrome → ⋮ → *Install app*
 - **Same Wi-Fi.** Run `npm start` on your computer, then open `http://<computer-ip>:8080` on your phone. Install and notifications need HTTPS, but the live view works.
