@@ -10,8 +10,8 @@ const store = {
 
 const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
-  ['waitForDip', 'Wait for the low', 'Only alert when the candles show a dip to buy', 'bool'],
-  ['minEdge', 'Min edge (¢)', 'EV per contract after fees needed to call', 'cents'],
+  ['minEdge', 'Min gap (¢)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, to call BUY THE LOW', 'cents'],
+  ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['maxSpread', 'Max spread (¢)', 'Skip markets with a wider yes spread', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['maxMinutesLeft', 'Max minutes left', 'Don\'t call this early in the window', 'num'],
@@ -22,7 +22,9 @@ const SETTINGS_META = [
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
   ['refreshSec', 'Refresh (sec)', 'How often to poll', 'num'],
 ];
-const settings = { series: 'KXBTC15M', refreshSec: 5, waitForDip: true, ...DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 5, waitForDip: false, ...DEFAULTS, ...store.get('settings', {}) };
+// v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
+if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, alerted: {}, history: store.get('history', []) };
 
@@ -98,7 +100,6 @@ async function alert(tag, title, body) {
 // ---------- render helpers ----------
 const usd = (v, d = 2) => v == null ? '—' : `$${v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })}`;
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
-const cents = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}¢`;
 const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle('neg', v < 0); };
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -116,6 +117,23 @@ function compute() {
   return { now, bars, sigmaMin, driftMin, rows };
 }
 
+// Kalshi % vs bot % for each side. "Low" = Kalshi's price is below the bot's odds by the min gap after fees.
+function oddsRows(ev, minEdge) {
+  if (ev.pYes == null) return '';
+  const row = (side, kalshi, bot, edge) => {
+    if (kalshi == null) return `<div class="odds-row"><span class="side">${side}</span><span class="muted">no offers</span></div>`;
+    const gap = (bot - kalshi) * 100;
+    const status = edge != null && edge >= minEdge ? ['low', `LOW by ${gap.toFixed(0)} pts`] : gap > 0 ? ['near', `${gap.toFixed(0)} pts low, not enough after fees`] : ['high', `${Math.abs(gap).toFixed(0)} pts high`];
+    const a = Math.min(kalshi, bot) * 100, b = Math.max(kalshi, bot) * 100;
+    return `<div class="odds-row ${status[0]}"><span class="side">${side}</span>` +
+      `<span class="nums">Kalshi <b>${(kalshi * 100).toFixed(0)}%</b> · Bot <b>${(bot * 100).toFixed(0)}%</b></span>` +
+      `<span class="track"><i class="fill" style="left:${a}%;width:${b - a}%"></i><i class="mk kalshi" style="left:${kalshi * 100}%"></i><i class="mk bot" style="left:${bot * 100}%"></i></span>` +
+      `<span class="status">${status[1]}</span></div>`;
+  };
+  return row('YES', ev.quote.yesAsk, ev.pYes, ev.evYes) + row('NO', ev.quote.noAsk, 1 - ev.pYes, ev.evNo) +
+    '<div class="odds-legend"><i class="mk kalshi"></i> Kalshi price <i class="mk bot"></i> Bot odds</div>';
+}
+
 // The side the model leans to, even below the edge threshold, so timing has something to read.
 const leanSide = (ev) => ev.side ?? (ev.evYes == null && ev.evNo == null ? null : (ev.evYes ?? -1) >= (ev.evNo ?? -1) ? 'YES' : 'NO');
 
@@ -130,7 +148,7 @@ function render() {
   if (!live) {
     $('marketTitle').textContent = state.marketsAt ? `No open ${settings.series} markets` : 'Loading markets…';
     call.textContent = '—'; call.className = 'call pass';
-    ['countdown', 'reason', 'order', 'entry'].forEach((id) => { $(id).textContent = ''; });
+    ['countdown', 'reason', 'order', 'entry', 'callLabel', 'odds'].forEach((id) => { $(id).textContent = ''; });
     entry.hidden = true;
   } else {
     const { m, ev, strike } = live;
@@ -140,11 +158,13 @@ function render() {
 
     $('marketTitle').textContent = m.title || m.ticker;
     $('countdown').textContent = `closes in ${mmss(ev.minutesLeft)}`;
-    $('reason').textContent = ev.reason;
+    $('reason').textContent = ev.side ? '' : ev.reason;
+    $('odds').innerHTML = oddsRows(ev, settings.minEdge);
 
     // Call + entry timing
     const buyNow = ev.side && timing.state === 'NOW';
     const waiting = ev.side && !buyNow && settings.waitForDip;
+    $('callLabel').textContent = ev.side ? (waiting ? 'Low price, waiting for candle dip' : 'BUY THE LOW') : 'No low price';
     call.textContent = ev.call;
     call.className = `call ${ev.call.toLowerCase()}`;
     if (ev.side) card.classList.add(ev.side.toLowerCase());
@@ -152,14 +172,14 @@ function render() {
 
     entry.hidden = !side;
     if (side) {
-      const label = timing.state === 'NOW' ? `BUY THE LOW: ${side}` : timing.state === 'CHASE' ? 'CHASING: don\'t buy the high' : `WAIT FOR THE LOW: ${side}`;
+      const label = timing.state === 'NOW' ? `Candles: dip now, good timing for ${side}` : timing.state === 'CHASE' ? 'Candles: chasing, price just ran' : `Candles: no dip yet for ${side}`;
       entry.classList.add(timing.state.toLowerCase());
       entry.innerHTML = `<b>${label}</b><span>${esc(timing.reasons.slice(0, 4).join(' · '))}</span>` +
-        (limit && timing.state !== 'NOW' ? `<span>Limit ${side} at <b>${(limit.price * 100).toFixed(0)}¢</b> (BTC to ${usd(limit.dipLevel, 0)})</span>` : '');
+        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${side} at <b>${(limit.price * 100).toFixed(0)}¢</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : '');
     }
 
     if (!ev.side) $('order').textContent = '';
-    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${ev.contracts} ${ev.side} @ ${(ev.price * 100).toFixed(0)}¢`;
+    else if (buyNow || !settings.waitForDip) $('order').textContent = `Buy ${ev.contracts} ${ev.side} @ ${(ev.price * 100).toFixed(0)}¢ · +${(ev.edge * 100).toFixed(0)}¢ edge`;
     else $('order').textContent = limit ? `Rest ${ev.contracts} ${ev.side} at ${(limit.price * 100).toFixed(0)}¢ (ask ${(ev.price * 100).toFixed(0)}¢)` : 'Hold off: no dip yet';
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
@@ -168,8 +188,9 @@ function render() {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         recordCall(m, ev, buyNow ? 'low' : 'ask');
-        alert(m.ticker, buyNow ? `Buy the low: ${ev.side}` : `Shot: ${ev.side}`,
-          `${ev.side} @ ${(ev.price * 100).toFixed(0)}¢ ×${ev.contracts}: ${timing.reasons.slice(0, 2).join(', ')}`);
+        const bot = ev.side === 'YES' ? ev.pYes : 1 - ev.pYes;
+        alert(m.ticker, `Buy the low: ${ev.side} @ ${(ev.price * 100).toFixed(0)}¢`,
+          `Kalshi ${(ev.price * 100).toFixed(0)}% vs bot ${(bot * 100).toFixed(0)}% · buy ${ev.contracts}${buyNow ? ' · candle dip too' : ''}`);
       }
     }
 
@@ -177,11 +198,6 @@ function render() {
     const d = state.spot && strike ? state.spot - strike : null;
     $('dist').textContent = d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`;
     sign($('dist'), d);
-    $('pModel').textContent = pct(ev.pYes);
-    const q = ev.quote;
-    $('pMarket').textContent = q.yesBid != null && q.yesAsk != null ? `${(q.yesBid * 100).toFixed(0)}/${(q.yesAsk * 100).toFixed(0)}¢` : '—';
-    $('evYes').textContent = cents(ev.evYes); sign($('evYes'), ev.evYes);
-    $('evNo').textContent = cents(ev.evNo); sign($('evNo'), ev.evNo);
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit);
   }
 
@@ -193,7 +209,7 @@ function render() {
   $('levels').textContent = timing?.support ? `${Math.round(timing.support).toLocaleString()} / ${Math.round(timing.resistance).toLocaleString()}` : '—';
 
   $('others').innerHTML = rows.filter((x) => x !== live && x.ev.minutesLeft > 0).slice(0, 6).map(({ m, ev }) =>
-    `<div class="card mini"><span>${esc(m.yes_sub_title || m.ticker)}<br><small>${mmss(ev.minutesLeft)} · model ${pct(ev.pYes)}</small></span>` +
+    `<div class="card mini"><span>${esc(m.yes_sub_title || m.ticker)}<br><small>${mmss(ev.minutesLeft)} · bot ${pct(ev.pYes)} YES</small></span>` +
     `<span class="pill ${ev.call.toLowerCase()}">${ev.call}</span></div>`).join('');
   renderHistory();
 }
@@ -271,8 +287,8 @@ function renderHistory() {
   $('hPending').textContent = state.history.length - done.length;
   $('historyList').innerHTML = state.history.slice(0, 100).map((h) => {
     const res = h.result ? `<b class="${h.won ? 'pos' : 'neg'}">${h.won ? 'WIN' : 'LOSS'} ${h.pnl >= 0 ? '+' : '-'}$${Math.abs(h.pnl).toFixed(2)}</b>` : '<b>pending</b>';
-    const tag = h.entry === 'low' ? ' · bought the low' : '';
-    return `<li><span><b>${h.side}</b> @ ${(h.price * 100).toFixed(0)}¢ ×${h.contracts}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · model ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
+    const tag = h.entry === 'low' ? ' · candle dip' : '';
+    return `<li><span><b>${h.side}</b> @ ${(h.price * 100).toFixed(0)}¢ ×${h.contracts}<small>${esc(h.ticker)} · ${new Date(h.at).toLocaleTimeString()} · Kalshi ${(h.price * 100).toFixed(0)}% vs bot ${(h.pModel * 100).toFixed(0)}%${tag}</small></span>${res}</li>`;
   }).join('');
 }
 

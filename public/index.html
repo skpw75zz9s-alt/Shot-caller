@@ -23,7 +23,9 @@
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
         <div class="countdown" id="countdown">--:--</div>
+        <div class="call-label" id="callLabel"></div>
         <div class="call" id="call">—</div>
+        <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
         <div class="entry" id="entry" hidden></div>
@@ -34,10 +36,6 @@
         <div class="stat"><label>Strike</label><b id="strike">—</b></div>
         <div class="stat"><label>Distance</label><b id="dist">—</b></div>
         <div class="stat"><label>Vol (1m)</label><b id="vol">—</b></div>
-        <div class="stat"><label>Model YES</label><b id="pModel">—</b></div>
-        <div class="stat"><label>Market YES</label><b id="pMarket">—</b></div>
-        <div class="stat"><label>EV YES</label><b id="evYes">—</b></div>
-        <div class="stat"><label>EV NO</label><b id="evNo">—</b></div>
         <div class="stat"><label>RSI (14, 1m)</label><b id="rsi">—</b></div>
         <div class="stat"><label>Support / resist</label><b id="levels" class="small">—</b></div>
       </div>
@@ -48,7 +46,7 @@
       </div>
 
       <div id="others"></div>
-      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Candlestick patterns on 1-minute bars are weak signals. Check the "bought the low" hit rate in History before you trust them. Past calls don't predict future results.</p>
+      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Candlestick patterns on 1-minute bars are weak signals. Check the candle-dip hit rate in History before you trust them. Past calls don't predict future results.</p>
     </section>
 
     <section id="view-history" class="view">
@@ -56,7 +54,7 @@
         <div class="stat"><label>Calls</label><b id="hCount">0</b></div>
         <div class="stat"><label>Hit rate</label><b id="hRate">—</b></div>
         <div class="stat"><label>Paper P&amp;L</label><b id="hPnl">—</b></div>
-        <div class="stat"><label>"Bought the low" hit rate</label><b id="hLow">—</b></div>
+        <div class="stat"><label>Candle-dip entries hit rate</label><b id="hLow">—</b></div>
         <div class="stat"><label>Pending</label><b id="hPending">0</b></div>
       </div>
       <ul id="historyList" class="history"></ul>
@@ -67,7 +65,7 @@
       <form id="settingsForm" class="card settings"></form>
       <button id="enableAlerts">Enable call alerts</button>
       <p class="fine">Alerts fire while the app is open (iOS needs the app added to the Home Screen first). Settings are saved on this device.</p>
-      <p class="fine" id="version">Shot Caller v1.1 · candlestick timing</p>
+      <p class="fine" id="version">Shot Caller v1.2 · buy the low vs bot odds</p>
     </section>
   </main>
 

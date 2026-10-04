@@ -16,7 +16,11 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 5. **Call.** Take the better side if its EV beats *Min edge*, the spread is tight enough, and the market is inside the time window. Otherwise PASS.
 6. **Size.** Fractional Kelly on your bankroll, capped by *Max stake*.
 
-### Buying the low (candlestick timing)
+### Buying the low
+
+"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (4¢ by default).
+
+### Candle timing (optional)
 
 When the model likes a side, the app reads the last 2 hours of 1-minute candles and checks whether right now is a cheap entry:
 
@@ -27,9 +31,9 @@ When the model likes a side, the app reads the last 2 hours of 1-minute candles 
 | Support / resistance (30-min low/high) | testing support | testing resistance |
 | Reversal candle | hammer, bullish engulfing | shooting star, bearish engulfing |
 
-Two or more of these, after subtracting reversal candles pointing the other way, gives **BUY THE LOW**. If price has just run in your favor, you get **CHASING**: you'd be buying the high. Otherwise you get **WAIT FOR THE LOW**, with a limit price to rest. That price is where the contract should trade if BTC reaches the dip level, capped so a fill still clears *Min edge*. The chart shows the candles, support, resistance, the strike, the buy-low level, and ▲/▼ markers on reversal candles.
+Two or more of these, after subtracting reversal candles pointing the other way, gives **dip now**. If price has just run in your favor, you get **CHASING**: you'd be buying the high. Otherwise you get **no dip yet**, with an even lower limit price to rest. That price is where the contract should trade if BTC reaches the dip level, capped so a fill still clears *Min edge*. The chart shows the candles, support, resistance, the strike, the buy-low level, and ▲/▼ markers on reversal candles.
 
-With **Wait for the low** on (the default), alerts and History entries only fire on a confirmed low. Turn it off to get alerted on every call. History tracks a separate "bought the low" hit rate so you can see whether the timing actually helps. 1-minute candle patterns are weak signals, so judge them by that number.
+Alerts fire on every BUY THE LOW. Turn on **Also wait for candle dip** to alert only when the candles agree. History tracks a separate candle-dip hit rate so you can see whether the timing actually helps. 1-minute candle patterns are weak signals, so judge them by that number.
 
 Every first call on a market goes into **History**. After the market settles, the app fetches the result and tracks hit rate and paper P&L.
 
@@ -62,7 +66,8 @@ Tap **Settings → Enable call alerts** to get a vibration and notification when
 | Setting | Default | Meaning |
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
-| Min edge | 4¢ | EV after fees needed to call |
+| Min gap | 4¢ | How far Kalshi's price must be below the bot's odds, after fees |
+| Also wait for candle dip | off | Only alert when the candles show a dip too |
 | Max spread | 10¢ | Skip illiquid books |
 | Min / max minutes left | 0.5 / 14 | Window where calls are allowed |
 | Vol multiplier | 1.15 | Higher means fewer, more conservative calls |
