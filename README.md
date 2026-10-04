@@ -41,7 +41,7 @@ Alerts fire on every BUY THE LOW. Turn on **Also wait for candle dip** to alert 
 
 ### Selling for profit (exit signals)
 
-The app can't see your Kalshi account. After you buy, tap **I bought it: track my exit** and enter the trade the way Kalshi shows it: **$ amount at %**, and **YES · Above** or **NO · Below**. For example, $20 at 40% YES is 50 contracts that pay $50 if BTC finishes above the target. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
+The app can't see your Kalshi account. After you buy, tap **I bought it: track my exit**, pick **YES · Above** or **NO · Below**, and enter only the **$ amount**. The app locks in Kalshi's live price for that side and the exact time at the moment you tap. For example, $20 bought when YES is 40% is 50 contracts that pay $50 if BTC finishes above the target. Tap right after your Kalshi order fills so the locked price matches your fill. A position card appears at the top and checks every tick whether to **HOLD** or **SELL NOW**:
 
 | Signal | When | Why |
 |---|---|---|
@@ -51,7 +51,7 @@ The app can't see your Kalshi account. After you buy, tap **I bought it: track m
 
 Flip signs: a reversal candle against you (shooting star or bearish engulfing for YES, the mirror for NO), RSI rolling over from overbought or oversold, rejection at the Bollinger band, stalling at resistance or support, two strong candles against you, the bot's odds down *Odds drop* from their peak, or the bid down *Trailing drop* from its peak.
 
-On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** and enter how much of your stake you sold and at what %. Partial sales are supported. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
+On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold** right after selling. The live sell price and time lock in automatically, and you enter how much of your stake you sold. Partial sales are supported. History shows when you bought and sold. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
 ### Push notifications (app closed)
 

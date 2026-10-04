@@ -91,7 +91,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v1.6 · live price</p>
+      <p class="fine" id="version">Shot Caller v1.7 · auto price + time</p>
     </section>
   </main>
 
@@ -103,7 +103,7 @@
         <button type="button" data-side="NO">NO · Below</button>
       </div>
       <label><span id="amtLabel">Amount ($)</span><input id="sheetAmt" inputmode="decimal"></label>
-      <label>At (%)<input id="sheetPct" inputmode="decimal"></label>
+      <div class="locked-price" id="sheetLocked"></div>
       <p class="sheet-hint" id="sheetHint"></p>
       <button id="sheetOk">Save</button>
       <button id="sheetCancel" class="ghost">Cancel</button>
