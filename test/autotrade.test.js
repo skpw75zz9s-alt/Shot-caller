@@ -146,10 +146,10 @@ test('own prices: posts a waiting buy at the max price that Kalshi itself cancel
   const p = planBuy({ ...base, cfg: own, sig: call({ limit: 0.38 }), row: r });
   assert.equal(p.ok, true);
   assert.deepEqual([p.order.side, p.order.price, p.order.time_in_force], ['bid', '0.3800', 'good_till_canceled']);
-  assert.ok(Math.abs(Date.parse(p.order.expiration_time) - (now + 120000)) < 1000);
-  assert.match(p.order.expiration_time, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/, 'RFC 3339 to the second');
+  assert.equal(p.order.expiration_time, Math.floor((now + 120000) / 1000), 'Unix seconds, a whole number');
   assert.equal(validateOrder(p.order, { now }), null, 'the server accepts it');
-  assert.match(validateOrder({ ...p.order, expiration_time: new Date(now + 10 * 60000).toISOString() }, { now }), /expire within 5 minutes/);
+  assert.match(validateOrder({ ...p.order, expiration_time: Math.floor((now + 10 * 60000) / 1000) }, { now }), /expire within 5 minutes/);
+  assert.match(validateOrder({ ...p.order, expiration_time: new Date(now + 60000).toISOString() }, { now }), /expire within 5 minutes/, 'a date string is refused (Kalshi wants seconds)');
   assert.match(validateOrder({ ...p.order, expiration_time: undefined }, { now }), /expire within 5 minutes/, 'no open-ended orders');
   // near the close it expires 1 minute before; too close and it doesn't post
   assert.equal(restExpiry(now, new Date(now + 90000).toISOString()), now + 30000);

@@ -40,9 +40,8 @@ export function sellOrder({ ticker, side, count, floor }) {
 // orders mostly fill when the market knows something the bot doesn't), so the bot never does that.
 export const REST_MS = 120000;
 export const restExpiry = (now, closeTime) => Math.min(now + REST_MS, Date.parse(closeTime) - 60000);
-// RFC 3339 to the second (no milliseconds), the plainest form Kalshi accepts
-const rfc3339 = (t) => new Date(Math.floor(t / 1000) * 1000).toISOString().replace('.000Z', 'Z');
-const restify = (o, expiresAt) => ({ ...o, time_in_force: 'good_till_canceled', expiration_time: rfc3339(expiresAt) });
+// Kalshi wants expiration_time as a Unix timestamp in whole seconds (a date string got "bad request")
+const restify = (o, expiresAt) => ({ ...o, time_in_force: 'good_till_canceled', expiration_time: Math.floor(expiresAt / 1000) });
 // The same order as fill-now-or-cancel (the fallback if Kalshi or the server refuses a waiting order)
 export const fillNow = ({ expiration_time, ...o }) => ({ ...o, time_in_force: 'immediate_or_cancel' });
 export const restBuyOrder = ({ expiresAt, ...a }) => restify(buyOrder(a), expiresAt);

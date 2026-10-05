@@ -100,7 +100,7 @@ export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD
   // so nothing can be left resting for long even if the phone goes away
   if (o.time_in_force === 'immediate_or_cancel') { if (o.expiration_time !== undefined) return 'expiration_time only goes with waiting orders'; }
   else if (o.time_in_force === 'good_till_canceled') {
-    const exp = typeof o.expiration_time === 'string' ? Date.parse(o.expiration_time) : NaN;
+    const exp = Number.isInteger(o.expiration_time) ? o.expiration_time * 1000 : NaN; // Unix seconds
     if (!(exp > now) || exp > now + 5 * 60000) return 'waiting orders must expire within 5 minutes (nothing left resting)';
   } else return 'only fill-now-or-cancel orders, or waiting orders that expire within 5 minutes (nothing left resting)';
   if (typeof o.count !== 'string' || !/^\d{1,4}\.00$/.test(o.count) || Number(o.count) < 1 || Number(o.count) > 1000) return 'count must be "1.00"-"1000.00" contracts';
@@ -172,9 +172,9 @@ export const kalshiAuthFor = (base) => { const kalshiCancel = cancelFor(base); r
     body = await readBody(req);
     // A phone clock that's a few minutes off would push a waiting order's expiry outside the allowed window: pull it
     // back to between 15 seconds and 5 minutes from now on the server's clock
-    if (body && body.time_in_force === 'good_till_canceled' && typeof body.expiration_time === 'string') {
-      const exp = Date.parse(body.expiration_time);
-      if (Number.isFinite(exp) && Math.abs(exp - now) < 15 * 60000) body.expiration_time = new Date(Math.min(now + 5 * 60000 - 1000, Math.max(now + 15000, exp))).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    if (body && body.time_in_force === 'good_till_canceled' && Number.isInteger(body.expiration_time)) {
+      const exp = body.expiration_time * 1000;
+      if (Math.abs(exp - now) < 15 * 60000) body.expiration_time = Math.floor(Math.min(now + 5 * 60000 - 1000, Math.max(now + 15000, exp)) / 1000);
     }
     const bad = validateOrder(body);
     if (bad) return send(res, 400, { error: `order refused: ${bad}` });
