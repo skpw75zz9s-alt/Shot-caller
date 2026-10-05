@@ -143,13 +143,14 @@ export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpo
   if (!/^[A-Za-z0-9-]{8,64}$/.test(key || '') || !/^\d{12,14}$/.test(ts || '') || !/^[A-Za-z0-9+/=]{40,1024}$/.test(sig || '')) {
     return send(res, 400, { error: 'missing or malformed Kalshi signature' });
   }
-  let body = null;
+  let body = null, countHit = () => {};
   if (isOrder) {
     const ip = clientIp(req), now = Date.now();
     const hits = (orderHits.get(ip) || []).filter((t) => t > now - 60000);
+    orderHits.set(ip, hits);
     if (hits.length >= 20) return send(res, 429, { error: 'too many orders: wait a minute' });
-    hits.push(now); orderHits.set(ip, hits);
     if (orderHits.size > 5000) orderHits.delete(orderHits.keys().next().value);
+    countHit = () => hits.push(now); // only orders actually sent to Kalshi count toward the 20 a minute
     body = await readBody(req);
     const bad = validateOrder(body);
     if (bad) return send(res, 400, { error: `order refused: ${bad}` });
@@ -167,6 +168,7 @@ export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpo
   const q = new URLSearchParams();
   if (!isOrder) for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
   try {
+    countHit();
     const r = await fetch(`${base}/portfolio/${isOrder ? 'events/orders' : endpoint}${q.size ? `?${q}` : ''}`, { // V2 order path
       method: isOrder ? 'POST' : 'GET',
       headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig, ...(isOrder ? { 'content-type': 'application/json' } : {}) },

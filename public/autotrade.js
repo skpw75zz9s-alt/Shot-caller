@@ -72,7 +72,8 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
   if (ask == null) return { ok: false, why: 'No Kalshi price' };
   if (ask > sig.limit + 1e-9) return { ok: false, why: `Skipped: price ${cents(ask)}¢ is over the ${cents(sig.limit)}¢ max` };
   const per = sig.limit + kalshiFee(sig.limit); // worst case: filled at the max price
-  const room = Math.min(c.maxPerTrade, c.budget - st.exposure, c.dailyLoss + st.worstCase, balance ?? 0);
+  const cash = Math.max(0, (balance ?? 0) * 0.97 - 0.05); // a little cash held back: Kalshi's balance can lag pending fills and fees
+  const room = Math.min(c.maxPerTrade, c.budget - st.exposure, c.dailyLoss + st.worstCase, cash);
   const count = Math.min(Math.floor(room / per), Math.max(1, sig.contracts || 1));
   if (count < 1) {
     if ((balance ?? 0) < per) return { ok: false, why: `Not enough Kalshi cash ($${(balance ?? 0).toFixed(2)})` };

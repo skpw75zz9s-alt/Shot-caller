@@ -1155,6 +1155,8 @@ $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // a
 
 // ---------- live auto-trading (real orders) ----------
 let liveBusy = false, liveErrors = 0, liveBusySince = 0;
+// Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
+const livePause = { buyUntil: 0, why: '', tickers: {} };
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
 
 function stopLive(why) {
@@ -1174,6 +1176,7 @@ async function sendLive(order, meta, label) {
     const out = await kalshiPost('orders', order, '?book=1&slip=2');
     if (out.skipped) { // nothing at the price: no order was placed, so it doesn't count as a try
       state.liveOrders = state.liveOrders.filter((x) => x !== entry);
+      livePause.tickers[order.ticker] = Date.now() + 3000; // look again in 3s, not every second
       state.liveWhy = meta.action === 'buy'
         ? (out.best == null ? `Nothing for sale on ${sideName(meta.side)} right now` : `Bargain already gone: Kalshi's live price is ${Math.round((meta.side === 'YES' ? out.best : 1 - out.best) * 100)}¢, over the ${meta.cents}¢ max`)
         : `Sell waiting: Kalshi's live bid moved more than 2¢ under ${meta.cents}¢`;
@@ -1189,7 +1192,18 @@ async function sendLive(order, meta, label) {
     state.kalshi.balanceAt = 0; // refresh the balance with the fills
     if (entry.filled !== 0) { syncKalshi(); setTimeout(syncKalshi, 1500); } // pick up the new position right away so sells can follow instantly
   } catch (e) {
+    if (e.status === 429) { // the server's 20-a-minute safety limit: no order was placed, so not an error or a try
+      state.liveOrders = state.liveOrders.filter((x) => x !== entry);
+      Object.assign(livePause, { buyUntil: Date.now() + 30000, why: 'Pausing 30s: too many orders in a minute' });
+      return;
+    }
     entry.status = 'error'; entry.error = e.message;
+    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: wait for cash instead of retrying
+      Object.assign(livePause, { buyUntil: Date.now() + 60000, why: 'Kalshi cash too low for this order: pausing buys 1 min (add money or lower Max $ per trade)' });
+      state.kalshi.balanceAt = 0; syncKalshi();
+      toast('LIVE: Kalshi says insufficient balance. Pausing buys for a minute.');
+      return;
+    }
     liveErrors++;
     toast(`LIVE order failed: ${e.message}`);
     if (e.status === 403) stopLive('Kalshi refused the order. Your API key probably has no trading permission: make a key with trading enabled.');
@@ -1255,6 +1269,8 @@ function runLive(snap, live, sig, now) {
       return sendLive(sell.order, { ...sell.meta, kind }, `${kind === 'lock' ? 'lock profit: ' : ''}sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
     }
   }
+  if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
+  if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
   const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
   if (!b.ok) { state.liveWhy = /^Waiting/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
