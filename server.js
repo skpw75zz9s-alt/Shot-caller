@@ -90,13 +90,19 @@ const ORDER_MAX_USD = Number(process.env.AUTO_MAX_ORDER_USD || 100);
 // Every live order is checked here before it reaches Kalshi (V2 shape: one YES book, bid/ask, dollar strings):
 // only the BTC 15-minute series, only orders that fill now or cancel (nothing left resting), sensible sizes,
 // a hard dollar cap on anything that opens a position, no extra fields.
-export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD } = {}) {
+export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD, now = Date.now() } = {}) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return 'order must be an object';
-  const allowed = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type']);
+  const allowed = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type', 'expiration_time']);
   for (const k of Object.keys(o)) if (!allowed.has(k)) return `field not allowed: ${k}`;
   if (typeof o.ticker !== 'string' || !/^[A-Z0-9]+-[A-Z0-9-]{1,60}$/.test(o.ticker) || !series.some((s) => o.ticker.startsWith(`${s}-`))) return 'only the BTC 15-minute markets can be traded';
   if (!['bid', 'ask'].includes(o.side)) return 'side must be bid or ask';
-  if (o.time_in_force !== 'immediate_or_cancel') return 'only fill-now-or-cancel orders (nothing left resting)';
+  // Fill-now-or-cancel, or the bot's own-price orders that wait on Kalshi: those must expire within 5 minutes,
+  // so nothing can be left resting for long even if the phone goes away
+  if (o.time_in_force === 'immediate_or_cancel') { if (o.expiration_time !== undefined) return 'expiration_time only goes with waiting orders'; }
+  else if (o.time_in_force === 'good_till_canceled') {
+    const exp = typeof o.expiration_time === 'string' ? Date.parse(o.expiration_time) : NaN;
+    if (!(exp > now) || exp > now + 5 * 60000) return 'waiting orders must expire within 5 minutes (nothing left resting)';
+  } else return 'only fill-now-or-cancel orders, or waiting orders that expire within 5 minutes (nothing left resting)';
   if (typeof o.count !== 'string' || !/^\d{1,4}\.00$/.test(o.count) || Number(o.count) < 1 || Number(o.count) > 1000) return 'count must be "1.00"-"1000.00" contracts';
   if (typeof o.price !== 'string' || !/^0\.\d{4}$/.test(o.price) || Number(o.price) < 0.01 || Number(o.price) > 0.99) return 'price must be "0.0100"-"0.9900"';
   if (typeof o.reduce_only !== 'boolean') return 'reduce_only must be true or false';
@@ -133,9 +139,21 @@ export function bookAdjust(order, resp, slip = 0.02) {
 }
 
 const orderHits = new Map(); // ip -> recent order timestamps (max 20 a minute)
+// Cancel one of the bot's waiting orders (signed by the phone like everything else). Cancels are never rate-limited.
+const cancelFor = (base) => async function kalshiCancel(req, res, id) {
+  if (req.method !== 'DELETE') return send(res, 405, { error: 'method not allowed' });
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(id)) return send(res, 400, { error: 'bad order id' });
+  const key = req.headers['x-kalshi-key'], ts = req.headers['x-kalshi-ts'], sig = req.headers['x-kalshi-sig'];
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(key || '') || !/^\d{12,14}$/.test(ts || '') || !/^[A-Za-z0-9+/=]{40,1024}$/.test(sig || '')) return send(res, 400, { error: 'missing or malformed Kalshi signature' });
+  try {
+    const r = await fetch(`${base}/portfolio/events/orders/${id}`, { method: 'DELETE', headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig }, signal: AbortSignal.timeout(8000) });
+    sendEntry(req, res, r.status === 401 ? 403 : r.status, { raw: Buffer.from(await r.text()) }, 'application/json', { 'cache-control': 'no-store, private' });
+  } catch (e) { send(res, 502, { error: `Kalshi didn't answer: ${e.message}` }); }
+};
 const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status']);
-export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpoint, url) {
+export const kalshiAuthFor = (base) => { const kalshiCancel = cancelFor(base); return async function kalshiAuth(req, res, endpoint, url) {
   if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/` });
+  if (endpoint.startsWith('cancel/')) return kalshiCancel(req, res, endpoint.slice(7));
   const isOrder = req.method === 'POST' && endpoint === 'orders';
   if (!isOrder && req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
   if (!AUTH_READS.has(endpoint)) return send(res, 404, { error: 'not allowed' });
@@ -180,7 +198,7 @@ export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpo
   } catch (e) {
     send(res, 502, { error: `Kalshi didn't answer: ${e.message}` });
   }
-};
+}; };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 
 async function readBody(req) {
@@ -282,8 +300,8 @@ export const server = http.createServer(async (req, res) => {
 
     const push = path.match(/^\/api\/push\/(\w+)$/);
     if (push && req.method === 'POST') return await pushApi(req, res, push[1], token);
-    const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
-    if (ka) return await kalshiAuth(req, res, ka[1], url);
+    const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/) || path.match(/^\/api\/kalshi-auth\/orders\/([A-Za-z0-9-]{8,64})$/);
+    if (ka) return await kalshiAuth(req, res, ka[0].includes('/orders/') ? `cancel/${ka[1]}` : ka[1], url);
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
     const route = ROUTES.find((r) => path.startsWith(r.prefix));

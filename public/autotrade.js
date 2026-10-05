@@ -8,7 +8,7 @@
 // and a sell can never sell more than is held. It can only ever use the cash in the Kalshi account.
 import { kalshiFee } from './model.js';
 
-export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true };
+export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true, ownPrice: true };
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const cents = (p) => Math.round(p * 100);
@@ -31,6 +31,19 @@ export function sellOrder({ ticker, side, count, floor }) {
   return side === 'NO' ? v2({ ticker, book: 'bid', price: 1 - floor, count, reduce: true }) : v2({ ticker, book: 'ask', price: floor, count, reduce: true });
 }
 
+// The bot's own price on calls: the buy is a limit order at the call's max price that waits on Kalshi (up to REST_MS)
+// instead of cancelling when the ask is a cent too high. Kalshi fills it whenever a seller comes down to the bot's
+// price. The order carries an expiry, so Kalshi itself cancels it within REST_MS (and 1 minute before the market
+// closes) even if the phone goes away; the app also cancels it as soon as the call ends.
+// Tested in the simulator: waiting on real calls beat fill-now (+$7 per 100 windows, smaller worst stretch, and much
+// better with a slow connection). Posting own-price orders WITHOUT a call lost money in every version tried (those
+// orders mostly fill when the market knows something the bot doesn't), so the bot never does that.
+export const REST_MS = 120000;
+export const restExpiry = (now, closeTime) => Math.min(now + REST_MS, Date.parse(closeTime) - 60000);
+const restify = (o, expiresAt) => ({ ...o, time_in_force: 'good_till_canceled', expiration_time: new Date(expiresAt).toISOString() });
+export const restBuyOrder = ({ expiresAt, ...a }) => restify(buyOrder(a), expiresAt);
+export const isResting = (o, now = Date.now()) => o.status === 'resting' && o.expiresAt > now;
+
 // A buy that filled, or that may have (no fill count came back): never treated as a miss to retry
 const boughtSomething = (o) => o.status !== 'error' && !(o.filled === 0);
 export const LIVE_TRIES = 3; // tries per call when orders don't fill (price moved) or fail
@@ -39,7 +52,9 @@ export const LIVE_TRIES = 3; // tries per call when orders don't fill (price mov
 export function liveState({ positions, trades, orders, now = Date.now() }) {
   const since = dayStart(now);
   const open = positions.filter((p) => p.source === 'kalshi');
-  const exposure = open.reduce((a, p) => a + (p.price + kalshiFee(p.price)) * p.contracts, 0);
+  // Waiting buys count as money at risk too (they can fill any moment)
+  const exposure = open.reduce((a, p) => a + (p.price + kalshiFee(p.price)) * p.contracts, 0)
+    + orders.filter((o) => o.action === 'buy' && isResting(o, now)).reduce((a, o) => a + (o.restCost || 0), 0);
   const realized = trades.filter((t) => t.source === 'kalshi' && t.closedAt >= since).reduce((a, t) => a + t.pnl, 0);
   // Only buys that went through count toward Max trades (a no-fill or an error didn't spend anything)
   const buys = orders.filter((o) => o.at >= since && o.action === 'buy' && boughtSomething(o)).length;
@@ -47,7 +62,7 @@ export function liveState({ positions, trades, orders, now = Date.now() }) {
 }
 
 // Should it buy right now, and how many contracts? Returns { ok, why, order }.
-export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now = Date.now() }) {
+export function planBuy({ cfg, sig, row, positions, trades, orders, balance, lastSync = 0, now = Date.now() }) {
   const c = { ...LIVE_DEFAULTS, ...cfg };
   if (!c.live) return { ok: false, why: 'Live auto-trading is off' };
   if (!row || !sig?.callSide) return { ok: false, why: 'Waiting for a call' };
@@ -58,6 +73,10 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
   // fill, it errored, or Live was turned on mid-call), up to LIVE_TRIES orders per call
   const since = sig.calledAt ?? 0;
   const tries = orders.filter((o) => o.ticker === ticker && o.action === 'buy' && o.side === sig.callSide && o.at >= since);
+  const waiting = orders.find((o) => o.ticker === ticker && o.action === 'buy' && isResting(o, now));
+  if (waiting) return { ok: false, why: `Waiting at ${waiting.cents}¢ for a seller (the bot's own price), until ${new Date(waiting.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` };
+  // A waiting order that ended may have filled at the last second: check Kalshi before trying again
+  if (orders.some((o) => o.ticker === ticker && o.action === 'buy' && o.expiresAt && o.expiresAt <= now && o.expiresAt > lastSync - 1000)) return { ok: false, why: 'Checking whether the waiting order filled' };
   if (!add && tries.some(boughtSomething)) return { ok: false, why: 'Waiting for a new call' }; // already bought this call (Kalshi sync catching up)
   if (!add && !sig.fire && !(sig.callSide && sig.called === sig.callSide && !held)) return { ok: false, why: 'Waiting for a new call' };
   if (!add && tries.length >= LIVE_TRIES) return { ok: false, why: `Gave up on this call after ${LIVE_TRIES} orders didn't fill` };
@@ -69,8 +88,11 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
   if (-st.worstCase >= c.dailyLoss) return { ok: false, why: `Stopped for today: $${c.dailyLoss} loss limit` };
   if (!(sig.limit > 0)) return { ok: false, why: 'No max price' };
   const q = row.ev.quote, ask = sig.callSide === 'YES' ? q.yesAsk : q.noAsk;
-  if (ask == null) return { ok: false, why: 'No Kalshi price' };
-  if (ask > sig.limit + 1e-9) return { ok: false, why: `Skipped: price ${cents(ask)}¢ is over the ${cents(sig.limit)}¢ max` };
+  const own = c.ownPrice !== false;
+  const expiresAt = own ? restExpiry(now, row.m.close_time) : null;
+  if (own && expiresAt - now < 20000) return { ok: false, why: 'Too close to the market closing to post an order' };
+  if (!own && ask == null) return { ok: false, why: 'No Kalshi price' };
+  if (!own && ask > sig.limit + 1e-9) return { ok: false, why: `Skipped: price ${cents(ask)}¢ is over the ${cents(sig.limit)}¢ max` };
   const per = sig.limit + kalshiFee(sig.limit); // worst case: filled at the max price
   const cash = Math.max(0, (balance ?? 0) * 0.97 - 0.05); // a little cash held back: Kalshi's balance can lag pending fills and fees
   const room = Math.min(c.maxPerTrade, c.budget - st.exposure, c.dailyLoss + st.worstCase, cash);
@@ -79,7 +101,8 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
     if ((balance ?? 0) < per) return { ok: false, why: `Not enough Kalshi cash ($${(balance ?? 0).toFixed(2)})` };
     return { ok: false, why: `Budget full ($${st.exposure.toFixed(2)} of $${c.budget} at risk)` };
   }
-  return { ok: true, add, order: buyOrder({ ticker, side: sig.callSide, count, limit: sig.limit }), meta: { action: 'buy', side: sig.callSide, count, cents: cents(sig.limit) } };
+  const order = own ? restBuyOrder({ ticker, side: sig.callSide, count, limit: sig.limit, expiresAt }) : buyOrder({ ticker, side: sig.callSide, count, limit: sig.limit });
+  return { ok: true, add, order, meta: { action: 'buy', side: sig.callSide, count, cents: cents(sig.limit), rest: own, expiresAt, restCost: count * per } };
 }
 
 // Should it sell this Kalshi position now? `check` is positionCheck() for it. Sells at the bid or better.
@@ -91,4 +114,5 @@ export function planSell({ cfg, pos, check, orders, now = Date.now() }) {
   if (count < 1) return null;
   return { order: sellOrder({ ticker: pos.ticker, side: pos.side, count, floor: check.bid }), meta: { action: 'sell', side: pos.side, count, cents: cents(check.bid) } };
 }
+
 

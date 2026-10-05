@@ -139,6 +139,16 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 
 The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
 
+**Bot's own price on calls (on by default, Live card checkbox):** when a call fires, the buy is a limit order at the bot's max price that waits on Kalshi for up to 2 minutes. Before, it was fill-now-or-cancel, which gave up if Kalshi's price was a cent too high. Kalshi fills it as soon as a seller comes down to the bot's price.
+- The app cancels the order the moment the call ends.
+- **STOP** cancels everything that's waiting.
+- Each order also carries an expiry, so Kalshi itself cancels it within 2 minutes (and 1 minute before the market closes) even if your phone dies. The server refuses any waiting order that would last longer than 5 minutes.
+- Waiting buys count toward your budget while they wait.
+
+Tested in the simulator against fill-now: +$7 per 100 windows, worst losing stretch $338 instead of $363, and much better with a slow connection (+$43 vs +$30 at a 10-second delay).
+
+What it deliberately does **not** do: post its own price when there's no call, or keep a waiting sell posted. Both were tested. The no-call version lost money in every variant tried, even on a perfectly priced Kalshi, because those orders mostly fill when the market knows something the bot doesn't. Waiting sells have the same risk of selling too cheap right as a position gains value.
+
 **Instant orders:** while Live is on, the app reads Kalshi's prices every second (not every 3). Each order is a single request: the server, which sits next to Kalshi, reads the live order book and places the order immediately. That saves a second round trip over mobile data.
 - **Buys** go out only if something is for sale at or under the max price, sized to what's there. If the bargain is already gone, no order is sent and it doesn't count as a try.
 - **Sells** step to the live bid if it's within 2¢.

@@ -3,7 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
-import { LIVE_DEFAULTS, liveState, planBuy, planSell } from './autotrade.js';
+import { LIVE_DEFAULTS, isResting, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -942,6 +942,12 @@ async function syncKalshi() {
       cursor = page.cursor || null;
     } while (cursor && ++pages < 5);
     const mine = fills.filter((f) => f.ticker.startsWith(`${settings.series}-`) && !seen.has(f.id) && f.at);
+    // Fills on the bot's waiting orders show up here: credit them to the order in the Live log
+    for (const f of mine) {
+      // (only fills that came after Kalshi's reply: what filled right away is already in the reply)
+      const o = [...state.liveOrders].reverse().find((x) => x.ticker === f.ticker && x.action === f.action && x.expiresAt && x.at <= f.at + 2000 && ['resting', 'expired', 'cancelled', 'cancelling'].includes(x.status));
+      if (o && f.at <= (o.expiresAt || 0) + 5000) { o.filled = Math.min(o.count, (o.filled || 0) + f.count); o.status = o.filled >= o.count ? 'filled' : o.status; }
+    }
     if (mine.length) {
       const linked = state.positions.filter((p) => p.source === 'kalshi');
       const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at }]));
@@ -1162,18 +1168,40 @@ function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', sta
 function stopLive(why) {
   if (!liveCfg.live) return;
   liveCfg.live = false; saveLive();
+  cancelAllResting('live trading stopped');
   state.liveWhy = why || 'Stopped';
   toast(`Live auto-trading stopped${why ? `: ${why}` : ''}`);
   renderLive(); render();
 }
 
+// Cancel one of the bot's waiting orders on Kalshi (signed on the phone like everything else)
+async function kalshiDelete(id) {
+  const { key, keyId } = state.kalshi;
+  if (!key) throw new Error('Kalshi not linked');
+  kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
+  const headers = await signHeaders(key, keyId, 'DELETE', `${kalshiPrefix}events/orders/${id}`);
+  const r = await fetch(`${API}/kalshi-auth/orders/${encodeURIComponent(id)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(10000) });
+  paywalled(r);
+  if (!r.ok && r.status !== 404) { const out = await r.json().catch(() => ({})); throw new Error(out.error?.message || out.error || `Kalshi: HTTP ${r.status}`); }
+}
+async function cancelResting(entry, why) {
+  if (!isResting(entry)) return;
+  entry.status = 'cancelling';
+  try { if (entry.id) await kalshiDelete(entry.id); entry.status = 'cancelled'; entry.error = why; }
+  catch (e) { entry.status = 'resting'; entry.error = `cancel failed: ${e.message} (Kalshi still cancels it at ${clock(entry.expiresAt)})`; }
+  saveLive(); renderLive();
+}
+function cancelAllResting(why) { for (const o of state.liveOrders.filter((x) => isResting(x))) cancelResting(o, why); }
+
 async function sendLive(order, meta, label) {
   liveBusy = true; liveBusySince = Date.now();
-  const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label };
+  const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label,
+    ...(meta.rest ? { expiresAt: meta.expiresAt, restCost: meta.restCost || 0 } : {}) };
   state.liveOrders.push(entry); saveLive(); renderLive();
   try {
-    // One request: the server checks Kalshi's live book and places the order right away (sells may step 2¢ to the live bid)
-    const out = await kalshiPost('orders', order, '?book=1&slip=2');
+    // Own-price orders go to Kalshi as they are (they wait at the bot's price). Fill-now orders: the server checks the
+    // live book and places them in one request (sells may step 2¢ to the live bid)
+    const out = await kalshiPost('orders', order, meta.rest ? '' : '?book=1&slip=2');
     if (out.skipped) { // nothing at the price: no order was placed, so it doesn't count as a try
       state.liveOrders = state.liveOrders.filter((x) => x !== entry);
       livePause.tickers[order.ticker] = Date.now() + 3000; // look again in 3s, not every second
@@ -1187,6 +1215,11 @@ async function sendLive(order, meta, label) {
     entry.filled = Number.isFinite(filled) ? filled : null;
     entry.status = o.status || (entry.filled > 0 ? 'filled' : entry.filled === 0 ? 'no fill (cancelled)' : 'placed');
     entry.id = o.order_id || null;
+    if (meta.rest) { // waiting at the bot's price: whatever didn't fill right away rests until it fills, is cancelled or expires
+      const left = Number(o.remaining_count ?? o.remaining_count_fp ?? NaN);
+      if (!(left === 0)) { entry.status = 'resting'; entry.restCost = meta.restCost * (Number.isFinite(left) && meta.count ? left / meta.count : 1); }
+      else entry.status = 'filled';
+    }
     liveErrors = 0;
     toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
     state.kalshi.balanceAt = 0; // refresh the balance with the fills
@@ -1260,25 +1293,34 @@ function runLive(snap, live, sig, now) {
   renderLiveStrip();
   if (!liveCfg.live || !state.kalshi.key || liveBusy || document.hidden) return;
   if (state.kalshi.balance == null) { state.liveWhy = 'Waiting for your Kalshi balance (tap Sync in the Kalshi card if this stays)'; return; }
+  // Waiting orders: mark ones Kalshi has expired, and cancel a waiting buy whose call is over
+  for (const o of state.liveOrders) if (o.status === 'resting' && o.expiresAt <= now) o.status = 'expired';
+  for (const o of state.liveOrders.filter((x) => x.action === 'buy' && isResting(x, now))) {
+    if (!(live && sig?.callSide === o.side && live.m.ticker === o.ticker)) return cancelResting(o, 'call ended');
+  }
   // Sells first: the same exits as every position card
   for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
     const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, exitSettingsFor(pos), now), orders: state.liveOrders, now });
     if (sell) {
+      const waitingSell = state.liveOrders.find((o) => o.ticker === pos.ticker && o.action === 'sell' && isResting(o, now));
+      if (waitingSell) return cancelResting(waitingSell, 'selling now instead');
       const kind = positionCheck(pos, snap, exitSettingsFor(pos), now).ex.kind;
       return sendLive(sell.order, { ...sell.meta, kind }, `${kind === 'lock' ? 'lock profit: ' : ''}sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
     }
   }
   if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
   if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
-  const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
-  if (!b.ok) { state.liveWhy = /^Waiting/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
+  const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, lastSync: state.kalshi.lastSync || 0, now });
+  if (!b.ok) { state.liveWhy = /^Waiting for (a|a new) call/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
-  sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ max`);
+  sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ ${b.meta.rest ? `(bot's price, waits until ${clock(b.meta.expiresAt)})` : 'max'}`);
 }
 
 // While live trading is on, read Kalshi's prices every second (not every 3) so calls and exits react faster
 setInterval(() => {
+  // a waiting order can fill any moment: check Kalshi every 3s so exits follow right away
+  if (liveCfg.live && !document.hidden && state.liveOrders.some((o) => isResting(o)) && Date.now() - (state.kalshi.lastSync || 0) > 3000) syncKalshi();
   if (!liveCfg.live || document.hidden || Date.now() - state.marketsAt < 900) return;
   refreshMarkets().then(render).catch(() => {});
 }, 1000);
@@ -1314,6 +1356,7 @@ function renderLive() {
     : liveCfg.live ? `ON: trading real money while this app is open. Budget ${dollars(liveCfg.budget)}, up to ${dollars(liveCfg.maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
     : 'Off.';
   $('lvLock').checked = liveCfg.profitLock !== false;
+  $('lvOwn').checked = liveCfg.ownPrice !== false;
   $('liveArm').hidden = liveCfg.live;
   $('liveOffRow').hidden = !liveCfg.live;
   for (const [id, k] of [['lvBudget', 'budget'], ['lvMax', 'maxPerTrade'], ['lvLoss', 'dailyLoss'], ['lvTrades', 'maxTrades'], ['lvConf', 'minConfidence']]) {
@@ -1335,6 +1378,7 @@ for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'm
   });
 }
 $('lvLock').addEventListener('change', (e) => { liveCfg.profitLock = e.target.checked; saveLive(); renderLive(); });
+$('lvOwn').addEventListener('change', (e) => { liveCfg.ownPrice = e.target.checked; if (!e.target.checked) cancelAllResting('own prices turned off'); saveLive(); renderLive(); });
 $('lvOn').addEventListener('click', () => {
   if (!state.kalshi.key) return toast('Link your Kalshi account first');
   if (!$('lvAck').checked) return toast('Tick the box to confirm you understand it trades real money');

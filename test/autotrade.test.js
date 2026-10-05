@@ -7,7 +7,7 @@ const now = Date.now();
 const c2 = (v) => Math.round(v * 100) / 100;
 const row = (yb, ticker = 'KXBTC15M-26OCT05-T1') => ({ m: { ticker }, ev: { quote: { yesBid: yb, yesAsk: c2(yb + 0.02), noBid: c2(0.98 - yb), noAsk: c2(1 - yb) } } });
 const call = (o = {}) => ({ fire: true, callSide: 'YES', stance: 'new', deep: { score: 80 }, limit: 0.45, contracts: 100, ...o });
-const cfg = { live: true, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 40 };
+const cfg = { live: true, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 40, ownPrice: false };
 const base = { cfg, positions: [], trades: [], orders: [], balance: 200, now };
 
 test('V2 order bodies pass the server check, and the server refuses anything else', () => {
@@ -44,7 +44,7 @@ test('buys a new confident call at the max price, sized to the per-trade cap', (
   assert.equal(p.order.side, 'bid');
   assert.equal(p.order.price, '0.4500', 'limit at the max price: fills at the ask or better, never higher');
   assert.equal(p.order.count, '21.00', '$10 / (45¢ + 2¢ fee)');
-  assert.deepEqual(p.meta, { action: 'buy', side: 'YES', count: 21, cents: 45 });
+  assert.deepEqual([p.meta.action, p.meta.side, p.meta.count, p.meta.cents, p.meta.rest], ['buy', 'YES', 21, 45, false]);
 });
 
 test('skips: off, holding, low confidence, price over max, just ordered', () => {
@@ -136,4 +136,30 @@ test('instant orders: the server checks the live book and places the order in on
   assert.equal(bookAdjust({ ...sellYes, price: '0.4700' }, book, 0.02).skip, true, 'live bid 5c under: wait');
   const fp = { orderbook_fp: { yes_dollars: [['0.3000', '12.00']], no_dollars: null } };
   assert.equal(bookAdjust(buyYes, fp).skip, true, 'no YES for sale');
+});
+
+test('own prices: posts a waiting buy at the max price that Kalshi itself cancels within 2 minutes', async () => {
+  const { restExpiry, isResting } = await import('../public/autotrade.js');
+  const own = { ...cfg, ownPrice: true };
+  const r = { ...row(0.40), m: { ticker: 'KXBTC15M-26OCT05-T1', close_time: new Date(now + 10 * 60000).toISOString() } };
+  // Kalshi's ask (42c) is over the 38c max: fill-now would skip, own price posts at 38c and waits
+  const p = planBuy({ ...base, cfg: own, sig: call({ limit: 0.38 }), row: r });
+  assert.equal(p.ok, true);
+  assert.deepEqual([p.order.side, p.order.price, p.order.time_in_force], ['bid', '0.3800', 'good_till_canceled']);
+  assert.equal(Date.parse(p.order.expiration_time), now + 120000);
+  assert.equal(validateOrder(p.order, { now }), null, 'the server accepts it');
+  assert.match(validateOrder({ ...p.order, expiration_time: new Date(now + 10 * 60000).toISOString() }, { now }), /expire within 5 minutes/);
+  assert.match(validateOrder({ ...p.order, expiration_time: undefined }, { now }), /expire within 5 minutes/, 'no open-ended orders');
+  // near the close it expires 1 minute before; too close and it doesn't post
+  assert.equal(restExpiry(now, new Date(now + 90000).toISOString()), now + 30000);
+  const late = { ...r, m: { ...r.m, close_time: new Date(now + 70000).toISOString() } };
+  assert.match(planBuy({ ...base, cfg: own, sig: call({ limit: 0.38 }), row: late }).why, /Too close/);
+  // while it waits: no second order, and its money counts as at risk
+  const waiting = { at: now - 10000, ticker: r.m.ticker, action: 'buy', side: 'YES', cents: 38, status: 'resting', expiresAt: now + 110000, restCost: 10 };
+  assert.match(planBuy({ ...base, cfg: own, orders: [waiting], sig: call({ limit: 0.38 }), row: r }).why, /Waiting at 38¢/);
+  assert.equal(liveState({ positions: [], trades: [], orders: [waiting], now }).exposure, 10);
+  assert.equal(isResting({ ...waiting, expiresAt: now - 1 }, now), false);
+  // it just expired and Kalshi hasn't been checked since: make sure it didn't fill before trying again
+  const ended = { ...waiting, status: 'expired', expiresAt: now - 2000, filled: 0 };
+  assert.match(planBuy({ ...base, cfg: own, orders: [ended], lastSync: now - 5000, sig: call({ fire: false, called: 'YES', calledAt: now - 60000, limit: 0.38 }), row: r }).why, /Checking whether/);
 });
