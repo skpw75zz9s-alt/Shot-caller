@@ -173,6 +173,22 @@
           <ul id="lvLog" class="history pr-log"></ul>
         </div>
       </div>
+      <div class="card push-card" id="rpCard">
+        <h3>Live results (real trades)</h3>
+        <div class="risk-btns" id="rpPeriod"><button data-p="today">Today</button><button data-p="week">7 days</button><button data-p="all">All</button></div>
+        <div class="grid pr-stats">
+          <div class="stat"><label>Profit / loss</label><b id="rpPnl">—</b></div>
+          <div class="stat"><label>Trades</label><b id="rpTrades">—</b></div>
+          <div class="stat"><label>Win rate</label><b id="rpWin">—</b></div>
+          <div class="stat"><label>Per trade</label><b id="rpPer">—</b></div>
+        </div>
+        <p class="push-status" id="rpDetail"></p>
+        <h4>By how it sold</h4>
+        <ul id="rpExit" class="history pr-log"></ul>
+        <h4>By confidence at the buy</h4>
+        <ul id="rpConf" class="history pr-log"></ul>
+        <p class="push-status" id="rpOrders"></p>
+      </div>
       <div class="card push-card health-card" id="healthCard">
         <h3>Health check</h3>
         <p class="push-status" id="healthStatus">Runs every 2 rounds (every 30 minutes, at :00 and :30) while the app is open, and tells you only when something new is wrong.</p>

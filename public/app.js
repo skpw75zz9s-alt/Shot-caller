@@ -6,6 +6,7 @@ import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './
 import { LIVE_DEFAULTS, fillNow, heldByOrders, isResting, liveLimits, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
+import { EXIT_NAMES, liveReport } from './livereport.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 
 const API = './api';
@@ -1200,6 +1201,7 @@ function cancelAllResting(why) { for (const o of state.liveOrders.filter((x) => 
 async function sendLive(order, meta, label) {
   liveBusy = true; liveBusySince = Date.now();
   const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label,
+    kind: meta.kind ?? null, conf: meta.conf ?? null, // for the Live results report
     ...(meta.rest ? { expiresAt: meta.expiresAt, restCost: meta.restCost || 0 } : {}) };
   state.liveOrders.push(entry); saveLive(); renderLive();
   try {
@@ -1425,6 +1427,29 @@ $('liveStop').addEventListener('click', () => stopLive('STOP pressed'));
 buildSettings();
 renderRisk();
 renderLive();
+
+// ---------- live results (real trades) ----------
+let reportPeriod = 'today';
+function renderReport() {
+  const since = reportPeriod === 'today' ? new Date().setHours(0, 0, 0, 0) : reportPeriod === 'week' ? Date.now() - 7 * 86400000 : 0;
+  const r = liveReport({ trades: state.trades, orders: state.liveOrders, since });
+  for (const b of document.querySelectorAll('#rpPeriod button')) b.classList.toggle('on', b.dataset.p === reportPeriod);
+  const t = r.total, pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`), m = (v) => (v == null ? '—' : money(v));
+  $('rpPnl').textContent = money(t.pnl); $('rpPnl').className = t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : '';
+  $('rpTrades').textContent = `${t.n} (${t.wins} won)`;
+  $('rpWin').textContent = pct(t.winRate);
+  $('rpPer').textContent = m(t.perTrade);
+  $('rpDetail').textContent = t.n ? `Average win ${m(t.avgWin)} · average loss ${m(t.avgLoss)} · best ${m(t.best)} · worst ${m(t.worst)}` : 'No closed bot trades in this period yet.';
+  const rows = (g, name) => Object.entries(g).sort((a, b) => b[1].pnl - a[1].pnl).map(([k, s]) =>
+    `<li><span>${esc(name(k))}<small>${s.n} trade${s.n > 1 ? 's' : ''} · ${pct(s.winRate)} won</small></span><b class="${s.pnl > 0 ? 'pos' : s.pnl < 0 ? 'neg' : ''}">${money(s.pnl)}</b></li>`).join('') || '<li class="calm">—</li>';
+  $('rpExit').innerHTML = rows(r.byExit, (k) => EXIT_NAMES[k] || k);
+  $('rpConf').innerHTML = rows(r.byConf, (k) => `Confidence ${k}`);
+  const o = r.orders;
+  $('rpOrders').textContent = `${o.buys} buy orders: ${o.filled} filled, ${o.noFill} didn't fill, ${o.errors} errors${o.topErrors.length ? ` (${o.topErrors.map(([e, n]) => `${e} ×${n}`).join('; ')})` : ''}`;
+}
+document.querySelectorAll('#rpPeriod button').forEach((b) => b.addEventListener('click', () => { reportPeriod = b.dataset.p; renderReport(); }));
+setInterval(() => { if (!document.hidden && !$('rpCard').closest('[hidden]')) renderReport(); }, 5000);
+renderReport();
 
 // ---------- health check (every 2 rounds) ----------
 const bootAt = Date.now();

@@ -133,7 +133,7 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, las
     return { ok: false, why: `Budget full ($${st.exposure.toFixed(2)} of $${c.budget} at risk)` };
   }
   const order = own ? restBuyOrder({ ticker, side: sig.callSide, count, limit: sig.limit, expiresAt }) : buyOrder({ ticker, side: sig.callSide, count, limit: sig.limit });
-  return { ok: true, add, order, meta: { action: 'buy', side: sig.callSide, count, cents: cents(sig.limit), rest: own, expiresAt, restCost: count * per } };
+  return { ok: true, add, order, meta: { action: 'buy', side: sig.callSide, count, cents: cents(sig.limit), rest: own, expiresAt, restCost: count * per, conf: sig.deep?.score ?? null } };
 }
 
 // Should it sell this Kalshi position now? `check` is positionCheck() for it. Sells at the bid or better.
