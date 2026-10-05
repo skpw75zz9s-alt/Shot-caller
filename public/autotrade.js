@@ -8,7 +8,7 @@
 // and a sell can never sell more than is held. It can only ever use the cash in the Kalshi account.
 import { kalshiFee } from './model.js';
 
-export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true, ownPrice: true, useBalance: true, balancePct: 25 };
+export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true, ownPrice: true, useBalance: true, balancePct: 25, learn: true };
 
 // "Use my Kalshi balance": the budget is the cash in Kalshi (less a small cushion) and each trade is up to
 // balancePct % of it, so the bot grows and shrinks with the account instead of fixed dollar limits.
@@ -126,7 +126,8 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, las
   if (!own && ask > sig.limit + 1e-9) return { ok: false, why: `Skipped: price ${cents(ask)}¢ is over the ${cents(sig.limit)}¢ max` };
   const per = sig.limit + kalshiFee(sig.limit); // worst case: filled at the max price
   const cash = Math.max(0, (balance ?? 0) * 0.97 - 0.05); // a little cash held back: Kalshi's balance can lag pending fills and fees
-  const room = Math.min(c.maxPerTrade, c.budget - st.exposure, c.dailyLoss + st.worstCase, cash);
+  // sizeMult: learned from real trades (learn.js)
+  const room = Math.min(c.maxPerTrade * (c.sizeMult ?? 1), c.budget - st.exposure, c.dailyLoss + st.worstCase, cash);
   const count = Math.min(Math.floor(room / per), Math.max(1, sig.contracts || 1));
   if (count < 1) {
     if ((balance ?? 0) < per) return { ok: false, why: `Not enough Kalshi cash ($${(balance ?? 0).toFixed(2)})` };

@@ -7,6 +7,7 @@ import { LIVE_DEFAULTS, fillNow, heldByOrders, isResting, liveLimits, liveState,
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
 import { EXIT_NAMES, liveReport } from './livereport.js';
+import { learnStep, newLearned } from './learn.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 
 const API = './api';
@@ -101,7 +102,7 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   notifyLog: {}, // anti-spam limiter for in-app alerts
   calls: store.get('calls', {}), // what the bot has called per window, so it sticks with its calls
   practice: store.get('practice', null) || newPractice(), practiceWhy: '',
-  liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 3 * 86400000), liveWhy: '' };
+  liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 30 * 86400000), liveWhy: '' }; // 30 days, for Live results and learning
 const liveCfg = { ...LIVE_DEFAULTS, ...store.get('liveCfg', {}) };
 const practiceCfg = { ...PRACTICE_DEFAULTS, ...store.get('practiceCfg', {}) };
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
@@ -1168,7 +1169,7 @@ let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 const livePause = { buyUntil: 0, why: '', tickers: {} };
 let ownPriceRefused = '';
 let liveShrink = 1; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
-function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
+function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-1500)); }
 
 function stopLive(why) {
   if (!liveCfg.live) return;
@@ -1339,7 +1340,7 @@ function runLive(snap, live, sig, now) {
   }
   if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
   if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
-  const b = planBuy({ cfg: ownPriceRefused ? { ...liveCfg, ownPrice: false } : liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: spendable(), lastSync: state.kalshi.lastSync || 0, now });
+  const b = planBuy({ cfg: { ...liveCfg, ...(ownPriceRefused ? { ownPrice: false } : {}), sizeMult: liveCfg.learn !== false ? learned.sizeMult : 1 }, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: spendable(), lastSync: state.kalshi.lastSync || 0, now });
   if (!b.ok) { state.liveWhy = /^Waiting for (a|a new) call/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
   sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ ${b.meta.rest ? `(bot's price, waits until ${clock(b.meta.expiresAt)})` : 'max'}`);
@@ -1448,6 +1449,29 @@ function renderReport() {
   $('rpOrders').textContent = `${o.buys} buy orders: ${o.filled} filled, ${o.noFill} didn't fill, ${o.errors} errors${o.topErrors.length ? ` (${o.topErrors.map(([e, n]) => `${e} ×${n}`).join('; ')})` : ''}`;
 }
 document.querySelectorAll('#rpPeriod button').forEach((b) => b.addEventListener('click', () => { reportPeriod = b.dataset.p; renderReport(); }));
+
+// ---------- learns from real trades ----------
+let learned = store.get('learned', null) || newLearned();
+function runLearning() {
+  if (liveCfg.learn === false) return;
+  const botTrades = liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades;
+  const res = learnStep({ botTrades, learned, liveBar: liveCfg.minConfidence, stratBar: settings.minConfidence });
+  if (res.learned.seen === learned.seen) return;
+  learned = res.learned; store.set('learned', learned);
+  if (res.liveBar !== liveCfg.minConfidence) { liveCfg.minConfidence = res.liveBar; saveLive(); renderLive(); }
+  if (res.changes.length) toast(`Learned from real trades: ${res.changes.map((c) => `${c.what} ${c.from} → ${c.to}`).join(', ')}`);
+}
+function renderLearn() {
+  $('lnOn').checked = liveCfg.learn !== false;
+  const n = liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades.length;
+  $('lnStatus').textContent = liveCfg.learn === false ? 'Off: the bot keeps your settings as they are.'
+    : n < 30 ? `Watching: ${n} of 30 real trades so far before it adjusts anything.` : `Trade size ×${learned.sizeMult} · next check after ${Math.max(0, (learned.seen || 0) + 10 - n)} more trades.`;
+  $('lnLog').innerHTML = learned.log.map((c) => `<li><span>${esc(c.what)}: ${esc(String(c.from))} → ${esc(String(c.to))}<small>${new Date(c.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · because ${esc(c.why)}</small></span></li>`).join('') || '<li class="calm">No changes yet</li>';
+}
+$('lnOn').addEventListener('change', (e) => { liveCfg.learn = e.target.checked; saveLive(); renderLearn(); });
+$('lnReset').addEventListener('click', () => { learned = { ...newLearned(), seen: liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades.length }; store.set('learned', learned); renderLearn(); toast('Learning reset: trade size back to normal'); });
+setInterval(() => { runLearning(); if (!document.hidden) renderLearn(); }, 10000);
+renderLearn();
 setInterval(() => { if (!document.hidden && !$('rpCard').closest('[hidden]')) renderReport(); }, 5000);
 renderReport();
 

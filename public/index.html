@@ -188,6 +188,11 @@
         <h4>By confidence at the buy</h4>
         <ul id="rpConf" class="history pr-log"></ul>
         <p class="push-status" id="rpOrders"></p>
+        <h4>Learns from real trades</h4>
+        <label class="practice-toggle"><input type="checkbox" id="lnOn"> Let it adjust Min confidence and trade size from how its real trades go (small steps, every 10 trades)</label>
+        <p class="push-status" id="lnStatus"></p>
+        <ul id="lnLog" class="history pr-log"></ul>
+        <div class="pos-btns"><button id="lnReset" class="ghost">Reset what it learned</button></div>
       </div>
       <div class="card push-card health-card" id="healthCard">
         <h3>Health check</h3>

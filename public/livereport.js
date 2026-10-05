@@ -44,7 +44,7 @@ export function liveReport({ trades, orders, since = 0 }) {
   const errs = {};
   for (const o of recent.filter((x) => x.status === 'error')) { const k = String(o.error || 'unknown').split(' · ')[0].slice(0, 60); errs[k] = (errs[k] || 0) + 1; }
   return {
-    total: stats(bot), byExit: group((t) => t.kind), byConf: group((t) => confGroup(t.conf)),
+    trades: bot, total: stats(bot), byExit: group((t) => t.kind), byConf: group((t) => confGroup(t.conf)),
     orders: {
       buys: buys.length, filled: buys.filter((o) => o.filled > 0 || o.status === 'filled').length,
       noFill: buys.filter((o) => o.filled === 0 && o.status !== 'error' && o.status !== 'resting').length,

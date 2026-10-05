@@ -182,3 +182,8 @@ test('use my Kalshi balance: budget = cash, each trade up to 25% of it; held mon
     { side: 'bid', price: '0.5000', remaining_count: '0.00' },
   ]), { held: 5.8, count: 4 });
 });
+
+test('learned trade size scales the per-trade cap', () => {
+  assert.equal(planBuy({ ...base, cfg: { ...cfg, sizeMult: 0.5 }, sig: call(), row: row(0.4) }).meta.count, 10, '$5 / 47c');
+  assert.equal(planBuy({ ...base, cfg: { ...cfg, sizeMult: 1.5 }, sig: call(), row: row(0.4) }).meta.count, 31, '$15 / 47c');
+});
