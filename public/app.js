@@ -1186,8 +1186,13 @@ function liveWaitWhy(live, sig) {
   if (!live) return 'Waiting for the next 15-minute market to open';
   if (!sig?.deep) return `Waiting for a call: ${live.ev.reason || 'no price gap on either side right now'}`;
   if (sig.callSide && !sig.fire && !sig.add) return `Holding its ${sideName(sig.callSide)} call: buys happen on a new call or an add`;
+  // Live buys need both the strategy's bar and the Live card's own Min confidence, so show the higher one
   const gap = sig.robustEdge != null ? Math.round(sig.robustEdge * 100) : null, ov = Math.round((settings.bigEdgeOverride || 0) * 100);
-  return `Waiting for a call: ${sideName(sig.side)} is at confidence ${sig.deep.score} (needs ${sig.confNeed}${ov ? `, or a ${ov}-pt gap` : ''}) with a ${gap ?? '—'}-pt worst-case gap (needs ${Math.round(sig.edgeNeed * 100)})`;
+  const confNeed = Math.max(sig.confNeed ?? 0, liveCfg.minConfidence ?? 0), gapNeed = Math.round(sig.edgeNeed * 100);
+  const conf = `confidence ${sig.deep.score} (needs ${confNeed}${ov ? `, or a ${ov}-pt gap` : ''})`;
+  if (gap == null) return `Waiting for a call: ${sideName(sig.side)} has ${conf}`;
+  if (gap < gapNeed) return `No bargain yet: ${sideName(sig.side)} has ${conf}, but Kalshi's price is ${gap < 0 ? `${-gap} pts above` : `only ${gap} pts below`} the bot's cautious odds (it buys at ${gapNeed}+ pts below)`;
+  return `Waiting for confidence: ${sideName(sig.side)} has ${conf}; Kalshi is ${gap} pts below the bot's cautious odds`;
 }
 
 function runLive(snap, live, sig, now) {
