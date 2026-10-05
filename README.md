@@ -133,6 +133,8 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 - It has no unknown fields.
 - It's within 20 orders a minute.
 
+**Right now line:** while it's on, the Live card always says what it's doing. For example: *Waiting for a call: YES is at confidence 73 (needs 80, or a 10-pt gap) with a 9-pt worst-case gap*. If an order fails, the card also shows Kalshi's exact error. It only runs while the app is open on screen. iPhone pauses it when the app is in the background or the phone is locked.
+
 **Turning it on and off:**
 - Turning it on needs a confirmation tick plus typing **LIVE**.
 - A red **LIVE AUTO-TRADING** strip with a **STOP** button sits on the Live screen while it's on.

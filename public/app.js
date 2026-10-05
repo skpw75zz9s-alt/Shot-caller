@@ -903,7 +903,7 @@ async function kalshiPost(endpoint, body) {
   if (!key) throw new Error('Kalshi not linked');
   kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
   const headers = { ...(await signHeaders(key, keyId, 'POST', kalshiPrefix + (UPSTREAM[endpoint] || endpoint))), 'content-type': 'application/json' };
-  const r = await fetch(`${API}/kalshi-auth/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const r = await fetch(`${API}/kalshi-auth/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   paywalled(r);
   const out = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(out.error?.message || out.error || out.message || `Kalshi: HTTP ${r.status}`); e.status = r.status; throw e; }
@@ -1181,9 +1181,20 @@ async function sendLive(order, meta, label) {
   }
 }
 
+// Plain-language "why no buy right now", so a quiet bot never looks broken
+function liveWaitWhy(live, sig) {
+  if (!live) return 'Waiting for the next 15-minute market to open';
+  if (!sig?.deep) return `Waiting for a call: ${live.ev.reason || 'no price gap on either side right now'}`;
+  if (sig.callSide && !sig.fire && !sig.add) return `Holding its ${sideName(sig.callSide)} call: buys happen on a new call or an add`;
+  const gap = sig.robustEdge != null ? Math.round(sig.robustEdge * 100) : null, ov = Math.round((settings.bigEdgeOverride || 0) * 100);
+  return `Waiting for a call: ${sideName(sig.side)} is at confidence ${sig.deep.score} (needs ${sig.confNeed}${ov ? `, or a ${ov}-pt gap` : ''}) with a ${gap ?? '—'}-pt worst-case gap (needs ${Math.round(sig.edgeNeed * 100)})`;
+}
+
 function runLive(snap, live, sig, now) {
+  if (liveCfg.live && !state.kalshi.key) state.liveWhy = 'Kalshi key not loaded on this phone: link your Kalshi account again';
   renderLiveStrip();
   if (!liveCfg.live || !state.kalshi.key || liveBusy || document.hidden) return;
+  if (state.kalshi.balance == null) { state.liveWhy = 'Waiting for your Kalshi balance (tap Sync in the Kalshi card if this stays)'; return; }
   // Sells first: the same exits as every position card
   for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
@@ -1191,17 +1202,24 @@ function runLive(snap, live, sig, now) {
     if (sell) return sendLive(sell.order, sell.meta, `sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
   }
   const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
-  if (!b.ok) { if (!/Waiting|off/.test(b.why)) state.liveWhy = b.why; return; }
+  if (!b.ok) { state.liveWhy = /^Waiting/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
   sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ max`);
 }
 
+function renderLiveWhy() {
+  const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
+  $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
+}
+
 function renderLiveStrip() {
+  renderLiveWhy();
   const el = $('liveStrip');
   el.hidden = !liveCfg.live;
   if (!liveCfg.live) return;
   const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
-  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveCfg.budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy)}` : ''}`;
+  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveCfg.budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy.length > 90 ? `${state.liveWhy.slice(0, 88)}…` : state.liveWhy)}` : ''}`;
 }
 
 function renderLive() {
@@ -1218,7 +1236,7 @@ function renderLive() {
   }
   $('lvRisk').textContent = dollars(st.exposure);
   $('lvToday').textContent = money(st.realized);
-  $('lvWhy').textContent = state.liveWhy;
+  renderLiveWhy();
   $('lvLog').innerHTML = [...state.liveOrders].reverse().slice(0, 30).map((o) =>
     `<li><span>${esc(o.label || `${o.action} ${o.count} ${o.side}`)}<small>${clock(o.at)} · ${esc(o.ticker)}${o.error ? ` · ${esc(o.error)}` : ''}</small></span><b class="${o.status === 'error' ? 'neg' : ''}">${esc(o.status)}${o.filled != null ? ` · ${o.filled}` : ''}</b></li>`).join('') || '<li class="calm">No live orders yet</li>';
   renderLiveStrip();
