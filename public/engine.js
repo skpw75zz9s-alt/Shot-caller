@@ -91,7 +91,7 @@ function edgeUnder(row, snap, s, side, volScale) {
 // Should this market fire a BUY THE LOW alert right now? Two gates, both tested for profit:
 // 1) robust edge: the gap must clear minEdge even if volatility is 20% lower or 25% higher than measured
 //    (an edge that only exists at one vol guess is mostly model error, and those trades lost money);
-// 2) the deep dive's confidence must clear minConfidence. Position size scales with confidence.
+// 2) confidence (the call's win odds, worst case of the same three vol guesses) must clear minConfidence.
 // `memory` (per ticker, kept by the caller across ticks) makes the bot stick with its call: once it has
 // called a side this window, that call stands while the edge is still there (hysteresis), and switching
 // to the other side needs clearly stronger evidence instead of one tick's wiggle.
@@ -106,8 +106,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
       const edges = [0.8, 1, 1.25].map((k) => edgeUnder(row, snap, s, side, k));
       if (edges.every((e) => e != null)) { stressEdge = edges[2]; robustEdge = Math.min(...edges); }
     }
+    const price0 = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
+    const winProb = robustEdge != null && price0 != null ? Math.min(1, Math.max(0, robustEdge + price0 + kalshiFee(price0))) : null;
     const deep = deepDive({
-      ev: ev.side === side ? ev : { ...ev, side, edge: (side === 'YES' ? ev.evYes : ev.evNo) ?? 0 }, side, rej: row.rej, timing,
+      winProb, ev: ev.side === side ? ev : { ...ev, side, edge: (side === 'YES' ? ev.evYes : ev.evNo) ?? 0 }, side, rej: row.rej, timing,
       sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin, spot: snap.spot, strike: row.strike,
       kalshiDrift: quoteTrend(snap.quoteLog?.[row.m.ticker], side, now), bars: snap.bars, log: snap.quoteLog?.[row.m.ticker], now, minEdge: s.minEdge, stressEdge,
     });
@@ -127,8 +129,11 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
       return ask != null && p != null && p - ask - kalshiFee(ask) >= edgeNeed - 1e-9;
     });
   };
+  // Smart exception (Aggressive): a cheap side whose gap is huge even at the worst vol guess is worth buying below the
+  // confidence bar. Tested: it keeps most of the profit a high bar gives up, and those trades still mostly sell at a profit.
+  const bigGap = (a) => s.bigEdgeOverride > 0 && a.robustEdge != null && a.robustEdge >= s.bigEdgeOverride - 1e-9;
   const passes = (a, edgeNeed, confNeed, persist = false) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 && a.point <= s.maxEdge &&
-    a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && a.score >= confNeed && (!persist || persisted(a.side, edgeNeed));
+    a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && (a.score >= confNeed || bigGap(a)) && (!persist || persisted(a.side, edgeNeed));
 
   const mem = memory ? (memory[row.m.ticker] ||= {}) : {};
   const called = mem.side ?? null, lean = leanSide(ev);
@@ -169,12 +174,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const reached = (e) => tiers.reduce((k, t, i) => (e != null && e >= t - 1e-9 ? i : k), -1);
   let add = false;
   if (fire) { mem.side = callSide; mem.at = now; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
-  else if (callSide && callSide === called && tiers.length > 1 && pick.deep && pick.score >= s.minConfidence) {
+  else if (callSide && callSide === called && tiers.length > 1 && pick.deep && (pick.score >= s.minConfidence || bigGap(pick))) {
     const next = (mem.tier ?? 0) + 1;
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    add, tier: mem.tier ?? null, callN: mem.n ?? 0,
+    add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < confNeed && bigGap(pick),
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
     side: a?.side ?? lean, callSide, price: pick?.price ?? null, limit, edge: pick?.point ?? null,
     timing: a?.timing ?? entrySignal(snap.bars, null, now), deep: a?.deep ?? null, robustEdge: a?.robustEdge ?? null,
@@ -246,7 +251,7 @@ export function buyMessage(row, sig, spot) {
     tag: `buy-${m.ticker}`,
     title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
     body: `${sig.limit ? `Act now: buy only at ${pc(sig.limit)} or less, skip if it's higher. ` : ''}Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
-      `${sig.deep ? ` · confidence ${sig.deep.score}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
+      `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }
 

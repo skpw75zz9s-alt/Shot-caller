@@ -8,7 +8,7 @@
 // and a sell can never sell more than is held. It can only ever use the cash in the Kalshi account.
 import { kalshiFee } from './model.js';
 
-export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 40 };
+export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80 };
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const cents = (p) => Math.round(p * 100);
@@ -51,7 +51,7 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
   const add = !!(held && held.source === 'kalshi' && sig.add && held.side === sig.callSide);
   if (!add && !sig.fire) return { ok: false, why: 'Waiting for a new call' }; // a fresh call or a real switch
   if (held && !add) return { ok: false, why: 'Already holding this market' };
-  if ((sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
+  if (!sig.bigGap && (sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
   if (orders.some((o) => o.ticker === ticker && now - o.at < 5000)) return { ok: false, why: 'Just sent an order on this market' };
   const st = liveState({ positions, trades, orders, now });
   if (st.buys >= c.maxTrades) return { ok: false, why: `Stopped for today: ${c.maxTrades} trades` };

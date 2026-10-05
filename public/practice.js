@@ -4,7 +4,7 @@
 import { kalshiFee } from './model.js';
 import { positionCheck, releaseCall } from './engine.js';
 
-export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 60 };
+export const PRACTICE_DEFAULTS = { on: false, maxPerTrade: 5, dailyLoss: 20, maxTrades: 10, minConfidence: 85 };
 export const newPractice = () => ({ positions: [], log: [], since: Date.now(), range: { positions: [], log: [] } });
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -39,7 +39,7 @@ export function wouldBuy(pr, { row, sig, cfg, now = Date.now() }) {
   // Aggressive scale-in: the call's gap grew past the next tier while we hold it, so add
   const add = !!(held && sig?.add && sig.callSide === held.side);
   if (!row || !sig?.callSide || (!add && !sig.fire)) return { ok: false, why: 'Waiting for a new call' }; // a fresh call or a real switch
-  if ((sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
+  if (!sig.bigGap && (sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
   if (held && !add) return { ok: false, why: 'Already holding this market' };
   const t = todayStats(pr, now);
   if (t.buys >= c.maxTrades) return { ok: false, why: `Skipped: hit today's limit of ${c.maxTrades} trades` };

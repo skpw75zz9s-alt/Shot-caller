@@ -116,12 +116,13 @@ export const DEFAULTS = {
   bankroll: 100,
   maxStake: 25,
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
-  minConfidence: 55,    // deep-dive score (0-100) a call needs before it fires (Balanced)
+  minConfidence: 85,    // confidence = win odds (0-100) a call needs before it fires (Balanced)
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
   holdEdgeFrac: 0.5,    // once called, the call stands while the robust gap is at least half of minEdge...
   holdConfDrop: 10,     // ...and confidence is no more than 10 below minConfidence
   switchEdgeExtra: 0.04, // calling the OTHER side in the same window needs 4 pts more gap...
-  switchConfExtra: 15,   // ...and 15 more confidence
+  switchConfExtra: 8,    // ...and 8 more confidence (win odds)
+  bigEdgeOverride: 0,   // a call under minConfidence still fires if its worst-case gap is at least this (0 = off; Safe 0.15, Balanced 0.12, Aggressive 0.10)
   persistSec: 0,        // a new call needs its gap to have held this long (edges that last survive your reaction time)
   limitEdgeFrac: 0.5,   // max price on a call: still clears this share of minEdge even with vol 20% off
   marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
@@ -136,17 +137,18 @@ export const DEFAULTS = {
 // grows, re-enters fast and bets twice Safe's size. Simulated on fresh seeds with instant fills it made 2.4-16x
 // Safe's profit where there was an edge; its worst losing stretch was ~$90-200 vs Safe's ~$15-40.
 export const RISK_LEVELS = {
-  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
-    practiceConfidence: 70, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'Fewest calls, biggest gaps only' },
-  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
-    practiceConfidence: 60, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'About 2× the calls of Safe' },
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
+    practiceConfidence: 90, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
+    practiceConfidence: 85, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
   // it was not picked on (beat the previous Aggressive in 11 of 12 market/fill-speed cells).
-  aggressive: { label: 'Aggressive', minEdge: 0.02, minConfidence: 40, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50,
-    practiceConfidence: 40, practiceMax: 10, practiceLoss: 40, practiceTrades: 40, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
+  aggressive: { label: 'Aggressive', minEdge: 0.02, minConfidence: 80, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50,
+    bigEdgeOverride: 0.10,
+    practiceConfidence: 80, practiceMax: 10, practiceLoss: 40, practiceTrades: 40, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
 // The strategy settings a risk level sets (practice limits are applied separately)
-export const RISK_KEYS = ['minEdge', 'minConfidence', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
 export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
 

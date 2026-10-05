@@ -26,7 +26,7 @@ A sticky ticker at the top streams every BTC trade from Coinbase's public WebSoc
 
 ### Buying the low
 
-"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (6¢ on the default Balanced risk level) **even if volatility is 20% lower or 25% higher than measured** (the robust edge), and the deep-dive confidence clears 60. An edge that only exists at one volatility guess is mostly model error; in the profit simulator those trades lost money.
+"Low" means **Kalshi's price is below the bot's odds**. For example, YES costs 40¢ (Kalshi says 40%) while the bot gives it 66%. The top of the screen shows Kalshi % vs bot % for both YES and NO on a bar. The app calls **BUY THE LOW** when the gap, after Kalshi's fee, beats *Min gap* (6¢ on the default Balanced risk level) **even if volatility is 20% lower or 25% higher than measured** (the robust edge), and confidence (the call's win odds) clears 85. An edge that only exists at one volatility guess is mostly model error; in the profit simulator those trades lost money.
 
 ### Rejection trends (inside each 15-minute window)
 
@@ -41,9 +41,29 @@ The bot tracks how price behaves around the target since the window opened:
 
 It also weighs wick pressure (long upper wicks mean sellers hit rallies, long lower wicks mean buyers absorb dips), the window's structure (higher lows, lower highs, squeezing) and chop around the target. Recent events count more. The result nudges the bot's odds by up to ±5 pts (*Rejection weight*, 0 = off). The **Rejections this window** card shows the counts and summary, and the chart marks each rejected wick with an orange ✕. A fresh rejection against an open position also counts as a flip sign for **SELL NOW**.
 
-### Deep dive (confidence score)
+### Confidence = win odds
 
-Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtracts points per factor:
+**Confidence is the call's win odds**: how many times in 100 the side it calls should settle in the money. It comes from the bot's price model at the most cautious of three volatility guesses (20% lower, measured, 25% higher). "Confidence 85" means it should win about 85 times in 100.
+
+Why: on about 65,000 simulated calls, those odds matched reality. Calls given 80–90% won 82–83% of the time, and calls given 90%+ won 95%. The old points score (below) predicted wins worse than the odds alone, so it no longer sets confidence.
+
+Every confidence bar doubled in v4.1. Aggressive went from 40 to **80**, and Balanced and Safe now need **85** and **90**. Practice and Live use the same bars.
+
+**Smart exception (big gaps):** a call under the bar still fires when its gap is huge **even at the worst volatility guess**: 15 pts on Safe, 12 on Balanced, 10 on Aggressive. These are usually cheap sides that Kalshi has badly underpriced. They win less often at settlement but are worth more than they cost, and most get sold at a profit before then. Push alerts mark them *big-gap exception*.
+
+Tested on 48 fresh simulated runs per level (6 market types × 8 seeds × 400 windows):
+
+| | Old bars (40 / 55 / 60) | New bars + exception |
+|---|---|---|
+| Aggressive | +$503 per 100 windows, 90% of trades won | **+$636, 92% won** (worst drawdown $400 vs $280) |
+| Balanced | +$231, 91% won | **+$248, 94% won** |
+| Safe | +$228, 93% won, 39 trades | **+$226, 94% won, 19 trades** (half the trades, same profit) |
+
+Without the exception, the high bars alone cut profit by 60–85%. On a perfectly efficient Kalshi, no setting makes money, old or new. The edge only exists when Kalshi lags or misprices.
+
+### Deep dive (the reasons)
+
+The Deep dive card still lists every factor behind a call, with points from a base of 50:
 
 - Edge after fees (up to +25 / −20)
 - Rejection trend for or against the side (+10 / −15)
@@ -58,7 +78,7 @@ Before any **BUY THE LOW**, the bot scores the call from 50 and adds or subtract
 - Kalshi's price catching up to the bot (+3), or moving against the call while the bot's own odds fade too (−5). A Kalshi dip while the bot holds steady scores 0, because that dip *is* the low
 - **Stress test:** re-prices the call with 25% more volatility and with any momentum or rejection tilt that helps the call removed (adverse ones stay). The edge still clears the min gap (+6), survives thinner (+2), or flips negative (−4)
 
-The result is a single **confidence score from 0 to 100**, shown on the call, in the Deep dive card and in push alerts. There are no letter grades. A call only fires, on screen and as a push, when confidence is at least *Min confidence* (60). Below that the bot keeps watching and calls if confidence rises. The suggested size scales with confidence: half size at 45, three quarters at 60, full size at 75 and above. The **Deep dive** card lists every factor with its points.
+These points are the reasons, not the confidence number. The confidence badge (on the call, in the Deep dive card and in push alerts) shows the win odds. A call only fires, on screen and as a push, when confidence is at least *Min confidence*. Below that the bot keeps watching and calls if confidence rises. Bet size comes from Kelly on the bot's odds. When the factor points fall under 35 (many red flags at once), it bets half size.
 
 ### Candle timing (optional)
 
@@ -150,13 +170,13 @@ Settings → **Risk level**. Each level sets the whole strategy, and Practice's 
 
 | | Safe | **Balanced (default)** | Aggressive |
 |---|---|---|---|
-| Min gap / confidence | 8 pts / 60 | 6 pts / 55 | **2 pts / 40** |
+| Min gap / confidence (win odds) | 8 pts / 90, or a 15-pt worst-case gap | 6 pts / 85, or a 12-pt gap | **2 pts / 80**, or a 10-pt gap |
 | Scales in | no | no | yes, tiers 1.5 pts apart |
 | Re-entry cooldown | 15s | 15s | **5s** |
 | Max price | half the gap | half the gap | **tighter (¼ of the gap)** |
 | Cut a loser when Kalshi pays | 3 pts over the bot | 3 pts over | **1 pt over** (still after the 30s hold) |
 | Bet size | ¼ Kelly, ≤ $25 | ¼ Kelly, ≤ $25 | **½ Kelly, ≤ $50** |
-| Practice | conf 70+, $5, $20/day, 10 trades | conf 60+, $5, $20/day, 10 trades | conf 40+, $10, $40/day, 40 trades |
+| Practice | conf 90+, $5, $20/day, 10 trades | conf 85+, $5, $20/day, 10 trades | conf 80+, $10, $40/day, 40 trades |
 
 **How Aggressive was chosen:**
 1. A random search tried 100 strategy configurations at a fixed bet size, scored across 6 simulated Kalshi market types at instant and ~10s fills.
@@ -212,7 +232,7 @@ Things tested and left off by default:
 Settings → **Auto-trade practice**. Turn it on and the app runs the rules an auto-trader would use, on live Kalshi prices, and logs every trade it **would** make. **It never places an order.**
 
 The rules:
-- **Buy** on a new BUY THE LOW call with confidence at or above *Min confidence* (default 70), at Kalshi's ask, only if the ask is at or under the call's max price.
+- **Buy** on a new BUY THE LOW call with confidence at or above *Min confidence* (default 85), at Kalshi's ask, only if the ask is at or under the call's max price.
 - **One buy per window**, sized to *Max $ per trade* (default $5).
 - **Stop buying for the day** after *Max trades / day* (default 10) or the *Daily loss limit* (default $20). Open positions count as fully at risk, so the limit can't be overrun.
 - **Sell** on the same exits as real positions: take profit as soon as Kalshi pays what the bot thinks it's worth, and cut only after the hold-steady wait. Otherwise hold to settlement.
@@ -240,7 +260,7 @@ Offline, on ~1,100 real candles from Oct 4, the rule was right about half the ti
 
 The bot sticks with its calls instead of reacting to every tick:
 - **Once it calls a side, the call stands** while the robust gap is at least half of *Min gap* and confidence is within 10 of the cutoff. If the gap closes past that, the card says *Called YES earlier · no new buy*. It doesn't flip to PASS and back.
-- **Switching sides in the same window** needs a 12-pt gap (Min gap + 4) and confidence 75 (cutoff + 15). A switch push says **Switch:** so it's clear the bot changed its mind for a real reason.
+- **Switching sides in the same window** needs a 12-pt gap (Min gap + 4) and confidence 8 above the cutoff. A switch push says **Switch:** so it's clear the bot changed its mind for a real reason.
 - **Selling at a loss** needs Kalshi to pay at least 3 pts more than the bot's odds, and that has to stay true for 30 seconds (*Hold steady*). In the meantime the position card says it's holding the call and counts down. A dip that reverses resets the clock. In the last minute there's no wait.
 - **Taking profit stays instant**, because Kalshi's lag closes fast.
 
@@ -339,7 +359,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 |---|---|---|
 | Kalshi series | `KXBTC15M` | Change it if Kalshi renames the series |
 | Fixed trade amount | 0 | What one-tap "I bought it" records ($). 0 = the bot's suggested amount |
-| Min confidence | 60 | Confidence (0–100) a call needs to fire |
+| Min confidence | 85 | Win odds (0–100) a call needs to fire |
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 8 pts | How far Kalshi's price must be below the bot's odds, after fees, even with volatility 20% off either way |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |

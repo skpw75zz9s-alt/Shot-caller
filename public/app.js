@@ -16,7 +16,7 @@ const store = {
 const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, even if volatility is 20% off either way, to call BUY THE LOW', 'cents'],
-  ['minConfidence', 'Min confidence (0-100)', 'Deep-dive score a call needs before BUY THE LOW fires', 'num'],
+  ['minConfidence', 'Min confidence (0-100)', 'Win odds a call needs before BUY THE LOW fires (80 = wins about 8 times in 10)', 'num'],
   ['rejectionWeight', 'Rejection weight', 'How much rejection trends move the bot\'s odds (0 = off, 1 = up to ±5 pts)', 'num'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
@@ -81,6 +81,16 @@ if (store.get('settingsVersion', 1) < 10) {
 if (store.get('settingsVersion', 1) < 9) {
   if (riskLevelOf(settings) === 'aggressive' && settings.kellyFraction === 0.25 && settings.maxStake === 25) Object.assign(settings, { kellyFraction: 0.5, maxStake: 50 });
   store.set('settings', settings); store.set('settingsVersion', 9);
+}
+
+// v4.1: confidence is now the call's win odds, and every confidence bar doubles (Aggressive 40 -> 80).
+// Risk levels get their new settings; custom bars, Practice and Live bars double (capped at 95).
+if (store.get('settingsVersion', 1) < 11) {
+  const dbl = (c) => Math.min(95, Math.round((Number(c) || 0) * 2));
+  const lvl = Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - settings.minEdge) < 1e-9 && { safe: 60, balanced: 55, aggressive: 40 }[k] === settings.minConfidence);
+  if (lvl) Object.assign(settings, riskSettings(lvl)); else settings.minConfidence = dbl(settings.minConfidence);
+  for (const k of ['practiceCfg', 'liveCfg']) { const c = store.get(k, null); if (c && c.minConfidence != null) { c.minConfidence = dbl(c.minConfidence); store.set(k, c); } }
+  store.set('settings', settings); store.set('settingsVersion', 11);
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
@@ -1117,7 +1127,7 @@ function renderRisk() {
   $('riskBtns').innerHTML = Object.entries(RISK_LEVELS).map(([k, r]) => `<button type="button" data-risk="${k}" class="${cur === k ? 'on' : ''}">${r.label}</button>`).join('');
   $('riskHint').textContent = cur === 'custom'
     ? `Custom: min gap ${(settings.minEdge * 100).toFixed(0)} pts, confidence ${settings.minConfidence}. Tap a level to reset.`
-    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}; bets up to $${RISK_LEVELS[cur].maxStake}. Practice buys at confidence ${RISK_LEVELS[cur].practiceConfidence}+, up to $${RISK_LEVELS[cur].practiceMax} a trade.`;
+    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}${RISK_LEVELS[cur].bigEdgeOverride ? ` (or a ${Math.round(RISK_LEVELS[cur].bigEdgeOverride * 100)}-pt worst-case gap)` : ''}; bets up to $${RISK_LEVELS[cur].maxStake}. Practice buys at confidence ${RISK_LEVELS[cur].practiceConfidence}+, up to $${RISK_LEVELS[cur].practiceMax} a trade.`;
 }
 $('riskBtns').addEventListener('click', (e) => {
   const k = e.target.closest('button[data-risk]')?.dataset.risk;

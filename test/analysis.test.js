@@ -139,13 +139,13 @@ test('strong confluence scores 75+; a flip-flopping, fading read scores under 60
 
 test('callsByConfidence groups follow-the-bot results by confidence at entry', async () => {
   const { callsByConfidence } = await import('../public/tracker.js');
-  const out = callsByConfidence([{ trades: [{ conf: 80, pts: 0.3, entry: 0.5 }, { conf: 78, pts: -0.52, entry: 0.5 }, { conf: 62, pts: 0.1, entry: 0.4 }, { conf: null, pts: 1, entry: 0.5 }] }]);
-  assert.deepEqual(Object.keys(out).sort(), ['60–69', '70–79', '80+']);
-  assert.equal(out['80+'].calls, 1);
-  assert.equal(out['80+'].wins, 1);
+  const out = callsByConfidence([{ trades: [{ conf: 90, pts: 0.3, entry: 0.5 }, { conf: 88, pts: -0.52, entry: 0.5 }, { conf: 72, pts: 0.1, entry: 0.4 }, { conf: null, pts: 1, entry: 0.5 }] }]);
+  assert.deepEqual(Object.keys(out).sort(), ['70–79', '80–89', '90+']);
+  assert.equal(out['90+'].calls, 1);
+  assert.equal(out['90+'].wins, 1);
+  assert.equal(out['80–89'].calls, 1);
+  assert.ok(Math.abs(out['80–89'].usd + 10.4) < 1e-9);
   assert.equal(out['70–79'].calls, 1);
-  assert.ok(Math.abs(out['70–79'].usd + 10.4) < 1e-9);
-  assert.equal(out['60–69'].calls, 1);
 });
 
 // ---------- v3.1: fairer confidence ----------
@@ -286,4 +286,17 @@ test('Aggressive scale-in: one add per tier as the gap grows, none on Safe', asy
     if (expectAdds) assert.ok(adds >= 2 && adds <= 3, `aggressive adds once per tier (${adds})`);
     else assert.equal(adds, 0, 'safe never adds');
   }
+});
+
+// ---------- v4.1: confidence = win odds ----------
+test('with win odds, confidence is the odds; the factor checks stay as reasons and red flags halve size', () => {
+  const ev = { pYes: 0.62, evYes: 0.18, evNo: -0.3, minutesLeft: 6, quote: { yesBid: 0.40, yesAsk: 0.42 } };
+  const base = { ev, side: 'YES', rej: { tilt: 0, summary: [] }, timing: { state: 'WAIT' }, sigmaMin: 0.0006, sigmaLong: 0.0006, spot: 100030, strike: 100000, now: NOW2, log: [] };
+  const d = deepDive({ ...base, winProb: 0.834 });
+  assert.equal(d.score, 83);
+  assert.match(d.checks[0].label, /Wins about 83 times in 100/);
+  assert.equal(d.points, deepDive(base).score, 'points = the old factor score');
+  assert.equal(d.sizeMult, 1);
+  const flags = deepDive({ ...base, winProb: 0.9, timing: { state: 'CHASE' }, rej: { tilt: -0.02, summary: ['x'] }, ev: { ...ev, evYes: -0.1 } });
+  assert.ok(flags.points < 35); assert.equal(flags.sizeMult, 0.5);
 });

@@ -169,3 +169,20 @@ test('saved devices on the old 1.15 vol multiplier move to measured vol; custom 
   assert.equal(b.devices.get('https://fcm.googleapis.com/b').settings.volMultiplier, 1.4);
   b.stop();
 });
+
+test('v4.1 migration: saved confidence bars double once (risk levels get their new settings)', async () => {
+  const { writeFile } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'sc-mig-'));
+  const dataFile = join(dir, 'data.json');
+  const dev = (n, settings) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, keys: {}, settings, positions: [] });
+  await writeFile(dataFile, JSON.stringify({ devices: [dev('a', { minEdge: 0.02, minConfidence: 40 }), dev('b', { minEdge: 0.05, minConfidence: 45 }), dev('c', { minEdge: 0.05, minConfidence: 70 })] }));
+  const log = { warn() {}, error() {}, log() {} };
+  const b1 = createBot({ kalshi: 'http://127.0.0.1:1', coinbase: 'http://127.0.0.1:1', dataFile, env: {}, log });
+  await b1.load();
+  const conf = (b) => ['a', 'b', 'c'].map((n) => b.devices.get(`https://fcm.googleapis.com/fcm/send/${n}`).settings.minConfidence);
+  assert.deepEqual(conf(b1), [80, 90, 95]);
+  assert.equal(b1.devices.get('https://fcm.googleapis.com/fcm/send/a').settings.bigEdgeOverride, 0.1);
+  const b2 = createBot({ kalshi: 'http://127.0.0.1:1', coinbase: 'http://127.0.0.1:1', dataFile, env: {}, log });
+  await b2.load();
+  assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
+});

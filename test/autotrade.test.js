@@ -89,3 +89,9 @@ test('scale-in adds to a held Kalshi position; sells follow the exit rules at th
   assert.equal(planSell({ cfg: { ...cfg, live: false }, pos, check: { ex: { action: 'SELL' }, bid: 0.72 }, orders: [], now }), null);
   assert.equal(planSell({ cfg, pos: { ...pos, source: undefined }, check: { ex: { action: 'SELL' }, bid: 0.72 }, orders: [], now }), null, 'only Kalshi-synced positions');
 });
+
+test('confidence bar is 80 (win odds); the Aggressive big-gap exception may trade under it', () => {
+  const lowConf = call({ deep: { score: 60 } });
+  assert.match(planBuy({ ...base, cfg: { ...cfg, minConfidence: 80 }, sig: lowConf, row: row(0.4) }).why, /confidence 60 is under 80/);
+  assert.equal(planBuy({ ...base, cfg: { ...cfg, minConfidence: 80 }, sig: { ...lowConf, bigGap: true }, row: row(0.4) }).ok, true);
+});

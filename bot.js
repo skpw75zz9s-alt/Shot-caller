@@ -31,6 +31,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings?.minEdge === 0.08 && d.settings?.minConfidence === 60) Object.assign(d.settings, { minEdge: 0.06, minConfidence: 55 }); // v3.9: Balanced
       if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50 && d.settings.scaleIn == null) d.settings.scaleIn = true; // v3.10: Aggressive scales in
       if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50) Object.assign(d.settings, riskSettings('aggressive')); // v3.12: optimized Aggressive
+      if (d.settings && !d.confOdds) { // v4.1: confidence = win odds, bars double (risk levels get their new settings)
+        const lvl = { 0.08: ['safe', 60], 0.06: ['balanced', 55], 0.02: ['aggressive', 40] }[d.settings.minEdge];
+        if (lvl && d.settings.minConfidence === lvl[1]) Object.assign(d.settings, riskSettings(lvl[0]));
+        else if (d.settings.minConfidence != null) d.settings.minConfidence = Math.min(95, Math.round(d.settings.minConfidence * 2));
+      }
+      if (d.settings) d.confOdds = true;
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
@@ -104,7 +110,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
       token: ctx.token ?? prev?.token ?? null, // paywall session, so alerts stop if access lapses
       tz: validTz(tz) ?? prev?.tz ?? null, lastWindow: prev?.lastWindow ?? null,
-      createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(),
+      createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(), confOdds: true,
     });
     scheduleSave();
     start();

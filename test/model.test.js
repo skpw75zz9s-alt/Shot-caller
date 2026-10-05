@@ -138,7 +138,12 @@ test('picking a risk level sets every strategy setting; the optimized Aggressive
     assert.equal(riskLevelOf({ ...DEFAULTS, ...s }), k);
   }
   const a = riskSettings('aggressive');
-  assert.deepEqual(a, { minEdge: 0.02, minConfidence: 40, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50 });
+  assert.deepEqual(a, { minEdge: 0.02, minConfidence: 80, bigEdgeOverride: 0.10, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50 });
   // Safe and Balanced restore the standard exits/re-entry if you come back from Aggressive
   for (const k of ['safe', 'balanced']) assert.deepEqual([riskSettings(k).reentrySec, riskSettings(k).cutMargin, riskSettings(k).limitEdgeFrac], [15, 0.03, 0.5]);
+});
+
+test('v4.1: confidence bars doubled to win odds 90/85/80, each with a big-gap exception', async () => {
+  const { riskSettings } = await import('../public/model.js');
+  assert.deepEqual(['safe', 'balanced', 'aggressive'].map((k) => [riskSettings(k).minConfidence, riskSettings(k).bigEdgeOverride]), [[90, 0.15], [85, 0.12], [80, 0.1]]);
 });
