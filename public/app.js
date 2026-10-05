@@ -2,7 +2,7 @@ import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskL
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
-import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
+import { balanceDollars, foldFills, importKey, parseFill, parseOrder, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { LIVE_DEFAULTS, fillNow, heldByOrders, isResting, liveLimits, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
@@ -154,7 +154,8 @@ async function settlePositions() {
     } catch { /* retry next cycle */ }
   }
   // Positions still open when their market settled
-  for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).slice(0, 3)) {
+  // (Kalshi-linked positions are closed from Kalshi's own settlement records in syncKalshi; this is only a fallback)
+  for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - (p.source === 'kalshi' && state.kalshi.key ? 15 * 60000 : 60000)).slice(0, 3)) {
     try {
       const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(pos.ticker)}`);
       if (market && (market.result === 'yes' || market.result === 'no')) {
@@ -166,7 +167,8 @@ async function settlePositions() {
 }
 
 // ---------- positions ----------
-const entryCost = (pos) => pos.price + kalshiFee(pos.price);
+// What one contract cost including fees: Kalshi's actual fees when known, otherwise its fee formula
+const entryCost = (pos) => pos.price + (pos.fees != null && pos.contracts > 0 ? pos.fees / pos.contracts : kalshiFee(pos.price));
 function savePositions() { store.set('positions', state.positions); }
 
 function openPosition(m, side, price, contracts, at = Date.now()) {
@@ -178,9 +180,12 @@ function openPosition(m, side, price, contracts, at = Date.now()) {
 }
 
 // exit = sale price in dollars, or 1/0 when it settled. `contracts` < pos.contracts closes part of it.
-function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contracts) {
+// fees: what Kalshi actually charged for these contracts (entry + exit), when known; otherwise Kalshi's fee formula
+function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contracts, fees = null) {
   const proceeds = how === 'settled' ? exit : exit - kalshiFee(exit);
-  const trade = { ...pos, contracts, exit, how, closedAt: at, pnl: (proceeds - entryCost(pos)) * contracts };
+  const pnl = fees != null ? (exit - pos.price) * contracts - fees : (proceeds - entryCost(pos)) * contracts;
+  const trade = { ...pos, contracts, exit, how, closedAt: at, pnl, ...(fees != null ? { fees, exact: true } : {}) };
+  if (pos.fees != null && contracts < pos.contracts - 1e-9) pos.fees *= 1 - contracts / pos.contracts; // fees left on what's still held
   state.trades.unshift(trade);
   state.trades = state.trades.slice(0, 500);
   if (contracts < pos.contracts - 1e-9) pos.contracts -= contracts;
@@ -938,11 +943,12 @@ async function syncKalshi() {
     const since = store.get('kalshiSince', Math.floor(Date.now() / 1000) - 24 * 3600); // first link: the last 24 hours
     const fills = [];
     let cursor = null, pages = 0;
-    do {
+    do { // read every page (it used to stop at 5 and could skip fills for good)
       const page = await kalshiGet('fills', { min_ts: since, limit: 200, cursor });
       fills.push(...(page.fills || []).map(parseFill));
       cursor = page.cursor || null;
-    } while (cursor && ++pages < 5);
+    } while (cursor && ++pages < 50);
+    const complete = !cursor;
     const mine = fills.filter((f) => f.ticker.startsWith(`${settings.series}-`) && !seen.has(f.id) && f.at);
     // Fills on the bot's waiting orders show up here: credit them to the order in the Live log
     for (const f of mine) {
@@ -952,11 +958,11 @@ async function syncKalshi() {
     }
     if (mine.length) {
       const linked = state.positions.filter((p) => p.source === 'kalshi');
-      const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at }]));
+      const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at, fees: p.fees ?? null }]));
       const { holdings: next, closes } = foldFills(holdings, mine);
       for (const c of closes) {
         const pos = state.positions.find((p) => p.source === 'kalshi' && p.ticker === c.ticker);
-        if (pos) closePosition({ ...pos, price: c.entry }, c.exit, 'sold', c.at, Math.min(c.contracts, pos.contracts)); // contracts left are set from `next` below
+        if (pos) closePosition({ ...pos, price: c.entry }, c.exit, 'sold', c.at, Math.min(c.contracts, pos.contracts), c.fees); // contracts left are set from `next` below
       }
       state.positions = state.positions.filter((p) => !(p.source === 'kalshi' && !next[p.ticker]));
       for (const [ticker, h] of Object.entries(next)) {
@@ -969,7 +975,7 @@ async function syncKalshi() {
           pos = { id: `k-${ticker}`, source: 'kalshi', ticker, title: m.title, closeTime: m.close_time, peakBid: null, peakP: null };
           state.positions.push(pos);
         }
-        Object.assign(pos, { side: h.side, contracts: h.contracts, price: h.price, at: h.at });
+        Object.assign(pos, { side: h.side, contracts: h.contracts, price: h.price, at: h.at, fees: h.fees ?? null });
       }
       const placed = new Set(state.positions.map((p) => p.ticker));
       for (const f of mine) if (placed.has(f.ticker) || !next[f.ticker]) seen.add(f.id);
@@ -983,7 +989,8 @@ async function syncKalshi() {
     // Next time, start from the newest fill, or from the oldest one we couldn't place yet so it's retried
     const waiting = mine.filter((f) => !seen.has(f.id)).map((f) => f.at);
     const newest = waiting.length ? Math.min(...waiting) : Math.max(0, ...fills.map((f) => f.at || 0));
-    if (newest) store.set('kalshiSince', Math.max(since, Math.floor(newest / 1000) - 5));
+    if (newest && complete) store.set('kalshiSince', Math.max(since, Math.floor(newest / 1000) - 5));
+    await checkAgainstKalshi(); // Kalshi's own settlements, positions and orders: the source of truth
     state.kalshi.lastSync = Date.now(); state.kalshi.error = null;
     if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > (liveCfg.live ? 20000 : 60000)) {
       state.kalshi.balance = balanceDollars(await kalshiGet('balance')); state.kalshi.balanceAt = Date.now();
@@ -999,6 +1006,68 @@ async function syncKalshi() {
   }
 }
 
+// ---------- 100% accuracy: Kalshi's own records win ----------
+// Settlements close linked positions at Kalshi's settlement; the positions list corrects anything the fills missed;
+// the orders list confirms every bot order's real fills, average price and fees.
+async function checkAgainstKalshi() {
+  const asOf = Date.now(), fixes = [];
+  // 1) settlements for linked positions whose market has closed
+  const closed = state.positions.filter((p) => p.source === 'kalshi' && Date.parse(p.closeTime) < asOf);
+  if (closed.length) {
+    try {
+      const out = await kalshiGet('settlements', { min_ts: Math.floor(Math.min(...closed.map((p) => Date.parse(p.closeTime))) / 1000) - 3600, limit: 200 });
+      const byTicker = new Map((out.settlements || []).map(parseSettlement).map((s) => [s.ticker, s]));
+      for (const pos of closed) {
+        const s = byTicker.get(pos.ticker);
+        if (!s || (s.result !== 'yes' && s.result !== 'no')) continue;
+        closePosition(pos, pos.side.toLowerCase() === s.result ? 1 : 0, 'settled', s.at || asOf, pos.contracts, pos.fees ?? null);
+        toast(`Kalshi settled ${pos.ticker}: ${pos.side} ${pos.side.toLowerCase() === s.result ? 'won' : 'lost'}`);
+      }
+    } catch { /* tried again next sync */ }
+  }
+  // 2) positions: Kalshi's list wins
+  try {
+    const out = await kalshiGet('positions', { count_filter: 'position', limit: 200 });
+    if (!Array.isArray(out.market_positions)) throw new Error('unexpected reply from Kalshi'); // never read a bad reply as "no positions"
+    const truth = out.market_positions.map(parsePosition);
+    const r = reconcilePositions(state.positions, truth, { series: settings.series, asOf });
+    // a market the bot just ordered in: its fills may not have arrived yet, so check it next time
+    const busy = new Set(state.liveOrders.filter((o) => asOf - o.at < 20000).map((o) => o.ticker));
+    const waiting = new Set();
+    for (const k of ['set', 'remove', 'add']) r[k] = r[k].filter((x) => (busy.has(x.ticker) ? (waiting.add(x.ticker), false) : true));
+    for (const x of r.set) { const p = state.positions.find((q) => q.source === 'kalshi' && q.ticker === x.ticker); if (p) { Object.assign(p, { side: x.side, contracts: x.contracts, price: x.price }); if (x.why.includes('→') && !x.why.includes('¢')) p.fees = null; fixes.push(`${x.ticker}: ${x.why}`); } }
+    for (const x of r.remove) { state.positions = state.positions.filter((q) => !(q.source === 'kalshi' && q.ticker === x.ticker)); fixes.push(`${x.ticker}: ${x.why}`); }
+    for (const x of r.add) {
+      const m = await marketInfo(x.ticker).catch(() => null);
+      if (!m?.close_time || x.price == null) continue;
+      state.positions = state.positions.filter((p) => p.ticker !== x.ticker);
+      state.positions.push({ id: `k-${x.ticker}`, source: 'kalshi', ticker: x.ticker, title: m.title, closeTime: m.close_time, side: x.side, contracts: x.contracts, price: x.price, at: asOf, fees: null, peakBid: null, peakP: null });
+      fixes.push(`${x.ticker}: ${x.why}`);
+    }
+    state.kalshi.verify = { at: Date.now(), positions: truth.filter((k) => k.ticker.startsWith(`${settings.series}-`) && k.contracts > 0).length, fixes, waiting: waiting.size };
+    if (fixes.length) { state.kalshi.lastFix = { at: Date.now(), fixes }; savePositions(); store.set('trades', state.trades); pushSyncSoon(); toast(`Corrected from Kalshi: ${fixes[0]}${fixes.length > 1 ? ` (+${fixes.length - 1} more)` : ''}`); }
+  } catch (e) { state.kalshi.verify = { at: Date.now(), error: e.message, fixes }; }
+  // 3) the bot's orders: Kalshi's record of each one
+  const open = state.liveOrders.filter((o) => o.id && !o.verifiedFinal && o.at > asOf - 2 * 86400000);
+  if (open.length) {
+    try {
+      const out = await kalshiGet('orders', { min_ts: Math.floor(Math.min(...open.map((o) => o.at)) / 1000) - 60, limit: 200 });
+      const byId = new Map((out.orders || []).map(parseOrder).filter((o) => o.id).map((o) => [o.id, o]));
+      for (const e of open) {
+        const k = byId.get(e.id);
+        if (!k) continue;
+        if (k.filled != null) e.filled = k.filled;
+        if (k.avgPrice != null) e.avgCents = Math.round(k.avgPrice * 1000) / 10;
+        if (k.fees != null) e.fees = k.fees;
+        if (k.status === 'resting') e.status = 'resting';
+        else if (k.status) e.status = k.filled > 0 ? (k.remaining > 0 && k.status === 'canceled' ? 'partly filled' : 'filled') : (k.status === 'canceled' ? (e.status === 'cancelled' ? 'cancelled' : 'no fill (cancelled)') : e.status);
+        e.verified = true; e.verifiedFinal = k.status !== 'resting' && k.status != null;
+      }
+      saveLive(); renderLive();
+    } catch { /* tried again next sync */ }
+  }
+}
+
 function renderKalshi() {
   const k = state.kalshi, linked = !!k.key;
   if (!linked && liveCfg.live) { liveCfg.live = false; saveLive(); }
@@ -1009,7 +1078,12 @@ function renderKalshi() {
   if (!linked) return;
   const bal = k.balance != null ? ` · balance ${dollars(k.balance)}` : '';
   const last = k.lastSync ? ` · synced ${clock(k.lastSync)}` : ' · syncing…';
-  $('kStatus').textContent = `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}. Your ${settings.series} buys and sells show up on their own.`;
+  const v = k.verify;
+  const check = !v ? '' : v.error ? ` · couldn't check against Kalshi (${v.error})`
+    : v.fixes.length ? ` · corrected from Kalshi at ${clock(v.at)}: ${v.fixes.join('; ')}`
+    : v.waiting ? ` · checking ${v.waiting} market${v.waiting > 1 ? 's' : ''} against Kalshi after the bot's latest order settles (${clock(v.at)})`
+    : ` · ✓ matches Kalshi (${v.positions} open position${v.positions === 1 ? '' : 's'}, checked ${clock(v.at)})${k.lastFix && Date.now() - k.lastFix.at < 3600000 ? ` · last correction ${clock(k.lastFix.at)}: ${k.lastFix.fixes.join('; ')}` : ''}`;
+  $('kStatus').textContent = `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}${check}. Your ${settings.series} buys and sells show up on their own.`;
 }
 
 async function loadKalshi() {
@@ -1398,7 +1472,7 @@ function renderLive() {
   $('lvToday').textContent = money(st.realized);
   renderLiveWhy();
   $('lvLog').innerHTML = [...state.liveOrders].reverse().slice(0, 30).map((o) =>
-    `<li><span>${esc(o.label || `${o.action} ${o.count} ${o.side}`)}<small>${clock(o.at)} · ${esc(o.ticker)}${o.error ? ` · ${esc(o.error)}` : ''}</small></span><b class="${o.status === 'error' ? 'neg' : ''}">${esc(o.status)}${o.filled != null ? ` · ${o.filled}` : ''}</b></li>`).join('') || '<li class="calm">No live orders yet</li>';
+    `<li><span>${esc(o.label || `${o.action} ${o.count} ${o.side}`)}<small>${clock(o.at)} · ${esc(o.ticker)}${o.verified ? ` · ✓ Kalshi: ${o.filled ?? 0} filled${o.avgCents != null ? ` at ${o.avgCents}¢ avg` : ''}${o.fees != null ? `, fees $${o.fees.toFixed(2)}` : ''}` : ''}${o.error ? ` · ${esc(o.error)}` : ''}</small></span><b class="${o.status === 'error' ? 'neg' : ''}">${esc(o.status)}${o.filled != null ? ` · ${o.filled}` : ''}</b></li>`).join('') || '<li class="calm">No live orders yet</li>';
   renderLiveStrip();
 }
 
@@ -1440,7 +1514,7 @@ function renderReport() {
   $('rpTrades').textContent = `${t.n} (${t.wins} won)`;
   $('rpWin').textContent = pct(t.winRate);
   $('rpPer').textContent = m(t.perTrade);
-  $('rpDetail').textContent = t.n ? `Average win ${m(t.avgWin)} · average loss ${m(t.avgLoss)} · best ${m(t.best)} · worst ${m(t.worst)}` : 'No closed bot trades in this period yet.';
+  $('rpDetail').textContent = t.n ? `Average win ${m(t.avgWin)} · average loss ${m(t.avgLoss)} · best ${m(t.best)} · worst ${m(t.worst)} · ${t.exact === t.n ? 'all' : `${t.exact} of ${t.n}`} using Kalshi's exact fills and fees` : 'No closed bot trades in this period yet.';
   const rows = (g, name) => Object.entries(g).sort((a, b) => b[1].pnl - a[1].pnl).map(([k, s]) =>
     `<li><span>${esc(name(k))}<small>${s.n} trade${s.n > 1 ? 's' : ''} · ${pct(s.winRate)} won</small></span><b class="${s.pnl > 0 ? 'pos' : s.pnl < 0 ? 'neg' : ''}">${money(s.pnl)}</b></li>`).join('') || '<li class="calm">—</li>';
   $('rpExit').innerHTML = rows(r.byExit, (k) => EXIT_NAMES[k] || k);

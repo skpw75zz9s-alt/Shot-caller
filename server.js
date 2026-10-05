@@ -150,7 +150,7 @@ const cancelFor = (base) => async function kalshiCancel(req, res, id) {
     sendEntry(req, res, r.status === 401 ? 403 : r.status, { raw: Buffer.from(await r.text()) }, 'application/json', { 'cache-control': 'no-store, private' });
   } catch (e) { send(res, 502, { error: `Kalshi didn't answer: ${e.message}` }); }
 };
-const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status']);
+const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status', 'count_filter', 'settlement_status']);
 export const kalshiAuthFor = (base) => { const kalshiCancel = cancelFor(base); return async function kalshiAuth(req, res, endpoint, url) {
   if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/` });
   if (endpoint.startsWith('cancel/')) return kalshiCancel(req, res, endpoint.slice(7));

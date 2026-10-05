@@ -139,6 +139,14 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 
 The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
 
+**Account sync matches Kalshi:** Kalshi's own records are the source of truth, checked on every sync:
+- **Fills** are read in full (every page) and on the right side. Newer fills give the side in `outcome_side`. Their `side` field can say "bid"/"ask", which older versions read as YES. Every trade records the exact fee Kalshi charged (`fee_cost`) instead of an estimate.
+- **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*. A market the bot ordered in within the last 20 seconds is checked on the next sync, after its fills arrive.
+- **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
+- **Orders:** every bot order in the Live log is matched to Kalshi's record of it, showing *✓ Kalshi: 55 filled at 48¢ avg, fees $0.97*.
+
+Live results profit and loss uses those exact fills and fees, and the card says how many trades it covers.
+
 **Live results (Settings):** how the bot's **real** trades went, for Today, 7 days or All: profit and loss, trades, win rate, average per trade, best and worst. It's split by how each trade sold (take profit, profit lock, cut loss, held to settlement) and by confidence at the buy. It also shows how many buy orders filled, didn't fill or errored, with the most common errors. It counts only trades the bot bought, not ones you placed yourself in the Kalshi app.
 
 **Learns from real trades (on by default, in the Live results card):** every 10 new closed bot trades, it looks at the last 30:
