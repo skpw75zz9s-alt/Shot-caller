@@ -139,6 +139,14 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 
 The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
 
+**Live results (Settings):** how the bot's **real** trades went, for Today, 7 days or All: profit and loss, trades, win rate, average per trade, best and worst. It's split by how each trade sold (take profit, profit lock, cut loss, held to settlement) and by confidence at the buy. It also shows how many buy orders filled, didn't fill or errored, with the most common errors. It counts only trades the bot bought, not ones you placed yourself in the Kalshi app.
+
+**Learns from real trades (on by default, in the Live results card):** every 10 new closed bot trades, it looks at the last 30:
+- **Min confidence:** goes up 2 points if the trades just over the bar (within 5 points of it) lost money. Goes down 2 points if the last 30 made money with 60%+ wins. It never goes under the risk level's bar or over 95.
+- **Trade size:** 20% smaller after a losing 30 (down to half size), 10% bigger after a winning 30 (up to 1.5×).
+
+Every change is listed with the date and reason, and you can turn it off or reset it. 30 trades is a small sample, which is why the steps are small.
+
 **Use my Kalshi balance (on by default, Live card checkbox):** the budget is the cash in your Kalshi account (less a small cushion), and each trade can use up to *% of balance per trade* (25% by default). The bot grows and shrinks with your account, and the *Daily loss stop* and *Max trades / day* still apply. Uncheck it to use fixed dollar limits instead.
 
 **When Kalshi says "insufficient balance":** the bot re-reads your balance and the orders still waiting on Kalshi (yours from the Kalshi app or older ones). Kalshi holds money for those orders, and it can't be spent even though it shows in the balance. The bot then sizes to what's actually free and tries again smaller about 15 seconds later. The Health check shows *Kalshi is holding $X for N waiting orders*. Cancel old ones in the Kalshi app (Portfolio → Orders) to free that money.

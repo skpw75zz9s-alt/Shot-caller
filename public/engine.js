@@ -132,6 +132,18 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // Smart exception (Aggressive): a cheap side whose gap is huge even at the worst vol guess is worth buying below the
   // confidence bar. Tested: it keeps most of the profit a high bar gives up, and those trades still mostly sell at a profit.
   const bigGap = (a) => s.bigEdgeOverride > 0 && a.robustEdge != null && a.robustEdge >= s.bigEdgeOverride - 1e-9;
+  // Entry filters for NEW calls (all off unless set): too late in the window, a volatility spike, or Kalshi's price
+  // for the side just jumped (someone knows something / the low already got bought)
+  const entryOk = (side) => {
+    if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
+    if (s.maxVolRatio > 0 && snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.maxVolRatio) return false;
+    if (s.jumpSkip > 0) {
+      const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
+      const then = log.find((e) => e.t >= now - 30000 && e[key] != null), cur = ev.quote[key];
+      if (then && cur != null && Math.abs(cur - then[key]) >= s.jumpSkip - 1e-9) return false;
+    }
+    return true;
+  };
   const passes = (a, edgeNeed, confNeed, persist = false) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 && a.point <= s.maxEdge &&
     a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && (a.score >= confNeed || bigGap(a)) && (!persist || persisted(a.side, edgeNeed));
 
@@ -149,12 +161,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (passes(b, ...need.switching, true)) { pick = b; stance = 'switching'; }
+      if (passes(b, ...need.switching, true) && entryOk(lean)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now)) pick = shown;
+    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
