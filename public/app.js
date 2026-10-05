@@ -190,9 +190,12 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
   return trade;
 }
 
+// Live auto-traded positions also use the profit lock (sell while still up if it starts giving the profit back)
+const exitSettingsFor = (pos) => (pos.source === 'kalshi' && liveCfg.live && liveCfg.profitLock !== false ? { ...settings, profitLock: true } : settings);
+
 function renderPositions(snap) {
   const html = state.positions.map((pos) => {
-    const check = positionCheck(pos, snap, settings);
+    const check = positionCheck(pos, snap, exitSettingsFor(pos));
     const { row, minutesLeft, pSide, bid, ex } = check;
     if (check.changed) savePositions();
 
@@ -1238,8 +1241,8 @@ function runLive(snap, live, sig, now) {
   // Sells first: the same exits as every position card
   for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
-    const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, settings, now), orders: state.liveOrders, now });
-    if (sell) return bookThenSell(pos, sell);
+    const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, exitSettingsFor(pos), now), orders: state.liveOrders, now });
+    if (sell) { sell.meta.kind = positionCheck(pos, snap, exitSettingsFor(pos), now).ex.kind; return bookThenSell(pos, sell); }
   }
   const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
   if (!b.ok) { state.liveWhy = /^Waiting/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
@@ -1286,7 +1289,7 @@ async function bookThenSell(pos, sell) {
     }
   }
   if (!liveCfg.live) return;
-  sendLive(order, meta, `sell ${meta.count} ${sideName(pos.side)} at ${meta.cents}¢ or better`);
+  sendLive(order, meta, `${meta.kind === 'lock' ? 'lock profit: ' : ''}sell ${meta.count} ${sideName(pos.side)} at ${meta.cents}¢ or better`);
 }
 
 function seenLine() {
@@ -1319,6 +1322,7 @@ function renderLive() {
   $('liveStatus').textContent = !linked ? 'Link your Kalshi account above first.'
     : liveCfg.live ? `ON: trading real money while this app is open. Budget ${dollars(liveCfg.budget)}, up to ${dollars(liveCfg.maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
     : 'Off.';
+  $('lvLock').checked = liveCfg.profitLock !== false;
   $('liveArm').hidden = liveCfg.live;
   $('liveOffRow').hidden = !liveCfg.live;
   for (const [id, k] of [['lvBudget', 'budget'], ['lvMax', 'maxPerTrade'], ['lvLoss', 'dailyLoss'], ['lvTrades', 'maxTrades'], ['lvConf', 'minConfidence']]) {
@@ -1339,6 +1343,7 @@ for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'm
     saveLive(); renderLive();
   });
 }
+$('lvLock').addEventListener('change', (e) => { liveCfg.profitLock = e.target.checked; saveLive(); renderLive(); });
 $('lvOn').addEventListener('click', () => {
   if (!state.kalshi.key) return toast('Link your Kalshi account first');
   if (!$('lvAck').checked) return toast('Tick the box to confirm you understand it trades real money');

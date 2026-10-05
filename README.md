@@ -133,6 +133,12 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 - It has no unknown fields.
 - It's within 20 orders a minute.
 
+**Profit lock (on by default, Live card checkbox):** once a live trade has been up at least **4¢ a contract**, the bot sells while it's still a win if both of these happen:
+- it gives back **half** of that peak profit
+- it shows at least one other sign of turning: the bot's odds down 8+ points from their peak, a reversal candle pattern, RSI rolling over, rejection at a band or level, or two strong candles against you
+
+The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
+
 **Checks the live order book first:** Kalshi's market list (where the bot reads prices) can lag the real order book by a few seconds. A "bargain" seen in old prices is often already gone, and then a fill-now-or-cancel order can't fill. So right before every order, the app reads Kalshi's live order book:
 - **Buys** go out only if something is for sale at or under the max price, and only for as many contracts as are there. Otherwise the Live card says *Bargain already gone: Kalshi's live price is 84¢, over the 69¢ max*, and it checks again next tick.
 - **Sells** go out at the live bid, but never more than 2¢ under the price the exit was decided on.

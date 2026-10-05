@@ -257,6 +257,12 @@ export const EXIT_DEFAULTS = {
   cutConfirmSec: 30, // ...and to keep doing so this long before SELL NOW (one bad tick isn't a reason)
   takeConfirmSec: 0, // same wait for a profitable sell
   smoothSec: 0,      // exit decisions use the bot's odds averaged over this many seconds
+  // Profit lock (live auto-trader): once a position was up at least lockArm per contract, sell while still in profit
+  // if it gives back lockGiveback of that peak profit AND shows at least lockSigns other signs of turning
+  profitLock: false,
+  lockArm: 0.04,
+  lockGiveback: 0.5,
+  lockSigns: 1,
 };
 
 // When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
@@ -283,6 +289,13 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
 
   if (inProfit && net >= pSide) {
     return { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` };
+  }
+  if (s.profitLock && inProfit && pos.peakBid != null) {
+    const peakGain = pos.peakBid - kalshiFee(pos.peakBid) - entryCost, gave = peakGain - pnlPer;
+    const turning = signs.filter((x) => !/^Sell price down/.test(x)).length; // signs besides the price drop itself
+    if (peakGain >= s.lockArm - 1e-9 && gave >= s.lockGiveback * peakGain - 1e-9 && turning >= s.lockSigns) {
+      return { ...base, signs, action: 'SELL', kind: 'lock', why: `Locking in profit: it was up ${c(peakGain)} a contract and has given back ${c(gave)}, with signs it's turning (${signs.filter((x) => !/^Sell price down/.test(x)).join('; ') || 'price falling'}). Sell while it's still a win.` };
+    }
   }
   if (!inProfit && net >= pSide + s.cutMargin) {
     return { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };

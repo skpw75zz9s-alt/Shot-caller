@@ -8,7 +8,7 @@
 // and a sell can never sell more than is held. It can only ever use the cash in the Kalshi account.
 import { kalshiFee } from './model.js';
 
-export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80 };
+export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true };
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const cents = (p) => Math.round(p * 100);

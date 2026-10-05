@@ -155,6 +155,7 @@
           <div class="adm-row"><label>Budget (most at risk) $<input id="lvBudget" inputmode="decimal"></label><label>Max $ per trade<input id="lvMax" inputmode="decimal"></label></div>
           <div class="adm-row"><label>Daily loss stop $<input id="lvLoss" inputmode="decimal"></label><label>Max trades / day<input id="lvTrades" inputmode="numeric"></label></div>
           <div class="adm-row"><label>Min confidence<input id="lvConf" inputmode="numeric"></label></div>
+          <label class="practice-toggle"><input type="checkbox" id="lvLock"> Lock in profit: once a trade is up, sell while it's still a win if it starts giving the profit back</label>
           <div class="grid pr-stats">
             <div class="stat"><label>At risk now</label><b id="lvRisk">—</b></div>
             <div class="stat"><label>Today (realized)</label><b id="lvToday">—</b></div>
@@ -188,7 +189,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v4.3.2 · live order book check</p>
+      <p class="fine" id="version">Shot Caller v4.4 · profit lock</p>
     </section>
   </main>
 
