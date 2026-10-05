@@ -179,7 +179,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < confNeed && bigGap(pick),
+    add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
     side: a?.side ?? lean, callSide, price: pick?.price ?? null, limit, edge: pick?.point ?? null,
     timing: a?.timing ?? entrySignal(snap.bars, null, now), deep: a?.deep ?? null, robustEdge: a?.robustEdge ?? null,

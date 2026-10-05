@@ -95,3 +95,27 @@ test('confidence bar is 80 (win odds); the Aggressive big-gap exception may trad
   assert.match(planBuy({ ...base, cfg: { ...cfg, minConfidence: 80 }, sig: lowConf, row: row(0.4) }).why, /confidence 60 is under 80/);
   assert.equal(planBuy({ ...base, cfg: { ...cfg, minConfidence: 80 }, sig: { ...lowConf, bigGap: true }, row: row(0.4) }).ok, true);
 });
+
+test('keeps trying an active call it has not bought: no fill, an error, or Live turned on mid-call (max 3 tries)', () => {
+  const T = 'KXBTC15M-26OCT05-T1';
+  const holdingCall = call({ fire: false, stance: 'holding', called: 'YES', calledAt: now - 60000 });
+  // turned on mid-call: no order yet
+  assert.equal(planBuy({ ...base, sig: holdingCall, row: row(0.4) }).ok, true);
+  // first order didn't fill: try again
+  const miss = { at: now - 20000, ticker: T, action: 'buy', side: 'YES', status: 'no fill (cancelled)', filled: 0 };
+  assert.equal(planBuy({ ...base, orders: [miss], sig: holdingCall, row: row(0.4) }).ok, true);
+  const err = { ...miss, at: now - 10000, status: 'error', filled: undefined };
+  assert.equal(planBuy({ ...base, orders: [miss, err], sig: holdingCall, row: row(0.4) }).ok, true);
+  assert.match(planBuy({ ...base, orders: [miss, err, { ...miss, at: now - 6000 }], sig: holdingCall, row: row(0.4) }).why, /Gave up on this call after 3/);
+  // it filled (or may have, still in flight): never buy the same call twice while Kalshi sync catches up
+  assert.match(planBuy({ ...base, orders: [{ ...miss, status: 'filled', filled: 5 }], sig: holdingCall, row: row(0.4) }).why, /new call/);
+  assert.match(planBuy({ ...base, orders: [{ at: now - 6000, ticker: T, action: 'buy', side: 'YES', status: 'sent' }], sig: holdingCall, row: row(0.4) }).why, /new call/);
+  // orders from an earlier call don't count against this one
+  assert.equal(planBuy({ ...base, orders: [{ ...miss, at: now - 120000 }, { ...miss, at: now - 110000 }, { ...miss, at: now - 100000 }], sig: holdingCall, row: row(0.4) }).ok, true);
+});
+
+test('only buys that went through count toward Max trades / day', () => {
+  const misses = Array.from({ length: 40 }, (_, i) => ({ at: now - 60000 - i, ticker: `T${i}`, action: 'buy', side: 'YES', status: i % 2 ? 'error' : 'no fill (cancelled)', filled: i % 2 ? undefined : 0 }));
+  assert.equal(planBuy({ ...base, orders: misses, sig: call(), row: row(0.4) }).ok, true);
+  assert.equal(liveState({ positions: [], trades: [], orders: misses, now }).buys, 0);
+});

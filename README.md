@@ -133,6 +133,8 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 - It has no unknown fields.
 - It's within 20 orders a minute.
 
+**Doesn't miss calls:** if an order doesn't fill (the price moved in the second it took) or errors, it tries the same call again, up to 3 orders at least 5 seconds apart. It also picks up a call that was already active when you turned Live on or reopened the app. It never buys the same call twice. Only buys that went through count toward *Max trades / day*. While Live is on and the app is on screen, it keeps the screen awake. In Low Power Mode iPhone may still lock it, so set Auto-Lock to Never while trading.
+
 **Right now line:** while it's on, the Live card always says what it's doing. For example: *Waiting for a call: YES is at confidence 73 (needs 80, or a 10-pt gap) with a 9-pt worst-case gap*. If an order fails, the card also shows Kalshi's exact error. It only runs while the app is open on screen. iPhone pauses it when the app is in the background or the phone is locked.
 
 **Turning it on and off:**

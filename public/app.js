@@ -1213,7 +1213,21 @@ function seenStats(now = Date.now()) {
   return { n: liveSeen.length, bestConf: Math.max(...liveSeen.filter((e) => e.gap >= e.need - 1e-9).map((e) => e.score), -1), bestGap: Math.max(...liveSeen.map((e) => e.gap), -1), bars: bars.map((b) => [b, markets(b)]) };
 }
 
+// Keep the screen awake while live trading is on: iPhone pauses the app when it auto-locks
+let wakeLock = null;
+async function keepAwake() {
+  const want = liveCfg.live && !document.hidden;
+  try {
+    if (want && !wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!want && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { wakeLock = null; /* low battery mode or not supported: the screen may still lock */ }
+}
+document.addEventListener('visibilitychange', keepAwake);
+
 function runLive(snap, live, sig, now) {
+  if (!!wakeLock !== (liveCfg.live && !document.hidden)) keepAwake();
   if (liveCfg.live && live && sig?.deep && sig.robustEdge != null && (!liveSeen.length || now - liveSeen[liveSeen.length - 1].t >= 3000)) {
     liveSeen.push({ t: now, ticker: live.m.ticker, score: sig.deep.score, gap: sig.robustEdge, need: sig.edgeNeed });
   }
@@ -1244,7 +1258,7 @@ function seenLine() {
 function renderLiveWhy() {
   const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
   $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
 }
 
 function renderLiveStrip() {

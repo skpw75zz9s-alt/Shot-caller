@@ -31,13 +31,18 @@ export function sellOrder({ ticker, side, count, floor }) {
   return side === 'NO' ? v2({ ticker, book: 'bid', price: 1 - floor, count, reduce: true }) : v2({ ticker, book: 'ask', price: floor, count, reduce: true });
 }
 
+// A buy that filled, or that may have (no fill count came back): never treated as a miss to retry
+const boughtSomething = (o) => o.status !== 'error' && !(o.filled === 0);
+export const LIVE_TRIES = 3; // tries per call when orders don't fill (price moved) or fail
+
 // Where the account stands today, from Kalshi-synced positions and trades plus the auto-trader's own order log.
 export function liveState({ positions, trades, orders, now = Date.now() }) {
   const since = dayStart(now);
   const open = positions.filter((p) => p.source === 'kalshi');
   const exposure = open.reduce((a, p) => a + (p.price + kalshiFee(p.price)) * p.contracts, 0);
   const realized = trades.filter((t) => t.source === 'kalshi' && t.closedAt >= since).reduce((a, t) => a + t.pnl, 0);
-  const buys = orders.filter((o) => o.at >= since && o.action === 'buy').length;
+  // Only buys that went through count toward Max trades (a no-fill or an error didn't spend anything)
+  const buys = orders.filter((o) => o.at >= since && o.action === 'buy' && boughtSomething(o)).length;
   return { exposure, realized, buys, worstCase: realized - exposure };
 }
 
@@ -49,7 +54,13 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
   const ticker = row.m.ticker;
   const held = positions.find((p) => p.ticker === ticker);
   const add = !!(held && held.source === 'kalshi' && sig.add && held.side === sig.callSide);
-  if (!add && !sig.fire) return { ok: false, why: 'Waiting for a new call' }; // a fresh call or a real switch
+  // Not only the tick a call fires: the bot keeps trying an active call it hasn't bought yet (the first order didn't
+  // fill, it errored, or Live was turned on mid-call), up to LIVE_TRIES orders per call
+  const since = sig.calledAt ?? 0;
+  const tries = orders.filter((o) => o.ticker === ticker && o.action === 'buy' && o.side === sig.callSide && o.at >= since);
+  if (!add && tries.some(boughtSomething)) return { ok: false, why: 'Waiting for a new call' }; // already bought this call (Kalshi sync catching up)
+  if (!add && !sig.fire && !(sig.callSide && sig.called === sig.callSide && !held)) return { ok: false, why: 'Waiting for a new call' };
+  if (!add && tries.length >= LIVE_TRIES) return { ok: false, why: `Gave up on this call after ${LIVE_TRIES} orders didn't fill` };
   if (held && !add) return { ok: false, why: 'Already holding this market' };
   if (!sig.bigGap && (sig.deep?.score ?? 0) < c.minConfidence) return { ok: false, why: `Skipped: confidence ${sig.deep?.score ?? '—'} is under ${c.minConfidence}` };
   if (orders.some((o) => o.ticker === ticker && now - o.at < 5000)) return { ok: false, why: 'Just sent an order on this market' };
