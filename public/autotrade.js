@@ -14,14 +14,21 @@ const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); ret
 const cents = (p) => Math.round(p * 100);
 const orderId = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
 
-// Kalshi order bodies (server re-checks every field)
+// Kalshi V2 order bodies (POST /portfolio/events/orders; the server re-checks every field). V2 has one YES book:
+//   buy YES at <= p  -> bid at p          buy NO at <= p  -> ask at 1 - p
+//   sell YES at >= p -> ask at p (reduce)  sell NO at >= p -> bid at 1 - p (reduce)
+// Prices are fixed-point dollar strings ("0.4500"), counts "N.00". Fill now or cancel: nothing rests on Kalshi.
+const px = (p) => (Math.round(Math.min(0.99, Math.max(0.01, p)) * 100) / 100).toFixed(4);
+const qty = (n) => `${Math.floor(n)}.00`;
+const v2 = ({ ticker, book, price, count, reduce }) => ({
+  ticker, client_order_id: orderId(), side: book, count: qty(count), price: px(price),
+  time_in_force: 'immediate_or_cancel', reduce_only: !!reduce, self_trade_prevention_type: 'taker_at_cross',
+});
 export function buyOrder({ ticker, side, count, limit }) {
-  const s = side === 'NO' ? 'no' : 'yes';
-  return { ticker, action: 'buy', side: s, count: Math.floor(count), type: 'limit', [`${s}_price`]: cents(limit), time_in_force: 'immediate_or_cancel', client_order_id: orderId() };
+  return side === 'NO' ? v2({ ticker, book: 'ask', price: 1 - limit, count }) : v2({ ticker, book: 'bid', price: limit, count });
 }
 export function sellOrder({ ticker, side, count, floor }) {
-  const s = side === 'NO' ? 'no' : 'yes';
-  return { ticker, action: 'sell', side: s, count: Math.floor(count), type: 'limit', [`${s}_price`]: Math.max(1, cents(floor)), time_in_force: 'immediate_or_cancel', sell_position_floor: 0, client_order_id: orderId() };
+  return side === 'NO' ? v2({ ticker, book: 'bid', price: 1 - floor, count, reduce: true }) : v2({ ticker, book: 'ask', price: floor, count, reduce: true });
 }
 
 // Where the account stands today, from Kalshi-synced positions and trades plus the auto-trader's own order log.
@@ -60,7 +67,7 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
     if ((balance ?? 0) < per) return { ok: false, why: `Not enough Kalshi cash ($${(balance ?? 0).toFixed(2)})` };
     return { ok: false, why: `Budget full ($${st.exposure.toFixed(2)} of $${c.budget} at risk)` };
   }
-  return { ok: true, add, order: buyOrder({ ticker, side: sig.callSide, count, limit: sig.limit }) };
+  return { ok: true, add, order: buyOrder({ ticker, side: sig.callSide, count, limit: sig.limit }), meta: { action: 'buy', side: sig.callSide, count, cents: cents(sig.limit) } };
 }
 
 // Should it sell this Kalshi position now? `check` is positionCheck() for it. Sells at the bid or better.
@@ -68,5 +75,7 @@ export function planSell({ cfg, pos, check, orders, now = Date.now() }) {
   if (!cfg?.live || pos.source !== 'kalshi') return null;
   if (check.ex.action !== 'SELL' || !(check.bid > 0)) return null;
   if (orders.some((o) => o.ticker === pos.ticker && now - o.at < 5000)) return null;
-  return sellOrder({ ticker: pos.ticker, side: pos.side, count: pos.contracts, floor: check.bid });
+  const count = Math.floor(pos.contracts);
+  if (count < 1) return null;
+  return { order: sellOrder({ ticker: pos.ticker, side: pos.side, count, floor: check.bid }), meta: { action: 'sell', side: pos.side, count, cents: cents(check.bid) } };
 }

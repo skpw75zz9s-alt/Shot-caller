@@ -106,9 +106,9 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 | Max trades / day | 40 | |
 | Kalshi balance | | It never spends more cash than the account holds. Kalshi has no borrowing, and the bot can't withdraw or reach your bank. |
 
-**Server check:** before any order reaches Kalshi, the server refuses it unless all of these hold:
+**Server check:** orders use Kalshi's V2 order API (`POST /portfolio/events/orders`: one YES book, so buy YES = bid, buy NO = ask at 1 − price, and sells are `reduce_only` so they can only close what's held). Before any order reaches Kalshi, the server refuses it unless all of these hold:
 - It's for the BTC 15-minute series.
-- It's a fill-now-or-cancel limit order, with a sane size.
+- It's a fill-now-or-cancel (`immediate_or_cancel`) order with a price of 1–99¢ and a sane size.
 - Its total cost is at most $100 (`AUTO_MAX_ORDER_USD`).
 - It has no unknown fields.
 - It's within 20 orders a minute.

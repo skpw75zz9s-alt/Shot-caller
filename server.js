@@ -86,24 +86,23 @@ const AUTH_READS = new Set(['fills', 'positions', 'balance', 'settlements', 'ord
 const ORDER_SERIES = (process.env.AUTO_SERIES || 'KXBTC15M').split(',').filter(Boolean);
 const ORDER_MAX_USD = Number(process.env.AUTO_MAX_ORDER_USD || 100);
 
-// Every live order is checked here before it reaches Kalshi: only the BTC 15-minute series, only limit orders
-// that fill now or cancel (nothing left resting), sensible sizes, a hard dollar cap per order, no extra fields.
+// Every live order is checked here before it reaches Kalshi (V2 shape: one YES book, bid/ask, dollar strings):
+// only the BTC 15-minute series, only orders that fill now or cancel (nothing left resting), sensible sizes,
+// a hard dollar cap on anything that opens a position, no extra fields.
 export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD } = {}) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return 'order must be an object';
-  const allowed = new Set(['ticker', 'action', 'side', 'count', 'type', 'yes_price', 'no_price', 'time_in_force', 'client_order_id', 'sell_position_floor']);
+  const allowed = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type']);
   for (const k of Object.keys(o)) if (!allowed.has(k)) return `field not allowed: ${k}`;
   if (typeof o.ticker !== 'string' || !/^[A-Z0-9]+-[A-Z0-9-]{1,60}$/.test(o.ticker) || !series.some((s) => o.ticker.startsWith(`${s}-`))) return 'only the BTC 15-minute markets can be traded';
-  if (!['buy', 'sell'].includes(o.action)) return 'action must be buy or sell';
-  if (!['yes', 'no'].includes(o.side)) return 'side must be yes or no';
-  if (o.type !== 'limit') return 'only limit orders';
+  if (!['bid', 'ask'].includes(o.side)) return 'side must be bid or ask';
   if (o.time_in_force !== 'immediate_or_cancel') return 'only fill-now-or-cancel orders (nothing left resting)';
-  if (!Number.isInteger(o.count) || o.count < 1 || o.count > 1000) return 'count must be 1-1000 contracts';
-  const priceKey = `${o.side}_price`, other = o.side === 'yes' ? 'no_price' : 'yes_price';
-  if (!Number.isInteger(o[priceKey]) || o[priceKey] < 1 || o[priceKey] > 99) return `${priceKey} must be 1-99 cents`;
-  if (o[other] !== undefined) return `send only ${priceKey}`;
-  if (o.action === 'buy' && (o.count * o[priceKey]) / 100 > maxUsd) return `order over the $${maxUsd} cap`;
-  if (o.action === 'sell' && o.sell_position_floor !== 0) return 'sells must not go short (sell_position_floor 0)';
-  if (o.action === 'buy' && o.sell_position_floor !== undefined) return 'sell_position_floor is for sells';
+  if (typeof o.count !== 'string' || !/^\d{1,4}\.00$/.test(o.count) || Number(o.count) < 1 || Number(o.count) > 1000) return 'count must be "1.00"-"1000.00" contracts';
+  if (typeof o.price !== 'string' || !/^0\.\d{4}$/.test(o.price) || Number(o.price) < 0.01 || Number(o.price) > 0.99) return 'price must be "0.0100"-"0.9900"';
+  if (typeof o.reduce_only !== 'boolean') return 'reduce_only must be true or false';
+  if (o.self_trade_prevention_type !== undefined && o.self_trade_prevention_type !== 'taker_at_cross') return 'unsupported self_trade_prevention_type';
+  // Opening a position costs price per contract on a bid (YES) and 1 - price on an ask (NO)
+  const cost = Number(o.count) * (o.side === 'bid' ? Number(o.price) : 1 - Number(o.price));
+  if (!o.reduce_only && cost > maxUsd + 1e-9) return `order over the $${maxUsd} cap`;
   if (typeof o.client_order_id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(o.client_order_id)) return 'client_order_id required';
   return null;
 }
@@ -132,7 +131,7 @@ export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpo
   const q = new URLSearchParams();
   if (!isOrder) for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
   try {
-    const r = await fetch(`${base}/portfolio/${endpoint}${q.size ? `?${q}` : ''}`, {
+    const r = await fetch(`${base}/portfolio/${isOrder ? 'events/orders' : endpoint}${q.size ? `?${q}` : ''}`, { // V2 order path
       method: isOrder ? 'POST' : 'GET',
       headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig, ...(isOrder ? { 'content-type': 'application/json' } : {}) },
       body: isOrder ? JSON.stringify(body) : undefined,

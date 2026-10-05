@@ -886,11 +886,13 @@ async function kalshiGet(endpoint, params = {}) {
   return body;
 }
 
+// Orders go to Kalshi's V2 path (portfolio/events/orders); the server forwards /kalshi-auth/orders there
+const UPSTREAM = { orders: 'events/orders' };
 async function kalshiPost(endpoint, body) {
   const { key, keyId } = state.kalshi;
   if (!key) throw new Error('Kalshi not linked');
   kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
-  const headers = { ...(await signHeaders(key, keyId, 'POST', kalshiPrefix + endpoint)), 'content-type': 'application/json' };
+  const headers = { ...(await signHeaders(key, keyId, 'POST', kalshiPrefix + (UPSTREAM[endpoint] || endpoint))), 'content-type': 'application/json' };
   const r = await fetch(`${API}/kalshi-auth/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
   paywalled(r);
   const out = await r.json().catch(() => ({}));
@@ -1143,15 +1145,16 @@ function stopLive(why) {
   renderLive(); render();
 }
 
-async function sendLive(order, label) {
+async function sendLive(order, meta, label) {
   liveBusy = true;
-  const entry = { at: Date.now(), ticker: order.ticker, action: order.action, side: order.side.toUpperCase(), count: order.count, cents: order[`${order.side}_price`], status: 'sent', label };
+  const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label };
   state.liveOrders.push(entry); saveLive(); renderLive();
   try {
     const out = await kalshiPost('orders', order);
-    const o = out.order || {};
-    entry.status = o.status || 'placed';
-    entry.filled = o.fill_count ?? o.taker_fill_count ?? null;
+    const o = out.order || out; // V2 answers with the order fields at the top level
+    const filled = Number(o.fill_count ?? o.fill_count_fp ?? o.taker_fill_count ?? NaN);
+    entry.filled = Number.isFinite(filled) ? filled : null;
+    entry.status = o.status || (entry.filled > 0 ? 'filled' : entry.filled === 0 ? 'no fill (cancelled)' : 'placed');
     entry.id = o.order_id || null;
     liveErrors = 0;
     toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
@@ -1174,14 +1177,13 @@ function runLive(snap, live, sig, now) {
   // Sells first: the same exits as every position card
   for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
-    const order = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, settings, now), orders: state.liveOrders, now });
-    if (order) return sendLive(order, `sell ${order.count} ${sideName(pos.side)} at ${order[`${order.side}_price`]}¢ or better`);
+    const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, settings, now), orders: state.liveOrders, now });
+    if (sell) return sendLive(sell.order, sell.meta, `sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
   }
   const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
   if (!b.ok) { if (!/Waiting|off/.test(b.why)) state.liveWhy = b.why; return; }
   state.liveWhy = '';
-  const o = b.order;
-  sendLive(o, `${b.add ? 'add' : 'buy'} ${o.count} ${sideName(o.side.toUpperCase())} at ${o[`${o.side}_price`]}¢ max`);
+  sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ max`);
 }
 
 function renderLiveStrip() {

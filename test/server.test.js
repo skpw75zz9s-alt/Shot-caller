@@ -126,7 +126,7 @@ test('live orders: only checked orders are forwarded to Kalshi, signed, never an
   const kal = http.createServer((req, res) => {
     let body = ''; req.on('data', (c) => (body += c)); req.on('end', () => {
       got.push({ method: req.method, url: req.url, sig: req.headers['kalshi-access-signature'], body: body ? JSON.parse(body) : null });
-      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ order: { order_id: 'o1', status: 'executed', fill_count: 3 } }));
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ order_id: 'o1', fill_count: '3.00', remaining_count: '0.00' }));
     });
   });
   await new Promise((r) => kal.listen(0, r));
@@ -136,16 +136,17 @@ test('live orders: only checked orders are forwarded to Kalshi, signed, never an
   await new Promise((r) => srv.listen(0, r));
   const at = `http://127.0.0.1:${srv.address().port}/api/kalshi-auth`;
   const h = { 'x-kalshi-key': 'good-key-1234', 'x-kalshi-ts': '1700000000000', 'x-kalshi-sig': 'B'.repeat(88), 'content-type': 'application/json' };
-  const good = { ticker: 'KXBTC15M-26OCT05-T1', action: 'buy', side: 'yes', count: 3, type: 'limit', yes_price: 45, time_in_force: 'immediate_or_cancel', client_order_id: 'abcd-1234-efgh' };
+  const good = { ticker: 'KXBTC15M-26OCT05-T1', client_order_id: 'abcd-1234-efgh', side: 'bid', count: '3.00', price: '0.4500', time_in_force: 'immediate_or_cancel', reduce_only: false, self_trade_prevention_type: 'taker_at_cross' };
+  try {
   const r = await fetch(`${at}/orders`, { method: 'POST', headers: h, body: JSON.stringify(good) });
   assert.equal(r.status, 200);
-  assert.equal((await r.json()).order.status, 'executed');
-  assert.deepEqual(got[0], { method: 'POST', url: '/trade-api/v2/portfolio/orders', sig: 'B'.repeat(88), body: good });
+  assert.equal((await r.json()).fill_count, '3.00');
+  assert.deepEqual(got[0], { method: 'POST', url: '/trade-api/v2/portfolio/events/orders', sig: 'B'.repeat(88), body: good });
   const bad = await fetch(`${at}/orders`, { method: 'POST', headers: h, body: JSON.stringify({ ...good, ticker: 'KXPRES-28-X' }) });
   assert.equal(bad.status, 400);
   assert.match((await bad.json()).error, /order refused/);
   assert.equal((await fetch(`${at}/orders`, { method: 'POST', body: JSON.stringify(good) })).status, 400, 'unsigned');
   assert.equal((await fetch(`${at}/fills`, { method: 'POST', headers: h, body: '{}' })).status, 405, 'only orders can be POSTed');
   assert.equal(got.length, 1, 'refused orders never reach Kalshi');
-  srv.close(); kal.close();
+  } finally { srv.close(); kal.close(); }
 });
