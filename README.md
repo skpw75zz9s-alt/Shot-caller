@@ -18,7 +18,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 
 ### 5-minute wait
 
-The bot watches the first **5 minutes** of every window before it makes any call. Early in a window BTC sits near the target, so calls there are mostly momentum guesses, and the paper test lost money on exactly those. During the wait, the call card shows *Watching the first 5 minutes* with a countdown, and the confidence badge is labeled as a preview. No BUY THE LOW alerts go out, the server's window scoring doesn't trade, and the 15-minute update says when calls start. Sell signals for positions you already hold keep working the whole time. Change it with *Wait before calling* in Settings (0 = no wait).
+The bot watches the first **5 minutes** of every window before it makes any call. Early in a window BTC sits near the target, so calls there are mostly momentum guesses, and the paper test lost money on exactly those. During the wait, the call card shows *Watching the first 5 minutes* with a countdown, and the confidence badge is labeled as a preview. No BUY THE LOW alerts go out, the server's window scoring doesn't trade, and the hourly update says when calls start. Sell signals for positions you already hold keep working the whole time. Change it with *Wait before calling* in Settings (0 = no wait).
 
 ### Live price
 
@@ -289,12 +289,20 @@ The server runs the same bot as the app, around the clock. It sends **Web Push**
 2. Open **Settings → Turn on push notifications** and allow notifications.
 3. Tap **Send test**. You should get "Shot Caller ✓" within a few seconds.
 
-**15-minute updates:** each time a new window opens, every subscribed phone gets one push. It covers how the last window went (settled YES or NO, the odds the bot gave the winner, follow-the-bot result) and the read on the new one (target, where BTC is versus it, which way the bot leans, and BUY THE LOW if it's already a call). For example:
+**Hourly updates:** once an hour (on the window that opens on the hour), every subscribed phone gets one push. It covers how the last window went (settled YES or NO, the odds the bot gave the winner, follow-the-bot result) and the read on the new one (target, where BTC is versus it, which way the bot leans, and BUY THE LOW if it's already a call). For example:
 
 > 🕒 3:30 AM–3:45 AM window · target $84,812
 > 3:15 AM window settled YES · bot had 67% on the winner · follow-the-bot +$3.20. Now BTC $84,820 (+$8) · bot leans YES 58% · BUY THE LOW YES · Above at 52%.
 
-The server waits up to 4 minutes for Kalshi to settle the last window so the result is included. Times use the phone's time zone. Each update replaces the previous one in the notification list, and there's no update right after you first turn on push. Turn it off with **Notify: 15-minute updates**.
+The server waits up to 4 minutes for Kalshi to settle the last window so the result is included. Times use the phone's time zone. Each update replaces the previous one in the notification list, and there's no update right after you first turn on push. Turn it off with **Notify: hourly updates**.
+
+**No spam:** the server and the app share one limiter (`public/notify.js`):
+- **Buy alerts:** at most 2 per 15-minute market (the first call, plus one switch or re-entry), at least 3 minutes apart.
+- **Add alerts:** at most 1 per market.
+- **Hourly cap:** no more than 6 buy, add and update alerts combined per hour.
+- **Sell alerts:** one per position, never held back by the cap, because they're about money you hold.
+
+An alert that gets held back is dropped, never sent late.
 
 Your settings and tracked positions sync to the server whenever they change, so it watches the same thresholds and positions. Turn off either alert type with **Notify: buy the low** and **Notify: sell now**. With push on, the app only vibrates in the foreground; the server sends the notification, so you don't get duplicates.
 
@@ -365,7 +373,7 @@ Tap **Settings → Turn on push notifications** to get alerts even when the app 
 | Rejection weight | 1 | How much rejection trends move the odds (0 = off, 1 = up to ±5 pts) |
 | Min gap | 8 pts | How far Kalshi's price must be below the bot's odds, after fees, even with volatility 20% off either way |
 | Also wait for candle dip | off | Only alert when the candles show a dip too |
-| Notify: buy the low / sell now / 15-minute updates | on / on / on | Which push alerts to send |
+| Notify: buy the low / sell now / hourly updates | on / on / on | Which push alerts to send |
 | Min profit | 1 pt | Profit per contract, after both fees, for a sell to count as taking profit |
 | Trailing drop | 6 pts | Sell-% drop from its peak that shows as a flip sign (warning only) |
 | Odds drop | 8 pts | Bot odds drop from their peak that shows as a flip sign (warning only) |

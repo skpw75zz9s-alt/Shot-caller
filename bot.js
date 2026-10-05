@@ -6,8 +6,9 @@ import { DEFAULTS, EXIT_DEFAULTS, riskSettings } from './public/model.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
+import { allowAlert, hourlyWindow } from './public/notify.js';
 
-const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, ...DEFAULTS, ...EXIT_DEFAULTS };
+const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, updateMinutes: 60, ...DEFAULTS, ...EXIT_DEFAULTS };
 const MAX_DEVICES = 100;
 // Only send to real browser push services (stops the server being used to POST anywhere).
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
@@ -107,7 +108,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     });
     devices.set(subscription.endpoint, {
       endpoint: subscription.endpoint, keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
-      settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
+      settings: cleanSettings(settings), positions: next, alerted: prev?.alerted ?? {}, calls: prev?.calls ?? {}, notifyLog: prev?.notifyLog ?? {}, tracker: prev?.tracker ?? newTracker(), fails: 0,
       token: ctx.token ?? prev?.token ?? null, // paywall session, so alerts stop if access lapses
       tz: validTz(tz) ?? prev?.tz ?? null, lastWindow: prev?.lastWindow ?? null,
       createdAt: prev?.createdAt ?? Date.now(), lastSeen: Date.now(), confOdds: true,
@@ -191,9 +192,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, now });
-        const fire = (key, msg, ttl) => {
+        // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
+        const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
-          d.alerted[key] = now;
+          d.alerted[key] = now; // held back counts as handled: a stale alert is never sent later
+          if (!allowAlert((d.notifyLog ||= {}), kind, { ...extra, now })) return;
           sends.push(notify(d, msg, key, ttl));
         };
 
@@ -202,21 +205,21 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const sig = buySignal(snap.live, snap, s, now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}:${sig.buyNow ? 'low' : 'call'}`, buyMessage(snap.live, sig, market.spot), 45); // a buy call is stale within a minute: never deliver it late
+          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, market.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
           // Aggressive scale-in: only phones holding that call hear about the add
           if (s.notifyBuy && sig.add && d.positions.some((p) => p.ticker === snap.live.m.ticker && p.side === sig.callSide)) {
-            fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, market.spot), 45);
+            fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, market.spot), 45, 'add', { ticker: snap.live.m.ticker });
           }
-          if (windowUpdate(d, snap, sig, now) && s.notifyUpdates) {
+          if (windowUpdate(d, snap, sig, now) && s.notifyUpdates && hourlyWindow(Date.parse(snap.live.m.open_time), s.updateMinutes)) { // hourly unless set to every window
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
-            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz, now }));
+            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz, now }), 300, 'update', { ticker: snap.live.m.ticker });
           }
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap, s, now);
           if (check.ex.action === 'SELL') {
-            if (s.notifySell) fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot));
+            if (s.notifySell) fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot), 300, 'sell', { posId: pos.id });
             releaseCall(d.calls, pos.ticker, now, s); // after the sell call, a fresh buy call on this market can fire again
           }
         }

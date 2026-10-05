@@ -107,8 +107,8 @@ test('grades the whole window on the server and serves the report card', async (
   assert.equal(bot.report({ endpoint: 'nope' }).status, 404);
 });
 
-test('every new 15-minute window sends one update with the last result, in local time', async () => {
-  bot.sync({ subscription, settings: {}, positions: [], tz: 'America/New_York' });
+test('updates set to every window: each new window sends one update with the last result, in local time', async () => {
+  bot.sync({ subscription, settings: { updateMinutes: 15 }, positions: [], tz: 'America/New_York' });
   const before = svc.received.length;
   nextWindow = true;
   await bot.tick(NOW + 8 * 60000 + 30000); // T2 is live, T1 already graded

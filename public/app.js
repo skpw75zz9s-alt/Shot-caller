@@ -5,6 +5,7 @@ import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
 import { LIVE_DEFAULTS, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
+import { allowAlert } from './notify.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -21,7 +22,7 @@ const SETTINGS_META = [
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
   ['notifySell', 'Notify: sell now', 'Alert when a tracked position should be sold', 'bool'],
-  ['notifyUpdates', 'Notify: 15-minute updates', 'Each new window: last window\'s result and the bot\'s read on the new one', 'bool'],
+  ['notifyUpdates', 'Notify: hourly updates', 'Once an hour: the last window\'s result and the bot\'s read on the new one', 'bool'],
   ['maxSpread', 'Max spread (pts)', 'Skip markets where buy and sell % are further apart', 'cents'],
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['waitMinutes', 'Wait before calling (min)', 'Minutes into each 15-minute window before the bot makes any call', 'num'],
@@ -95,6 +96,7 @@ if (store.get('settingsVersion', 1) < 11) {
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
+  notifyLog: {}, // anti-spam limiter for in-app alerts
   calls: store.get('calls', {}), // what the bot has called per window, so it sticks with its calls
   practice: store.get('practice', null) || newPractice(), practiceWhy: '',
   liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 3 * 86400000), liveWhy: '' };
@@ -195,7 +197,7 @@ function renderPositions(snap) {
       const key = `${pos.id}:${ex.kind}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        if (settings.notifySell) alert(sellMessage(pos, check, state.spot));
+        if (settings.notifySell) alert(sellMessage(pos, check, state.spot), 'sell', { posId: pos.id });
       }
     }
 
@@ -239,7 +241,8 @@ function toast(text, undo) {
 
 // ---------- alerts ----------
 // In-app alert. When push is on, the server sends the notification, so only vibrate here.
-async function alert({ tag, title, body }) {
+async function alert({ tag, title, body }, kind = 'buy', extra = {}) {
+  if (!allowAlert(state.notifyLog, kind, extra)) return; // same anti-spam limits as push (public/notify.js)
   try { navigator.vibrate?.([200, 100, 200]); } catch { /* needs a tap first */ }
   if (state.pushOn || !('Notification' in window) || Notification.permission !== 'granted') return;
   const reg = await navigator.serviceWorker?.getRegistration();
@@ -387,10 +390,10 @@ function render() {
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
-      const key = `${m.ticker}:${call}:${sig.callN}:${buyNow ? 'low' : 'call'}`;
+      const key = `${m.ticker}:${call}:${sig.callN}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
-        if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot));
+        if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
       }
     }
     // Aggressive scale-in: tell people who hold the call that the gap grew
@@ -399,7 +402,7 @@ function render() {
       const key = `add:${m.ticker}:${sig.tier}`;
       if (state.positions.some((p) => p.ticker === m.ticker && p.side === call) && !state.alerted[key]) {
         state.alerted[key] = true;
-        if (settings.notifyBuy) alert(addMessage(live, sig, state.spot));
+        if (settings.notifyBuy) alert(addMessage(live, sig, state.spot), 'add', { ticker: m.ticker });
       }
     }
 
