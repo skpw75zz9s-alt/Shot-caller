@@ -169,6 +169,12 @@
           <ul id="lvLog" class="history pr-log"></ul>
         </div>
       </div>
+      <div class="card push-card health-card" id="healthCard">
+        <h3>Health check</h3>
+        <p class="push-status" id="healthStatus">Runs every 2 rounds (every 30 minutes, at :00 and :30) while the app is open, and tells you only when something new is wrong.</p>
+        <ul id="healthList" class="health-list"></ul>
+        <div class="pos-btns"><button id="healthRun">Check now</button></div>
+      </div>
       <div class="card push-card">
         <h3>Notifications</h3>
         <p id="pushStatus" class="push-status">Checking…</p>
@@ -182,7 +188,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v4.2 · fewer notifications</p>
+      <p class="fine" id="version">Shot Caller v4.3 · self health check</p>
     </section>
   </main>
 

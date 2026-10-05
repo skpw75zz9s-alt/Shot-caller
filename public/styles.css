@@ -237,3 +237,10 @@ nav button.active::before { content: ''; position: absolute; top: -1px; left: 30
 button.danger { background: var(--no); border-color: var(--no); color: #fff; width: auto; margin: 0; white-space: nowrap; }
 .live-card h3 { color: var(--no); }
 .live-card h4 { margin: 12px 0 4px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+/* Health check (every 2 rounds) */
+.health-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.health-list li { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.health-list li b { flex: none; width: 16px; text-align: center; font-family: var(--mono); }
+.health-list li.ok b { color: var(--yes); } .health-list li.bad b, .health-list li.bad span { color: var(--no); }
+.health-list li.warn b { color: #e0a43a; }
+.health-list li small { display: block; color: var(--muted); margin-top: 2px; }

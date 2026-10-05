@@ -281,6 +281,17 @@ There's no sell on flip signs alone. They're listed on the position card as a **
 
 On a SELL NOW your phone vibrates and gets a notification with the price and P&L. Tap **I sold at 72%** right after cashing out. It's also one tap: the whole position is closed at Kalshi's live cash-out price and the time is recorded, with Undo. History shows when you bought and sold. Positions still open at expiry are settled automatically from Kalshi's result. Realized P&L shows under **History → My trades**.
 
+### Health check (every 2 rounds)
+
+While the app is open, it checks itself every 2 rounds: every 30 minutes, at :00 and :30, plus once about 20 seconds after you open it. **Settings → Health check → Check now** runs it any time. It checks:
+- Kalshi and BTC prices are fresh
+- The phone's clock matches the server (Kalshi refuses orders from a wrong clock)
+- The Kalshi link and balance sync work (a deleted or wrong API key shows here)
+- The live auto-trader: a stuck or failed order, low cash, a full budget, or a Min confidence that found no trades in an hour when a lower one would have
+- Push notifications are on
+
+Each problem comes with what to do about it. You're told once, with a toast and a notification, when a **new** problem appears. Problems that stay don't re-alert, and the Live card shows a line while any problem is open.
+
 ### Push notifications (app closed)
 
 The server runs the same bot as the app, around the clock. It sends **Web Push** notifications for **BUY THE LOW** and **SELL NOW**, so you get them with the app closed and your phone locked.

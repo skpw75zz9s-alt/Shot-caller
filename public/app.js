@@ -6,6 +6,7 @@ import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './
 import { LIVE_DEFAULTS, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
+import { healthCheck, healthDue, newProblems } from './health.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -113,6 +114,8 @@ function paywalled(r) {
 async function getJSON(path) {
   const r = await fetch(`${API}/${path}`);
   paywalled(r);
+  const srv = Date.parse(r.headers.get('date') || ''); // server clock, for the health check's phone-clock test
+  if (srv) state.skewMs = Date.now() - srv - 500; // the Date header drops milliseconds: half a second on average
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return r.json();
 }
@@ -132,7 +135,7 @@ async function refreshMarkets() {
 
 async function refreshSpot() {
   const t = await getJSON('coinbase/products/BTC-USD/ticker');
-  state.spot = Number(t.price);
+  state.spot = Number(t.price); state.spotAt = Date.now();
 }
 
 // ---------- settlement ----------
@@ -524,7 +527,7 @@ function liveConnect() {
     try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'heartbeat') { state.liveAt = Date.now(); return; }
     if (m.type !== 'ticker' || !m.price) return;
-    state.spot = Number(m.price);
+    state.spot = Number(m.price); state.spotAt = Date.now();
     state.open24h = Number(m.open_24h) || state.open24h;
     state.liveAt = Date.now();
     queueRender();
@@ -846,6 +849,7 @@ document.addEventListener('visibilitychange', () => {
 // and when the opening wait ends so the call appears right on time.
 function tickClocks() {
   const now = Date.now(), c = state.clock;
+  if (!document.hidden && now - bootAt > 20000 && healthDue(state.health?.at, now)) runHealth();
   if (now - (state.renderedAt || 0) > 2900 || (c?.callsAt && now >= c.callsAt) || (c && now >= c.close)) return render();
   if (c) {
     $('countdown').textContent = `closes in ${mmss((c.close - now) / 60000)}`;
@@ -1147,7 +1151,7 @@ $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // a
 
 
 // ---------- live auto-trading (real orders) ----------
-let liveBusy = false, liveErrors = 0;
+let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
 
 function stopLive(why) {
@@ -1159,7 +1163,7 @@ function stopLive(why) {
 }
 
 async function sendLive(order, meta, label) {
-  liveBusy = true;
+  liveBusy = true; liveBusySince = Date.now();
   const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label };
   state.liveOrders.push(entry); saveLive(); renderLive();
   try {
@@ -1180,7 +1184,7 @@ async function sendLive(order, meta, label) {
     if (e.status === 403) stopLive('Kalshi refused the order. Your API key probably has no trading permission: make a key with trading enabled.');
     else if (liveErrors >= 3) stopLive('3 orders in a row failed');
   } finally {
-    saveLive(); liveBusy = false; renderLive();
+    saveLive(); liveBusy = false; liveBusySince = 0; renderLive();
   }
 }
 
@@ -1240,7 +1244,7 @@ function seenLine() {
 function renderLiveWhy() {
   const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
   $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
 }
 
 function renderLiveStrip() {
@@ -1294,6 +1298,46 @@ $('liveStop').addEventListener('click', () => stopLive('STOP pressed'));
 buildSettings();
 renderRisk();
 renderLive();
+
+// ---------- health check (every 2 rounds) ----------
+const bootAt = Date.now();
+function runHealth(manual = false) {
+  const now = Date.now();
+  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
+  const seen = seenStats(now);
+  const lastOrder = state.liveOrders[state.liveOrders.length - 1];
+  const items = healthCheck({
+    now, marketsAt: state.marketsAt, candlesAt: state.candlesAt, spotAt: state.spotAt, streaming: isLive(), skewMs: state.skewMs ?? null,
+    noMarket: !!state.marketsAt && !state.markets.some((m) => Date.parse(m.close_time) > now),
+    linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance,
+    liveOn: liveCfg.live, busySince: liveBusy ? liveBusySince : 0,
+    lastOrderError: lastOrder?.status === 'error' && now - lastOrder.at < 30 * 60000 ? lastOrder.error : null,
+    budget: liveCfg.budget, exposure: st.exposure, liveConf: liveCfg.minConfidence,
+    seen: liveSeen.length ? { minutes: Math.round((now - liveSeen[0].t) / 60000), bars: seen.bars } : null,
+    pushSupported: 'PushManager' in window, pushOn: !!state.pushOn,
+  });
+  const fresh = newProblems(state.health?.items, items);
+  state.health = { at: now, items };
+  renderHealth();
+  if (fresh.length) {
+    toast(`Health check: ${fresh[0].label}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`);
+    // A local notification even with push on: the server can't see these problems
+    if ('Notification' in window && Notification.permission === 'granted') {
+      navigator.serviceWorker?.getRegistration().then((reg) => reg?.showNotification('Shot Caller health check', { body: fresh.map((r) => r.label).join(' · '), tag: 'health', icon: 'icon.svg' })).catch(() => {});
+    }
+  } else if (manual) toast(items.some((r) => r.level !== 'ok') ? 'Health check done: see Settings' : 'Health check: all good');
+}
+function renderHealth() {
+  const h = state.health;
+  if (!h) return;
+  const bad = h.items.filter((r) => r.level !== 'ok');
+  const next = (Math.floor(h.at / 1800000) + 1) * 1800000;
+  $('healthStatus').textContent = `${bad.length ? `${bad.length} problem${bad.length > 1 ? 's' : ''}` : 'All good'} · checked ${clock(h.at)} · next ${clock(next)} (every 2 rounds)`;
+  $('healthList').innerHTML = [...bad, ...h.items.filter((r) => r.level === 'ok')].map((r) =>
+    `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(r.label)}${r.fix ? `<small>${esc(r.fix)}</small>` : ''}</span></li>`).join('');
+  state.healthNote = bad.length ? `Health check: ${bad.length} problem${bad.length > 1 ? 's' : ''} (see the Health check card)` : '';
+}
+$('healthRun').addEventListener('click', () => runHealth(true));
 renderPractice();
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
