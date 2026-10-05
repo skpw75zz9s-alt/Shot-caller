@@ -135,6 +135,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // Entry filters for NEW calls (all off unless set): too late in the window, a volatility spike, or Kalshi's price
   // for the side just jumped (someone knows something / the low already got bought)
   const entryOk = (side) => {
+    // Two-rejections rule: never make a new call against two rejections in a row
+    if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
     if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
     if (s.maxVolRatio > 0 && snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.maxVolRatio) return false;
     if (s.jumpSkip > 0) {

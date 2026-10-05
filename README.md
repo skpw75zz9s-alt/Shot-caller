@@ -61,6 +61,14 @@ Tested on 48 fresh simulated runs per level (6 market types × 8 seeds × 400 wi
 
 Without the exception, the high bars alone cut profit by 60–85%. On a perfectly efficient Kalshi, no setting makes money, old or new. The edge only exists when Kalshi lags or misprices.
 
+### Two rejections in a row (calling rule)
+
+When price gets rejected **twice in a row at about the same level** inside the window, it tends to go the other way. Twice at the top means down; twice at the bottom means up.
+- **Counts as a rejection:** a candle that pokes at or near the window's high or low and closes well back, with a wick of at least 0.35× the average candle range and about as long as its body.
+- **When it fires:** the last two rejections point the same way, within half an average candle range of each other and 2–12 minutes apart. The second must be in the last ~5 minutes, and no candle can have closed through the level since.
+- **What it does:** no new call against it, and the call card says so (*NO looks cheap, but not calling it: Two rejections in a row at $85,392: expect down*). The bot's odds lean that way. The deep dive scores it +10 when the call agrees and −15 when it's against.
+- **Scorecard:** every time the rule fires on a real market, the app records whether price moved the expected way 5 minutes later and whether the side it favored won at settlement. The score shows in the Live results card. The pattern couldn't be checked against enough real history from here, so this is how to find out whether it holds up.
+
 ### Deep dive (the reasons)
 
 The Deep dive card still lists every factor behind a call, with points from a base of 50:

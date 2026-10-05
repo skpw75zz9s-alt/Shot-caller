@@ -131,6 +131,7 @@ export const DEFAULTS = {
   scaleStep: 0.02,      // spacing of the scale-in tiers: minEdge +1, +2 and +4 steps
   firstSize: 1,         // with scaleIn, the first entry is this fraction of the normal size (adds carry the rest)
   reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
+  doubleRejRule: true,  // two decent rejections in a row in the window: never call against them (see analysis.js)
   noCallLastMin: 0,     // entry filters for new calls (0 = off): no new call with fewer than this many minutes left,
   maxVolRatio: 0,       // ...or when 1-minute vol is more than this many times its 2-hour norm,
   jumpSkip: 0,          // ...or when Kalshi's price for the side moved this much in the last 30 seconds

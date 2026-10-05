@@ -33,11 +33,11 @@ export function rejections(bars, strike, openTime, now = Date.now()) {
     lower += bot - b.l;
     const cap = b.h >= strike - tol && top < strike && b.h - top >= wickMin;
     const floor = b.l <= strike + tol && bot > strike && bot - b.l >= wickMin;
-    if (cap) events.push({ type: 'strike-cap', t: b.t, price: b.h, dir: -1 });
-    if (floor) events.push({ type: 'strike-floor', t: b.t, price: b.l, dir: 1 });
+    if (cap) events.push({ type: 'strike-cap', t: b.t, price: b.h, dir: -1, wick: b.h - top });
+    if (floor) events.push({ type: 'strike-floor', t: b.t, price: b.l, dir: 1, wick: bot - b.l });
     // Retests of the window's extremes (needs a candle in between; a target rejection on the same wick wins)
-    if (!cap && i - runHighAt >= 2 && Math.abs(b.h - runHigh) <= tol * 2 && b.h - top >= wickMin) events.push({ type: 'high-reject', t: b.t, price: b.h, dir: -1 });
-    if (!floor && i - runLowAt >= 2 && Math.abs(b.l - runLow) <= tol * 2 && bot - b.l >= wickMin) events.push({ type: 'low-hold', t: b.t, price: b.l, dir: 1 });
+    if (!cap && i - runHighAt >= 2 && Math.abs(b.h - runHigh) <= tol * 2 && b.h - top >= wickMin) events.push({ type: 'high-reject', t: b.t, price: b.h, dir: -1, wick: b.h - top });
+    if (!floor && i - runLowAt >= 2 && Math.abs(b.l - runLow) <= tol * 2 && bot - b.l >= wickMin) events.push({ type: 'low-hold', t: b.t, price: b.l, dir: 1, wick: bot - b.l });
     if (b.h > runHigh + tol) { runHigh = b.h; runHighAt = i; }
     if (b.l < runLow - tol) { runLow = b.l; runLowAt = i; }
     if (i && (closed[i - 1].c - strike) * (b.c - strike) < 0) crosses++;
@@ -66,8 +66,33 @@ export function rejections(bars, strike, openTime, now = Date.now()) {
   const wickBias = upper + lower > a * 0.5 ? (lower - upper) / (upper + lower) : 0;
   const ratio = (x, y) => (y < a * 0.05 ? 'far longer than' : `${(x / y).toFixed(1)}×`);
 
+  // Two decent rejections in a row, same direction: price tends to go the other way (the user's rule).
+  // A rejection candle pokes at (or near) the window's high or low and closes well back: a wick of at least 0.35 x ATR
+  // and about as long as its body. The last two rejection candles must point the same way, at about the same level
+  // (within half an ATR), 2-12 minutes apart, the second in the last ~5 minutes, and the level must still hold.
+  let double = null;
+  {
+    const rejs = [];
+    let hi = -Infinity, lo = Infinity;
+    for (const b of closed) {
+      const top = Math.max(b.o, b.c), bot = Math.min(b.o, b.c), body = top - bot;
+      const up = b.h - top, dn = bot - b.l;
+      if (up >= a * 0.35 && up >= body * 0.8 && b.h >= Math.max(hi, b.h) - a * 0.5 && up >= dn) rejs.push({ t: b.t, dir: -1, price: b.h });
+      else if (dn >= a * 0.35 && dn >= body * 0.8 && b.l <= Math.min(lo, b.l) + a * 0.5 && dn > up) rejs.push({ t: b.t, dir: 1, price: b.l });
+      hi = Math.max(hi, b.h); lo = Math.min(lo, b.l);
+    }
+    if (rejs.length >= 2) {
+      const e2 = rejs[rejs.length - 1], e1 = rejs[rejs.length - 2], gap = e2.t - e1.t;
+      if (e1.dir === e2.dir && Math.abs(e1.price - e2.price) <= a * 0.5 && gap >= 2 * 60000 && gap <= 12 * 60000 && now - e2.t <= 5 * 60000) {
+        const level = e2.dir < 0 ? Math.max(e1.price, e2.price) : Math.min(e1.price, e2.price);
+        const holds = closed.filter((b) => b.t >= e1.t).every((b) => (e2.dir < 0 ? b.c < level : b.c > level));
+        if (holds) double = { dir: e2.dir, price: level, at: e2.t, label: e2.dir < 0 ? `Two rejections in a row at ${usd0(level)}: expect down` : `Two rejections in a row at ${usd0(level)}: expect up` };
+      }
+    }
+  }
+
   // Score: recent events weigh more; a broken level counts for the breakout side
-  let score = 0;
+  let score = double ? double.dir * 2 : 0;
   for (const e of live) {
     const recent = now - e.t <= 5 * 60000 ? 1 : 0.5;
     score += e.dir * recent * (e.type.startsWith('strike') ? 1 : 0.5);
@@ -90,9 +115,10 @@ export function rejections(bars, strike, openTime, now = Date.now()) {
   if (Math.abs(wickBias) > 0.25) summary.push(wickBias > 0 ? `Buyers absorbing dips (lower wicks ${ratio(lower, upper)} upper)` : `Sellers hitting rallies (upper wicks ${ratio(upper, lower)} lower)`);
   if (crosses >= 3) summary.push(`Chopping around the target (${crosses} crosses)`);
   if (structure !== 'forming' && structure !== 'ranging') summary.push(`Structure: ${structure}`);
+  if (double) summary.unshift(double.label);
   if (!summary.length) summary.push('No clear rejections yet this window');
 
-  return { events: live, strikeCaps, strikeFloors, highRejects: count('high-reject'), lowHolds: count('low-hold'), crosses, wickBias, structure, tilt, bias, summary, broken, windowHigh: runHigh, windowLow: runLow };
+  return { double, events: live, strikeCaps, strikeFloors, highRejects: count('high-reject'), lowHolds: count('low-hold'), crosses, wickBias, structure, tilt, bias, summary, broken, windowHigh: runHigh, windowLow: runLow };
 }
 
 // A fresh rejection against `side` in the last two closed candles (used as a sell warning).
@@ -140,6 +166,7 @@ export function deepDive({ winProb = null, ev, side, rej, timing, sigmaMin, sigm
   const edge = side === 'YES' ? ev.evYes : ev.evNo;
   if (edge != null) add(clamp(edge * 200, -20, 25), `Edge ${(edge * 100).toFixed(1)} pts after fees`);
 
+  if (rej?.double) add(rej.double.dir === s ? 10 : -15, rej.double.dir === s ? `${rej.double.label} (with ${side})` : `${rej.double.label} (against ${side})`);
   const rt = (rej?.tilt || 0) * s;
   if (rt > 0.008) add(10, `Rejections favor ${side}: ${rej.summary[0]}`);
   else if (rt < -0.008) add(-15, `Rejections against ${side}: ${rej.summary[0]}`);

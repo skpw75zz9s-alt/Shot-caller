@@ -22,7 +22,8 @@ test('counts target rejections from below while price stays under it', () => {
   assert.equal(r.strikeCaps, 3);
   assert.equal(r.bias, 'bearish');
   assert.ok(r.tilt < 0);
-  assert.match(r.summary[0], /rejected 3× from below/);
+  assert.ok(r.summary.some((x) => /rejected 3× from below/.test(x)));
+  assert.match(r.summary[0], /Two rejections in a row/, 'and the two-in-a-row rule leads');
   assert.equal(freshRejection(r, 'YES', afterAll(w)), 'Rejected at the target');
   assert.equal(r.lowHolds >= 1, true); // lows ~99,940 were retested and held: correctly a warning for NO
   assert.equal(freshRejection(r, 'NO', afterAll(w)), 'Bounced off the window low');
@@ -299,4 +300,53 @@ test('with win odds, confidence is the odds; the factor checks stay as reasons a
   assert.equal(d.sizeMult, 1);
   const flags = deepDive({ ...base, winProb: 0.9, timing: { state: 'CHASE' }, rej: { tilt: -0.02, summary: ['x'] }, ev: { ...ev, evYes: -0.1 } });
   assert.ok(flags.points < 35); assert.equal(flags.sizeMult, 0.5);
+});
+
+// ---------- two rejections in a row (user's rule) ----------
+test('two decent rejections in a row at the same level: expect the other way, and no call against it', async () => {
+  const { rejections: rj } = await import('../public/analysis.js');
+  const open = Date.parse('2026-10-05T14:00:00Z'), M = 60000;
+  const c = (i, o, h, l, cl) => ({ t: open + i * M, o, h, l, c: cl });
+  // ATR ~ $40. Price runs up to ~100,100, gets rejected at 100,100 (minute 3), dips, retests and is rejected again (minute 6)
+  const bars = [
+    ...Array.from({ length: 20 }, (_, i) => ({ t: open - (20 - i) * M, o: 100000, h: 100020, l: 99980, c: 100000 })),
+    c(0, 100000, 100030, 99990, 100025), c(1, 100025, 100060, 100015, 100055), c(2, 100055, 100090, 100045, 100080),
+    c(3, 100080, 100100, 100050, 100055), // decent upper wick: rejected at 100,100
+    c(4, 100055, 100065, 100020, 100030), c(5, 100030, 100070, 100025, 100065),
+    c(6, 100065, 100098, 100040, 100045), // rejected again at the same level
+    c(7, 100045, 100050, 100030, 100040),
+  ];
+  const now = open + 8 * M + 5000;
+  const r = rj(bars, 99950, open, now);
+  assert.ok(r.double, 'detected');
+  assert.equal(r.double.dir, -1);
+  assert.match(r.double.label, /Two rejections in a row at \$100,100: expect down/);
+  assert.ok(r.tilt < 0, 'odds lean down');
+  // the level breaking (a close above it) cancels the rule
+  const broke = [...bars.slice(0, -1), c(7, 100045, 100140, 100040, 100130)];
+  assert.equal(rj(broke, 99950, open, now).double, null);
+  // old news: the second rejection was long ago
+  assert.equal(rj(bars, 99950, open, open + 14 * M).double, null);
+  // one rejection only: no rule
+  assert.equal(rj(bars.slice(0, -2), 99950, open, open + 6 * M + 5000).double, null);
+  // deep dive: +10 with the rule, -15 against it
+  const ev = { pYes: 0.5, evYes: 0.05, evNo: 0.05, minutesLeft: 6, quote: { yesBid: 0.45, yesAsk: 0.47 } };
+  const yes = deepDive({ ev, side: 'YES', rej: r, timing: { state: 'WAIT' }, now, log: [] });
+  const no = deepDive({ ev, side: 'NO', rej: r, timing: { state: 'WAIT' }, now, log: [] });
+  assert.ok(yes.checks.some((x) => x.pts === -15 && /against YES/.test(x.label)));
+  assert.ok(no.checks.some((x) => x.pts === 10 && /with NO/.test(x.label)));
+});
+
+test('two-rejections rule: no new call against it (and the rule can be switched off)', () => {
+  const now = OPEN;
+  const ev = evaluate({ market: market(6, 44, 45), strike: K, spot: 100030, sigmaMin: 0.0006, now });
+  assert.equal(ev.side, 'YES');
+  const snap = { now, bars: pre, sigmaMin: 0.0006, sigmaLong: 0.0006, driftMin: 0, spot: 100030, quoteLog: {} };
+  const plain = { m: { ticker: 'T9' }, strike: K, ev, rej: { tilt: 0, summary: [], events: [] } };
+  assert.equal(buySignal(plain, snap, { minConfidence: 0 }, now, {}).callSide, 'YES', 'calls YES normally');
+  const down = { ...plain, rej: { ...plain.rej, double: { dir: -1, price: 100060, at: now - 60000, label: 'Two rejections in a row at $100,060: expect down' } } };
+  assert.equal(buySignal(down, snap, { minConfidence: 0 }, now, {}).callSide, null, 'no YES call into two rejections at the top');
+  assert.equal(buySignal(down, snap, { minConfidence: 0, doubleRejRule: false }, now, {}).callSide, 'YES', 'rule off');
+  const up = { ...plain, rej: { ...plain.rej, double: { dir: 1, price: 99990, at: now - 60000, label: 'x' } } };
+  assert.equal(buySignal(up, snap, { minConfidence: 0 }, now, {}).callSide, 'YES', 'with the rule: allowed');
 });

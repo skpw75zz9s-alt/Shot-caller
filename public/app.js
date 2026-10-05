@@ -100,7 +100,8 @@ if (store.get('settingsVersion', 1) < 11) {
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
-  calls: store.get('calls', {}), // what the bot has called per window, so it sticks with its calls
+  calls: store.get('calls', {}),
+  ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule // what the bot has called per window, so it sticks with its calls
   practice: store.get('practice', null) || newPractice(), practiceWhy: '',
   liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 30 * 86400000), liveWhy: '' }; // 30 days, for Live results and learning
 const liveCfg = { ...LIVE_DEFAULTS, ...store.get('liveCfg', {}) };
@@ -332,6 +333,7 @@ function render() {
   if (sig?.fire) store.set('calls', state.calls);
   if (practiceCfg.on || state.practice.positions.length || state.practice.range?.positions.length) runPractice(snap, live, sig, now);
   runLive(snap, live, sig, now);
+  trackRule(snap, live, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
@@ -370,6 +372,7 @@ function render() {
       : sig.cooldown ? `Just sold on this market. A fresh call can come in ${sig.cooldown}s if the gap is still there.`
       : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
       : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
+      : ev.side && settings.doubleRejRule !== false && live.rej?.double && live.rej.double.dir !== (ev.side === 'YES' ? 1 : -1) ? `${sideName(ev.side)} looks cheap, but not calling it: ${live.rej.double.label}`
       : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
       : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${sig.confNeed}` : ev.reason;
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
@@ -1346,6 +1349,8 @@ function liveWaitWhy(live, sig) {
   if (!live) return 'Waiting for the next 15-minute market to open';
   if (!sig?.deep) return `Waiting for a call: ${live.ev.reason || 'no price gap on either side right now'}`;
   if (sig.callSide && !sig.fire && !sig.add) return `Holding its ${sideName(sig.callSide)} call: buys happen on a new call or an add`;
+  const dr = live.rej?.double;
+  if (dr && settings.doubleRejRule !== false && sig.side && dr.dir !== (sig.side === 'YES' ? 1 : -1)) return `Not calling ${sideName(sig.side)}: ${dr.label}`;
   // Live buys need both the strategy's bar and the Live card's own Min confidence, so show the higher one
   const gap = sig.robustEdge != null ? Math.round(sig.robustEdge * 100) : null, ov = Math.round((settings.bigEdgeOverride || 0) * 100);
   const confNeed = Math.max(sig.confNeed ?? 0, liveCfg.minConfidence ?? 0), gapNeed = Math.round(sig.edgeNeed * 100);
@@ -1520,9 +1525,41 @@ function renderReport() {
   $('rpExit').innerHTML = rows(r.byExit, (k) => EXIT_NAMES[k] || k);
   $('rpConf').innerHTML = rows(r.byConf, (k) => `Confidence ${k}`);
   const o = r.orders;
+  const rs = ruleStats(state.ruleLog.filter((e) => e.at >= since));
+  $('rpRule').textContent = rs.fired ? `Two-rejections rule: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule: hasn\'t fired in this period yet (it\'s scored on every market while the app is open)';
   $('rpOrders').textContent = `${o.buys} buy orders: ${o.filled} filled, ${o.noFill} didn't fill, ${o.errors} errors${o.topErrors.length ? ` (${o.topErrors.map(([e, n]) => `${e} ×${n}`).join('; ')})` : ''}`;
 }
 document.querySelectorAll('#rpPeriod button').forEach((b) => b.addEventListener('click', () => { reportPeriod = b.dataset.p; renderReport(); }));
+
+// ---------- scorecard for the two-rejections rule (is it right on real markets?) ----------
+function trackRule(snap, live, now) {
+  const log = state.ruleLog;
+  const d = live?.rej?.double;
+  if (d && snap.spot && !log.some((e) => e.ticker === live.m.ticker && e.at === d.at)) {
+    log.push({ ticker: live.m.ticker, dir: d.dir, level: Math.round(d.price), at: d.at, seenAt: now, spot0: snap.spot, closeTime: live.m.close_time, spot5: null, result: null });
+    if (log.length > 300) log.splice(0, log.length - 300);
+    store.set('ruleLog', log);
+  }
+  let changed = false;
+  for (const e of log) if (e.spot5 == null && snap.spot && now - e.seenAt >= 5 * 60000 && now - e.seenAt < 7 * 60000) { e.spot5 = snap.spot; changed = true; }
+  if (changed) store.set('ruleLog', log);
+}
+async function settleRuleLog() {
+  for (const e of state.ruleLog.filter((x) => !x.result && Date.parse(x.closeTime) < Date.now() - 90000).slice(0, 2)) {
+    try {
+      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(e.ticker)}`);
+      if (market?.result === 'yes' || market?.result === 'no') { e.result = market.result; store.set('ruleLog', state.ruleLog); }
+      else if (Date.parse(e.closeTime) < Date.now() - 6 * 3600000) { e.result = 'unknown'; store.set('ruleLog', state.ruleLog); }
+    } catch { /* next time */ }
+  }
+}
+function ruleStats(log) {
+  const five = log.filter((e) => e.spot5 != null && e.spot5 !== e.spot0);
+  const settled = log.filter((e) => e.result === 'yes' || e.result === 'no');
+  return { fired: log.length, five: five.length, right5: five.filter((e) => (e.spot5 - e.spot0) * e.dir > 0).length,
+    settled: settled.length, won: settled.filter((e) => (e.result === 'yes') === (e.dir > 0)).length };
+}
+setInterval(() => { if (!document.hidden) settleRuleLog(); }, 30000);
 
 // ---------- learns from real trades ----------
 let learned = store.get('learned', null) || newLearned();

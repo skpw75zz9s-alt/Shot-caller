@@ -20,7 +20,8 @@ const sum = (xs) => xs.reduce((a, t) => a + t.pnl, 0);
 function stats(ts) {
   const wins = ts.filter((t) => t.pnl > 0), losses = ts.filter((t) => t.pnl <= 0);
   return {
-    n: ts.length, wins: wins.length, pnl: r2(sum(ts)), exact: ts.filter((t) => t.exact).length, // exact = Kalshi's own fees winRate: ts.length ? wins.length / ts.length : null,
+    // exact = trades using Kalshi's own fills and fees
+    n: ts.length, wins: wins.length, pnl: r2(sum(ts)), exact: ts.filter((t) => t.exact).length, winRate: ts.length ? wins.length / ts.length : null,
     avgWin: wins.length ? r2(sum(wins) / wins.length) : null, avgLoss: losses.length ? r2(sum(losses) / losses.length) : null,
     perTrade: ts.length ? r2(sum(ts) / ts.length) : null,
     best: ts.length ? r2(Math.max(...ts.map((t) => t.pnl))) : null, worst: ts.length ? r2(Math.min(...ts.map((t) => t.pnl))) : null,

@@ -23,7 +23,7 @@ test('live results: only the bot\'s trades, split by how they sold and confidenc
     trade({ ticker: 'F', source: undefined, closedAt: T0, pnl: 3 }), // a manual "I bought it" trade
   ];
   const r = liveReport({ trades, orders, since: T0 - 1 });
-  assert.deepEqual([r.total.n, r.total.wins, r.total.pnl, r.total.perTrade, r.total.best, r.total.worst], [3, 2, 1.1, 0.37, 1.2, -0.9]);
+  assert.deepEqual([r.total.n, r.total.wins, r.total.pnl, r.total.perTrade, r.total.best, r.total.worst, Math.round(r.total.winRate * 100)], [3, 2, 1.1, 0.37, 1.2, -0.9, 67]);
   assert.deepEqual(Object.keys(r.byExit).sort(), ['cut', 'lock', 'settle']);
   assert.equal(r.byExit.lock.pnl, 0.8);
   assert.equal(r.byConf['90+'].n, 1); assert.equal(r.byConf['under 80 (big gap)'].pnl, -0.9);
