@@ -133,6 +133,12 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 - It has no unknown fields.
 - It's within 20 orders a minute.
 
+**Checks the live order book first:** Kalshi's market list (where the bot reads prices) can lag the real order book by a few seconds. A "bargain" seen in old prices is often already gone, and then a fill-now-or-cancel order can't fill. So right before every order, the app reads Kalshi's live order book:
+- **Buys** go out only if something is for sale at or under the max price, and only for as many contracts as are there. Otherwise the Live card says *Bargain already gone: Kalshi's live price is 84¢, over the 69¢ max*, and it checks again next tick.
+- **Sells** go out at the live bid, but never more than 2¢ under the price the exit was decided on.
+
+If the book can't be read, the order goes out as before.
+
 **Doesn't miss calls:** if an order doesn't fill (the price moved in the second it took) or errors, it tries the same call again, up to 3 orders at least 5 seconds apart. It also picks up a call that was already active when you turned Live on or reopened the app. It never buys the same call twice. Only buys that went through count toward *Max trades / day*. While Live is on and the app is on screen, it keeps the screen awake. In Low Power Mode iPhone may still lock it, so set Auto-Lock to Never while trading.
 
 **Right now line:** while it's on, the Live card always says what it's doing. For example: *Waiting for a call: YES is at confidence 73 (needs 80, or a 10-pt gap) with a 9-pt worst-case gap*. If an order fails, the card also shows Kalshi's exact error. It only runs while the app is open on screen. iPhone pauses it when the app is in the background or the phone is locked.

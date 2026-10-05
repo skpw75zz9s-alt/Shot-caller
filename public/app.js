@@ -3,7 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
-import { LIVE_DEFAULTS, liveState, planBuy, planSell } from './autotrade.js';
+import { LIVE_DEFAULTS, bookLevels, checkBuy, checkSell, liveState, planBuy, planSell, sellOrder } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -1239,12 +1239,54 @@ function runLive(snap, live, sig, now) {
   for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
     if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
     const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, settings, now), orders: state.liveOrders, now });
-    if (sell) return sendLive(sell.order, sell.meta, `sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
+    if (sell) return bookThenSell(pos, sell);
   }
   const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
   if (!b.ok) { state.liveWhy = /^Waiting/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
-  sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ max`);
+  bookThenBuy(b);
+}
+
+// Read Kalshi's live order book right before an order (the price list can lag by seconds). No book? Order anyway.
+async function liveBook(ticker) {
+  try {
+    const r = await fetch(`${API}/kalshi/markets/${encodeURIComponent(ticker)}/orderbook`, { signal: AbortSignal.timeout(2500) });
+    return r.ok ? bookLevels(await r.json()) : null;
+  } catch { return null; }
+}
+async function withBook(ticker) {
+  liveBusy = true; liveBusySince = Date.now();
+  try { return await liveBook(ticker); } finally { liveBusy = false; liveBusySince = 0; }
+}
+async function bookThenBuy(b) {
+  const { order, meta } = b;
+  const book = await withBook(order.ticker);
+  if (book) {
+    const limit = meta.side === 'YES' ? Number(order.price) : Math.round((1 - Number(order.price)) * 10000) / 10000;
+    const c = checkBuy(book, meta.side, limit);
+    if (!c.ok) {
+      state.liveWhy = c.ask == null ? `Nothing for sale on ${sideName(meta.side)} right now` : `Bargain already gone: Kalshi's live price is ${Math.round(c.ask * 100)}¢, over the ${meta.cents}¢ max (its price list lags a few seconds)`;
+      renderLiveStrip();
+      return;
+    }
+    if (c.depth < meta.count) { meta.count = c.depth; order.count = `${c.depth}.00`; } // only what's actually for sale at the max
+  }
+  if (!liveCfg.live) return;
+  sendLive(order, meta, `${b.add ? 'add' : 'buy'} ${meta.count} ${sideName(meta.side)} at ${meta.cents}¢ max${book ? '' : ' (book unavailable)'}`);
+}
+async function bookThenSell(pos, sell) {
+  let { order, meta } = sell;
+  const book = await withBook(order.ticker);
+  if (book) {
+    const c = checkSell(book, pos.side, meta.cents / 100);
+    if (!c.ok) { state.liveWhy = `Sell waiting: Kalshi's live bid is ${c.bid == null ? 'empty' : `${Math.round(c.bid * 100)}¢`}, under the ${meta.cents}¢ it planned`; renderLiveStrip(); return; }
+    if (Math.abs(c.bid - meta.cents / 100) > 1e-9) { // sell at the live bid (never more than 2¢ under the plan)
+      order = sellOrder({ ticker: order.ticker, side: pos.side, count: meta.count, floor: c.bid });
+      meta = { ...meta, cents: Math.round(c.bid * 100) };
+    }
+  }
+  if (!liveCfg.live) return;
+  sendLive(order, meta, `sell ${meta.count} ${sideName(pos.side)} at ${meta.cents}¢ or better`);
 }
 
 function seenLine() {

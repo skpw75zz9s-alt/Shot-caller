@@ -33,7 +33,7 @@ setInterval(() => access.prune(), 3600000).unref();
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const ROUTES = [
-  { prefix: '/api/kalshi/', upstream: KALSHI, allow: /^(markets(\/[A-Za-z0-9._-]+)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/ },
+  { prefix: '/api/kalshi/', upstream: KALSHI, allow: /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/ },
   { prefix: '/api/coinbase/', upstream: COINBASE, allow: /^products\/BTC-USD\/(ticker|candles)$/ },
 ];
 
@@ -67,7 +67,8 @@ async function proxy(route, url, req, res) {
   if (!route.allow.test(path)) return send(res, 404, { error: 'not allowed' });
   const target = `${route.upstream}/${path}${url.search}`;
   const hit = cache.get(target);
-  if (hit && Date.now() - hit.at < 2000) return sendEntry(req, res, hit.status, hit, 'application/json', { 'cache-control': 'no-store' });
+  // The order book is checked right before a live order, so it's only cached for a moment
+  if (hit && Date.now() - hit.at < (path.endsWith('/orderbook') ? 300 : 2000)) return sendEntry(req, res, hit.status, hit, 'application/json', { 'cache-control': 'no-store' });
   try {
     const r = await fetch(target, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });
     const entry = { at: Date.now(), status: r.status, raw: Buffer.from(await r.text()) };
