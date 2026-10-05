@@ -147,6 +147,14 @@ The order shows as *lock profit: sell …* in Live orders. In the simulator, thi
 
 Every change is listed with the date and reason, and you can turn it off or reset it. 30 trades is a small sample, which is why the steps are small.
 
+**Entry ideas tested and left off:** each was run against the live setup in the simulator (+$629 per 100 windows):
+- **No new calls in the last 1 or 2 minutes:** $492 / $308. Late calls are where the model is most accurate.
+- **Skip volatility spikes:** $628–629, no measurable effect.
+- **Skip after Kalshi's price jumps 5 or 10 pts in 30s:** $307 / $431. Slightly better with a slow connection, but it gives up most of the profit.
+- **Split the first buy in half:** $338, with a smaller worst stretch ($280 vs $338).
+
+The settings exist (`noCallLastMin`, `maxVolRatio`, `jumpSkip`, `firstSize`) but stay off.
+
 **Use my Kalshi balance (on by default, Live card checkbox):** the budget is the cash in your Kalshi account (less a small cushion), and each trade can use up to *% of balance per trade* (25% by default). The bot grows and shrinks with your account, and the *Daily loss stop* and *Max trades / day* still apply. Uncheck it to use fixed dollar limits instead.
 
 **When Kalshi says "insufficient balance":** the bot re-reads your balance and the orders still waiting on Kalshi (yours from the Kalshi app or older ones). Kalshi holds money for those orders, and it can't be spent even though it shows in the balance. The bot then sizes to what's actually free and tries again smaller about 15 seconds later. The Health check shows *Kalshi is holding $X for N waiting orders*. Cancel old ones in the Kalshi app (Portfolio → Orders) to free that money.
