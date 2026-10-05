@@ -1,4 +1,4 @@
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings } from './model.js';
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
@@ -66,6 +66,15 @@ if (store.get('settingsVersion', 1) < 7) {
 if (store.get('settingsVersion', 1) < 8) {
   if (riskLevelOf(settings) === 'aggressive') settings.scaleIn = true;
   store.set('settings', settings); store.set('settingsVersion', 8);
+}
+// v3.12: the optimized Aggressive replaces the old one for anyone on it
+if (store.get('settingsVersion', 1) < 10) {
+  if (Math.abs(settings.minEdge - 0.04) < 1e-9 && settings.minConfidence === 50) {
+    Object.assign(settings, riskSettings('aggressive'));
+    const pc1 = store.get('practiceCfg', null);
+    if (pc1) { Object.assign(pc1, { minConfidence: RISK_LEVELS.aggressive.practiceConfidence, maxPerTrade: RISK_LEVELS.aggressive.practiceMax, dailyLoss: RISK_LEVELS.aggressive.practiceLoss, maxTrades: RISK_LEVELS.aggressive.practiceTrades }); store.set('practiceCfg', pc1); }
+  }
+  store.set('settings', settings); store.set('settingsVersion', 10);
 }
 // v3.11: Aggressive bets double size (only if the sizing was never changed by hand)
 if (store.get('settingsVersion', 1) < 9) {
@@ -1094,10 +1103,10 @@ $('riskBtns').addEventListener('click', (e) => {
   const k = e.target.closest('button[data-risk]')?.dataset.risk;
   if (!k) return;
   const r = RISK_LEVELS[k];
-  Object.assign(settings, { minEdge: r.minEdge, minConfidence: r.minConfidence, scaleIn: !!r.scaleIn, kellyFraction: r.kellyFraction, maxStake: r.maxStake });
-  Object.assign(practiceCfg, { minConfidence: r.practiceConfidence, maxPerTrade: r.practiceMax, dailyLoss: r.practiceLoss });
+  Object.assign(settings, riskSettings(k));
+  Object.assign(practiceCfg, { minConfidence: r.practiceConfidence, maxPerTrade: r.practiceMax, dailyLoss: r.practiceLoss, maxTrades: r.practiceTrades });
   store.set('settings', settings); store.set('practiceCfg', practiceCfg);
-  for (const [name, v] of [['minEdge', r.minEdge * 100], ['minConfidence', r.minConfidence], ['kellyFraction', r.kellyFraction], ['maxStake', r.maxStake]]) { const el = $('settingsForm').elements[name]; if (el) el.value = v; }
+  for (const [name, v] of [['minEdge', r.minEdge * 100], ['minConfidence', r.minConfidence], ['kellyFraction', r.kellyFraction], ['maxStake', r.maxStake], ['cutMargin', r.cutMargin * 100]]) { const el = $('settingsForm').elements[name]; if (el) el.value = v; }
   pushSyncSoon(); renderRisk(); renderPractice(); render();
   toast(`Risk level: ${r.label}`);
 });

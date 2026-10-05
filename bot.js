@@ -2,7 +2,7 @@
 // to subscribed phones, so alerts arrive even when the app is closed.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { DEFAULTS, EXIT_DEFAULTS } from './public/model.js';
+import { DEFAULTS, EXIT_DEFAULTS, riskSettings } from './public/model.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
@@ -30,7 +30,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings?.minEdge === 0.04) d.settings.minEdge = 0.08;
       if (d.settings?.minEdge === 0.08 && d.settings?.minConfidence === 60) Object.assign(d.settings, { minEdge: 0.06, minConfidence: 55 }); // v3.9: Balanced
       if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50 && d.settings.scaleIn == null) d.settings.scaleIn = true; // v3.10: Aggressive scales in
-      if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50 && d.settings.kellyFraction === 0.25 && d.settings.maxStake === 25) Object.assign(d.settings, { kellyFraction: 0.5, maxStake: 50 }); // v3.11
+      if (d.settings?.minEdge === 0.04 && d.settings?.minConfidence === 50) Object.assign(d.settings, riskSettings('aggressive')); // v3.12: optimized Aggressive
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };

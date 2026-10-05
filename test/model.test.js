@@ -129,3 +129,16 @@ test('risk levels: Balanced is the default, presets are recognized, edits read a
   const safeN = contractsFor(0.7, 0.5, { kellyFraction: 0.25, maxStake: 25 }), aggN = contractsFor(0.7, 0.5, { kellyFraction: 0.5, maxStake: 50 });
   assert.ok(aggN >= 2 * safeN - 1, `double size: ${aggN} vs ${safeN}`);
 });
+
+test('picking a risk level sets every strategy setting; the optimized Aggressive is applied', async () => {
+  const { RISK_LEVELS, RISK_KEYS, riskSettings, riskLevelOf, DEFAULTS } = await import('../public/model.js');
+  for (const k of Object.keys(RISK_LEVELS)) {
+    const s = riskSettings(k);
+    assert.deepEqual(Object.keys(s).sort(), [...RISK_KEYS].sort());
+    assert.equal(riskLevelOf({ ...DEFAULTS, ...s }), k);
+  }
+  const a = riskSettings('aggressive');
+  assert.deepEqual(a, { minEdge: 0.02, minConfidence: 40, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50 });
+  // Safe and Balanced restore the standard exits/re-entry if you come back from Aggressive
+  for (const k of ['safe', 'balanced']) assert.deepEqual([riskSettings(k).reentrySec, riskSettings(k).cutMargin, riskSettings(k).limitEdgeFrac], [15, 0.03, 0.5]);
+});

@@ -132,14 +132,22 @@ export const DEFAULTS = {
   reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
 };
 
-// Risk levels (Settings). All levels re-enter after selling. Aggressive also scales in as the gap grows and
-// bets twice the size (half Kelly, $50 max). Simulated with instant fills it made 2-11x Safe's profit where
-// there was an edge, with ~2x its own swings; sizing multiplies losses by the same factor as wins.
+// Risk levels (Settings). All levels re-enter after selling. Aggressive trades every small gap, scales in as it
+// grows, re-enters fast and bets twice Safe's size. Simulated on fresh seeds with instant fills it made 2.4-16x
+// Safe's profit where there was an edge; its worst losing stretch was ~$90-200 vs Safe's ~$15-40.
 export const RISK_LEVELS = {
-  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, practiceConfidence: 70, scaleIn: false, kellyFraction: 0.25, maxStake: 25, practiceMax: 5, practiceLoss: 20, hint: 'Fewest calls, biggest gaps only' },
-  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, practiceConfidence: 60, scaleIn: false, kellyFraction: 0.25, maxStake: 25, practiceMax: 5, practiceLoss: 20, hint: 'About 2× the calls of Safe' },
-  aggressive: { label: 'Aggressive', minEdge: 0.04, minConfidence: 50, practiceConfidence: 55, scaleIn: true, kellyFraction: 0.5, maxStake: 50, practiceMax: 10, practiceLoss: 40, hint: 'Most calls, adds as the gap grows, double-size bets: biggest wins and biggest swings' },
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 60, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
+    practiceConfidence: 70, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 55, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
+    practiceConfidence: 60, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'About 2× the calls of Safe' },
+  // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
+  // it was not picked on (beat the previous Aggressive in 11 of 12 market/fill-speed cells).
+  aggressive: { label: 'Aggressive', minEdge: 0.02, minConfidence: 40, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50,
+    practiceConfidence: 40, practiceMax: 10, practiceLoss: 40, practiceTrades: 40, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
+// The strategy settings a risk level sets (practice limits are applied separately)
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
 
 // Decide the call for one market.

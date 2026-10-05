@@ -104,28 +104,42 @@ Security:
 
 ### Risk level
 
-Settings → **Risk level**:
+Settings → **Risk level**. Each level sets the whole strategy, and Practice's limits move with it:
 
-| Level | Min gap | Confidence | Bet size | Practice | Scales in |
-|---|---|---|---|---|---|
-| Safe | 8 pts | 60 | ¼ Kelly, up to $25 | conf 70+, $5/trade, $20/day | no |
-| **Balanced (default)** | 6 pts | 55 | ¼ Kelly, up to $25 | conf 60+, $5/trade, $20/day | no |
-| Aggressive | 4 pts | 50 | **½ Kelly, up to $50** | conf 55+, $10/trade, $40/day | **yes** |
+| | Safe | **Balanced (default)** | Aggressive |
+|---|---|---|---|
+| Min gap / confidence | 8 pts / 60 | 6 pts / 55 | **2 pts / 40** |
+| Scales in | no | no | yes, tiers 1.5 pts apart |
+| Re-entry cooldown | 15s | 15s | **5s** |
+| Max price | half the gap | half the gap | **tighter (¼ of the gap)** |
+| Cut a loser when Kalshi pays | 3 pts over the bot | 3 pts over | **1 pt over** (still after the 30s hold) |
+| Bet size | ¼ Kelly, ≤ $25 | ¼ Kelly, ≤ $25 | **½ Kelly, ≤ $50** |
+| Practice | conf 70+, $5, $20/day, 10 trades | conf 60+, $5, $20/day, 10 trades | conf 40+, $10, $40/day, 40 trades |
 
-**Every level re-enters.** After you sell (or Practice sells), the call on that market is released. If a gap opens again after a 15-second cooldown, a new call fires, and its alert isn't deduped against the first. This was the biggest gain in the simulator for every level: Safe went from +$402 to +$1,136 over 200 windows.
+**How Aggressive was chosen:**
+1. A random search tried 100 strategy configurations at a fixed bet size, scored across 6 simulated Kalshi market types at instant and ~10s fills.
+2. The top 8 were re-run on fresh seeds they weren't picked on.
+3. The winner beat the previous Aggressive in 11 of 12 market/fill-speed cells.
 
-**Aggressive scales in.** It opens on a small gap (4 pts), then adds each time the gap clears +2, +4 and +8 pts (one add per tier, with full confidence). Phones holding the call get an **Add** push, and Practice averages the add into its position. So Aggressive makes every trade Safe would make, plus smaller early ones.
+On that fresh data, per 100 windows:
 
-Simulated results, Aggressive vs Safe, both re-entering:
+| Market type | Safe | Aggressive |
+|---|---|---|
+| Sloppy, instant | +$1,155 | **+$3,915** |
+| 5s slow + noisy, instant | +$746 | **+$2,022** |
+| 5s slow, instant | +$695 | **+$1,700** |
+| Noisy ±4, instant | +$25 | **+$396** |
+| Noisy ±2, instant | +$2 | **+$38** |
+| Noisy ±4, ~10s by hand | +$17 | **+$174** |
+| Sloppy, ~10s by hand | +$6 | **+$80** |
+| Kalshi priced right, by hand | −$0.57 | −$7.31 |
+| 5s lag, by hand | +$1.39 | −$2.85 |
 
-| Fill speed | Result |
-|---|---|
-| Instant (Practice, auto-trading) | **More profit in all 6 market types**: e.g. +$118 vs +$24, +$911 vs +$711, +$1,593 vs +$1,129 per 100 windows, and a tie when Kalshi is priced right |
-| ~10s by hand | More profit when the mispricing lasts (+$64 vs +$11, +$21 vs +$9), a few dollars worse per 100 windows when Kalshi is priced right, only noisy, or the edge is a seconds-long lag |
+The cost is swings: Aggressive's worst stretch was ~$90–200 (up to ~$280 by hand) vs Safe's ~$15–40.
 
-The costs: a lower return per dollar (44–51% vs 67–76%) and bigger swings (worst stretch up to ~$150–180 vs ~$80–135).
+Doubling the bet size again would double profit, but the worst stretch would reach ~$560, over 5× the $100 bankroll the bot sizes from, so it was not shipped. If you really have a bigger bankroll, set *Bankroll* in Settings and stakes scale with it.
 
-**Aggressive bets double size** (½ Kelly, $50 max). With instant fills that took it from 1.1–5× Safe's profit to **2–11×**: e.g. +$280 vs +$26, +$2,164 vs +$844, +$3,670 vs +$1,278 per 100 windows. It's the same edge with twice the money on it, so losses and swings double too: worst stretch ~$110–160 vs Safe's ~$15–35, and −$2.66 vs +$0.10 when Kalshi is priced right.
+**Every level re-enters.** After you sell (or Practice sells), the call on that market is released, and a new call can fire after the cooldown. Aggressive scales in by opening on a small gap and adding each time the gap clears the next tier. Phones holding the call get an **Add** push.
 
 Editing the gap or confidence by hand shows as *Custom*.
 
