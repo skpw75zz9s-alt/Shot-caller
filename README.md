@@ -139,6 +139,10 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 
 The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
 
+**Use my Kalshi balance (on by default, Live card checkbox):** the budget is the cash in your Kalshi account (less a small cushion), and each trade can use up to *% of balance per trade* (25% by default). The bot grows and shrinks with your account, and the *Daily loss stop* and *Max trades / day* still apply. Uncheck it to use fixed dollar limits instead.
+
+**When Kalshi says "insufficient balance":** the bot re-reads your balance and the orders still waiting on Kalshi (yours from the Kalshi app or older ones). Kalshi holds money for those orders, and it can't be spent even though it shows in the balance. The bot then sizes to what's actually free and tries again smaller about 15 seconds later. The Health check shows *Kalshi is holding $X for N waiting orders*. Cancel old ones in the Kalshi app (Portfolio → Orders) to free that money.
+
 **Bot's own price on calls (on by default, Live card checkbox):** when a call fires, the buy is a limit order at the bot's max price that waits on Kalshi for up to 2 minutes. Before, it was fill-now-or-cancel, which gave up if Kalshi's price was a cent too high. Kalshi fills it as soon as a seller comes down to the bot's price.
 - The app cancels the order the moment the call ends.
 - **STOP** cancels everything that's waiting.

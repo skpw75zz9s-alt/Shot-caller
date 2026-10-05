@@ -3,7 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
-import { LIVE_DEFAULTS, fillNow, isResting, liveState, planBuy, planSell } from './autotrade.js';
+import { LIVE_DEFAULTS, fillNow, heldByOrders, isResting, liveLimits, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -983,8 +983,10 @@ async function syncKalshi() {
     const newest = waiting.length ? Math.min(...waiting) : Math.max(0, ...fills.map((f) => f.at || 0));
     if (newest) store.set('kalshiSince', Math.max(since, Math.floor(newest / 1000) - 5));
     state.kalshi.lastSync = Date.now(); state.kalshi.error = null;
-    if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > 60000) {
+    if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > (liveCfg.live ? 20000 : 60000)) {
       state.kalshi.balance = balanceDollars(await kalshiGet('balance')); state.kalshi.balanceAt = Date.now();
+      // what Kalshi is holding for waiting orders (can't be spent); a failure here never blocks the sync
+      try { const out = await kalshiGet('orders', { status: 'resting', limit: 100 }); state.kalshi.held = heldByOrders(out.orders); } catch { state.kalshi.held = null; }
     }
   } catch (e) {
     state.kalshi.error = e.message;
@@ -1163,7 +1165,8 @@ $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // a
 let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 // Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
 const livePause = { buyUntil: 0, why: '', tickers: {} };
-let ownPriceRefused = ''; // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
+let ownPriceRefused = '';
+let liveShrink = 1; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
 
 function stopLive(why) {
@@ -1221,7 +1224,7 @@ async function sendLive(order, meta, label) {
       if (!(left === 0)) { entry.status = 'resting'; entry.restCost = meta.restCost * (Number.isFinite(left) && meta.count ? left / meta.count : 1); }
       else entry.status = 'filled';
     }
-    liveErrors = 0;
+    liveErrors = 0; liveShrink = 1; state.kalshi.spendable = null;
     toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
     state.kalshi.balanceAt = 0; // refresh the balance with the fills
     if (entry.filled !== 0) { syncKalshi(); setTimeout(syncKalshi, 1500); } // pick up the new position right away so sells can follow instantly
@@ -1241,10 +1244,15 @@ async function sendLive(order, meta, label) {
       await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
       return;
     }
-    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: wait for cash instead of retrying
-      Object.assign(livePause, { buyUntil: Date.now() + 60000, why: 'Kalshi cash too low for this order: pausing buys 1 min (add money or lower Max $ per trade)' });
-      state.kalshi.balanceAt = 0; syncKalshi();
-      toast('LIVE: Kalshi says insufficient balance. Pausing buys for a minute.');
+    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: re-read the real balance, re-size, try again
+      state.kalshi.balanceAt = 0; await syncKalshi();
+      const held = state.kalshi.held?.held || 0;
+      if (meta.action === 'buy' && held > 0 && state.kalshi.balance != null) state.kalshi.spendable = Math.max(0, state.kalshi.balance - held);
+      Object.assign(livePause, { buyUntil: Date.now() + 15000, why: held > 0
+        ? `Kalshi is holding $${held.toFixed(2)} for ${state.kalshi.held.count} waiting order${state.kalshi.held.count > 1 ? 's' : ''}, so only $${Math.max(0, state.kalshi.balance - held).toFixed(2)} can be spent: sizing to that`
+        : 'Kalshi said insufficient balance: re-read the balance, trying again smaller in 15s' });
+      liveShrink = Math.max(0.25, liveShrink * 0.6); // next orders smaller until one goes through
+      toast('LIVE: Kalshi said insufficient balance. Re-sizing to your real balance.');
       return;
     }
     liveErrors++;
@@ -1294,6 +1302,14 @@ async function keepAwake() {
 }
 document.addEventListener('visibilitychange', keepAwake);
 
+// Cash the bot can really use: Kalshi's balance minus what its waiting orders hold, smaller after an "insufficient balance"
+function spendable() {
+  const b = state.kalshi.balance;
+  if (b == null) return null;
+  const free = state.kalshi.spendable ?? b; // held money is only taken off after Kalshi says the balance isn't enough
+  return free * liveShrink;
+}
+
 function runLive(snap, live, sig, now) {
   if (!!wakeLock !== (liveCfg.live && !document.hidden)) keepAwake();
   if (liveCfg.live && live && sig?.deep && sig.robustEdge != null && (!liveSeen.length || now - liveSeen[liveSeen.length - 1].t >= 3000)) {
@@ -1321,7 +1337,7 @@ function runLive(snap, live, sig, now) {
   }
   if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
   if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
-  const b = planBuy({ cfg: ownPriceRefused ? { ...liveCfg, ownPrice: false } : liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, lastSync: state.kalshi.lastSync || 0, now });
+  const b = planBuy({ cfg: ownPriceRefused ? { ...liveCfg, ownPrice: false } : liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: spendable(), lastSync: state.kalshi.lastSync || 0, now });
   if (!b.ok) { state.liveWhy = /^Waiting for (a|a new) call/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
   sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ ${b.meta.rest ? `(bot's price, waits until ${clock(b.meta.expiresAt)})` : 'max'}`);
@@ -1355,7 +1371,7 @@ function renderLiveStrip() {
   el.hidden = !liveCfg.live;
   if (!liveCfg.live) return;
   const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
-  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveCfg.budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy.length > 90 ? `${state.liveWhy.slice(0, 88)}…` : state.liveWhy)}` : ''}`;
+  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveLimits(liveCfg, state.kalshi.balance).budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy.length > 90 ? `${state.liveWhy.slice(0, 88)}…` : state.liveWhy)}` : ''}`;
 }
 
 function renderLive() {
@@ -1363,9 +1379,12 @@ function renderLive() {
   $('liveBody').hidden = !linked;
   const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
   $('liveStatus').textContent = !linked ? 'Link your Kalshi account above first.'
-    : liveCfg.live ? `ON: trading real money while this app is open. Budget ${dollars(liveCfg.budget)}, up to ${dollars(liveCfg.maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
+    : liveCfg.live ? `ON: trading real money while this app is open. ${liveCfg.useBalance !== false ? `Using your Kalshi balance ($${(state.kalshi.balance ?? 0).toFixed(2)}): ` : ''}Budget ${dollars(liveLimits(liveCfg, state.kalshi.balance).budget)}, up to ${dollars(liveLimits(liveCfg, state.kalshi.balance).maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
     : 'Off.';
   $('lvLock').checked = liveCfg.profitLock !== false;
+  $('lvUseBal').checked = liveCfg.useBalance !== false;
+  $('lvBalRow').hidden = liveCfg.useBalance === false; $('lvFixedRow').hidden = liveCfg.useBalance !== false;
+  if (document.activeElement !== $('lvPct')) $('lvPct').value = liveCfg.balancePct ?? LIVE_DEFAULTS.balancePct;
   $('lvOwn').checked = liveCfg.ownPrice !== false;
   $('liveArm').hidden = liveCfg.live;
   $('liveOffRow').hidden = !liveCfg.live;
@@ -1388,6 +1407,8 @@ for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'm
   });
 }
 $('lvLock').addEventListener('change', (e) => { liveCfg.profitLock = e.target.checked; saveLive(); renderLive(); });
+$('lvUseBal').addEventListener('change', (e) => { liveCfg.useBalance = e.target.checked; saveLive(); renderLive(); });
+$('lvPct').addEventListener('change', (e) => { const v = Number(e.target.value); if (Number.isFinite(v)) liveCfg.balancePct = Math.min(100, Math.max(1, v)); saveLive(); renderLive(); });
 $('lvOwn').addEventListener('change', (e) => { liveCfg.ownPrice = e.target.checked; if (!e.target.checked) cancelAllResting('own prices turned off'); saveLive(); renderLive(); });
 $('lvOn').addEventListener('click', () => {
   if (!state.kalshi.key) return toast('Link your Kalshi account first');
@@ -1415,10 +1436,10 @@ function runHealth(manual = false) {
   const items = healthCheck({
     now, marketsAt: state.marketsAt, candlesAt: state.candlesAt, spotAt: state.spotAt, streaming: isLive(), skewMs: state.skewMs ?? null,
     noMarket: !!state.marketsAt && !state.markets.some((m) => Date.parse(m.close_time) > now),
-    linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance,
+    linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance, held: state.kalshi.held,
     liveOn: liveCfg.live, busySince: liveBusy ? liveBusySince : 0,
     lastOrderError: lastOrder?.status === 'error' && now - lastOrder.at < 30 * 60000 ? lastOrder.error : null,
-    budget: liveCfg.budget, exposure: st.exposure, liveConf: liveCfg.minConfidence,
+    budget: liveLimits(liveCfg, state.kalshi.balance).budget, exposure: st.exposure, liveConf: liveCfg.minConfidence,
     seen: liveSeen.length ? { minutes: Math.round((now - liveSeen[0].t) / 60000), bars: seen.bars } : null,
     pushSupported: 'PushManager' in window, pushOn: !!state.pushOn,
   });

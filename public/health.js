@@ -49,6 +49,7 @@ export function healthCheck(h) {
     if (h.busySince && now - h.busySince > 30000) add('bad', 'live-stuck', `An order has been waiting for ${ago(now - h.busySince)}`, 'Close and reopen the app. Check Kalshi to see if the order went through.');
     if (h.lastOrderError) add('bad', 'live-error', `Last live order failed: ${h.lastOrderError}`, 'Send a screenshot of the Live card if this keeps happening.');
     if (h.balance != null && h.balance < 1) add('warn', 'live-cash', `Kalshi cash is $${h.balance.toFixed(2)}`, 'Add money in the Kalshi app or it can\'t buy.');
+    if (h.held?.held > 0) add('warn', 'live-held', `Kalshi is holding $${h.held.held.toFixed(2)} for ${h.held.count} waiting order${h.held.count > 1 ? 's' : ''}`, 'That money can\'t be used until those orders fill or are cancelled. Cancel old ones in the Kalshi app (Portfolio → Orders) if you don\'t want them.');
     if (h.budget != null && h.exposure != null && h.exposure >= h.budget - 0.01) add('warn', 'live-budget', 'Live budget is full', 'It buys again after a position closes, or raise Budget.');
     if (h.seen && h.seen.minutes >= 60) {
       const at = h.seen.bars.find(([b]) => b === h.liveConf)?.[1] ?? 0;

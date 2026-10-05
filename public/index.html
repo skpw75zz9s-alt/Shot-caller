@@ -152,7 +152,9 @@
         <p class="push-status" id="liveStatus">Link your Kalshi account above first.</p>
         <div id="liveBody" hidden>
           <p class="push-status">When on, the bot places <b>real orders</b> in your Kalshi account using the same rules as Practice: limit orders at the call's max price that fill now or cancel, sells at the bid or better, never more than you hold. It can only use the cash in your Kalshi account and these limits. It only trades while this app is open on screen, and only on one phone at a time (don't turn it on on two phones).</p>
-          <div class="adm-row"><label>Budget (most at risk) $<input id="lvBudget" inputmode="decimal"></label><label>Max $ per trade<input id="lvMax" inputmode="decimal"></label></div>
+          <label class="practice-toggle"><input type="checkbox" id="lvUseBal"> Use my Kalshi balance: budget = the cash in Kalshi, each trade up to the % below</label>
+          <div class="adm-row" id="lvBalRow"><label>% of balance per trade<input id="lvPct" inputmode="numeric"></label></div>
+          <div class="adm-row" id="lvFixedRow"><label>Budget (most at risk) $<input id="lvBudget" inputmode="decimal"></label><label>Max $ per trade<input id="lvMax" inputmode="decimal"></label></div>
           <div class="adm-row"><label>Daily loss stop $<input id="lvLoss" inputmode="decimal"></label><label>Max trades / day<input id="lvTrades" inputmode="numeric"></label></div>
           <div class="adm-row"><label>Min confidence<input id="lvConf" inputmode="numeric"></label></div>
           <label class="practice-toggle"><input type="checkbox" id="lvOwn"> Use the bot's own price on calls: if Kalshi's price is a little above the max, the buy waits at the bot's price for up to 2 minutes instead of giving up (cancels itself when the call ends)</label>
@@ -190,7 +192,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v4.6.2 · bot's own price</p>
+      <p class="fine" id="version">Shot Caller v4.7 · uses your Kalshi balance</p>
     </section>
   </main>
 

@@ -7,7 +7,7 @@ const now = Date.now();
 const c2 = (v) => Math.round(v * 100) / 100;
 const row = (yb, ticker = 'KXBTC15M-26OCT05-T1') => ({ m: { ticker }, ev: { quote: { yesBid: yb, yesAsk: c2(yb + 0.02), noBid: c2(0.98 - yb), noAsk: c2(1 - yb) } } });
 const call = (o = {}) => ({ fire: true, callSide: 'YES', stance: 'new', deep: { score: 80 }, limit: 0.45, contracts: 100, ...o });
-const cfg = { live: true, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 40, ownPrice: false };
+const cfg = { live: true, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 40, ownPrice: false, useBalance: false };
 const base = { cfg, positions: [], trades: [], orders: [], balance: 200, now };
 
 test('V2 order bodies pass the server check, and the server refuses anything else', () => {
@@ -163,4 +163,22 @@ test('own prices: posts a waiting buy at the max price that Kalshi itself cancel
   // it just expired and Kalshi hasn't been checked since: make sure it didn't fill before trying again
   const ended = { ...waiting, status: 'expired', expiresAt: now - 2000, filled: 0 };
   assert.match(planBuy({ ...base, cfg: own, orders: [ended], lastSync: now - 5000, sig: call({ fire: false, called: 'YES', calledAt: now - 60000, limit: 0.38 }), row: r }).why, /Checking whether/);
+});
+
+test('use my Kalshi balance: budget = cash, each trade up to 25% of it; held money is counted', async () => {
+  const { liveLimits, heldByOrders } = await import('../public/autotrade.js');
+  assert.deepEqual(liveLimits({ useBalance: true, balancePct: 25 }, 11.59), { budget: 11.19, maxPerTrade: 2.8 });
+  assert.deepEqual(liveLimits({ useBalance: false, budget: 1, maxPerTrade: 1 }, 11.59), { budget: 1, maxPerTrade: 1 });
+  assert.equal(liveLimits({ useBalance: true, balancePct: 25 }, 2).maxPerTrade, 1, 'never under $1 a trade');
+  // $11.59 in Kalshi, 25%: 2.80 a trade = 5 contracts at 45c + 2c fee, whatever the fixed limits say
+  const p = planBuy({ ...base, cfg: { ...cfg, budget: 1, maxPerTrade: 1, useBalance: true, balancePct: 25 }, balance: 11.59, sig: call(), row: row(0.4) });
+  assert.equal(p.meta.count, 5);
+  // waiting orders: V2 (bid/ask, dollars) and older (yes/no, cents) shapes
+  assert.deepEqual(heldByOrders([
+    { side: 'bid', price: '0.4000', remaining_count: '7.00' },        // 7 x 40c
+    { side: 'ask', price: '0.2000', remaining_count_fp: '3.00' },     // buying NO at 80c: 3 x 80c
+    { side: 'yes', action: 'buy', yes_price: 30, remaining_count: 2 }, // 2 x 30c
+    { side: 'yes', action: 'sell', yes_price: 90, remaining_count: 5 }, // a sell holds no cash
+    { side: 'bid', price: '0.5000', remaining_count: '0.00' },
+  ]), { held: 5.8, count: 4 });
 });

@@ -8,7 +8,34 @@
 // and a sell can never sell more than is held. It can only ever use the cash in the Kalshi account.
 import { kalshiFee } from './model.js';
 
-export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true, ownPrice: true };
+export const LIVE_DEFAULTS = { live: false, budget: 50, maxPerTrade: 10, dailyLoss: 40, maxTrades: 40, minConfidence: 80, profitLock: true, ownPrice: true, useBalance: true, balancePct: 25 };
+
+// "Use my Kalshi balance": the budget is the cash in Kalshi (less a small cushion) and each trade is up to
+// balancePct % of it, so the bot grows and shrinks with the account instead of fixed dollar limits.
+// The daily loss stop and trades-per-day limit still apply.
+export function liveLimits(cfg, balance) {
+  const c = { ...LIVE_DEFAULTS, ...cfg };
+  if (!c.useBalance || balance == null) return { budget: c.budget, maxPerTrade: c.maxPerTrade };
+  const cash = Math.max(0, balance * 0.97 - 0.05);
+  return { budget: Math.round(cash * 100) / 100, maxPerTrade: Math.max(1, Math.round(cash * c.balancePct) / 100) };
+}
+
+// Money Kalshi is holding for orders still waiting on its book (yours from the Kalshi app, or the bot's). The balance
+// includes it but it can't be spent, which is what "insufficient balance" with cash showing usually means.
+const n0 = (v) => (v == null || v === '' ? null : Number(v));
+export function heldByOrders(orders) {
+  let held = 0, count = 0;
+  for (const o of orders || []) {
+    const left = n0(o.remaining_count) ?? n0(o.remaining_count_fp) ?? 0;
+    if (!(left > 0)) continue;
+    let p = null; // dollars per contract this order ties up
+    if (o.side === 'bid' || o.side === 'ask') { const yp = n0(o.price) ?? n0(o.yes_price_dollars); if (yp != null) p = o.side === 'bid' ? yp : 1 - yp; }
+    else { const side = String(o.side || '').toLowerCase(); const k = side === 'no' ? 'no_price' : 'yes_price'; p = n0(o[`${k}_dollars`]) ?? (n0(o[k]) != null ? n0(o[k]) / 100 : null); if (String(o.action || 'buy') === 'sell') p = 0; }
+    if (p == null) continue;
+    held += left * p; count++;
+  }
+  return { held: Math.round(held * 100) / 100, count };
+}
 
 const dayStart = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const cents = (p) => Math.round(p * 100);
@@ -66,7 +93,8 @@ export function liveState({ positions, trades, orders, now = Date.now() }) {
 
 // Should it buy right now, and how many contracts? Returns { ok, why, order }.
 export function planBuy({ cfg, sig, row, positions, trades, orders, balance, lastSync = 0, now = Date.now() }) {
-  const c = { ...LIVE_DEFAULTS, ...cfg };
+  const c0 = { ...LIVE_DEFAULTS, ...cfg };
+  const c = { ...c0, ...liveLimits(c0, balance) };
   if (!c.live) return { ok: false, why: 'Live auto-trading is off' };
   if (!row || !sig?.callSide) return { ok: false, why: 'Waiting for a call' };
   const ticker = row.m.ticker;
