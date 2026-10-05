@@ -83,6 +83,47 @@ Next to each side's buy price, the app shows Kalshi's **cash-out price**: the li
 
 The server still follows each whole window (the bot's odds every 5 seconds, plus a paper "follow the bot" trade) so the 15-minute update can say how the last window went. The app's History tab shows only **My trades**.
 
+### Live auto-trading (real money)
+
+Settings → **Live auto-trading**. It appears once Kalshi is linked, and your Kalshi API key needs trading permission.
+
+**What it does:** while the app is open on screen, the bot places real orders in your Kalshi account using the same rules as Practice.
+- It buys new calls (and real switches) at or above *Min confidence*.
+- On Aggressive, it adds as the gap grows.
+- It sells on the same exits as every position card, and re-enters after a sale.
+
+**How orders are placed:**
+- Every buy is a limit order at the call's max price that fills now or cancels. Nothing is left resting on Kalshi.
+- Sells go at the bid or better and can never sell more than you hold.
+
+**Your money limits**, all checked before every order:
+
+| Limit | Default | What it does |
+|---|---|---|
+| Budget | $50 | Most it will ever have at risk (open positions at cost) |
+| Max $ per trade | $10 | Most one order may cost |
+| Daily loss stop | $40 | Buying stops for the day once today's realized losses plus everything still open could reach this |
+| Max trades / day | 40 | |
+| Kalshi balance | | It never spends more cash than the account holds. Kalshi has no borrowing, and the bot can't withdraw or reach your bank. |
+
+**Server check:** before any order reaches Kalshi, the server refuses it unless all of these hold:
+- It's for the BTC 15-minute series.
+- It's a fill-now-or-cancel limit order, with a sane size.
+- Its total cost is at most $100 (`AUTO_MAX_ORDER_USD`).
+- It has no unknown fields.
+- It's within 20 orders a minute.
+
+**Turning it on and off:**
+- Turning it on needs a confirmation tick plus typing **LIVE**.
+- A red **LIVE AUTO-TRADING** strip with a **STOP** button sits on the Live screen while it's on.
+- It switches itself off if Kalshi refuses an order for permissions (a read-only key) or after 3 failed orders in a row.
+- **STOP doesn't sell open positions.** They keep their sell signals, and you can sell them on Kalshi.
+
+**Rules:**
+- Turn it on on one phone only.
+- Only keep money in Kalshi you're fine losing.
+- The strategy is tested in simulation and Practice, not proven on live money.
+
 ### Link your Kalshi account (optional)
 
 Settings → **Kalshi account**. On Kalshi, go to Account → API keys → Create key, then copy the key ID and download the private key file. Paste the key ID, then paste the key or pick the file, and tap **Link account**. The app checks the key by reading your balance.
@@ -99,7 +140,8 @@ Once linked, the app reads your **fills** (every buy and sell, with exact price,
 Security:
 - **The key never leaves the phone.** It's imported as a non-extractable WebCrypto key in IndexedDB, so it can sign requests but can't be read back out, not even by the app's own code. The pasted text is cleared right away.
 - Each request is signed on the phone (Ed25519 or RSA-PSS, matching the key type Kalshi issued). The server only forwards the signature headers.
-- The server forwards only GET requests, and only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`. Responses are never cached. **There is no code anywhere that places, changes or cancels orders.**
+- Reads: the server forwards GET requests only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`, and never caches the responses.
+- Orders: these are placed only when you turn on **Live auto-trading** (see below). The server checks every order before it reaches Kalshi.
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
 
 ### Risk level

@@ -3,6 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
+import { LIVE_DEFAULTS, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 
 const API = './api';
@@ -85,7 +86,9 @@ if (store.get('settingsVersion', 1) < 9) {
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   calls: store.get('calls', {}), // what the bot has called per window, so it sticks with its calls
-  practice: store.get('practice', null) || newPractice(), practiceWhy: '' };
+  practice: store.get('practice', null) || newPractice(), practiceWhy: '',
+  liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 3 * 86400000), liveWhy: '' };
+const liveCfg = { ...LIVE_DEFAULTS, ...store.get('liveCfg', {}) };
 const practiceCfg = { ...PRACTICE_DEFAULTS, ...store.get('practiceCfg', {}) };
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
@@ -302,6 +305,7 @@ function render() {
   const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
   if (sig?.fire) store.set('calls', state.calls);
   if (practiceCfg.on || state.practice.positions.length || state.practice.range?.positions.length) runPractice(snap, live, sig, now);
+  runLive(snap, live, sig, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
@@ -882,6 +886,18 @@ async function kalshiGet(endpoint, params = {}) {
   return body;
 }
 
+async function kalshiPost(endpoint, body) {
+  const { key, keyId } = state.kalshi;
+  if (!key) throw new Error('Kalshi not linked');
+  kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
+  const headers = { ...(await signHeaders(key, keyId, 'POST', kalshiPrefix + endpoint)), 'content-type': 'application/json' };
+  const r = await fetch(`${API}/kalshi-auth/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  paywalled(r);
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(out.error?.message || out.error || out.message || `Kalshi: HTTP ${r.status}`); e.status = r.status; throw e; }
+  return out;
+}
+
 async function marketInfo(ticker) {
   const open = state.markets.find((x) => x.ticker === ticker);
   if (open) return open;
@@ -953,6 +969,8 @@ async function syncKalshi() {
 
 function renderKalshi() {
   const k = state.kalshi, linked = !!k.key;
+  if (!linked && liveCfg.live) { liveCfg.live = false; saveLive(); }
+  setTimeout(renderLive);
   $('kForm').hidden = linked;
   $('kLinked').hidden = !linked;
   $('kErr').textContent = k.error || '';
@@ -1112,8 +1130,110 @@ $('riskBtns').addEventListener('click', (e) => {
 });
 $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // after the form's own handler saves the value
 
+
+// ---------- live auto-trading (real orders) ----------
+let liveBusy = false, liveErrors = 0;
+function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
+
+function stopLive(why) {
+  if (!liveCfg.live) return;
+  liveCfg.live = false; saveLive();
+  state.liveWhy = why || 'Stopped';
+  toast(`Live auto-trading stopped${why ? `: ${why}` : ''}`);
+  renderLive(); render();
+}
+
+async function sendLive(order, label) {
+  liveBusy = true;
+  const entry = { at: Date.now(), ticker: order.ticker, action: order.action, side: order.side.toUpperCase(), count: order.count, cents: order[`${order.side}_price`], status: 'sent', label };
+  state.liveOrders.push(entry); saveLive(); renderLive();
+  try {
+    const out = await kalshiPost('orders', order);
+    const o = out.order || {};
+    entry.status = o.status || 'placed';
+    entry.filled = o.fill_count ?? o.taker_fill_count ?? null;
+    entry.id = o.order_id || null;
+    liveErrors = 0;
+    toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
+    state.kalshi.balanceAt = 0; // refresh the balance with the fills
+    setTimeout(syncKalshi, 800);
+  } catch (e) {
+    entry.status = 'error'; entry.error = e.message;
+    liveErrors++;
+    toast(`LIVE order failed: ${e.message}`);
+    if (e.status === 403) stopLive('Kalshi refused the order. Your API key probably has no trading permission: make a key with trading enabled.');
+    else if (liveErrors >= 3) stopLive('3 orders in a row failed');
+  } finally {
+    saveLive(); liveBusy = false; renderLive();
+  }
+}
+
+function runLive(snap, live, sig, now) {
+  renderLiveStrip();
+  if (!liveCfg.live || !state.kalshi.key || liveBusy || document.hidden) return;
+  // Sells first: the same exits as every position card
+  for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
+    if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
+    const order = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, settings, now), orders: state.liveOrders, now });
+    if (order) return sendLive(order, `sell ${order.count} ${sideName(pos.side)} at ${order[`${order.side}_price`]}¢ or better`);
+  }
+  const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, now });
+  if (!b.ok) { if (!/Waiting|off/.test(b.why)) state.liveWhy = b.why; return; }
+  state.liveWhy = '';
+  const o = b.order;
+  sendLive(o, `${b.add ? 'add' : 'buy'} ${o.count} ${sideName(o.side.toUpperCase())} at ${o[`${o.side}_price`]}¢ max`);
+}
+
+function renderLiveStrip() {
+  const el = $('liveStrip');
+  el.hidden = !liveCfg.live;
+  if (!liveCfg.live) return;
+  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
+  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveCfg.budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy)}` : ''}`;
+}
+
+function renderLive() {
+  const linked = !!state.kalshi.key;
+  $('liveBody').hidden = !linked;
+  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
+  $('liveStatus').textContent = !linked ? 'Link your Kalshi account above first.'
+    : liveCfg.live ? `ON: trading real money while this app is open. Budget ${dollars(liveCfg.budget)}, up to ${dollars(liveCfg.maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
+    : 'Off.';
+  $('liveArm').hidden = liveCfg.live;
+  $('liveOffRow').hidden = !liveCfg.live;
+  for (const [id, k] of [['lvBudget', 'budget'], ['lvMax', 'maxPerTrade'], ['lvLoss', 'dailyLoss'], ['lvTrades', 'maxTrades'], ['lvConf', 'minConfidence']]) {
+    if (document.activeElement !== $(id)) $(id).value = liveCfg[k];
+  }
+  $('lvRisk').textContent = dollars(st.exposure);
+  $('lvToday').textContent = money(st.realized);
+  $('lvWhy').textContent = state.liveWhy;
+  $('lvLog').innerHTML = [...state.liveOrders].reverse().slice(0, 30).map((o) =>
+    `<li><span>${esc(o.label || `${o.action} ${o.count} ${o.side}`)}<small>${clock(o.at)} · ${esc(o.ticker)}${o.error ? ` · ${esc(o.error)}` : ''}</small></span><b class="${o.status === 'error' ? 'neg' : ''}">${esc(o.status)}${o.filled != null ? ` · ${o.filled}` : ''}</b></li>`).join('') || '<li class="calm">No live orders yet</li>';
+  renderLiveStrip();
+}
+
+for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'maxPerTrade', 1, 1000], ['lvLoss', 'dailyLoss', 1, 100000], ['lvTrades', 'maxTrades', 1, 500], ['lvConf', 'minConfidence', 0, 100]]) {
+  $(id).addEventListener('change', (e) => {
+    const v = Number(e.target.value);
+    if (Number.isFinite(v)) liveCfg[k] = Math.min(max, Math.max(min, v));
+    saveLive(); renderLive();
+  });
+}
+$('lvOn').addEventListener('click', () => {
+  if (!state.kalshi.key) return toast('Link your Kalshi account first');
+  if (!$('lvAck').checked) return toast('Tick the box to confirm you understand it trades real money');
+  if ($('lvConfirm').value.trim().toUpperCase() !== 'LIVE') return toast('Type LIVE to turn it on');
+  liveCfg.live = true; liveErrors = 0; state.liveWhy = '';
+  $('lvConfirm').value = ''; $('lvAck').checked = false;
+  saveLive(); renderLive(); render();
+  toast('Live auto-trading ON: real orders while this app is open');
+});
+$('lvOff').addEventListener('click', () => stopLive('turned off'));
+$('liveStop').addEventListener('click', () => stopLive('STOP pressed'));
+
 buildSettings();
 renderRisk();
+renderLive();
 renderPractice();
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }

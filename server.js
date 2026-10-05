@@ -79,23 +79,63 @@ async function proxy(route, url, req, res) {
   }
 }
 
-// /api/kalshi-auth/* — a linked Kalshi account's own portfolio, read-only. The phone signs each request
-// with its Kalshi API key (the key never reaches this server); we only forward the signature headers.
-// GET only, portfolio read endpoints only, never cached (it's one person's data).
+// /api/kalshi-auth/* — a linked Kalshi account. The phone signs each request with its Kalshi API key (the key
+// never reaches this server); we only forward the signature headers. GETs: portfolio reads only, never cached.
+// POST orders (live auto-trading, which the user turns on in the app): only orders that pass validateOrder.
 const AUTH_READS = new Set(['fills', 'positions', 'balance', 'settlements', 'orders']);
+const ORDER_SERIES = (process.env.AUTO_SERIES || 'KXBTC15M').split(',').filter(Boolean);
+const ORDER_MAX_USD = Number(process.env.AUTO_MAX_ORDER_USD || 100);
+
+// Every live order is checked here before it reaches Kalshi: only the BTC 15-minute series, only limit orders
+// that fill now or cancel (nothing left resting), sensible sizes, a hard dollar cap per order, no extra fields.
+export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD } = {}) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'order must be an object';
+  const allowed = new Set(['ticker', 'action', 'side', 'count', 'type', 'yes_price', 'no_price', 'time_in_force', 'client_order_id', 'sell_position_floor']);
+  for (const k of Object.keys(o)) if (!allowed.has(k)) return `field not allowed: ${k}`;
+  if (typeof o.ticker !== 'string' || !/^[A-Z0-9]+-[A-Z0-9-]{1,60}$/.test(o.ticker) || !series.some((s) => o.ticker.startsWith(`${s}-`))) return 'only the BTC 15-minute markets can be traded';
+  if (!['buy', 'sell'].includes(o.action)) return 'action must be buy or sell';
+  if (!['yes', 'no'].includes(o.side)) return 'side must be yes or no';
+  if (o.type !== 'limit') return 'only limit orders';
+  if (o.time_in_force !== 'immediate_or_cancel') return 'only fill-now-or-cancel orders (nothing left resting)';
+  if (!Number.isInteger(o.count) || o.count < 1 || o.count > 1000) return 'count must be 1-1000 contracts';
+  const priceKey = `${o.side}_price`, other = o.side === 'yes' ? 'no_price' : 'yes_price';
+  if (!Number.isInteger(o[priceKey]) || o[priceKey] < 1 || o[priceKey] > 99) return `${priceKey} must be 1-99 cents`;
+  if (o[other] !== undefined) return `send only ${priceKey}`;
+  if (o.action === 'buy' && (o.count * o[priceKey]) / 100 > maxUsd) return `order over the $${maxUsd} cap`;
+  if (o.action === 'sell' && o.sell_position_floor !== 0) return 'sells must not go short (sell_position_floor 0)';
+  if (o.action === 'buy' && o.sell_position_floor !== undefined) return 'sell_position_floor is for sells';
+  if (typeof o.client_order_id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(o.client_order_id)) return 'client_order_id required';
+  return null;
+}
+const orderHits = new Map(); // ip -> recent order timestamps (max 20 a minute)
 const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status']);
 export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpoint, url) {
   if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/` });
+  const isOrder = req.method === 'POST' && endpoint === 'orders';
+  if (!isOrder && req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
   if (!AUTH_READS.has(endpoint)) return send(res, 404, { error: 'not allowed' });
   const key = req.headers['x-kalshi-key'], ts = req.headers['x-kalshi-ts'], sig = req.headers['x-kalshi-sig'];
   if (!/^[A-Za-z0-9-]{8,64}$/.test(key || '') || !/^\d{12,14}$/.test(ts || '') || !/^[A-Za-z0-9+/=]{40,1024}$/.test(sig || '')) {
     return send(res, 400, { error: 'missing or malformed Kalshi signature' });
   }
+  let body = null;
+  if (isOrder) {
+    const ip = clientIp(req), now = Date.now();
+    const hits = (orderHits.get(ip) || []).filter((t) => t > now - 60000);
+    if (hits.length >= 20) return send(res, 429, { error: 'too many orders: wait a minute' });
+    hits.push(now); orderHits.set(ip, hits);
+    if (orderHits.size > 5000) orderHits.delete(orderHits.keys().next().value);
+    body = await readBody(req);
+    const bad = validateOrder(body);
+    if (bad) return send(res, 400, { error: `order refused: ${bad}` });
+  }
   const q = new URLSearchParams();
-  for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
+  if (!isOrder) for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
   try {
     const r = await fetch(`${base}/portfolio/${endpoint}${q.size ? `?${q}` : ''}`, {
-      headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig },
+      method: isOrder ? 'POST' : 'GET',
+      headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig, ...(isOrder ? { 'content-type': 'application/json' } : {}) },
+      body: isOrder ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(8000),
     });
     // Kalshi's 401 (bad key) goes out as 403 so the app doesn't mistake it for the paywall's 401
@@ -205,10 +245,10 @@ export const server = http.createServer(async (req, res) => {
 
     const push = path.match(/^\/api\/push\/(\w+)$/);
     if (push && req.method === 'POST') return await pushApi(req, res, push[1], token);
+    const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
+    if (ka) return await kalshiAuth(req, res, ka[1], url);
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
-    const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
-    if (ka) return kalshiAuth(req, res, ka[1], url);
     const route = ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) return proxy(route, url, req, res);
     if (rel === '/paywall.html') return serveFile(req, res, '/index.html'); // already paid: go straight to the app

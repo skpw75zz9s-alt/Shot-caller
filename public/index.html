@@ -34,6 +34,7 @@
   <main>
     <section id="view-live" class="view active">
       <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
+      <div class="live-strip" id="liveStrip" hidden><span id="liveStripText"></span><button id="liveStop" class="danger">STOP</button></div>
       <div class="practice-strip" id="practiceStrip" hidden></div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
@@ -119,7 +120,7 @@
           <div class="pos-btns"><label class="file-btn">Choose key file<input id="kFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="kLink">Link account</button></div>
           <p class="fine">On Kalshi: Account → API keys → Create key. Copy the key ID and download the private key file.
             The key stays on this phone: it's locked in so that even this app can't read it back out, and it's never sent to our server.
-            Shot Caller only reads your trades and balance and has no way to place orders. Delete the key on Kalshi any time to cut access.</p>
+            Linking only reads your trades and balance. Orders are placed only if you turn on <b>Live auto-trading</b> below, within the limits you set. Delete the key on Kalshi any time to cut access.</p>
         </div>
         <div id="kLinked" class="pos-btns" hidden><button id="kSync">Sync now</button><button id="kUnlink" class="ghost">Unlink</button></div>
         <p class="err" id="kErr"></p>
@@ -146,6 +147,28 @@
         <ul id="prLog" class="history pr-log"></ul>
         <div class="pos-btns"><button id="prReset" class="ghost">Reset practice</button></div>
       </div>
+      <div class="card push-card live-card" id="liveCard">
+        <h3>Live auto-trading (real money)</h3>
+        <p class="push-status" id="liveStatus">Link your Kalshi account above first.</p>
+        <div id="liveBody" hidden>
+          <p class="push-status">When on, the bot places <b>real orders</b> in your Kalshi account using the same rules as Practice: limit orders at the call's max price that fill now or cancel, sells at the bid or better, never more than you hold. It can only use the cash in your Kalshi account and these limits. It only trades while this app is open on screen, and only on one phone at a time (don't turn it on on two phones).</p>
+          <div class="adm-row"><label>Budget (most at risk) $<input id="lvBudget" inputmode="decimal"></label><label>Max $ per trade<input id="lvMax" inputmode="decimal"></label></div>
+          <div class="adm-row"><label>Daily loss stop $<input id="lvLoss" inputmode="decimal"></label><label>Max trades / day<input id="lvTrades" inputmode="numeric"></label></div>
+          <div class="adm-row"><label>Min confidence<input id="lvConf" inputmode="numeric"></label></div>
+          <div class="grid pr-stats">
+            <div class="stat"><label>At risk now</label><b id="lvRisk">—</b></div>
+            <div class="stat"><label>Today (realized)</label><b id="lvToday">—</b></div>
+          </div>
+          <p class="push-status" id="lvWhy"></p>
+          <div id="liveArm">
+            <label class="practice-toggle"><input type="checkbox" id="lvAck"> I understand this trades real money in my Kalshi account and I can lose up to my limits.</label>
+            <div class="adm-row"><label>Type LIVE to turn it on<input id="lvConfirm" autocomplete="off" autocapitalize="characters" placeholder="LIVE"></label><button id="lvOn" class="danger">Turn on live trading</button></div>
+          </div>
+          <div class="pos-btns" id="liveOffRow" hidden><button id="lvOff" class="danger">Stop live trading</button></div>
+          <h4>Live orders</h4>
+          <ul id="lvLog" class="history pr-log"></ul>
+        </div>
+      </div>
       <div class="card push-card">
         <h3>Notifications</h3>
         <p id="pushStatus" class="push-status">Checking…</p>
@@ -159,7 +182,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v3.12 · optimized aggressive</p>
+      <p class="fine" id="version">Shot Caller v4.0 · live auto-trading</p>
     </section>
   </main>
 
