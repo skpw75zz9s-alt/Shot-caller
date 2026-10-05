@@ -145,6 +145,8 @@ The order shows as *lock profit: sell …* in Live orders. In the simulator, thi
 - Each order also carries an expiry, so Kalshi itself cancels it within 2 minutes (and 1 minute before the market closes) even if your phone dies. The server refuses any waiting order that would last longer than 5 minutes.
 - Waiting buys count toward your budget while they wait.
 
+If Kalshi (or the server) ever refuses a waiting order, the bot immediately sends the same buy as a fill-now order instead, and keeps using fill-now orders until the app restarts. The Live card says so. The server also pulls a waiting order's expiry back into range if the phone's clock is a few minutes off.
+
 Tested in the simulator against fill-now: +$7 per 100 windows, worst losing stretch $338 instead of $363, and much better with a slow connection (+$43 vs +$30 at a 10-second delay).
 
 What it deliberately does **not** do: post its own price when there's no call, or keep a waiting sell posted. Both were tested. The no-call version lost money in every variant tried, even on a perfectly priced Kalshi, because those orders mostly fill when the market knows something the bot doesn't. Waiting sells have the same risk of selling too cheap right as a position gains value.

@@ -170,6 +170,12 @@ export const kalshiAuthFor = (base) => { const kalshiCancel = cancelFor(base); r
     if (orderHits.size > 5000) orderHits.delete(orderHits.keys().next().value);
     countHit = () => hits.push(now); // only orders actually sent to Kalshi count toward the 20 a minute
     body = await readBody(req);
+    // A phone clock that's a few minutes off would push a waiting order's expiry outside the allowed window: pull it
+    // back to between 15 seconds and 5 minutes from now on the server's clock
+    if (body && body.time_in_force === 'good_till_canceled' && typeof body.expiration_time === 'string') {
+      const exp = Date.parse(body.expiration_time);
+      if (Number.isFinite(exp) && Math.abs(exp - now) < 15 * 60000) body.expiration_time = new Date(Math.min(now + 5 * 60000 - 1000, Math.max(now + 15000, exp))).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    }
     const bad = validateOrder(body);
     if (bad) return send(res, 400, { error: `order refused: ${bad}` });
     if (url.searchParams.get('book') === '1') { // check the live book first (no book? the order goes as sent)

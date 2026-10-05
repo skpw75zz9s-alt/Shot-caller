@@ -3,7 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, signHeaders } from './kalshi.js';
-import { LIVE_DEFAULTS, isResting, liveState, planBuy, planSell } from './autotrade.js';
+import { LIVE_DEFAULTS, fillNow, isResting, liveState, planBuy, planSell } from './autotrade.js';
 import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -1163,6 +1163,7 @@ $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // a
 let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 // Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
 const livePause = { buyUntil: 0, why: '', tickers: {} };
+let ownPriceRefused = ''; // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-300)); }
 
 function stopLive(why) {
@@ -1231,6 +1232,15 @@ async function sendLive(order, meta, label) {
       return;
     }
     entry.status = 'error'; entry.error = e.message;
+    if (meta.rest && (e.status === 400 || e.status === 422) && !/insufficient|balance/i.test(e.message)) {
+      // A waiting (own-price) order was refused: don't keep failing. Switch to fill-now orders and send this one now.
+      ownPriceRefused = e.message;
+      entry.error = `${e.message} · waiting orders refused, switched to fill-now`;
+      toast('LIVE: Kalshi refused a waiting order. Switching to fill-now orders.');
+      liveBusy = false;
+      await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
+      return;
+    }
     if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: wait for cash instead of retrying
       Object.assign(livePause, { buyUntil: Date.now() + 60000, why: 'Kalshi cash too low for this order: pausing buys 1 min (add money or lower Max $ per trade)' });
       state.kalshi.balanceAt = 0; syncKalshi();
@@ -1311,7 +1321,7 @@ function runLive(snap, live, sig, now) {
   }
   if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
   if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
-  const b = planBuy({ cfg: liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, lastSync: state.kalshi.lastSync || 0, now });
+  const b = planBuy({ cfg: ownPriceRefused ? { ...liveCfg, ownPrice: false } : liveCfg, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: state.kalshi.balance, lastSync: state.kalshi.lastSync || 0, now });
   if (!b.ok) { state.liveWhy = /^Waiting for (a|a new) call/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
   state.liveWhy = '';
   sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ ${b.meta.rest ? `(bot's price, waits until ${clock(b.meta.expiresAt)})` : 'max'}`);
@@ -1336,7 +1346,7 @@ function seenLine() {
 function renderLiveWhy() {
   const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
   $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${ownPriceRefused ? `<br><b class="neg">Waiting orders refused by Kalshi</b> (${esc(ownPriceRefused)}): using fill-now orders until the app restarts.` : ''}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
 }
 
 function renderLiveStrip() {

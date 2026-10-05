@@ -146,7 +146,8 @@ test('own prices: posts a waiting buy at the max price that Kalshi itself cancel
   const p = planBuy({ ...base, cfg: own, sig: call({ limit: 0.38 }), row: r });
   assert.equal(p.ok, true);
   assert.deepEqual([p.order.side, p.order.price, p.order.time_in_force], ['bid', '0.3800', 'good_till_canceled']);
-  assert.equal(Date.parse(p.order.expiration_time), now + 120000);
+  assert.ok(Math.abs(Date.parse(p.order.expiration_time) - (now + 120000)) < 1000);
+  assert.match(p.order.expiration_time, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/, 'RFC 3339 to the second');
   assert.equal(validateOrder(p.order, { now }), null, 'the server accepts it');
   assert.match(validateOrder({ ...p.order, expiration_time: new Date(now + 10 * 60000).toISOString() }, { now }), /expire within 5 minutes/);
   assert.match(validateOrder({ ...p.order, expiration_time: undefined }, { now }), /expire within 5 minutes/, 'no open-ended orders');
