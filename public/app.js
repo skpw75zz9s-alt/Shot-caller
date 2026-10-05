@@ -1195,7 +1195,21 @@ function liveWaitWhy(live, sig) {
   return `Waiting for confidence: ${sideName(sig.side)} has ${conf}; Kalshi is ${gap} pts below the bot's cautious odds`;
 }
 
+// What the bot saw over the last 2 hours, so you can see what a different Min confidence would have done
+const liveSeen = []; // { t, ticker, score, gap, need }
+function seenStats(now = Date.now()) {
+  while (liveSeen.length && liveSeen[0].t < now - 7200000) liveSeen.shift();
+  const ov = settings.bigEdgeOverride || 0;
+  const markets = (bar) => new Set(liveSeen.filter((e) => e.gap >= e.need - 1e-9 && (e.score >= bar || (ov > 0 && e.gap >= ov - 1e-9))).map((e) => e.ticker)).size;
+  // Live can't go below the risk level's own bar (calls under it never fire), so only show bars at or above it
+  const bars = [...new Set([liveCfg.minConfidence, 95, 90, 85, 80, settings.minConfidence])].filter((b) => b <= 100 && b >= settings.minConfidence).sort((a, b) => b - a);
+  return { n: liveSeen.length, bestConf: Math.max(...liveSeen.filter((e) => e.gap >= e.need - 1e-9).map((e) => e.score), -1), bestGap: Math.max(...liveSeen.map((e) => e.gap), -1), bars: bars.map((b) => [b, markets(b)]) };
+}
+
 function runLive(snap, live, sig, now) {
+  if (liveCfg.live && live && sig?.deep && sig.robustEdge != null && (!liveSeen.length || now - liveSeen[liveSeen.length - 1].t >= 3000)) {
+    liveSeen.push({ t: now, ticker: live.m.ticker, score: sig.deep.score, gap: sig.robustEdge, need: sig.edgeNeed });
+  }
   if (liveCfg.live && !state.kalshi.key) state.liveWhy = 'Kalshi key not loaded on this phone: link your Kalshi account again';
   renderLiveStrip();
   if (!liveCfg.live || !state.kalshi.key || liveBusy || document.hidden) return;
@@ -1212,10 +1226,18 @@ function runLive(snap, live, sig, now) {
   sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ max`);
 }
 
+function seenLine() {
+  const st = seenStats();
+  if (st.n < 20) return '';
+  const mins = Math.round((Date.now() - liveSeen[0].t) / 60000);
+  const pts = (v) => `${Math.round(v * 100)} pts`;
+  return `<br><b>Last ${mins} min:</b> best worst-case gap ${pts(st.bestGap)}${st.bestConf >= 0 ? `, best confidence with a gap ${st.bestConf}` : ', no side had a big enough gap'}. Markets it would have bought: ${st.bars.map(([b, n]) => `${b === liveCfg.minConfidence ? '<b>' : ''}at ${b}: ${n}${b === liveCfg.minConfidence ? '</b>' : ''}`).join(' · ')}`;
+}
+
 function renderLiveWhy() {
   const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
   $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}<br><small>Keep this app open with the screen on: iPhone pauses it in the background or when locked.</small>`;
 }
 
 function renderLiveStrip() {
