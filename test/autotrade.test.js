@@ -120,19 +120,20 @@ test('only buys that went through count toward Max trades / day', () => {
   assert.equal(liveState({ positions: [], trades: [], orders: misses, now }).buys, 0);
 });
 
-test('live order book: YES asks come from NO bids; buys only when something is for sale at the max; sells at the live bid', async () => {
-  const { bookLevels, checkBuy, checkSell } = await import('../public/autotrade.js');
-  // cents format: YES bids 40¢ x10, 42¢ x5; NO bids 55¢ x8 (= YES ask 45¢), 50¢ x20 (= YES ask 50¢)
-  const book = bookLevels({ orderbook: { yes: [[40, 10], [42, 5]], no: [[50, 20], [55, 8]] } });
-  assert.deepEqual(book.YES.asks, [[0.45, 8], [0.5, 20]]);
-  assert.deepEqual(book.NO.asks, [[0.58, 5], [0.6, 10]]);
-  assert.deepEqual(checkBuy(book, 'YES', 0.46), { ok: true, ask: 0.45, depth: 8 });
-  assert.deepEqual(checkBuy(book, 'YES', 0.44), { ok: false, ask: 0.45, depth: 0 }, 'the bargain is gone: no order');
-  assert.equal(checkBuy(book, 'NO', 0.6).depth, 15);
-  assert.deepEqual(checkSell(book, 'YES', 0.43), { ok: true, bid: 0.42 });
-  assert.equal(checkSell(book, 'YES', 0.46).ok, false, 'live bid 4¢ under the plan: wait');
-  // dollars format, empty side
-  const fp = bookLevels({ orderbook_fp: { yes_dollars: [['0.3000', '12.00']], no_dollars: null } });
-  assert.deepEqual(fp.NO.asks, [[0.7, 12]]);
-  assert.equal(checkBuy(fp, 'YES', 0.9).ok, false);
+
+test('instant orders: the server checks the live book and places the order in one step', async () => {
+  const { bookAdjust } = await import('../server.js');
+  // YES bids 40c x10, 42c x5; NO bids 55c x8 (= YES ask 45c), 50c x20 (= YES ask 50c)
+  const book = { orderbook: { yes: [[40, 10], [42, 5]], no: [[50, 20], [55, 8]] } };
+  const buyYes = buyOrder({ ticker: 'KXBTC15M-26OCT05-T1', side: 'YES', count: 20, limit: 0.46 });
+  assert.deepEqual([bookAdjust(buyYes, book).order.count, bookAdjust(buyYes, book).order.price], ['8.00', '0.4600'], 'sized to the 8 for sale at <= 46c');
+  assert.deepEqual(bookAdjust({ ...buyYes, price: '0.4400' }, book), { skip: true, best: 0.45 }, 'bargain gone: no order');
+  const buyNo = buyOrder({ ticker: 'KXBTC15M-26OCT05-T1', side: 'NO', count: 50, limit: 0.6 }); // ask YES at 40c
+  assert.equal(bookAdjust(buyNo, book).order.count, '15.00', 'YES bids at >= 40c: 5 + 10');
+  // sells step to the live bid when it's within 2c, never further
+  const sellYes = sellOrder({ ticker: 'KXBTC15M-26OCT05-T1', side: 'YES', count: 7, floor: 0.44 });
+  assert.deepEqual([bookAdjust(sellYes, book, 0.02).order.price, bookAdjust(sellYes, book, 0.02).order.count], ['0.4200', '7.00']);
+  assert.equal(bookAdjust({ ...sellYes, price: '0.4700' }, book, 0.02).skip, true, 'live bid 5c under: wait');
+  const fp = { orderbook_fp: { yes_dollars: [['0.3000', '12.00']], no_dollars: null } };
+  assert.equal(bookAdjust(buyYes, fp).skip, true, 'no YES for sale');
 });

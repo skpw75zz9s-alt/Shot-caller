@@ -44,7 +44,7 @@ const TYPES = {
 // Files anyone can load: the paywall page and what it (and "Add to Home Screen") needs.
 const OPEN_FILES = new Set(['/paywall.html', '/paywall.js', '/styles.css', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/sw.js']);
 
-const cache = new Map(); // tiny 2s cache so several open phones don't multiply upstream calls
+const cache = new Map(); // tiny ~1s cache so several open phones don't multiply upstream calls
 
 // Compression: brotli or gzip when the phone accepts it (cuts the app's first download ~70%).
 // Compressed copies are kept on the cached entry so each body is compressed once.
@@ -68,7 +68,7 @@ async function proxy(route, url, req, res) {
   const target = `${route.upstream}/${path}${url.search}`;
   const hit = cache.get(target);
   // The order book is checked right before a live order, so it's only cached for a moment
-  if (hit && Date.now() - hit.at < (path.endsWith('/orderbook') ? 300 : 2000)) return sendEntry(req, res, hit.status, hit, 'application/json', { 'cache-control': 'no-store' });
+  if (hit && Date.now() - hit.at < (path.endsWith('/orderbook') ? 300 : 900)) return sendEntry(req, res, hit.status, hit, 'application/json', { 'cache-control': 'no-store' });
   try {
     const r = await fetch(target, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });
     const entry = { at: Date.now(), status: r.status, raw: Buffer.from(await r.text()) };
@@ -107,6 +107,31 @@ export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD
   if (typeof o.client_order_id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(o.client_order_id)) return 'client_order_id required';
   return null;
 }
+// Instant orders: the server (next to Kalshi) reads the live order book and sends the order in the same request,
+// instead of the phone doing two trips over mobile data. V2 orders trade the YES book:
+//   bid at p fills against YES asks <= p (YES asks are 1 - NO bids); ask at p fills against YES bids >= p.
+// Buys: if nothing is there at the max price, skip (no order); otherwise size to what's there. Sells (reduce_only)
+// may move up to `slip` toward the live price so a slipping market doesn't leave you stuck holding.
+const lvls = (rows, dollars) => (rows || []).map(([p, q]) => [dollars ? Number(p) : Number(p) / 100, Number(q)]).filter(([p, q]) => p > 0 && p < 1 && q > 0);
+export function bookAdjust(order, resp, slip = 0.02) {
+  const ob = resp?.orderbook_fp || resp?.orderbook || {};
+  const yesBids = ob.yes_dollars ? lvls(ob.yes_dollars, true) : lvls(ob.yes, false);
+  const noBids = ob.no_dollars ? lvls(ob.no_dollars, true) : lvls(ob.no, false);
+  const yesAsks = noBids.map(([p, q]) => [Math.round((1 - p) * 10000) / 10000, q]).sort((a, b) => a[0] - b[0]);
+  const bids = [...yesBids].sort((a, b) => b[0] - a[0]);
+  let price = Number(order.price);
+  const levels = order.side === 'bid' ? yesAsks : bids;
+  const fills = (p) => (order.side === 'bid' ? ([lp]) => lp <= p + 1e-9 : ([lp]) => lp >= p - 1e-9);
+  let depth = levels.filter(fills(price)).reduce((a, [, q]) => a + q, 0);
+  if (depth < 1 && order.reduce_only && levels.length) { // sell: step to the live price if it's within `slip`
+    const best = levels[0][0];
+    if (Math.abs(best - price) <= slip + 1e-9) { price = best; depth = levels.filter(fills(price)).reduce((a, [, q]) => a + q, 0); }
+  }
+  if (depth < 1) return { skip: true, best: levels[0]?.[0] ?? null };
+  const count = order.reduce_only ? Number(order.count) : Math.min(Number(order.count), Math.floor(depth));
+  return { skip: false, order: { ...order, price: price.toFixed(4), count: `${count}.00` } };
+}
+
 const orderHits = new Map(); // ip -> recent order timestamps (max 20 a minute)
 const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status']);
 export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpoint, url) {
@@ -128,6 +153,16 @@ export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpo
     body = await readBody(req);
     const bad = validateOrder(body);
     if (bad) return send(res, 400, { error: `order refused: ${bad}` });
+    if (url.searchParams.get('book') === '1') { // check the live book first (no book? the order goes as sent)
+      try {
+        const br = await fetch(`${base}/markets/${encodeURIComponent(body.ticker)}/orderbook`, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(1500) });
+        if (br.ok) {
+          const adj = bookAdjust(body, await br.json(), Math.min(0.05, Math.max(0, Number(url.searchParams.get('slip')) || 0) / 100));
+          if (adj.skip) return send(res, 200, { skipped: true, best: adj.best });
+          if (!validateOrder(adj.order)) body = adj.order;
+        }
+      } catch { /* book unavailable: send the order as is */ }
+    }
   }
   const q = new URLSearchParams();
   if (!isOrder) for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);

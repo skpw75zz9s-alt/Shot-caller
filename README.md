@@ -139,11 +139,12 @@ Settings → **Live auto-trading**. It appears once Kalshi is linked, and your K
 
 The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
 
-**Checks the live order book first:** Kalshi's market list (where the bot reads prices) can lag the real order book by a few seconds. A "bargain" seen in old prices is often already gone, and then a fill-now-or-cancel order can't fill. So right before every order, the app reads Kalshi's live order book:
-- **Buys** go out only if something is for sale at or under the max price, and only for as many contracts as are there. Otherwise the Live card says *Bargain already gone: Kalshi's live price is 84¢, over the 69¢ max*, and it checks again next tick.
-- **Sells** go out at the live bid, but never more than 2¢ under the price the exit was decided on.
+**Instant orders:** while Live is on, the app reads Kalshi's prices every second (not every 3). Each order is a single request: the server, which sits next to Kalshi, reads the live order book and places the order immediately. That saves a second round trip over mobile data.
+- **Buys** go out only if something is for sale at or under the max price, sized to what's there. If the bargain is already gone, no order is sent and it doesn't count as a try.
+- **Sells** step to the live bid if it's within 2¢.
+- After a fill, the position syncs right away, so the sell can follow at once.
 
-If the book can't be read, the order goes out as before.
+Measured against the stand-in Kalshi, from a price change to the order arriving at Kalshi: buys went from 5.3s to **1.0s**, and sells from 5.9s to **1.0s**.
 
 **Doesn't miss calls:** if an order doesn't fill (the price moved in the second it took) or errors, it tries the same call again, up to 3 orders at least 5 seconds apart. It also picks up a call that was already active when you turned Live on or reopened the app. It never buys the same call twice. Only buys that went through count toward *Max trades / day*. While Live is on and the app is on screen, it keeps the screen awake. In Low Power Mode iPhone may still lock it, so set Auto-Lock to Never while trading.
 

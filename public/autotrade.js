@@ -85,36 +85,9 @@ export function planBuy({ cfg, sig, row, positions, trades, orders, balance, now
 export function planSell({ cfg, pos, check, orders, now = Date.now() }) {
   if (!cfg?.live || pos.source !== 'kalshi') return null;
   if (check.ex.action !== 'SELL' || !(check.bid > 0)) return null;
-  if (orders.some((o) => o.ticker === pos.ticker && now - o.at < 5000)) return null;
+  if (orders.some((o) => o.ticker === pos.ticker && now - o.at < 2000)) return null; // reduce-only: can never oversell, so 2s is enough
   const count = Math.floor(pos.contracts);
   if (count < 1) return null;
   return { order: sellOrder({ ticker: pos.ticker, side: pos.side, count, floor: check.bid }), meta: { action: 'sell', side: pos.side, count, cents: cents(check.bid) } };
 }
 
-// ---------- live order book check ----------
-// Kalshi's market list can lag the real book by seconds, and a "bargain" seen in old prices is often gone (then the
-// fill-now-or-cancel order doesn't fill). Right before each order the app reads the live book and this decides.
-// The book lists bids only: YES asks are 1 - NO bids, NO asks are 1 - YES bids.
-const lv = (rows, dollars) => (rows || []).map(([p, q]) => [dollars ? Number(p) : Number(p) / 100, Number(q)]).filter(([p, q]) => p > 0 && p < 1 && q > 0);
-export function bookLevels(resp) {
-  const ob = resp?.orderbook_fp || resp?.orderbook || {};
-  const yesBids = ob.yes_dollars ? lv(ob.yes_dollars, true) : lv(ob.yes, false);
-  const noBids = ob.no_dollars ? lv(ob.no_dollars, true) : lv(ob.no, false);
-  const r4 = (v) => Math.round(v * 10000) / 10000;
-  const asks = (bids) => bids.map(([p, q]) => [r4(1 - p), q]).sort((a, b) => a[0] - b[0]);
-  return { YES: { asks: asks(noBids), bids: [...yesBids].sort((a, b) => b[0] - a[0]) }, NO: { asks: asks(yesBids), bids: [...noBids].sort((a, b) => b[0] - a[0]) } };
-}
-
-// Buy: is anything for sale at or under the max price? Returns { ok, ask, depth } (depth = contracts at <= limit).
-export function checkBuy(book, side, limit) {
-  const asks = book?.[side]?.asks || [];
-  if (!asks.length) return { ok: false, ask: null, depth: 0 };
-  const depth = asks.filter(([p]) => p <= limit + 1e-9).reduce((a, [, q]) => a + q, 0);
-  return { ok: depth >= 1, ask: asks[0][0], depth: Math.floor(depth) };
-}
-
-// Sell: the live best bid. If it slipped more than `slip` under the price the exit was decided on, wait a tick.
-export function checkSell(book, side, planned, slip = 0.02) {
-  const bid = book?.[side]?.bids?.[0]?.[0] ?? null;
-  return { ok: bid != null && bid >= planned - slip - 1e-9, bid };
-}
