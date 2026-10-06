@@ -150,6 +150,9 @@ export const RISK_LEVELS = {
   // 80%+ kept their confidence above 80 for the rest of the round 93% of the time (85+ alone: 84%; 85-90 alone: 65%)
   // and won about 98%. No big-gap exception, no switching sides mid-round.
   steady: { label: 'Steady', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0, minHold: 0.8, steadySec: 60, lockCall: true, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Calls that hold: confidence 85+ that held for a minute and is likely to stay above 80 all round' },
+  // Sniper: the strictest. Confidence 90+ held for 90s, hold odds 90%+. Simulated: confidence stayed above 80 all round
+  // 97-98% of the time and calls won 99.2-99.6%. Very few calls, and they're priced high, so each win pays a few cents.
+  sniper: { label: 'Sniper', minEdge: 0.03, minConfidence: 90, bigEdgeOverride: 0, minHold: 0.9, steadySec: 90, lockCall: true, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest, surest calls: confidence 90+ for 90 seconds and likely to stay above 80 all round. Wins pay little' },
   safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
   balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds

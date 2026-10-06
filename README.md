@@ -79,6 +79,18 @@ This is the real accuracy test. Calls rated 85–90 should win about 85–90% of
 
 The model is already close to the limit set by BTC's randomness. Fancier math won't make it many times more accurate. What decides profit is whether Kalshi's price is wrong, and only the live call record can show that.
 
+### BTC index estimate (several exchanges)
+
+Kalshi settles on CF Benchmarks' BRTI, which is built from several exchanges, not Coinbase alone.
+
+- **What the server reads:** the mid price on Coinbase, Kraken, Bitstamp and Gemini, every 5 seconds.
+- **How it combines them:** it takes the median, dropping any quote that's more than 15 seconds old or more than 0.3% from the rest.
+- **What the phone does:** it shifts its live Coinbase price by that offset before pricing a call.
+- **Fallback:** if fewer than two exchanges answer, the bot uses Coinbase alone.
+- **What's left over:** the remaining gap to Kalshi's settlement is learned as the basis (see below).
+- **Switching it off:** set `INDEX=off` to use only Coinbase.
+- **Not yet tested live:** the exchange feeds couldn't be reached from the development sandbox. The code is covered by unit tests with sample replies.
+
 ### Learning the market (day, week, year)
 
 The server watches BTC and every 15-minute window around the clock, even with every phone closed. It learns three things and uses them in every call, on the phone and in push alerts. The History tab shows what it has learned so far.
@@ -196,8 +208,9 @@ In simulation (9,000+ moments at confidence 85+):
 | Confidence 85–90 alone | 65% | 92–94% |
 | Confidence 85+ alone | 84% | 96.5–97.5% |
 | **Steady (85+ and hold odds 80%+)** | **93%** | **98.4–98.9%** |
+| **Sniper (90+ held 90s, hold odds 90%+)** | **97–98%** | **99.2–99.6%** |
 
-The hold odds came true: predicted 78% held 79–81% of the time, and predicted 90% held 87–88%. Steady makes fewer calls, and calls that hold are often priced high on Kalshi, so each win pays less. It still isn't 100%: about 1 in 15 Steady calls drops below 80 at some point, and a few lose. Phones on Balanced moved to Steady in v5.3, and Balanced is still available.
+**Sniper** is the strictest level. It needs confidence 90+ that has held for 90 seconds and hold odds of 90%+, and its minimum gap is 3 pts. It makes the fewest calls, and they're priced high, so each win pays only a few cents. One loss erases many wins. The hold odds came true: predicted 78% held 79–81% of the time, and predicted 90% held 87–88%. Steady makes fewer calls, and calls that hold are often priced high on Kalshi, so each win pays less. It still isn't 100%: about 1 in 15 Steady calls drops below 80 at some point, and a few lose. Phones on Balanced moved to Steady in v5.3, and Balanced is still available.
 
 | | Safe | Balanced | Aggressive |
 |---|---|---|---|

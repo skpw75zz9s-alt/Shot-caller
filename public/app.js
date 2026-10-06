@@ -148,6 +148,11 @@ async function refreshMemory() {
   renderMemory();
 }
 
+async function refreshIndex() {
+  const ix = await getJSON('index');
+  state.index = ix.index ? { offset: ix.offset || 0, used: ix.used || [], at: Date.now() } : null;
+}
+
 async function refreshSpot() {
   const t = await getJSON('coinbase/products/BTC-USD/ticker');
   state.spot = Number(t.price); state.spotAt = Date.now();
@@ -272,7 +277,11 @@ const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
+// The price the bot prices with: live Coinbase shifted onto the server's multi-exchange index estimate (index.js),
+// when that's fresh and sane. Kalshi settles on an index of several exchanges, not Coinbase alone.
+const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
+const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
+const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
 
 // Deep dive (confidence and its reasons) and the window's rejection trends.
 function renderDeep(row, sig) {
@@ -436,7 +445,7 @@ function render() {
     }
 
     $('strike').textContent = usd(strike);
-    const d = state.spot && strike ? state.spot - strike : null;
+    const d = modelSpot() && strike ? modelSpot() - strike : null;
     $('dist').textContent = d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`;
     sign($('dist'), d);
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
@@ -546,6 +555,7 @@ function renderMemory() {
   lines.push(st.minutes ? `Watched BTC for ${days} day${days === 1 ? '' : 's'} (${st.minutes.toLocaleString()} one-minute moves)${st.backfilling ? ', still reading history' : ''}, graded ${st.windows.toLocaleString()} window${st.windows === 1 ? '' : 's'}.` : 'Just started watching the market.');
   if (st.busiest) lines.push(`Busiest half hour: ${slotLabel(st.busiest.slot)} (${st.busiest.x.toFixed(1)}× normal volatility). Quietest: ${slotLabel(st.quietest.slot)} (${st.quietest.x.toFixed(1)}×).`);
   if (st.nowFactor && Math.abs(st.nowFactor - 1) >= 0.05) lines.push(`Right now the coming minutes are usually ${st.nowFactor > 1 ? 'busier' : 'calmer'} than the last half hour (×${st.nowFactor.toFixed(2)}), and the odds account for it.`);
+  if (indexFresh() && state.index.used.length > 1) lines.push(`Price: median of ${state.index.used.join(', ')} (Kalshi settles on a multi-exchange index; right now it's ${state.index.offset >= 0 ? '+' : '−'}$${Math.abs(state.index.offset).toFixed(2)} vs Coinbase).`);
   lines.push(st.basisN >= 10 ? `Kalshi's settlement index vs Coinbase: ${st.basis >= 0 ? '+' : '−'}$${Math.abs(st.basis).toFixed(2)} (middle of the last ${st.basisN} settlements), included in the odds.` : `Learning the gap between Coinbase and Kalshi's settlement index: ${st.basisN} of 10 settlements.`);
   if (settings.learn === false) lines.push('Off in Settings: the bot isn\'t using any of this right now.');
   $('memSummary').textContent = lines.join(' ');
@@ -631,8 +641,8 @@ function renderTicker(strike) {
   const day = spot && state.open24h ? spot - state.open24h : null;
   $('liveMove').textContent = day == null ? '' : `24h ${day >= 0 ? '+' : '-'}${usd(Math.abs(day), 0)} (${((day / state.open24h) * 100).toFixed(2)}%)`;
   $('liveMove').className = `tk-move ${day > 0 ? 'pos' : day < 0 ? 'neg' : ''}`;
-  const d = spot && strike ? spot - strike : null;
-  $('liveTarget').textContent = d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${usd(Math.abs(d), 0)} ${d >= 0 ? 'above' : 'below'} target`;
+  const d = spot && strike ? modelSpot() - strike : null;
+  $('liveTarget').textContent = d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${usd(Math.abs(d), 0)} ${d >= 0 ? 'above' : 'below'} target${indexFresh() && state.index.used.length > 1 ? ` · index of ${state.index.used.length} exchanges` : ''}`;
   $('liveTarget').className = `tk-target ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
 }
 
@@ -829,6 +839,7 @@ async function tick() {
     if (!(Date.now() - (state.memory?.at || 0) < 10 * 60000) && !state.memoryBusy) { state.memoryBusy = true; refreshMemory().catch(() => {}).finally(() => { state.memoryBusy = false; }); }
     const closed = state.markets.length && Date.parse(state.markets[0].close_time) < Date.now();
     if (Date.now() - state.marketsAt > settings.refreshSec * 1000 || closed) jobs.push(refreshMarkets());
+    refreshIndex().catch(() => { state.index = null; }); // optional: without it the bot uses Coinbase alone
     await Promise.all(jobs);
     $('status').className = 'dot ok';
     $('status').title = 'connected';

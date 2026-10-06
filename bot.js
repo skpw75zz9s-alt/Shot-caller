@@ -6,6 +6,7 @@ import { DEFAULTS, EXIT_DEFAULTS, riskSettings } from './public/model.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
+import { createIndex, defaultSources } from './index.js';
 import { allowAlert, hourlyWindow } from './public/notify.js';
 import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
 
@@ -16,7 +17,8 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 
 // learn: watch the market around the clock (even with no phones subscribed), backfill a few weeks of BTC history
 // on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false }) {
+// indexSources: exchanges for the BTC index estimate (index.js); INDEX=off uses Coinbase alone.
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -27,6 +29,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
   const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
   const LEARN_SERIES = 'KXBTC15M';
+  const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
+  const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
 
   // ---------- storage ----------
   async function load() {
@@ -210,7 +214,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   async function refresh(now) {
     const series = [...new Set([LEARN_SERIES, ...[...devices.values()].map((d) => d.settings.series)])];
-    const jobs = [getJSON(`${coinbase}/products/BTC-USD/ticker`).then((t) => { market.spot = Number(t.price); })];
+    // BTC: the multi-exchange index estimate, or Coinbase alone if the other exchanges don't answer
+    const jobs = [index.poll(now).then((ix) => {
+      const p = ix.index ?? ix.coinbase;
+      if (!p) throw new Error('no BTC price from any exchange');
+      market.spot = p; market.index = ix;
+    })];
     if (now - market.candlesAt > 20000) {
       jobs.push(getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`).then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
     }
@@ -366,5 +375,5 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
   return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices,
-    learned: () => publicLearned(learned), learnStatus, backfill, saveLearned, startLearning };
+    learned: () => publicLearned(learned), learnStatus, index: () => index.read(), backfill, saveLearned, startLearning };
 }

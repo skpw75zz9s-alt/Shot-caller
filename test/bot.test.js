@@ -43,7 +43,7 @@ const base = `http://127.0.0.1:${upstream.address().port}`;
 const svc = await fakePushService();
 const dataFile = join(await mkdtemp(join(tmpdir(), 'shot-')), 'data.json');
 const quiet = { log() {}, warn() {}, error() {} };
-const bot = createBot({ kalshi: base, coinbase: base, dataFile, env: { PUSH_HOST_ALLOW: '127.0.0.1' }, log: quiet });
+const bot = createBot({ kalshi: base, coinbase: base, dataFile, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet });
 await bot.load();
 const phone = fakeBrowser();
 const subscription = { endpoint: `${svc.base}/push/phone1`, keys: phone.keys };

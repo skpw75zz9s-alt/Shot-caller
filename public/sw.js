@@ -1,5 +1,5 @@
 // App-shell cache; API calls always go to the network.
-const CACHE = 'shot-caller-v64';
+const CACHE = 'shot-caller-v65';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'model.js', 'candles.js', 'engine.js', 'analysis.js', 'tracker.js', 'kalshi.js', 'notify.js', 'health.js', 'record.js', 'learner.js', 'icon-192.png', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting())));
