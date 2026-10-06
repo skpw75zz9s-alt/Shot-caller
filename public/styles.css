@@ -217,6 +217,13 @@ nav button.active::before { content: ''; position: absolute; top: -1px; left: 30
 .auto-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
 .src-tag { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--accent); }
 
+/* What the bot has learned */
+.mem-wrap { margin: 8px 0; }
+.mem-bars { display: flex; align-items: flex-end; gap: 1px; height: 64px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.mem-bars i { flex: 1; background: var(--accent); border-radius: 1px 1px 0 0; opacity: .85; }
+.mem-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin: 2px 2px 4px; }
+.mem-wrap small { font-size: 11px; }
+
 /* Risk level */
 .risk-btns { display: flex; gap: 8px; margin: 8px 0 6px; }
 .risk-btns button { flex: 1; margin: 0; background: transparent; border: 1px solid var(--line-2); color: var(--muted); }

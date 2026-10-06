@@ -107,6 +107,19 @@ test('grades the whole window on the server and serves the report card', async (
   assert.equal(bot.report({ endpoint: 'nope' }).status, 404);
 });
 
+test('learns from every window it watches, and from candle history', async () => {
+  const st = bot.learnStatus(NOW + 8 * 60000);
+  assert.equal(st.windows, 1, 'the settled window was learned from');
+  assert.ok(st.minutes >= 100, `learned the candles it saw: ${st.minutes}`);
+  assert.equal(st.calibration.length, 8);
+  assert.equal(st.basis, 0, 'no basis until 10 settlements');
+  const L = bot.learned();
+  assert.equal(L.vol.s2.length, 336);
+  await bot.saveLearned();
+  const saved = JSON.parse(await readFile(join(dataFile, '..', 'learned.json'), 'utf8'));
+  assert.equal(saved.windows, 1, 'kept on disk next to the data file');
+});
+
 test('updates set to every window: each new window sends one update with the last result, in local time', async () => {
   bot.sync({ subscription, settings: { updateMinutes: 15 }, positions: [], tz: 'America/New_York' });
   const before = svc.received.length;

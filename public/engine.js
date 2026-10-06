@@ -3,6 +3,7 @@
 import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
+import { basisOf, calShift, volFactor } from './learner.js';
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
 export const parseCandles = (rows) =>
@@ -33,41 +34,52 @@ const tiltSign = (m) => (/^less/.test(m.strike_type || '') ? -1 : m.strike_type 
 
 // Kalshi settles on the average price over the last minute. Inside that minute, average what has
 // printed so far (BTC prices logged with each quote, plus the current one); before it, null.
-function settlementSoFar(log, close, spot, now) {
+function settlementSoFar(log, close, spot, now, basis = 0) {
   if (!spot || Number.isNaN(close) || now < close - 60000 || now >= close) return null;
   const xs = log.filter((e) => e.t >= close - 60000 && e.s > 0).map((e) => e.s);
   xs.push(spot);
-  return xs.reduce((a, b) => a + b, 0) / xs.length;
+  return xs.reduce((a, b) => a + b, 0) / xs.length + basis;
 }
 
 // Everything the bot knows at one moment: candles with the live bar, vol, drift, rejection trends
 // and a call per market. `quoteLog` (ticker -> [{ t, yesAsk, noAsk }]) collects Kalshi prices over time.
-export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, now = Date.now() }) {
+// `learned` (public/learner.js) is what the server has learned about the market over days and weeks: usual
+// volatility by time of week, calibration from graded windows, and the Coinbase-vs-index basis.
+export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, learned = null, now = Date.now() }) {
   const s = { ...DEFAULTS, ...settings };
   const bars = withLiveBar(candles, spot, now);
   const closes = bars.map((c) => c.c);
   const sigmaLong = longVol(closes.slice(-121));
   const sigmaMin = effectiveVol(realizedVol(closes.slice(-121)), sigmaLong, s.minVol);
   const driftMin = momentum(closes, 10);
+  const useLearned = learned && s.learn !== false;
+  const basis = useLearned ? basisOf(learned) : 0;
+  const mSpot = spot ? spot + basis : spot; // the price Kalshi will actually settle on, as best the bot knows
   const rows = markets.map((m) => {
     const strike = strikeFor(m, candles, strikes, now);
     const rej = rejections(bars, strike, Date.parse(m.open_time), now);
-    const pShift = rej.tilt * s.rejectionWeight * tiltSign(m);
+    let pShift = rej.tilt * s.rejectionWeight * tiltSign(m);
     const q = quote(m);
     const log = (quoteLog[m.ticker] ||= []);
-    const settleAvg = settlementSoFar(log, Date.parse(m.close_time), spot, now);
-    let ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift, settleAvg, now, settings: s });
+    const settleAvg = settlementSoFar(log, Date.parse(m.close_time), spot, now, basis);
+    // The coming minutes are usually busier (or calmer) than the last half hour at this time of the week
+    const vf = useLearned ? volFactor(learned, now, Date.parse(m.close_time)) : 1;
+    const sig = sigmaMin ? sigmaMin * vf : sigmaMin;
+    const raw = useLearned && mSpot && sig ? probYes(m, strike, mSpot, sig * s.volMultiplier, (Date.parse(m.close_time) - now) / 60000, driftMin * s.momentumWeight, settleAvg) : null;
+    const cal = useLearned ? calShift(learned, raw) : 0; // what graded windows say about odds like these
+    pShift += cal;
+    let ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift, settleAvg, now, settings: s });
     // Respect the market: pull the bot's odds part of the way toward Kalshi's mid
     if (s.marketWeight > 0 && ev.pYes != null && q.yesBid != null && q.yesAsk != null) {
       const mid = (q.yesBid + q.yesAsk) / 2;
-      ev = evaluate({ market: m, strike, spot, sigmaMin, driftMin, pShift: pShift + s.marketWeight * (mid - ev.pYes), settleAvg, now, settings: s });
+      ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift: pShift + s.marketWeight * (mid - ev.pYes), settleAvg, now, settings: s });
     }
     if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes, s: spot });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
-    return { m, strike, rej, ev, settleAvg };
+    return { m, strike, rej, ev, settleAvg, sigma: sig, learnedAdj: { volFactor: vf, cal, basis }, pRaw: raw ?? ev.pBase };
   });
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
-  return { now, bars, spot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
+  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
@@ -81,7 +93,7 @@ function edgeUnder(row, snap, s, side, volScale) {
   const drift = (snap.driftMin || 0) * s.momentumWeight;
   const keptDrift = drift * dir > 0 ? 0 : drift;
   const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
-  const p0 = probYes(row.m, row.strike, snap.spot, snap.sigmaMin * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg);
+  const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg);
   const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
   if (p0 == null || ask == null) return null;
   const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));

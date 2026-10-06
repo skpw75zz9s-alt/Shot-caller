@@ -79,6 +79,33 @@ This is the real accuracy test. Calls rated 85–90 should win about 85–90% of
 
 The model is already close to the limit set by BTC's randomness. Fancier math won't make it many times more accurate. What decides profit is whether Kalshi's price is wrong, and only the live call record can show that.
 
+### Learning the market (day, week, year)
+
+The server watches BTC and every 15-minute window around the clock, even with every phone closed. It learns three things and uses them in every call, on the phone and in push alerts. The History tab shows what it has learned so far.
+
+1. **Volatility by time of week.** It learns how wild BTC usually is in each half hour of the week, in New York time, so the US open and 8:30 news line up all year.
+   - When the next 15 minutes are usually busier than the last half hour (or calmer), the bot prices that in before the move arrives.
+   - On first start it reads 4 weeks of 1-minute history from Coinbase, which takes about a minute.
+   - Old weeks fade out with an 8-week half-life, so it keeps up with the seasons.
+2. **Calibration.** For every settled window, it checks how often the side it favored really won at each level of odds. It corrects only the part of a miss that is bigger than luck (2 standard errors). Corrections are capped at ±5 pts, and memory fades over about a year.
+3. **Basis.** It learns the gap between Coinbase (the app's price) and the index Kalshi settles on, from Kalshi's reported settlement values. It uses the median of the last 100, and only after 10 settlements.
+
+You can turn this off in Settings under "Use what the bot learned".
+
+**What it's worth (simulated).** Each test trained on 6 weeks of synthetic BTC, then scored 1,500–3,000 new windows. Synthetic BTC here has a weekly volatility pattern, fat tails and changing volatility. A Brier score measures probability error; lower is better.
+
+| Case | Without learning | With learning |
+|---|---|---|
+| Index $15 above Coinbase: Brier | 0.162 | 0.131 |
+| Index $15 above Coinbase: calls the bot gave 85% | won 75% | won 85% |
+| Index $5 above Coinbase: Brier | 0.128 | 0.125 |
+
+- **Time of week alone:** odds got a little more accurate at busy and quiet times, and stayed about even overall.
+- **Calibration when the bot was already right:** no corrections, so no harm.
+- **Calibration when the bot underestimated volatility by 20%:** its 90%+ odds were pulled 1.5–3 pts toward the truth.
+
+**Keep what it learns:** it's saved in `learned.json` in `DATA_DIR`. Add the Railway volume (see Push notifications below) so calibration and the basis survive redeploys. Without the volume, the time-of-week pattern is re-read from history in about a minute after each deploy, but calibration and the basis start over. Set `LEARN=off` to stop watching while no phone is subscribed.
+
 ### Two rejections in a row (calling rule)
 
 When price gets rejected **twice in a row at about the same level** inside the window, it tends to go the other way. Twice at the top means down; twice at the bottom means up.
@@ -355,6 +382,6 @@ Configure the upstream APIs with the `KALSHI_API` and `COINBASE_API` env vars.
 
 ## Known limitations
 
-- Coinbase spot differs a little from BRTI. Near the strike in the final minute, that gap matters.
+- Coinbase spot differs a little from BRTI. The bot learns the typical gap from Kalshi's settlements (after 10), but the gap moves around during the day.
 - Realized vol lags regime changes such as news or liquidations.
 - The strike comes from Kalshi's `floor_strike`. If that field is missing, the app uses the BTC open price of the window.

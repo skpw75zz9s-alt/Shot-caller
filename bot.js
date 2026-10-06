@@ -7,18 +7,26 @@ import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, release
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
 import { allowAlert, hourlyWindow } from './public/notify.js';
+import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
 
 const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, updateMinutes: 60, ...DEFAULTS, ...EXIT_DEFAULTS };
 const MAX_DEVICES = 100;
 // Only send to real browser push services (stops the server being used to POST anywhere).
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
 
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true }) {
+// learn: watch the market around the clock (even with no phones subscribed), backfill a few weeks of BTC history
+// on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
   const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
   const market = { spot: null, candles: [], candlesAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
+  const learnFile = dataFile.replace(/[^/\\]+$/, 'learned.json');
+  let learned = newLearned(), learnDirty = false, learnSavedAt = 0, backfilling = false, backfillStop = false;
+  const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
+  const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
+  const LEARN_SERIES = 'KXBTC15M';
 
   // ---------- storage ----------
   async function load() {
@@ -47,7 +55,42 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       log.warn('Generated new VAPID keys. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY so phones stay subscribed across redeploys.');
     }
     vapid.subject = env.VAPID_SUBJECT || 'https://github.com/skpw75zz9s-alt/Shot-caller';
+    try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L }; } catch { /* first run: learns from scratch */ }
     await save();
+    if (learn) startLearning();
+  }
+  function startLearning() {
+    learn = true;
+    start();
+    backfill().catch((e) => log.warn('backfill stopped', e.message));
+  }
+  async function saveLearned() {
+    learnDirty = false; learnSavedAt = Date.now();
+    try {
+      await mkdir(dirname(learnFile), { recursive: true });
+      await writeFile(`${learnFile}.tmp`, JSON.stringify(learned));
+      await rename(`${learnFile}.tmp`, learnFile);
+    } catch (e) { log.error('saving what was learned failed', e.message); }
+  }
+
+  // First start (or a long outage): read up to 4 weeks of 1-minute BTC history so the time-of-week pattern is
+  // known from day one. Coinbase serves 300 minutes per request; one request every ~0.4s.
+  async function backfill(now = Date.now(), weeks = 4) {
+    const from = Math.max(learned.vol.lastT + 60000, now - weeks * 7 * 86400000);
+    if (now - from < 6 * 3600000) return;
+    backfilling = true;
+    try {
+      for (let a = from; a < now && !backfillStop; a += 300 * 60000) {
+        const b = Math.min(now, a + 300 * 60000);
+        try {
+          const rows = await getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60&start=${new Date(a - 60000).toISOString()}&end=${new Date(b).toISOString()}`);
+          if (Array.isArray(rows) && learnCandles(learned, parseCandles(rows))) learnDirty = true;
+        } catch { /* a missing chunk just leaves a gap */ }
+        await new Promise((r) => { const t = setTimeout(r, 400); t.unref?.(); });
+      }
+    } finally { backfilling = false; }
+    log.log?.(`learned ${learned.vol.minutes} minutes of BTC history`);
+    await saveLearned();
   }
   function scheduleSave() {
     clearTimeout(saveTimer);
@@ -166,7 +209,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   async function refresh(now) {
-    const series = [...new Set([...devices.values()].map((d) => d.settings.series))];
+    const series = [...new Set([LEARN_SERIES, ...[...devices.values()].map((d) => d.settings.series)])];
     const jobs = [getJSON(`${coinbase}/products/BTC-USD/ticker`).then((t) => { market.spot = Number(t.price); })];
     if (now - market.candlesAt > 20000) {
       jobs.push(getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`).then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
@@ -180,18 +223,19 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   async function tick(now = Date.now()) {
-    if (busy || !devices.size) return;
+    if (busy || (!devices.size && !learn)) return;
     busy = true;
     try {
       await refresh(now);
       market.lastTick = now; market.lastError = null;
       await gradeClosedWindows(now); // first, so the 15-minute update can include the result
+      observe(now);
       const sends = [];
       for (const d of devices.values()) {
         if (!canNotify(d)) continue; // paywall: no access, no bot
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
-        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, now });
+        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned, now });
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -255,16 +299,58 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     return true;
   }
 
+  // ---------- learning (every window, all day, every day) ----------
+  function observe(now) {
+    if (!backfilling && learnCandles(learned, market.candles.filter((c) => c.t + 60000 <= now))) learnDirty = true;
+    const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: market.spot, settings: DEVICE_DEFAULTS, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned, now });
+    for (const row of snap.rows) {
+      const close = Date.parse(row.m.close_time);
+      if (!(close > now)) continue;
+      const w = (lw[row.m.ticker] ||= { closeTime: close, samples: [], minute: null, spots: [] });
+      const minute = Math.floor(now / 60000);
+      // The bot's raw odds (before any calibration) once a minute while calls are allowed
+      if (row.ev.callsAt && now >= row.ev.callsAt && close - now > 30000 && w.minute !== minute && row.pRaw != null) { w.samples.push(row.pRaw); w.minute = minute; }
+      if (close - now <= 60000 && market.spot) w.spots.push(market.spot);
+    }
+    for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 2 * 3600000) delete lw[t];
+    if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
+  }
+  function learnFrom(t) {
+    const w = lw[t];
+    if (!w || !results.has(t)) return;
+    delete lw[t];
+    learnWindow(learned, w.samples, results.get(t));
+    if (settledValue.has(t) && w.spots.length >= 6) learnBasis(learned, settledValue.get(t), w.spots.reduce((a, b) => a + b, 0) / w.spots.length);
+    learnDirty = true;
+  }
+  function learnStatus(now = Date.now()) {
+    const p = volProfile(learned);
+    const live = (market.markets[LEARN_SERIES] || []).find((m) => Date.parse(m.close_time) > now);
+    return {
+      minutes: learned.vol.minutes, since: learned.vol.firstT, windows: learned.windows, backfilling,
+      busiest: p?.busiest ?? null, quietest: p?.quietest ?? null, profile: p?.rel ?? null,
+      nowFactor: live ? volFactor(learned, now, Date.parse(live.close_time)) : null,
+      calibration: calTable(learned), basis: basisOf(learned), basisN: learned.basis.length,
+    };
+  }
+
   // Fetch results for closed windows (a few per tick) and grade every phone's tracker.
   async function gradeClosedWindows(now) {
     const pending = new Set();
     for (const d of devices.values()) if (d.tracker) for (const w of pendingWindows(d.tracker, now)) pending.add(w.ticker);
+    for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 60000) pending.add(t);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
         const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
-        if (mk?.result === 'yes' || mk?.result === 'no') results.set(t, mk.result);
+        if (mk?.result === 'yes' || mk?.result === 'no') {
+          results.set(t, mk.result);
+          const v = Number(mk.expiration_value);
+          if (Number.isFinite(v) && v > 0) settledValue.set(t, v);
+        } else if (lw[t] && lw[t].closeTime < now - 3600000) delete lw[t]; // voided or never settled: nothing to learn
       } catch { /* retry next tick */ }
     }
+    for (const t of Object.keys(lw)) learnFrom(t);
+    if (settledValue.size > 500) settledValue.delete(settledValue.keys().next().value);
     for (const d of devices.values()) {
       if (!d.tracker) continue;
       for (const w of pendingWindows(d.tracker, now)) if (results.has(w.ticker)) { gradeWindow(d.tracker, w.ticker, results.get(w.ticker)); dirty = true; }
@@ -274,10 +360,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   function start(intervalMs = Number(env.BOT_INTERVAL_MS || 5000)) {
-    if (!timer) timer = setInterval(() => tick(), intervalMs);
+    if (!timer) { timer = setInterval(() => tick(), intervalMs); timer.unref?.(); }
   }
-  function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); }
+  function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); backfillStop = true; }
 
-  const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError });
-  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices };
+  const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
+  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices,
+    learned: () => publicLearned(learned), learnStatus, backfill, saveLearned, startLearning };
 }

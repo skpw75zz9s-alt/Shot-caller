@@ -210,6 +210,8 @@ export const server = http.createServer(async (req, res) => {
     if (ka) return await kalshiAuth(req, res, ka[1], url);
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
+    // What the server has learned about the market (the phone prices with it too)
+    if (path === '/api/learn') return send(res, 200, { learned: bot.learned(), status: bot.learnStatus() });
     const route = ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) return proxy(route, url, req, res);
     if (rel === '/paywall.html') return serveFile(req, res, '/index.html'); // already paid: go straight to the app
@@ -221,5 +223,6 @@ export const server = http.createServer(async (req, res) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
-  ready.then(() => { if (bot.status().devices) bot.start(); });
+  // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
+  ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices) bot.start(); });
 }

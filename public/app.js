@@ -6,6 +6,7 @@ import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSe
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, logCall, settleCalls, unsettledCalls } from './record.js';
+import { slotLabel } from './learner.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -19,6 +20,7 @@ const SETTINGS_META = [
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, even if volatility is 20% off either way, to call BUY THE LOW', 'cents'],
   ['minConfidence', 'Min confidence (0-100)', 'Win odds a call needs before BUY THE LOW fires (80 = wins about 8 times in 10)', 'num'],
   ['rejectionWeight', 'Rejection weight', 'How much rejection trends move the bot\'s odds (0 = off, 1 = up to ±5 pts)', 'num'],
+  ['learn', 'Use what the bot learned', 'Price with the market patterns the server has learned over days and weeks (see History)', 'bool'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
   ['notifySell', 'Notify: sell now', 'Alert when a tracked position should be sold', 'bool'],
@@ -94,7 +96,8 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   notifyLog: {}, // anti-spam limiter for in-app alerts
   calls: store.get('calls', {}),
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
-  callLog: store.get('callLog', []) }; // every call the bot makes, graded at settlement (public/record.js)
+  callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
+  memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
@@ -125,6 +128,13 @@ async function refreshMarkets() {
   const data = await getJSON(`kalshi/markets?series_ticker=${encodeURIComponent(settings.series)}&status=open&limit=50`);
   state.markets = (data.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time));
   state.marketsAt = Date.now();
+}
+
+// What the server has learned (volatility by time of week, calibration, basis). Small; refreshed every 10 minutes.
+async function refreshMemory() {
+  state.memory = { ...(await getJSON('learn')), at: Date.now() };
+  store.set('marketMemory', state.memory);
+  renderMemory();
 }
 
 async function refreshSpot() {
@@ -251,7 +261,7 @@ const sign = (el, v) => { el.classList.toggle('pos', v > 0); el.classList.toggle
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes, quoteLog: state.quoteLog });
+const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: state.spot, settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
 
 // Deep dive (confidence and its reasons) and the window's rejection trends.
 function renderDeep(row, sig) {
@@ -264,7 +274,8 @@ function renderDeep(row, sig) {
     $('deepScore').textContent = `Confidence ${deep.score}`;
     $('deepScore').className = confTier(deep.score);
     $('deepChecks').innerHTML = deep.checks.map((c) =>
-      `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('');
+      `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('') +
+      learnedNotes(row).map((x) => `<li class="meh"><i>🧠</i><span>${esc(x)}</span><b></b></li>`).join('');
   }
   $('rejCard').hidden = !rej;
   if (!rej) return;
@@ -278,6 +289,17 @@ function renderDeep(row, sig) {
   const w = (rej.wickBias + 1) / 2; // 0 = all upper wicks (sellers), 1 = all lower wicks (buyers)
   $('wickFill').style.cssText = w >= 0.5 ? `left:50%;width:${(w - 0.5) * 100}%;background:var(--yes)` : `left:${w * 100}%;width:${(0.5 - w) * 100}%;background:var(--no)`;
   $('rejSummary').innerHTML = rej.summary.map((x) => `<li>${esc(x)}</li>`).join('');
+}
+
+// What the long-term memory changed in this window's odds
+function learnedNotes(row) {
+  const a = row?.learnedAdj;
+  if (!a) return [];
+  const out = [];
+  if (Math.abs(a.volFactor - 1) >= 0.08) out.push(`Learned: at this time of the week the next minutes are usually ${a.volFactor > 1 ? 'busier' : 'calmer'} than the last half hour (volatility ×${a.volFactor.toFixed(2)})`);
+  if (a.basis) out.push(`Learned: Kalshi's settlement index runs ${a.basis > 0 ? '+' : '−'}$${Math.abs(a.basis).toFixed(2)} vs Coinbase, included`);
+  if (a.cal) out.push(`Learned: odds like these ${a.cal * (row.ev.pYes >= 0.5 ? 1 : -1) > 0 ? 'won more' : 'won less'} than the bot said, corrected ${(Math.abs(a.cal) * 100).toFixed(1)} pts`);
+  return out;
 }
 
 // Kalshi % vs bot % for each side. "Low" = Kalshi's price is below the bot's odds by the min gap after fees.
@@ -497,6 +519,31 @@ function renderHistory() {
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
     '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
   renderRecord();
+  renderMemory();
+}
+
+// What the bot has learned about the market (from the server, which watches every window around the clock)
+function renderMemory() {
+  const st = state.memory?.status;
+  if (!st) { $('memSummary').textContent = 'Not loaded yet. The server learns the market around the clock and shares it here.'; return; }
+  const days = st.since ? Math.max(1, Math.round((Date.now() - st.since) / 86400000)) : 0;
+  const lines = [];
+  lines.push(st.minutes ? `Watched BTC for ${days} day${days === 1 ? '' : 's'} (${st.minutes.toLocaleString()} one-minute moves)${st.backfilling ? ', still reading history' : ''}, graded ${st.windows.toLocaleString()} window${st.windows === 1 ? '' : 's'}.` : 'Just started watching the market.');
+  if (st.busiest) lines.push(`Busiest half hour: ${slotLabel(st.busiest.slot)} (${st.busiest.x.toFixed(1)}× normal volatility). Quietest: ${slotLabel(st.quietest.slot)} (${st.quietest.x.toFixed(1)}×).`);
+  if (st.nowFactor && Math.abs(st.nowFactor - 1) >= 0.05) lines.push(`Right now the coming minutes are usually ${st.nowFactor > 1 ? 'busier' : 'calmer'} than the last half hour (×${st.nowFactor.toFixed(2)}), and the odds account for it.`);
+  lines.push(st.basisN >= 10 ? `Kalshi's settlement index vs Coinbase: ${st.basis >= 0 ? '+' : '−'}$${Math.abs(st.basis).toFixed(2)} (middle of the last ${st.basisN} settlements), included in the odds.` : `Learning the gap between Coinbase and Kalshi's settlement index: ${st.basisN} of 10 settlements.`);
+  if (settings.learn === false) lines.push('Off in Settings: the bot isn\'t using any of this right now.');
+  $('memSummary').textContent = lines.join(' ');
+  // Weekday volatility by half hour (New York time)
+  const prof = st.profile;
+  if (prof) {
+    const day = [...Array(48).keys()].map((h) => { const xs = [1, 2, 3, 4, 5].map((d) => prof[d * 48 + h]).filter((x) => x != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0; });
+    const max = Math.max(...day, 1e-9);
+    $('memBars').innerHTML = day.map((x, h) => `<i style="height:${Math.max(4, (x / max) * 100)}%" title="${slotLabel(48 + h).slice(4)}: ${x.toFixed(2)}×"></i>`).join('');
+    $('memBarsWrap').hidden = false;
+  }
+  const rows = (st.calibration || []).filter((b) => b.n >= 20);
+  $('memCal').innerHTML = rows.map((b) => `<li><span><b>Said ${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</b><small>${b.n} window${b.n === 1 ? '' : 's'} · won ${Math.round(b.won * 100)}%${b.shift ? ` · corrected ${b.shift > 0 ? '+' : '−'}${(Math.abs(b.shift) * 100).toFixed(1)} pts` : ' · no correction needed'}</small></span></li>`).join('');
 }
 
 // The bot's call record: what it claimed (confidence = win odds) next to how often its calls really won
@@ -764,6 +811,7 @@ async function tick() {
   try {
     const jobs = isLive() ? [] : [refreshSpot()];
     if (Date.now() - state.candlesAt > 20000) jobs.push(refreshCandles());
+    if (!(Date.now() - (state.memory?.at || 0) < 10 * 60000) && !state.memoryBusy) { state.memoryBusy = true; refreshMemory().catch(() => {}).finally(() => { state.memoryBusy = false; }); }
     const closed = state.markets.length && Date.parse(state.markets[0].close_time) < Date.now();
     if (Date.now() - state.marketsAt > settings.refreshSec * 1000 || closed) jobs.push(refreshMarkets());
     await Promise.all(jobs);

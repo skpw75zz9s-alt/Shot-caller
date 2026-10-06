@@ -135,6 +135,7 @@ export const DEFAULTS = {
   noCallLastMin: 0,     // entry filters for new calls (0 = off): no new call with fewer than this many minutes left,
   maxVolRatio: 0,       // ...or when 1-minute vol is more than this many times its 2-hour norm,
   jumpSkip: 0,          // ...or when Kalshi's price for the side moved this much in the last 30 seconds
+  learn: true,          // use what the server learned over days and weeks (time-of-week volatility, calibration, basis)
 };
 
 // Risk levels (Settings). All levels re-enter after selling. Aggressive trades every small gap, scales in as it
