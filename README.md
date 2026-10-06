@@ -61,6 +61,24 @@ Tested on 48 fresh simulated runs per level (6 market types × 8 seeds × 400 wi
 
 Without the exception, the high bars alone cut profit by 60–85%. On a perfectly efficient Kalshi, no setting makes money, old or new. The edge only exists when Kalshi lags or misprices.
 
+### Call record (History)
+
+Every BUY THE LOW call the bot makes while the app is open is logged. When Kalshi settles the market, the call is graded.
+
+History shows:
+- How many calls won.
+- The win odds the bot claimed (its confidence), on average and by confidence range.
+- What $10 on every call would have made, held to settlement after Kalshi's fee.
+
+This is the real accuracy test. Calls rated 85–90 should win about 85–90% of the time. Under about 30 graded calls, luck still dominates.
+
+**How accurate the odds are (simulated).** The test used 114,000 moments from synthetic BTC with fat tails and changing volatility:
+- When the bot's own odds said 80–85%, it won 80–82% of the time. When they said 90–95%, it won 90–92%.
+- Confidence (the most cautious of three volatility guesses) runs conservative. Confidence 85–90 won 91–92%.
+- Three alternative volatility estimators scored no better: a 50/50 short/long blend, a slower EWMA, and completed candles only.
+
+The model is already close to the limit set by BTC's randomness. Fancier math won't make it many times more accurate. What decides profit is whether Kalshi's price is wrong, and only the live call record can show that.
+
 ### Two rejections in a row (calling rule)
 
 When price gets rejected **twice in a row at about the same level** inside the window, it tends to go the other way. Twice at the top means down; twice at the bottom means up.

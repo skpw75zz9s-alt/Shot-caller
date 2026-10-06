@@ -27,10 +27,10 @@ export function healthCheck(h) {
   const cAge = h.candlesAt ? now - h.candlesAt : Infinity;
   if (cAge > 5 * 60000) add('warn', 'candles', 'Candles haven\'t updated in a while', 'Usually a slow connection; they reload every 20 seconds.');
 
-  // Phone clock: Kalshi rejects signed requests when the clock is off
+  // Phone clock: Kalshi rejects signed requests (account sync) when the clock is off
   if (h.skewMs != null) {
     const s = Math.abs(h.skewMs) / 1000;
-    if (s > 20) add('bad', 'clock', `Phone clock is off by ${Math.round(s)}s`, 'Turn on Settings → General → Date & Time → Set Automatically. Kalshi refuses orders from a wrong clock.');
+    if (s > 20) add('bad', 'clock', `Phone clock is off by ${Math.round(s)}s`, 'Turn on Settings → General → Date & Time → Set Automatically. Kalshi refuses account sync from a wrong clock.');
     else if (s > 5) add('warn', 'clock', `Phone clock is off by ${Math.round(s)}s`, 'Turn on Set Automatically in your phone\'s Date & Time settings.');
     else add('ok', 'clock', 'Phone clock matches the server');
   }

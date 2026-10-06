@@ -5,6 +5,7 @@ import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
+import { callStats, logCall, settleCalls, unsettledCalls } from './record.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -92,7 +93,8 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
   calls: store.get('calls', {}),
-  ruleLog: store.get('ruleLog', []) }; // scorecard for the two-rejections rule
+  ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
+  callLog: store.get('callLog', []) }; // every call the bot makes, graded at settlement (public/record.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
@@ -379,6 +381,7 @@ function render() {
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
+      if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN })) store.set('callLog', state.callLog);
       const key = `${m.ticker}:${call}:${sig.callN}`;
       if (!state.alerted[key]) {
         state.alerted[key] = true;
@@ -493,6 +496,21 @@ function renderHistory() {
     `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
     '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
+  renderRecord();
+}
+
+// The bot's call record: what it claimed (confidence = win odds) next to how often its calls really won
+function renderRecord() {
+  const st = callStats(state.callLog);
+  const pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  $('recSummary').textContent = !st.calls ? 'No calls yet. Every BUY THE LOW call the bot makes while the app is open is logged here and graded when Kalshi settles it.'
+    : !st.graded ? `${st.calls} call${st.calls > 1 ? 's' : ''} logged, waiting for Kalshi to settle them.`
+    : `${st.graded} call${st.graded > 1 ? 's' : ''} graded${st.calls > st.graded ? ` (${st.calls - st.graded} waiting for Kalshi)` : ''}: won ${st.wins} (${pctOf(st.wins, st.graded)})${st.said != null ? `, the bot said ${Math.round(st.said)}% on average` : ''}. $10 on every call, held to settlement: ${money(st.usd)}.${st.graded < 30 ? ' Under 30 calls is too few to judge: luck still dominates.' : ''}`;
+  const order = ['90+', '80–89', '70–79', 'under 70'];
+  $('recBuckets').innerHTML = order.filter((k) => st.buckets[k]).map((k) => {
+    const b = st.buckets[k];
+    return `<li><span><b>Confidence ${k}</b><small>${b.calls} call${b.calls > 1 ? 's' : ''} · said ${Math.round(b.said)}% · won ${pctOf(b.wins, b.calls)}</small></span><b class="${b.usd >= 0 ? 'pos' : 'neg'}">${money(b.usd)}</b></li>`;
+  }).join('');
 }
 
 // ---------- live BTC price ----------
@@ -889,20 +907,6 @@ async function kalshiGet(endpoint, params = {}) {
   return body;
 }
 
-// Orders go to Kalshi's V2 path (portfolio/events/orders); the server forwards /kalshi-auth/orders there
-const UPSTREAM = { orders: 'events/orders' };
-async function kalshiPost(endpoint, body, query = '') {
-  const { key, keyId } = state.kalshi;
-  if (!key) throw new Error('Kalshi not linked');
-  kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
-  const headers = { ...(await signHeaders(key, keyId, 'POST', kalshiPrefix + (UPSTREAM[endpoint] || endpoint))), 'content-type': 'application/json' };
-  const r = await fetch(`${API}/kalshi-auth/${endpoint}${query}`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
-  paywalled(r);
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(out.error?.message || out.error || out.message || `Kalshi: HTTP ${r.status}`); e.status = r.status; throw e; }
-  return out;
-}
-
 async function marketInfo(ticker) {
   const open = state.markets.find((x) => x.ticker === ticker);
   if (open) return open;
@@ -1109,12 +1113,21 @@ function trackRule(snap, live, now) {
   for (const e of log) if (e.spot5 == null && snap.spot && now - e.seenAt >= 5 * 60000 && now - e.seenAt < 7 * 60000) { e.spot5 = snap.spot; changed = true; }
   if (changed) store.set('ruleLog', log);
 }
-async function settleRuleLog() {
-  for (const e of state.ruleLog.filter((x) => !x.result && Date.parse(x.closeTime) < Date.now() - 90000).slice(0, 2)) {
+// Kalshi results for the scorecards (two-rejections rule and the call record), a few markets per pass
+async function settleLogs() {
+  const now = Date.now();
+  const tickers = new Map();
+  for (const e of state.ruleLog) if (!e.result && Date.parse(e.closeTime) < now - 90000) tickers.set(e.ticker, e.closeTime);
+  for (const e of unsettledCalls(state.callLog, now)) tickers.set(e.ticker, e.closeTime);
+  for (const [ticker, closeTime] of [...tickers].slice(0, 3)) {
     try {
-      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(e.ticker)}`);
-      if (market?.result === 'yes' || market?.result === 'no') { e.result = market.result; store.set('ruleLog', state.ruleLog); }
-      else if (Date.parse(e.closeTime) < Date.now() - 6 * 3600000) { e.result = 'unknown'; store.set('ruleLog', state.ruleLog); }
+      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(ticker)}`);
+      let result = market?.result === 'yes' || market?.result === 'no' ? market.result : null;
+      if (!result && Date.parse(closeTime) < now - 6 * 3600000) result = 'unknown'; // voided or never reported
+      if (!result) continue;
+      for (const e of state.ruleLog) if (e.ticker === ticker && !e.result) e.result = result;
+      settleCalls(state.callLog, ticker, result);
+      store.set('ruleLog', state.ruleLog); store.set('callLog', state.callLog);
     } catch { /* next time */ }
   }
 }
@@ -1124,7 +1137,7 @@ function ruleStats(log) {
   return { fired: log.length, five: five.length, right5: five.filter((e) => (e.spot5 - e.spot0) * e.dir > 0).length,
     settled: settled.length, won: settled.filter((e) => (e.result === 'yes') === (e.dir > 0)).length };
 }
-setInterval(() => { if (!document.hidden) settleRuleLog(); }, 30000);
+setInterval(() => { if (!document.hidden) settleLogs(); }, 30000);
 function renderRuleScore() {
   const rs = ruleStats(state.ruleLog);
   $('ruleScore').textContent = rs.fired ? `Two-rejections rule scorecard: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule scorecard: hasn\'t fired yet (it\'s scored on every market while the app is open)';

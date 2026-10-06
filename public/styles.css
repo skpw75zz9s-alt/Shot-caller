@@ -217,26 +217,11 @@ nav button.active::before { content: ''; position: absolute; top: -1px; left: 30
 .auto-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
 .src-tag { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--accent); }
 
-/* Auto-trade practice */
-.practice-toggle { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-weight: 600; }
-.practice-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
-.practice-card h4 { margin: 12px 0 4px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
-.pr-stats { margin: 6px 0; }
-.pr-log li small { display: block; color: var(--muted); }
-.practice-strip { margin: 0 0 10px; padding: 9px 12px; border: 1px dashed var(--accent); border-radius: 10px; font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.practice-strip b { color: var(--accent); letter-spacing: .5px; }
-
 /* Risk level */
 .risk-btns { display: flex; gap: 8px; margin: 8px 0 6px; }
 .risk-btns button { flex: 1; margin: 0; background: transparent; border: 1px solid var(--line-2); color: var(--muted); }
 .risk-btns button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* Live auto-trading */
-.live-strip { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; padding: 9px 12px; border: 2px solid var(--no); border-radius: 10px; font-size: 12px; background: color-mix(in srgb, var(--no) 10%, transparent); }
-.live-strip b { color: var(--no); letter-spacing: .5px; }
-button.danger { background: var(--no); border-color: var(--no); color: #fff; width: auto; margin: 0; white-space: nowrap; }
-.live-card h3 { color: var(--no); }
-.live-card h4 { margin: 12px 0 4px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
 /* Health check (every 2 rounds) */
 .health-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
 .health-list li { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
