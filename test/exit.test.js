@@ -93,19 +93,3 @@ test('flipSigns spots a shooting star after a run-up for YES only', () => {
   assert.ok(!flipSigns(b, 'NO', now).includes('Shooting star'));
 });
 
-test('profit lock: sells while still up when it gives back the profit and shows signs of turning (live only)', async () => {
-  const { exitSignal } = await import('../public/model.js');
-  // bought 40c; bid peaked 60c (up ~16c a contract after fees); now 50c, bot still thinks it's worth 70%
-  const pos = { side: 'YES', price: 0.4, contracts: 10, peakBid: 0.6, peakP: 0.82 };
-  const args = { pos, bid: 0.5, pSide: 0.7, flips: [], minutesLeft: 6 };
-  assert.equal(exitSignal(args).action, 'HOLD', 'off by default: holds for value');
-  const on = { profitLock: true };
-  const ex = exitSignal({ ...args, settings: on });
-  assert.equal(ex.kind, 'lock', 'gave back 60% of the peak profit, bot odds down 12 pts from peak');
-  assert.match(ex.why, /Locking in profit/);
-  assert.equal(exitSignal({ ...args, pos: { ...pos, peakP: 0.72 }, settings: on }).action, 'HOLD', 'price dipped but no other sign: hold');
-  assert.equal(exitSignal({ ...args, pos: { ...pos, peakP: 0.72 }, flips: ['Two strong candles against you'], settings: on }).kind, 'lock');
-  assert.equal(exitSignal({ ...args, bid: 0.57, settings: on }).action, 'HOLD', 'only gave back a little');
-  assert.equal(exitSignal({ ...args, bid: 0.41, settings: on }).kind !== 'lock', true, 'no longer in profit: not a lock');
-  assert.equal(exitSignal({ ...args, pos: { ...pos, peakBid: 0.46 }, bid: 0.43, settings: on }).action, 'HOLD', 'never was up enough to arm');
-});

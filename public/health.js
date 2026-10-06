@@ -1,5 +1,5 @@
 // Self-check ("debug every 2 rounds"): every 30 minutes the app checks the things that can quietly break
-// auto-trading and alerts, and says what to do about each. Pure function; app.js gathers the inputs.
+// calls, account sync and alerts, and says what to do about each. Pure function; app.js gathers the inputs.
 // Each result: { level: 'ok' | 'warn' | 'bad', key, label, fix }
 export const ROUND_MS = 15 * 60000;
 export const HEALTH_EVERY_ROUNDS = 2;
@@ -36,27 +36,12 @@ export function healthCheck(h) {
   }
 
   // Kalshi account link
-  if (!h.linked) add(h.liveOn ? 'bad' : 'ok', 'kalshi-link', h.liveOn ? 'Live trading is on but Kalshi isn\'t linked on this phone' : 'Kalshi account not linked (optional)', h.liveOn ? 'Link your Kalshi account again in Settings.' : '');
+  if (!h.linked) add('ok', 'kalshi-link', 'Kalshi account not linked (optional)');
   else {
     const bAge = h.balanceAt ? now - h.balanceAt : Infinity;
     if (h.kalshiError) add('bad', 'kalshi-sync', `Kalshi sync error: ${h.kalshiError}`, /401|403|signature|key/i.test(h.kalshiError) ? 'Your API key may be deleted or wrong. Make a new key in Kalshi and link it again.' : 'Tap Sync in the Kalshi card. If it keeps failing, link the key again.');
     else if (bAge > 5 * 60000) add('warn', 'kalshi-sync', `Kalshi balance last synced ${h.balanceAt ? `${ago(bAge)} ago` : 'never'}`, 'Tap Sync in the Kalshi card.');
     else add('ok', 'kalshi-sync', `Kalshi linked · balance $${(h.balance ?? 0).toFixed(2)}`);
-  }
-
-  // Live auto-trader
-  if (h.liveOn) {
-    if (h.busySince && now - h.busySince > 30000) add('bad', 'live-stuck', `An order has been waiting for ${ago(now - h.busySince)}`, 'Close and reopen the app. Check Kalshi to see if the order went through.');
-    if (h.lastOrderError) add('bad', 'live-error', `Last live order failed: ${h.lastOrderError}`, 'Send a screenshot of the Live card if this keeps happening.');
-    if (h.balance != null && h.balance < 1) add('warn', 'live-cash', `Kalshi cash is $${h.balance.toFixed(2)}`, 'Add money in the Kalshi app or it can\'t buy.');
-    if (h.held?.held > 0) add('warn', 'live-held', `Kalshi is holding $${h.held.held.toFixed(2)} for ${h.held.count} waiting order${h.held.count > 1 ? 's' : ''}`, 'That money can\'t be used until those orders fill or are cancelled. Cancel old ones in the Kalshi app (Portfolio → Orders) if you don\'t want them.');
-    if (h.budget != null && h.exposure != null && h.exposure >= h.budget - 0.01) add('warn', 'live-budget', 'Live budget is full', 'It buys again after a position closes, or raise Budget.');
-    if (h.seen && h.seen.minutes >= 60) {
-      const at = h.seen.bars.find(([b]) => b === h.liveConf)?.[1] ?? 0;
-      const lower = h.seen.bars.filter(([b, n]) => b < h.liveConf && n > 0);
-      if (at === 0 && lower.length) add('warn', 'live-bar', `Min confidence ${h.liveConf} found no trades in ${h.seen.minutes} min`, `At ${lower[0][0]} it would have bought ${lower[0][1]}. Lower Min confidence in the Live card if you want more trades.`);
-    }
-    if (!out.some((r) => r.key.startsWith('live-') && r.level !== 'ok')) add('ok', 'live', 'Live auto-trader running normally');
   }
 
   // Push notifications (not required, but alerts with the app closed need them)

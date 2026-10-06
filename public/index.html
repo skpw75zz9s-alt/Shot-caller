@@ -34,8 +34,6 @@
   <main>
     <section id="view-live" class="view active">
       <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
-      <div class="live-strip" id="liveStrip" hidden><span id="liveStripText"></span><button id="liveStop" class="danger">STOP</button></div>
-      <div class="practice-strip" id="practiceStrip" hidden></div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
@@ -120,85 +118,16 @@
           <div class="pos-btns"><label class="file-btn">Choose key file<input id="kFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="kLink">Link account</button></div>
           <p class="fine">On Kalshi: Account → API keys → Create key. Copy the key ID and download the private key file.
             The key stays on this phone: it's locked in so that even this app can't read it back out, and it's never sent to our server.
-            Linking only reads your trades and balance. Orders are placed only if you turn on <b>Live auto-trading</b> below, within the limits you set. Delete the key on Kalshi any time to cut access.</p>
+            Linking only reads your trades and balance: the app never places orders. A read-only key is enough. Delete the key on Kalshi any time to cut access.</p>
         </div>
         <div id="kLinked" class="pos-btns" hidden><button id="kSync">Sync now</button><button id="kUnlink" class="ghost">Unlink</button></div>
         <p class="err" id="kErr"></p>
-      </div>
-      <div class="card push-card practice-card">
-        <h3>Auto-trade practice</h3>
-        <p class="push-status">Runs the auto-trader's rules on live Kalshi prices and logs every trade it <b>would</b> make, with P&amp;L. It never places an order or touches your money. It only runs while the app is open on screen.</p>
-        <label class="practice-toggle"><input type="checkbox" id="prOn"> Practice auto-trading</label>
-        <div class="adm-row"><label>Max $ per trade<input id="prMax" inputmode="decimal"></label><label>Daily loss limit $<input id="prLoss" inputmode="decimal"></label></div>
-        <div class="adm-row"><label>Max trades / day<input id="prTrades" inputmode="numeric"></label><label>Min confidence<input id="prConf" inputmode="numeric"></label></div>
-        <div class="grid pr-stats">
-          <div class="stat"><label>Today P&amp;L</label><b id="prToday">—</b></div>
-          <div class="stat"><label>All practice</label><b id="prAll">—</b></div>
-        </div>
-        <p class="push-status" id="prWhy"></p>
-        <h4>Range watch (experiment)</h4>
-        <p class="push-status">Your ceiling/floor chart rule, paper-traded on its own next to the bot: rejected at the ceiling = buy NO, at the floor = buy YES, once per window, held to settlement. A week of results will show if it helps before it touches any real call.</p>
-        <div class="grid pr-stats">
-          <div class="stat"><label>Range watch</label><b id="rgAll">—</b></div>
-          <div class="stat"><label>Bot practice</label><b id="rgBot">—</b></div>
-        </div>
-        <p class="push-status" id="rgRead"></p>
-        <h4>Practice log</h4>
-        <ul id="prLog" class="history pr-log"></ul>
-        <div class="pos-btns"><button id="prReset" class="ghost">Reset practice</button></div>
-      </div>
-      <div class="card push-card live-card" id="liveCard">
-        <h3>Live auto-trading (real money)</h3>
-        <p class="push-status" id="liveStatus">Link your Kalshi account above first.</p>
-        <div id="liveBody" hidden>
-          <p class="push-status">When on, the bot places <b>real orders</b> in your Kalshi account using the same rules as Practice: limit orders at the call's max price that fill now or cancel, sells at the bid or better, never more than you hold. It can only use the cash in your Kalshi account and these limits. It only trades while this app is open on screen, and only on one phone at a time (don't turn it on on two phones).</p>
-          <label class="practice-toggle"><input type="checkbox" id="lvUseBal"> Use my Kalshi balance: budget = the cash in Kalshi, each trade up to the % below</label>
-          <div class="adm-row" id="lvBalRow"><label>% of balance per trade<input id="lvPct" inputmode="numeric"></label></div>
-          <div class="adm-row" id="lvFixedRow"><label>Budget (most at risk) $<input id="lvBudget" inputmode="decimal"></label><label>Max $ per trade<input id="lvMax" inputmode="decimal"></label></div>
-          <div class="adm-row"><label>Daily loss stop $<input id="lvLoss" inputmode="decimal"></label><label>Max trades / day<input id="lvTrades" inputmode="numeric"></label></div>
-          <div class="adm-row"><label>Min confidence<input id="lvConf" inputmode="numeric"></label></div>
-          <label class="practice-toggle"><input type="checkbox" id="lvOwn"> Use the bot's own price on calls: if Kalshi's price is a little above the max, the buy waits at the bot's price for up to 2 minutes instead of giving up (cancels itself when the call ends)</label>
-          <label class="practice-toggle"><input type="checkbox" id="lvLock"> Lock in profit: once a trade is up, sell while it's still a win if it starts giving the profit back</label>
-          <div class="grid pr-stats">
-            <div class="stat"><label>At risk now</label><b id="lvRisk">—</b></div>
-            <div class="stat"><label>Today (realized)</label><b id="lvToday">—</b></div>
-          </div>
-          <p class="push-status" id="lvWhy"></p>
-          <div id="liveArm">
-            <label class="practice-toggle"><input type="checkbox" id="lvAck"> I understand this trades real money in my Kalshi account and I can lose up to my limits.</label>
-            <div class="adm-row"><label>Type LIVE to turn it on<input id="lvConfirm" autocomplete="off" autocapitalize="characters" placeholder="LIVE"></label><button id="lvOn" class="danger">Turn on live trading</button></div>
-          </div>
-          <div class="pos-btns" id="liveOffRow" hidden><button id="lvOff" class="danger">Stop live trading</button></div>
-          <h4>Live orders</h4>
-          <ul id="lvLog" class="history pr-log"></ul>
-        </div>
-      </div>
-      <div class="card push-card" id="rpCard">
-        <h3>Live results (real trades)</h3>
-        <div class="risk-btns" id="rpPeriod"><button data-p="today">Today</button><button data-p="week">7 days</button><button data-p="all">All</button></div>
-        <div class="grid pr-stats">
-          <div class="stat"><label>Profit / loss</label><b id="rpPnl">—</b></div>
-          <div class="stat"><label>Trades</label><b id="rpTrades">—</b></div>
-          <div class="stat"><label>Win rate</label><b id="rpWin">—</b></div>
-          <div class="stat"><label>Per trade</label><b id="rpPer">—</b></div>
-        </div>
-        <p class="push-status" id="rpDetail"></p>
-        <h4>By how it sold</h4>
-        <ul id="rpExit" class="history pr-log"></ul>
-        <h4>By confidence at the buy</h4>
-        <ul id="rpConf" class="history pr-log"></ul>
-        <p class="push-status" id="rpOrders"></p>
-        <p class="push-status" id="rpRule"></p>
-        <h4>Learns from real trades</h4>
-        <label class="practice-toggle"><input type="checkbox" id="lnOn"> Let it adjust Min confidence and trade size from how its real trades go (small steps, every 10 trades)</label>
-        <p class="push-status" id="lnStatus"></p>
-        <ul id="lnLog" class="history pr-log"></ul>
-        <div class="pos-btns"><button id="lnReset" class="ghost">Reset what it learned</button></div>
       </div>
       <div class="card push-card health-card" id="healthCard">
         <h3>Health check</h3>
         <p class="push-status" id="healthStatus">Runs every 2 rounds (every 30 minutes, at :00 and :30) while the app is open, and tells you only when something new is wrong.</p>
         <ul id="healthList" class="health-list"></ul>
+        <p class="push-status" id="ruleScore"></p>
         <div class="pos-btns"><button id="healthRun">Check now</button></div>
       </div>
       <div class="card push-card">
@@ -214,7 +143,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v4.10.2 · two-rejections rule</p>
+      <p class="fine" id="version">Shot Caller v5.0 · calls only (no auto-trading)</p>
     </section>
   </main>
 

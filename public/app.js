@@ -2,12 +2,8 @@ import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskL
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { confTier } from './analysis.js';
-import { balanceDollars, foldFills, importKey, parseFill, parseOrder, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
-import { LIVE_DEFAULTS, fillNow, heldByOrders, isResting, liveLimits, liveState, planBuy, planSell } from './autotrade.js';
-import { PRACTICE_DEFAULTS, allStats, newPractice, practiceSettle, practiceStep, rangeStats, rangeStep, todayStats } from './practice.js';
+import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
-import { EXIT_NAMES, liveReport } from './livereport.js';
-import { learnStep, newLearned } from './learn.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 
 const API = './api';
@@ -62,8 +58,6 @@ if (store.get('settingsVersion', 1) < 6) {
 // v3.9: Safe was leaving trades on the table for hand trading; old Safe defaults move to Balanced
 if (store.get('settingsVersion', 1) < 7) {
   if (riskLevelOf(settings) === 'safe') Object.assign(settings, { minEdge: RISK_LEVELS.balanced.minEdge, minConfidence: RISK_LEVELS.balanced.minConfidence });
-  const pc0 = store.get('practiceCfg', null);
-  if (pc0 && pc0.minConfidence === 70) { pc0.minConfidence = RISK_LEVELS.balanced.practiceConfidence; store.set('practiceCfg', pc0); }
   store.set('settings', settings); store.set('settingsVersion', 7);
 }
 
@@ -76,8 +70,6 @@ if (store.get('settingsVersion', 1) < 8) {
 if (store.get('settingsVersion', 1) < 10) {
   if (Math.abs(settings.minEdge - 0.04) < 1e-9 && settings.minConfidence === 50) {
     Object.assign(settings, riskSettings('aggressive'));
-    const pc1 = store.get('practiceCfg', null);
-    if (pc1) { Object.assign(pc1, { minConfidence: RISK_LEVELS.aggressive.practiceConfidence, maxPerTrade: RISK_LEVELS.aggressive.practiceMax, dailyLoss: RISK_LEVELS.aggressive.practiceLoss, maxTrades: RISK_LEVELS.aggressive.practiceTrades }); store.set('practiceCfg', pc1); }
   }
   store.set('settings', settings); store.set('settingsVersion', 10);
 }
@@ -88,12 +80,11 @@ if (store.get('settingsVersion', 1) < 9) {
 }
 
 // v4.1: confidence is now the call's win odds, and every confidence bar doubles (Aggressive 40 -> 80).
-// Risk levels get their new settings; custom bars, Practice and Live bars double (capped at 95).
+// Risk levels get their new settings; custom bars double (capped at 95).
 if (store.get('settingsVersion', 1) < 11) {
   const dbl = (c) => Math.min(95, Math.round((Number(c) || 0) * 2));
   const lvl = Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - settings.minEdge) < 1e-9 && { safe: 60, balanced: 55, aggressive: 40 }[k] === settings.minConfidence);
   if (lvl) Object.assign(settings, riskSettings(lvl)); else settings.minConfidence = dbl(settings.minConfidence);
-  for (const k of ['practiceCfg', 'liveCfg']) { const c = store.get(k, null); if (c && c.minConfidence != null) { c.minConfidence = dbl(c.minConfidence); store.set(k, c); } }
   store.set('settings', settings); store.set('settingsVersion', 11);
 }
 
@@ -101,11 +92,9 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
   calls: store.get('calls', {}),
-  ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule // what the bot has called per window, so it sticks with its calls
-  practice: store.get('practice', null) || newPractice(), practiceWhy: '',
-  liveOrders: store.get('liveOrders', []).filter((o) => o.at > Date.now() - 30 * 86400000), liveWhy: '' }; // 30 days, for Live results and learning
-const liveCfg = { ...LIVE_DEFAULTS, ...store.get('liveCfg', {}) };
-const practiceCfg = { ...PRACTICE_DEFAULTS, ...store.get('practiceCfg', {}) };
+  ruleLog: store.get('ruleLog', []) }; // scorecard for the two-rejections rule
+// v5.0: auto-trading and Practice were removed: drop what they stored
+try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
@@ -143,17 +132,6 @@ async function refreshSpot() {
 
 // ---------- settlement ----------
 async function settlePositions() {
-  // Practice positions still open when their market settled
-  const openPractice = [...state.practice.positions, ...(state.practice.range?.positions || [])];
-  for (const t of [...new Set(openPractice.filter((p) => Date.parse(p.closeTime) < Date.now() - 60000).map((p) => p.ticker))].slice(0, 3)) {
-    try {
-      const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(t)}`);
-      if (market && (market.result === 'yes' || market.result === 'no')) {
-        for (const e of practiceSettle(state.practice, t, market.result)) toast(`${e.range ? 'Range watch' : 'Practice'}: settled ${e.side} ${e.pnl >= 0 ? 'WIN' : 'LOSS'} ${money(e.pnl)}`);
-        store.set('practice', state.practice); renderPractice();
-      }
-    } catch { /* retry next cycle */ }
-  }
   // Positions still open when their market settled
   // (Kalshi-linked positions are closed from Kalshi's own settlement records in syncKalshi; this is only a fallback)
   for (const pos of state.positions.filter((p) => Date.parse(p.closeTime) < Date.now() - (p.source === 'kalshi' && state.kalshi.key ? 15 * 60000 : 60000)).slice(0, 3)) {
@@ -198,12 +176,9 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
   return trade;
 }
 
-// Live auto-traded positions also use the profit lock (sell while still up if it starts giving the profit back)
-const exitSettingsFor = (pos) => (pos.source === 'kalshi' && liveCfg.live && liveCfg.profitLock !== false ? { ...settings, profitLock: true } : settings);
-
 function renderPositions(snap) {
   const html = state.positions.map((pos) => {
-    const check = positionCheck(pos, snap, exitSettingsFor(pos));
+    const check = positionCheck(pos, snap, settings);
     const { row, minutesLeft, pSide, bid, ex } = check;
     if (check.changed) savePositions();
 
@@ -331,8 +306,6 @@ function render() {
   renderPositions(snap);
   const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
   if (sig?.fire) store.set('calls', state.calls);
-  if (practiceCfg.on || state.practice.positions.length || state.practice.range?.positions.length) runPractice(snap, live, sig, now);
-  runLive(snap, live, sig, now);
   trackRule(snap, live, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
@@ -953,12 +926,6 @@ async function syncKalshi() {
     } while (cursor && ++pages < 50);
     const complete = !cursor;
     const mine = fills.filter((f) => f.ticker.startsWith(`${settings.series}-`) && !seen.has(f.id) && f.at);
-    // Fills on the bot's waiting orders show up here: credit them to the order in the Live log
-    for (const f of mine) {
-      // (only fills that came after Kalshi's reply: what filled right away is already in the reply)
-      const o = [...state.liveOrders].reverse().find((x) => x.ticker === f.ticker && x.action === f.action && x.expiresAt && x.at <= f.at + 2000 && ['resting', 'expired', 'cancelled', 'cancelling'].includes(x.status));
-      if (o && f.at <= (o.expiresAt || 0) + 5000) { o.filled = Math.min(o.count, (o.filled || 0) + f.count); o.status = o.filled >= o.count ? 'filled' : o.status; }
-    }
     if (mine.length) {
       const linked = state.positions.filter((p) => p.source === 'kalshi');
       const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at, fees: p.fees ?? null }]));
@@ -993,12 +960,10 @@ async function syncKalshi() {
     const waiting = mine.filter((f) => !seen.has(f.id)).map((f) => f.at);
     const newest = waiting.length ? Math.min(...waiting) : Math.max(0, ...fills.map((f) => f.at || 0));
     if (newest && complete) store.set('kalshiSince', Math.max(since, Math.floor(newest / 1000) - 5));
-    await checkAgainstKalshi(); // Kalshi's own settlements, positions and orders: the source of truth
+    await checkAgainstKalshi(); // Kalshi's own settlements and positions: the source of truth
     state.kalshi.lastSync = Date.now(); state.kalshi.error = null;
-    if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > (liveCfg.live ? 20000 : 60000)) {
+    if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > 60000) {
       state.kalshi.balance = balanceDollars(await kalshiGet('balance')); state.kalshi.balanceAt = Date.now();
-      // what Kalshi is holding for waiting orders (can't be spent); a failure here never blocks the sync
-      try { const out = await kalshiGet('orders', { status: 'resting', limit: 100 }); state.kalshi.held = heldByOrders(out.orders); state.kalshi.resting = (out.orders || []).map((o) => ({ id: o.order_id, clientId: o.client_order_id, ticker: o.ticker })); } catch { state.kalshi.held = null; state.kalshi.resting = []; }
     }
   } catch (e) {
     state.kalshi.error = e.message;
@@ -1010,8 +975,7 @@ async function syncKalshi() {
 }
 
 // ---------- 100% accuracy: Kalshi's own records win ----------
-// Settlements close linked positions at Kalshi's settlement; the positions list corrects anything the fills missed;
-// the orders list confirms every bot order's real fills, average price and fees.
+// Settlements close linked positions at Kalshi's settlement; the positions list corrects anything the fills missed.
 async function checkAgainstKalshi() {
   const asOf = Date.now(), fixes = [];
   // 1) settlements for linked positions whose market has closed
@@ -1034,10 +998,6 @@ async function checkAgainstKalshi() {
     if (!Array.isArray(out.market_positions)) throw new Error('unexpected reply from Kalshi'); // never read a bad reply as "no positions"
     const truth = out.market_positions.map(parsePosition);
     const r = reconcilePositions(state.positions, truth, { series: settings.series, asOf });
-    // a market the bot just ordered in: its fills may not have arrived yet, so check it next time
-    const busy = new Set(state.liveOrders.filter((o) => asOf - o.at < 20000).map((o) => o.ticker));
-    const waiting = new Set();
-    for (const k of ['set', 'remove', 'add']) r[k] = r[k].filter((x) => (busy.has(x.ticker) ? (waiting.add(x.ticker), false) : true));
     for (const x of r.set) { const p = state.positions.find((q) => q.source === 'kalshi' && q.ticker === x.ticker); if (p) { Object.assign(p, { side: x.side, contracts: x.contracts, price: x.price }); if (x.why.includes('→') && !x.why.includes('¢')) p.fees = null; fixes.push(`${x.ticker}: ${x.why}`); } }
     for (const x of r.remove) { state.positions = state.positions.filter((q) => !(q.source === 'kalshi' && q.ticker === x.ticker)); fixes.push(`${x.ticker}: ${x.why}`); }
     for (const x of r.add) {
@@ -1047,34 +1007,13 @@ async function checkAgainstKalshi() {
       state.positions.push({ id: `k-${x.ticker}`, source: 'kalshi', ticker: x.ticker, title: m.title, closeTime: m.close_time, side: x.side, contracts: x.contracts, price: x.price, at: asOf, fees: null, peakBid: null, peakP: null });
       fixes.push(`${x.ticker}: ${x.why}`);
     }
-    state.kalshi.verify = { at: Date.now(), positions: truth.filter((k) => k.ticker.startsWith(`${settings.series}-`) && k.contracts > 0).length, fixes, waiting: waiting.size };
+    state.kalshi.verify = { at: Date.now(), positions: truth.filter((k) => k.ticker.startsWith(`${settings.series}-`) && k.contracts > 0).length, fixes };
     if (fixes.length) { state.kalshi.lastFix = { at: Date.now(), fixes }; savePositions(); store.set('trades', state.trades); pushSyncSoon(); toast(`Corrected from Kalshi: ${fixes[0]}${fixes.length > 1 ? ` (+${fixes.length - 1} more)` : ''}`); }
   } catch (e) { state.kalshi.verify = { at: Date.now(), error: e.message, fixes }; }
-  // 3) the bot's orders: Kalshi's record of each one
-  const open = state.liveOrders.filter((o) => o.id && !o.verifiedFinal && o.at > asOf - 2 * 86400000);
-  if (open.length) {
-    try {
-      const out = await kalshiGet('orders', { min_ts: Math.floor(Math.min(...open.map((o) => o.at)) / 1000) - 60, limit: 200 });
-      const byId = new Map((out.orders || []).map(parseOrder).filter((o) => o.id).map((o) => [o.id, o]));
-      for (const e of open) {
-        const k = byId.get(e.id);
-        if (!k) continue;
-        if (k.filled != null) e.filled = k.filled;
-        if (k.avgPrice != null) e.avgCents = Math.round(k.avgPrice * 1000) / 10;
-        if (k.fees != null) e.fees = k.fees;
-        if (k.status === 'resting') e.status = 'resting';
-        else if (k.status) e.status = k.filled > 0 ? (k.remaining > 0 && k.status === 'canceled' ? 'partly filled' : 'filled') : (k.status === 'canceled' ? (e.status === 'cancelled' ? 'cancelled' : 'no fill (cancelled)') : e.status);
-        e.verified = true; e.verifiedFinal = k.status !== 'resting' && k.status != null;
-      }
-      saveLive(); renderLive();
-    } catch { /* tried again next sync */ }
-  }
 }
 
 function renderKalshi() {
   const k = state.kalshi, linked = !!k.key;
-  if (!linked && liveCfg.live) { liveCfg.live = false; saveLive(); }
-  setTimeout(renderLive);
   $('kForm').hidden = linked;
   $('kLinked').hidden = !linked;
   $('kErr').textContent = k.error || '';
@@ -1084,7 +1023,6 @@ function renderKalshi() {
   const v = k.verify;
   const check = !v ? '' : v.error ? ` · couldn't check against Kalshi (${v.error})`
     : v.fixes.length ? ` · corrected from Kalshi at ${clock(v.at)}: ${v.fixes.join('; ')}`
-    : v.waiting ? ` · checking ${v.waiting} market${v.waiting > 1 ? 's' : ''} against Kalshi after the bot's latest order settles (${clock(v.at)})`
     : ` · ✓ matches Kalshi (${v.positions} open position${v.positions === 1 ? '' : 's'}, checked ${clock(v.at)})${k.lastFix && Date.now() - k.lastFix.at < 3600000 ? ` · last correction ${clock(k.lastFix.at)}: ${k.lastFix.fixes.join('; ')}` : ''}`;
   $('kStatus').textContent = `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}${check}. Your ${settings.series} buys and sells show up on their own.`;
 }
@@ -1138,424 +1076,25 @@ setInterval(() => { if (!document.hidden) syncKalshi(); }, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) syncKalshi(); });
 
 
-// ---------- auto-trade practice (no orders, ever) ----------
-function runPractice(snap, live, sig, now) {
-  const { actions, why } = practiceStep(state.practice, { snap, row: live, sig, settings, cfg: practiceCfg, memory: state.calls, now });
-  const rg = rangeStep(state.practice, { snap, row: live, cfg: practiceCfg, now });
-  state.rangeRead = rg.read;
-  for (const e of rg.actions) toast(`Range watch: ${e.why} → paper-bought ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}`);
-  if (rg.actions.length) { store.set('practice', state.practice); renderPractice(); }
-  if (why && why !== 'Waiting for a new call' && why !== 'Practice is off') state.practiceWhy = why;
-  for (const e of actions) {
-    state.practiceWhy = '';
-    toast(e.action === 'buy'
-      ? `Practice: ${e.add ? 'added' : 'bought'} ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)} (${dollars(e.cost)})`
-      : `Practice: sold at ${pc(e.price)} · ${money(e.pnl)}`);
-  }
-  if (actions.length) { store.set('practice', state.practice); renderPractice(); }
-  renderPracticeStrip(snap);
-}
-
-function renderPracticeStrip(snap) {
-  const el = $('practiceStrip');
-  const pos = state.practice.positions[0];
-  if (!practiceCfg.on && !pos) { el.hidden = true; return; }
-  el.hidden = false;
-  const t = todayStats(state.practice);
-  if (pos) {
-    const row = snap?.rows.find((r) => r.m.ticker === pos.ticker);
-    const bid = row ? (pos.side === 'YES' ? row.ev.quote.yesBid : row.ev.quote.noBid) : null;
-    const open = bid != null ? (bid - kalshiFee(bid)) * pos.contracts - pos.cost : null;
-    el.innerHTML = `<b>PRACTICE</b> · holding ${+pos.contracts.toFixed(0)} ${sideName(pos.side)} at ${pc(pos.price)}${open != null ? ` · now ${money(open)}` : ''} · today ${money(t.pnl)}`;
-  } else {
-    el.innerHTML = `<b>PRACTICE</b> · watching for a call${state.practiceWhy ? ` · last: ${esc(state.practiceWhy)}` : ''} · today ${money(t.pnl)}`;
-  }
-  const rp = state.practice.range?.positions[0];
-  if (rp) el.innerHTML += `<br><b>RANGE</b> · holding ${+rp.contracts.toFixed(0)} ${sideName(rp.side)} at ${pc(rp.price)} to settlement`;
-  else if (state.rangeRead?.ranged) el.innerHTML += `<br><b>RANGE</b> · ${esc(state.rangeRead.why)}`;
-}
-
-function renderPractice() {
-  const pr = state.practice, t = todayStats(pr), a = allStats(pr);
-  $('prOn').checked = practiceCfg.on;
-  for (const [id, k] of [['prMax', 'maxPerTrade'], ['prLoss', 'dailyLoss'], ['prTrades', 'maxTrades'], ['prConf', 'minConfidence']]) {
-    if (document.activeElement !== $(id)) $(id).value = practiceCfg[k];
-  }
-  $('prToday').textContent = t.closed || t.buys ? `${money(t.pnl)} · ${t.wins}/${t.closed}` : '—';
-  $('prAll').textContent = a.trades ? `${money(a.pnl)} · ${a.wins}/${a.trades} won` : '—';
-  $('prWhy').textContent = practiceCfg.on ? (state.practiceWhy || 'Watching for a call…') : 'Off';
-  const rs = rangeStats(pr);
-  $('rgAll').textContent = rs.trades ? `${money(rs.pnl)} · ${rs.wins}/${rs.trades} won` : rs.open ? `${rs.open} open` : '—';
-  $('rgBot').textContent = a.trades ? `${money(a.pnl)} · ${a.wins}/${a.trades} won` : '—';
-  $('rgRead').textContent = practiceCfg.on ? `Now: ${state.rangeRead?.why ?? 'waiting for candles'}` : '';
-  $('prLog').innerHTML = [...pr.log, ...(pr.range?.log || [])].sort((x, y) => y.at - x.at).slice(0, 30).map((e) => {
-    const tag = e.range ? '<span class="src-tag">Range</span> ' : '';
-    const what = tag + (e.action === 'buy' ? `${e.add ? 'Added' : 'Bought'} ${+e.contracts.toFixed(0)} ${sideName(e.side)} at ${pc(e.price)}` + (e.conf != null ? ` · conf ${e.conf}` : '') + (e.why && e.range ? ` · ${esc(e.why)}` : '')
-      : e.action === 'sell' ? `Sold ${+e.contracts.toFixed(0)} at ${pc(e.price)} (${e.kind === 'take' ? 'take profit' : 'cut'})`
-      : `Settled ${e.proceeds > 0 ? 'WIN' : 'LOSS'}`);
-    const val = e.action === 'buy' ? `<b>-${dollars(e.cost)}</b>` : `<b class="${e.pnl >= 0 ? 'pos' : 'neg'}">${money(e.pnl)}</b>`;
-    return `<li><span>${what}<small>${clock(e.at)} · ${esc(e.ticker)}</small></span>${val}</li>`;
-  }).join('') || '<li class="calm">No practice trades yet</li>';
-}
-
-$('prOn').addEventListener('change', (e) => {
-  practiceCfg.on = e.target.checked;
-  store.set('practiceCfg', practiceCfg);
-  state.practiceWhy = '';
-  renderPractice(); render();
-  toast(practiceCfg.on ? 'Practice auto-trading on: it logs trades, never places them' : 'Practice auto-trading off');
-});
-for (const [id, k, min, max] of [['prMax', 'maxPerTrade', 1, 1000], ['prLoss', 'dailyLoss', 1, 10000], ['prTrades', 'maxTrades', 1, 100], ['prConf', 'minConfidence', 0, 100]]) {
-  $(id).addEventListener('change', (e) => {
-    const v = Number(e.target.value);
-    if (Number.isFinite(v)) practiceCfg[k] = Math.min(max, Math.max(min, v));
-    store.set('practiceCfg', practiceCfg);
-    renderPractice();
-  });
-}
-$('prReset').addEventListener('click', () => {
-  if (!confirm('Reset practice? This clears the practice log and any practice positions.')) return;
-  state.practice = newPractice(); store.set('practice', state.practice); state.practiceWhy = '';
-  renderPractice(); render();
-});
-
 function renderRisk() {
   const cur = riskLevelOf(settings);
   $('riskBtns').innerHTML = Object.entries(RISK_LEVELS).map(([k, r]) => `<button type="button" data-risk="${k}" class="${cur === k ? 'on' : ''}">${r.label}</button>`).join('');
   $('riskHint').textContent = cur === 'custom'
     ? `Custom: min gap ${(settings.minEdge * 100).toFixed(0)} pts, confidence ${settings.minConfidence}. Tap a level to reset.`
-    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}${RISK_LEVELS[cur].bigEdgeOverride ? ` (or a ${Math.round(RISK_LEVELS[cur].bigEdgeOverride * 100)}-pt worst-case gap)` : ''}; bets up to $${RISK_LEVELS[cur].maxStake}. Practice buys at confidence ${RISK_LEVELS[cur].practiceConfidence}+, up to $${RISK_LEVELS[cur].practiceMax} a trade.`;
+    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}${RISK_LEVELS[cur].bigEdgeOverride ? ` (or a ${Math.round(RISK_LEVELS[cur].bigEdgeOverride * 100)}-pt worst-case gap)` : ''}; bets up to $${RISK_LEVELS[cur].maxStake}.`;
 }
 $('riskBtns').addEventListener('click', (e) => {
   const k = e.target.closest('button[data-risk]')?.dataset.risk;
   if (!k) return;
   const r = RISK_LEVELS[k];
   Object.assign(settings, riskSettings(k));
-  Object.assign(practiceCfg, { minConfidence: r.practiceConfidence, maxPerTrade: r.practiceMax, dailyLoss: r.practiceLoss, maxTrades: r.practiceTrades });
-  store.set('settings', settings); store.set('practiceCfg', practiceCfg);
+  store.set('settings', settings);
   for (const [name, v] of [['minEdge', r.minEdge * 100], ['minConfidence', r.minConfidence], ['kellyFraction', r.kellyFraction], ['maxStake', r.maxStake], ['cutMargin', r.cutMargin * 100]]) { const el = $('settingsForm').elements[name]; if (el) el.value = v; }
-  pushSyncSoon(); renderRisk(); renderPractice(); render();
+  pushSyncSoon(); renderRisk(); render();
   toast(`Risk level: ${r.label}`);
 });
 $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // after the form's own handler saves the value
 
-
-// ---------- live auto-trading (real orders) ----------
-let liveBusy = false, liveErrors = 0, liveBusySince = 0;
-// Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
-const livePause = { buyUntil: 0, why: '', tickers: {} };
-let ownPriceRefused = liveCfg.ownPriceOff || ''; // why Kalshi won't take waiting orders (remembered across restarts)
-// Kalshi won't take the bot's waiting orders: turn "own price" off (the checkbox shows it) and remember why
-function refuseOwnPrice(why) {
-  if (!ownPriceRefused) toast('LIVE: Kalshi won\'t take waiting orders on your account. Using fill-now orders instead.');
-  ownPriceRefused = why;
-  Object.assign(liveCfg, { ownPrice: false, ownPriceOff: why }); saveLive(); renderLive();
-}
-let liveShrink = 1, cashFails = 0; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
-function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-1500)); }
-
-function stopLive(why) {
-  if (!liveCfg.live) return;
-  liveCfg.live = false; saveLive();
-  cancelAllResting('live trading stopped');
-  state.liveWhy = why || 'Stopped';
-  toast(`Live auto-trading stopped${why ? `: ${why}` : ''}`);
-  renderLive(); render();
-}
-
-// Cancel one of the bot's waiting orders on Kalshi (signed on the phone like everything else)
-async function kalshiDelete(id) {
-  const { key, keyId } = state.kalshi;
-  if (!key) throw new Error('Kalshi not linked');
-  kalshiPrefix ||= (await getJSON('kalshi-auth/info')).pathPrefix;
-  const headers = await signHeaders(key, keyId, 'DELETE', `${kalshiPrefix}events/orders/${id}`);
-  const r = await fetch(`${API}/kalshi-auth/orders/${encodeURIComponent(id)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(10000) });
-  paywalled(r);
-  if (!r.ok && r.status !== 404) { const out = await r.json().catch(() => ({})); throw new Error(out.error?.message || out.error || `Kalshi: HTTP ${r.status}`); }
-}
-async function cancelResting(entry, why) {
-  if (!isResting(entry)) return;
-  entry.status = 'cancelling';
-  try { if (entry.id) await kalshiDelete(entry.id); entry.status = 'cancelled'; entry.error = why; }
-  catch (e) { entry.status = 'resting'; entry.error = `cancel failed: ${e.message} (Kalshi still cancels it at ${clock(entry.expiresAt)})`; }
-  saveLive(); renderLive();
-}
-function cancelAllResting(why) { for (const o of state.liveOrders.filter((x) => isResting(x))) cancelResting(o, why); }
-
-async function sendLive(order, meta, label) {
-  liveBusy = true; liveBusySince = Date.now();
-  const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label,
-    kind: meta.kind ?? null, conf: meta.conf ?? null, clientId: order.client_order_id, // for the Live results report and cleanup
-    ...(meta.rest ? { expiresAt: meta.expiresAt, restCost: meta.restCost || 0 } : {}) };
-  state.liveOrders.push(entry); saveLive(); renderLive();
-  try {
-    // Own-price orders go to Kalshi as they are (they wait at the bot's price). Fill-now orders: the server checks the
-    // live book and places them in one request (sells may step 2¢ to the live bid)
-    const out = await kalshiPost('orders', order, meta.rest ? '' : '?book=1&slip=2');
-    if (out.skipped) { // nothing at the price: no order was placed, so it doesn't count as a try
-      state.liveOrders = state.liveOrders.filter((x) => x !== entry);
-      livePause.tickers[order.ticker] = Date.now() + 3000; // look again in 3s, not every second
-      state.liveWhy = meta.action === 'buy'
-        ? (out.best == null ? `Nothing for sale on ${sideName(meta.side)} right now` : `Bargain already gone: Kalshi's live price is ${Math.round((meta.side === 'YES' ? out.best : 1 - out.best) * 100)}¢, over the ${meta.cents}¢ max`)
-        : `Sell waiting: Kalshi's live bid moved more than 2¢ under ${meta.cents}¢`;
-      return;
-    }
-    const o = out.order || out; // V2 answers with the order fields at the top level
-    const filled = Number(o.fill_count ?? o.fill_count_fp ?? o.taker_fill_count ?? NaN);
-    entry.filled = Number.isFinite(filled) ? filled : null;
-    entry.status = o.status || (entry.filled > 0 ? 'filled' : entry.filled === 0 ? 'no fill (cancelled)' : 'placed');
-    entry.id = o.order_id || null;
-    if (meta.rest) { // waiting at the bot's price: whatever didn't fill right away rests until it fills, is cancelled or expires
-      const left = Number(o.remaining_count ?? o.remaining_count_fp ?? NaN);
-      if (!(left === 0)) { entry.status = 'resting'; entry.restCost = meta.restCost * (Number.isFinite(left) && meta.count ? left / meta.count : 1); }
-      else entry.status = 'filled';
-    }
-    liveErrors = 0; liveShrink = 1; cashFails = 0; state.kalshi.spendable = null;
-    toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
-    state.kalshi.balanceAt = 0; // refresh the balance with the fills
-    if (entry.filled !== 0) { syncKalshi(); setTimeout(syncKalshi, 1500); } // pick up the new position right away so sells can follow instantly
-  } catch (e) {
-    if (e.status === 429) { // the server's 20-a-minute safety limit: no order was placed, so not an error or a try
-      state.liveOrders = state.liveOrders.filter((x) => x !== entry);
-      Object.assign(livePause, { buyUntil: Date.now() + 30000, why: 'Pausing 30s: too many orders in a minute' });
-      return;
-    }
-    entry.status = 'error'; entry.error = e.message;
-    if (meta.rest && (e.status === 400 || e.status === 422) && !/insufficient|balance/i.test(e.message)) {
-      // A waiting (own-price) order was refused: don't keep failing. Switch to fill-now orders and send this one now.
-      refuseOwnPrice(e.message);
-      entry.error = `${e.message} · waiting orders refused, switched to fill-now`;
-      liveBusy = false;
-      await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
-      return;
-    }
-    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: find out why, fix what we can, back off
-      state.kalshi.balanceAt = 0; await syncKalshi();
-      const bal = state.kalshi.balance, held = state.kalshi.held?.held || 0;
-      // what this order needed: buys pay price + fee per contract; a sell only closes what's held
-      const need = meta.action === 'buy' ? meta.count * (meta.cents / 100 + kalshiFee(meta.cents / 100)) : 0;
-      entry.error = `insufficient balance: ${meta.action} ${meta.count} ${meta.side} needed ~$${need.toFixed(2)}; Kalshi cash $${(bal ?? 0).toFixed(2)}${held > 0 ? `, $${held.toFixed(2)} of it held by ${state.kalshi.held.count} waiting order${state.kalshi.held.count > 1 ? 's' : ''}` : ''}`;
-      // A waiting (own-price) order refused although the cash clearly covers it: Kalshi won't take waiting orders on
-      // this account (only orders that fill right away went through). Stop using them and send this buy as fill-now.
-      if (meta.rest && bal != null && need > 0 && need <= bal - held - 0.05) {
-        refuseOwnPrice(`Kalshi refused waiting orders with "insufficient balance" although $${(bal - held).toFixed(2)} was free`);
-        entry.error += ' · Kalshi won\'t take waiting orders here: sent as fill-now instead';
-        liveBusy = false;
-        await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
-        return;
-      }
-      // the bot's own leftover waiting orders on Kalshi tie up cash: cancel any it isn't actively using
-      const ours = new Set(state.liveOrders.flatMap((o) => [o.id, o.clientId]).filter(Boolean));
-      const using = new Set(state.liveOrders.filter((o) => isResting(o)).map((o) => o.id));
-      const stale = (state.kalshi.resting || []).filter((r) => (ours.has(r.id) || ours.has(r.clientId)) && !using.has(r.id));
-      for (const r of stale) kalshiDelete(r.id).catch(() => {});
-      if (meta.action === 'buy' && held > 0 && bal != null) state.kalshi.spendable = Math.max(0, bal - held);
-      liveShrink = Math.max(0.25, liveShrink * 0.6); // next orders smaller until one goes through
-      // back off: 15s, 1 min, 5 min, then 15 min while it keeps happening (reset by the next order that goes through)
-      cashFails++;
-      const wait = [15, 60, 300, 900][Math.min(cashFails, 4) - 1] * 1000;
-      Object.assign(livePause, { buyUntil: Date.now() + wait, why: stale.length
-        ? `Cancelled ${stale.length} leftover bot order${stale.length > 1 ? 's' : ''} holding your Kalshi cash; buying again in ${Math.round(wait / 1000)}s`
-        : held > 0 ? `Kalshi is holding $${held.toFixed(2)} for waiting orders you placed in Kalshi, so only $${Math.max(0, (bal ?? 0) - held).toFixed(2)} can be spent: next try in ${wait >= 60000 ? `${wait / 60000} min` : `${wait / 1000}s`}`
-        : `Kalshi said insufficient balance (cash $${(bal ?? 0).toFixed(2)}, order ~$${need.toFixed(2)}): trying smaller in ${wait >= 60000 ? `${wait / 60000} min` : `${wait / 1000}s`}` });
-      if (cashFails === 1) toast(`LIVE: ${livePause.why}`); // once per streak, not every retry
-      return;
-    }
-    liveErrors++;
-    toast(`LIVE order failed: ${e.message}`);
-    if (e.status === 403) stopLive('Kalshi refused the order. Your API key probably has no trading permission: make a key with trading enabled.');
-    else if (liveErrors >= 3) stopLive('3 orders in a row failed');
-  } finally {
-    saveLive(); liveBusy = false; liveBusySince = 0; renderLive();
-  }
-}
-
-// Plain-language "why no buy right now", so a quiet bot never looks broken
-function liveWaitWhy(live, sig) {
-  if (!live) return 'Waiting for the next 15-minute market to open';
-  if (!sig?.deep) return `Waiting for a call: ${live.ev.reason || 'no price gap on either side right now'}`;
-  if (sig.callSide && !sig.fire && !sig.add) return `Holding its ${sideName(sig.callSide)} call: buys happen on a new call or an add`;
-  const dr = live.rej?.double;
-  if (dr && settings.doubleRejRule !== false && sig.side && dr.dir !== (sig.side === 'YES' ? 1 : -1)) return `Not calling ${sideName(sig.side)}: ${dr.label}`;
-  // Live buys need both the strategy's bar and the Live card's own Min confidence, so show the higher one
-  const gap = sig.robustEdge != null ? Math.round(sig.robustEdge * 100) : null, ov = Math.round((settings.bigEdgeOverride || 0) * 100);
-  const confNeed = Math.max(sig.confNeed ?? 0, liveCfg.minConfidence ?? 0), gapNeed = Math.round(sig.edgeNeed * 100);
-  const conf = `confidence ${sig.deep.score} (needs ${confNeed}${ov ? `, or a ${ov}-pt gap` : ''})`;
-  if (gap == null) return `Waiting for a call: ${sideName(sig.side)} has ${conf}`;
-  if (gap < gapNeed) return `No bargain yet: ${sideName(sig.side)} has ${conf}, but Kalshi's price is ${gap < 0 ? `${-gap} pts above` : `only ${gap} pts below`} the bot's cautious odds (it buys at ${gapNeed}+ pts below)`;
-  return `Waiting for confidence: ${sideName(sig.side)} has ${conf}; Kalshi is ${gap} pts below the bot's cautious odds`;
-}
-
-// What the bot saw over the last 2 hours, so you can see what a different Min confidence would have done
-const liveSeen = []; // { t, ticker, score, gap, need }
-function seenStats(now = Date.now()) {
-  while (liveSeen.length && liveSeen[0].t < now - 7200000) liveSeen.shift();
-  const ov = settings.bigEdgeOverride || 0;
-  const markets = (bar) => new Set(liveSeen.filter((e) => e.gap >= e.need - 1e-9 && (e.score >= bar || (ov > 0 && e.gap >= ov - 1e-9))).map((e) => e.ticker)).size;
-  // Live can't go below the risk level's own bar (calls under it never fire), so only show bars at or above it
-  const bars = [...new Set([liveCfg.minConfidence, 95, 90, 85, 80, settings.minConfidence])].filter((b) => b <= 100 && b >= settings.minConfidence).sort((a, b) => b - a);
-  return { n: liveSeen.length, bestConf: Math.max(...liveSeen.filter((e) => e.gap >= e.need - 1e-9).map((e) => e.score), -1), bestGap: Math.max(...liveSeen.map((e) => e.gap), -1), bars: bars.map((b) => [b, markets(b)]) };
-}
-
-// Keep the screen awake while live trading is on: iPhone pauses the app when it auto-locks
-let wakeLock = null;
-async function keepAwake() {
-  const want = liveCfg.live && !document.hidden;
-  try {
-    if (want && !wakeLock && navigator.wakeLock) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => { wakeLock = null; });
-    } else if (!want && wakeLock) { await wakeLock.release(); wakeLock = null; }
-  } catch { wakeLock = null; /* low battery mode or not supported: the screen may still lock */ }
-}
-document.addEventListener('visibilitychange', keepAwake);
-
-// Cash the bot can really use: Kalshi's balance minus what its waiting orders hold, smaller after an "insufficient balance"
-function spendable() {
-  const b = state.kalshi.balance;
-  if (b == null) return null;
-  const free = state.kalshi.spendable ?? b; // held money is only taken off after Kalshi says the balance isn't enough
-  return free * liveShrink;
-}
-
-function runLive(snap, live, sig, now) {
-  if (!!wakeLock !== (liveCfg.live && !document.hidden)) keepAwake();
-  if (liveCfg.live && live && sig?.deep && sig.robustEdge != null && (!liveSeen.length || now - liveSeen[liveSeen.length - 1].t >= 3000)) {
-    liveSeen.push({ t: now, ticker: live.m.ticker, score: sig.deep.score, gap: sig.robustEdge, need: sig.edgeNeed });
-  }
-  if (liveCfg.live && !state.kalshi.key) state.liveWhy = 'Kalshi key not loaded on this phone: link your Kalshi account again';
-  renderLiveStrip();
-  if (!liveCfg.live || !state.kalshi.key || liveBusy || document.hidden) return;
-  if (state.kalshi.balance == null) { state.liveWhy = 'Waiting for your Kalshi balance (tap Sync in the Kalshi card if this stays)'; return; }
-  // Waiting orders: mark ones Kalshi has expired, and cancel a waiting buy whose call is over
-  for (const o of state.liveOrders) if (o.status === 'resting' && o.expiresAt <= now) o.status = 'expired';
-  for (const o of state.liveOrders.filter((x) => x.action === 'buy' && isResting(x, now))) {
-    if (!(live && sig?.callSide === o.side && live.m.ticker === o.ticker)) return cancelResting(o, 'call ended');
-  }
-  // Sells first: the same exits as every position card
-  for (const pos of state.positions.filter((p) => p.source === 'kalshi')) {
-    if (!snap.rows.some((r) => r.m.ticker === pos.ticker)) continue;
-    const sell = planSell({ cfg: liveCfg, pos, check: positionCheck(pos, snap, exitSettingsFor(pos), now), orders: state.liveOrders, now });
-    if (sell) {
-      const waitingSell = state.liveOrders.find((o) => o.ticker === pos.ticker && o.action === 'sell' && isResting(o, now));
-      if (waitingSell) return cancelResting(waitingSell, 'selling now instead');
-      const kind = positionCheck(pos, snap, exitSettingsFor(pos), now).ex.kind;
-      return sendLive(sell.order, { ...sell.meta, kind }, `${kind === 'lock' ? 'lock profit: ' : ''}sell ${sell.meta.count} ${sideName(pos.side)} at ${sell.meta.cents}¢ or better`);
-    }
-  }
-  if (Date.now() < livePause.buyUntil) { state.liveWhy = livePause.why; return; }
-  if (live && Date.now() < (livePause.tickers[live.m.ticker] || 0)) return; // keeps the "bargain gone" reason showing
-  const b = planBuy({ cfg: { ...liveCfg, ...(ownPriceRefused ? { ownPrice: false } : {}), sizeMult: liveCfg.learn !== false ? learned.sizeMult : 1 }, sig, row: live, positions: state.positions, trades: state.trades, orders: state.liveOrders, balance: spendable(), lastSync: state.kalshi.lastSync || 0, now });
-  if (!b.ok) { state.liveWhy = /^Waiting for (a|a new) call/.test(b.why) ? liveWaitWhy(live, sig) : b.why; return; }
-  state.liveWhy = '';
-  sendLive(b.order, b.meta, `${b.add ? 'add' : 'buy'} ${b.meta.count} ${sideName(b.meta.side)} at ${b.meta.cents}¢ ${b.meta.rest ? `(bot's price, waits until ${clock(b.meta.expiresAt)})` : 'max'}`);
-}
-
-// While live trading is on, read Kalshi's prices every second (not every 3) so calls and exits react faster
-setInterval(() => {
-  // a waiting order can fill any moment: check Kalshi every 3s so exits follow right away
-  if (liveCfg.live && !document.hidden && state.liveOrders.some((o) => isResting(o)) && Date.now() - (state.kalshi.lastSync || 0) > 3000) syncKalshi();
-  if (!liveCfg.live || document.hidden || Date.now() - state.marketsAt < 900) return;
-  refreshMarkets().then(render).catch(() => {});
-}, 1000);
-
-function seenLine() {
-  const st = seenStats();
-  if (st.n < 20) return '';
-  const mins = Math.round((Date.now() - liveSeen[0].t) / 60000);
-  const pts = (v) => `${Math.round(v * 100)} pts`;
-  return `<br><b>Last ${mins} min:</b> best worst-case gap ${pts(st.bestGap)}${st.bestConf >= 0 ? `, best confidence with a gap ${st.bestConf}` : ', no side had a big enough gap'}. Markets it would have bought: ${st.bars.map(([b, n]) => `${b === liveCfg.minConfidence ? '<b>' : ''}at ${b}: ${n}${b === liveCfg.minConfidence ? '</b>' : ''}`).join(' · ')}`;
-}
-
-function renderLiveWhy() {
-  const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
-  $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${ownPriceRefused ? `<br><b>Using fill-now orders:</b> ${esc(ownPriceRefused)}. (Tick "Use the bot's own price" to try waiting orders again.)` : ''}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
-}
-
-function renderLiveStrip() {
-  renderLiveWhy();
-  const el = $('liveStrip');
-  el.hidden = !liveCfg.live;
-  if (!liveCfg.live) return;
-  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
-  $('liveStripText').innerHTML = `<b>LIVE AUTO-TRADING</b> · at risk ${dollars(st.exposure)} of ${dollars(liveLimits(liveCfg, state.kalshi.balance).budget)} · today ${money(st.realized)}${state.liveWhy ? ` · ${esc(state.liveWhy.length > 90 ? `${state.liveWhy.slice(0, 88)}…` : state.liveWhy)}` : ''}`;
-}
-
-function renderLive() {
-  const linked = !!state.kalshi.key;
-  $('liveBody').hidden = !linked;
-  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
-  $('liveStatus').textContent = !linked ? 'Link your Kalshi account above first.'
-    : liveCfg.live ? `ON: trading real money while this app is open. ${liveCfg.useBalance !== false ? `Using your Kalshi balance ($${(state.kalshi.balance ?? 0).toFixed(2)}): ` : ''}Budget ${dollars(liveLimits(liveCfg, state.kalshi.balance).budget)}, up to ${dollars(liveLimits(liveCfg, state.kalshi.balance).maxPerTrade)} a trade, stops after ${dollars(liveCfg.dailyLoss)} of losses today.`
-    : 'Off.';
-  $('lvLock').checked = liveCfg.profitLock !== false;
-  $('lvUseBal').checked = liveCfg.useBalance !== false;
-  $('lvBalRow').hidden = liveCfg.useBalance === false; $('lvFixedRow').hidden = liveCfg.useBalance !== false;
-  if (document.activeElement !== $('lvPct')) $('lvPct').value = liveCfg.balancePct ?? LIVE_DEFAULTS.balancePct;
-  $('lvOwn').checked = liveCfg.ownPrice !== false;
-  $('liveArm').hidden = liveCfg.live;
-  $('liveOffRow').hidden = !liveCfg.live;
-  for (const [id, k] of [['lvBudget', 'budget'], ['lvMax', 'maxPerTrade'], ['lvLoss', 'dailyLoss'], ['lvTrades', 'maxTrades'], ['lvConf', 'minConfidence']]) {
-    if (document.activeElement !== $(id)) $(id).value = liveCfg[k];
-  }
-  $('lvRisk').textContent = dollars(st.exposure);
-  $('lvToday').textContent = money(st.realized);
-  renderLiveWhy();
-  $('lvLog').innerHTML = [...state.liveOrders].reverse().slice(0, 30).map((o) =>
-    `<li><span>${esc(o.label || `${o.action} ${o.count} ${o.side}`)}<small>${clock(o.at)} · ${esc(o.ticker)}${o.verified ? ` · ✓ Kalshi: ${o.filled ?? 0} filled${o.avgCents != null ? ` at ${o.avgCents}¢ avg` : ''}${o.fees != null ? `, fees $${o.fees.toFixed(2)}` : ''}` : ''}${o.error ? ` · ${esc(o.error)}` : ''}</small></span><b class="${o.status === 'error' ? 'neg' : ''}">${esc(o.status)}${o.filled != null ? ` · ${o.filled}` : ''}</b></li>`).join('') || '<li class="calm">No live orders yet</li>';
-  renderLiveStrip();
-}
-
-for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'maxPerTrade', 1, 1000], ['lvLoss', 'dailyLoss', 1, 100000], ['lvTrades', 'maxTrades', 1, 500], ['lvConf', 'minConfidence', 0, 100]]) {
-  $(id).addEventListener('change', (e) => {
-    const v = Number(e.target.value);
-    if (Number.isFinite(v)) liveCfg[k] = Math.min(max, Math.max(min, v));
-    saveLive(); renderLive();
-  });
-}
-$('lvLock').addEventListener('change', (e) => { liveCfg.profitLock = e.target.checked; saveLive(); renderLive(); });
-$('lvUseBal').addEventListener('change', (e) => { liveCfg.useBalance = e.target.checked; saveLive(); renderLive(); });
-$('lvPct').addEventListener('change', (e) => { const v = Number(e.target.value); if (Number.isFinite(v)) liveCfg.balancePct = Math.min(100, Math.max(1, v)); saveLive(); renderLive(); });
-$('lvOwn').addEventListener('change', (e) => { liveCfg.ownPrice = e.target.checked; if (e.target.checked) { ownPriceRefused = ''; delete liveCfg.ownPriceOff; } if (!e.target.checked) cancelAllResting('own prices turned off'); saveLive(); renderLive(); });
-$('lvOn').addEventListener('click', () => {
-  if (!state.kalshi.key) return toast('Link your Kalshi account first');
-  if (!$('lvAck').checked) return toast('Tick the box to confirm you understand it trades real money');
-  if ($('lvConfirm').value.trim().toUpperCase() !== 'LIVE') return toast('Type LIVE to turn it on');
-  liveCfg.live = true; liveErrors = 0; state.liveWhy = '';
-  $('lvConfirm').value = ''; $('lvAck').checked = false;
-  saveLive(); renderLive(); render();
-  toast('Live auto-trading ON: real orders while this app is open');
-});
-$('lvOff').addEventListener('click', () => stopLive('turned off'));
-$('liveStop').addEventListener('click', () => stopLive('STOP pressed'));
-
-buildSettings();
-renderRisk();
-renderLive();
-
-// ---------- live results (real trades) ----------
-let reportPeriod = 'today';
-function renderReport() {
-  const since = reportPeriod === 'today' ? new Date().setHours(0, 0, 0, 0) : reportPeriod === 'week' ? Date.now() - 7 * 86400000 : 0;
-  const r = liveReport({ trades: state.trades, orders: state.liveOrders, since });
-  for (const b of document.querySelectorAll('#rpPeriod button')) b.classList.toggle('on', b.dataset.p === reportPeriod);
-  const t = r.total, pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`), m = (v) => (v == null ? '—' : money(v));
-  $('rpPnl').textContent = money(t.pnl); $('rpPnl').className = t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : '';
-  $('rpTrades').textContent = `${t.n} (${t.wins} won)`;
-  $('rpWin').textContent = pct(t.winRate);
-  $('rpPer').textContent = m(t.perTrade);
-  $('rpDetail').textContent = t.n ? `Average win ${m(t.avgWin)} · average loss ${m(t.avgLoss)} · best ${m(t.best)} · worst ${m(t.worst)} · ${t.exact === t.n ? 'all' : `${t.exact} of ${t.n}`} using Kalshi's exact fills and fees` : 'No closed bot trades in this period yet.';
-  const rows = (g, name) => Object.entries(g).sort((a, b) => b[1].pnl - a[1].pnl).map(([k, s]) =>
-    `<li><span>${esc(name(k))}<small>${s.n} trade${s.n > 1 ? 's' : ''} · ${pct(s.winRate)} won</small></span><b class="${s.pnl > 0 ? 'pos' : s.pnl < 0 ? 'neg' : ''}">${money(s.pnl)}</b></li>`).join('') || '<li class="calm">—</li>';
-  $('rpExit').innerHTML = rows(r.byExit, (k) => EXIT_NAMES[k] || k);
-  $('rpConf').innerHTML = rows(r.byConf, (k) => `Confidence ${k}`);
-  const o = r.orders;
-  const rs = ruleStats(state.ruleLog.filter((e) => e.at >= since));
-  $('rpRule').textContent = rs.fired ? `Two-rejections rule: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule: hasn\'t fired in this period yet (it\'s scored on every market while the app is open)';
-  $('rpOrders').textContent = `${o.buys} buy orders: ${o.filled} filled, ${o.noFill} didn't fill, ${o.errors} errors${o.topErrors.length ? ` (${o.topErrors.map(([e, n]) => `${e} ×${n}`).join('; ')})` : ''}`;
-}
-document.querySelectorAll('#rpPeriod button').forEach((b) => b.addEventListener('click', () => { reportPeriod = b.dataset.p; renderReport(); }));
 
 // ---------- scorecard for the two-rejections rule (is it right on real markets?) ----------
 function trackRule(snap, live, now) {
@@ -1586,47 +1125,19 @@ function ruleStats(log) {
     settled: settled.length, won: settled.filter((e) => (e.result === 'yes') === (e.dir > 0)).length };
 }
 setInterval(() => { if (!document.hidden) settleRuleLog(); }, 30000);
-
-// ---------- learns from real trades ----------
-let learned = store.get('learned', null) || newLearned();
-function runLearning() {
-  if (liveCfg.learn === false) return;
-  const botTrades = liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades;
-  const res = learnStep({ botTrades, learned, liveBar: liveCfg.minConfidence, stratBar: settings.minConfidence });
-  if (res.learned.seen === learned.seen) return;
-  learned = res.learned; store.set('learned', learned);
-  if (res.liveBar !== liveCfg.minConfidence) { liveCfg.minConfidence = res.liveBar; saveLive(); renderLive(); }
-  if (res.changes.length) toast(`Learned from real trades: ${res.changes.map((c) => `${c.what} ${c.from} → ${c.to}`).join(', ')}`);
+function renderRuleScore() {
+  const rs = ruleStats(state.ruleLog);
+  $('ruleScore').textContent = rs.fired ? `Two-rejections rule scorecard: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule scorecard: hasn\'t fired yet (it\'s scored on every market while the app is open)';
 }
-function renderLearn() {
-  $('lnOn').checked = liveCfg.learn !== false;
-  const n = liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades.length;
-  $('lnStatus').textContent = liveCfg.learn === false ? 'Off: the bot keeps your settings as they are.'
-    : n < 30 ? `Watching: ${n} of 30 real trades so far before it adjusts anything.` : `Trade size ×${learned.sizeMult} · next check after ${Math.max(0, (learned.seen || 0) + 10 - n)} more trades.`;
-  $('lnLog').innerHTML = learned.log.map((c) => `<li><span>${esc(c.what)}: ${esc(String(c.from))} → ${esc(String(c.to))}<small>${new Date(c.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · because ${esc(c.why)}</small></span></li>`).join('') || '<li class="calm">No changes yet</li>';
-}
-$('lnOn').addEventListener('change', (e) => { liveCfg.learn = e.target.checked; saveLive(); renderLearn(); });
-$('lnReset').addEventListener('click', () => { learned = { ...newLearned(), seen: liveReport({ trades: state.trades, orders: state.liveOrders, since: 0 }).trades.length }; store.set('learned', learned); renderLearn(); toast('Learning reset: trade size back to normal'); });
-setInterval(() => { runLearning(); if (!document.hidden) renderLearn(); }, 10000);
-renderLearn();
-setInterval(() => { if (!document.hidden && !$('rpCard').closest('[hidden]')) renderReport(); }, 5000);
-renderReport();
 
 // ---------- health check (every 2 rounds) ----------
 const bootAt = Date.now();
 function runHealth(manual = false) {
   const now = Date.now();
-  const st = liveState({ positions: state.positions, trades: state.trades, orders: state.liveOrders });
-  const seen = seenStats(now);
-  const lastOrder = state.liveOrders[state.liveOrders.length - 1];
   const items = healthCheck({
     now, marketsAt: state.marketsAt, candlesAt: state.candlesAt, spotAt: state.spotAt, streaming: isLive(), skewMs: state.skewMs ?? null,
     noMarket: !!state.marketsAt && !state.markets.some((m) => Date.parse(m.close_time) > now),
-    linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance, held: state.kalshi.held,
-    liveOn: liveCfg.live, busySince: liveBusy ? liveBusySince : 0,
-    lastOrderError: lastOrder?.status === 'error' && now - lastOrder.at < 30 * 60000 ? lastOrder.error : null,
-    budget: liveLimits(liveCfg, state.kalshi.balance).budget, exposure: st.exposure, liveConf: liveCfg.minConfidence,
-    seen: liveSeen.length ? { minutes: Math.round((now - liveSeen[0].t) / 60000), bars: seen.bars } : null,
+    linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance,
     pushSupported: 'PushManager' in window, pushOn: !!state.pushOn,
   });
   const fresh = newProblems(state.health?.items, items);
@@ -1648,10 +1159,9 @@ function renderHealth() {
   $('healthStatus').textContent = `${bad.length ? `${bad.length} problem${bad.length > 1 ? 's' : ''}` : 'All good'} · checked ${clock(h.at)} · next ${clock(next)} (every 2 rounds)`;
   $('healthList').innerHTML = [...bad, ...h.items.filter((r) => r.level === 'ok')].map((r) =>
     `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(r.label)}${r.fix ? `<small>${esc(r.fix)}</small>` : ''}</span></li>`).join('');
-  state.healthNote = bad.length ? `Health check: ${bad.length} problem${bad.length > 1 ? 's' : ''} (see the Health check card)` : '';
+  renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));
-renderPractice();
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();

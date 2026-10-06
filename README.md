@@ -4,7 +4,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/skpw75zz9s-alt/Shot-caller)
 
-> **Signals only.** It never logs in to Kalshi and never places orders. You place trades yourself.
+> **Signals only.** It never places orders: you place trades yourself. Linking a Kalshi account (optional) only reads your trades so positions and P&L track themselves.
 > No model reliably beats these markets. Watch the paper P&L in the History tab before you risk real money.
 
 ## How it calls shots
@@ -47,7 +47,7 @@ It also weighs wick pressure (long upper wicks mean sellers hit rallies, long lo
 
 Why: on about 65,000 simulated calls, those odds matched reality. Calls given 80–90% won 82–83% of the time, and calls given 90%+ won 95%. The old points score (below) predicted wins worse than the odds alone, so it no longer sets confidence.
 
-Every confidence bar doubled in v4.1. Aggressive went from 40 to **80**, and Balanced and Safe now need **85** and **90**. Practice and Live use the same bars.
+Every confidence bar doubled in v4.1. Aggressive went from 40 to **80**, and Balanced and Safe now need **85** and **90**.
 
 **Smart exception (big gaps):** a call under the bar still fires when its gap is huge **even at the worst volatility guess**: 15 pts on Safe, 12 on Balanced, 10 on Aggressive. These are usually cheap sides that Kalshi has badly underpriced. They win less often at settlement but are worth more than they cost, and most get sold at a profit before then. Push alerts mark them *big-gap exception*.
 
@@ -67,7 +67,7 @@ When price gets rejected **twice in a row at about the same level** inside the w
 - **Counts as a rejection:** a candle that pokes at or near the window's high or low and closes well back, with a wick of at least 0.35× the average candle range and about as long as its body.
 - **When it fires:** the last two rejections point the same way, within half an average candle range of each other and 2–12 minutes apart. The second must be in the last ~5 minutes, and no candle can have closed through the level since.
 - **What it does:** no new call against it, and the call card says so (*NO looks cheap, but not calling it: Two rejections in a row at $85,392: expect down*). The bot's odds lean that way. The deep dive scores it +10 when the call agrees and −15 when it's against.
-- **Scorecard:** every time the rule fires on a real market, the app records whether price moved the expected way 5 minutes later and whether the side it favored won at settlement. The score shows in the Live results card. The pattern couldn't be checked against enough real history from here, so this is how to find out whether it holds up.
+- **Scorecard:** every time the rule fires on a real market, the app records whether price moved the expected way 5 minutes later and whether the side it favored won at settlement. The score shows in the Health check card (Settings). The pattern couldn't be checked against enough real history from here, so this is how to find out whether it holds up.
 
 ### Deep dive (the reasons)
 
@@ -111,108 +111,6 @@ Next to each side's buy price, the app shows Kalshi's **cash-out price**: the li
 
 The server still follows each whole window (the bot's odds every 5 seconds, plus a paper "follow the bot" trade) so the 15-minute update can say how the last window went. The app's History tab shows only **My trades**.
 
-### Live auto-trading (real money)
-
-Settings → **Live auto-trading**. It appears once Kalshi is linked, and your Kalshi API key needs trading permission.
-
-**What it does:** while the app is open on screen, the bot places real orders in your Kalshi account using the same rules as Practice.
-- It buys new calls (and real switches) at or above *Min confidence*.
-- On Aggressive, it adds as the gap grows.
-- It sells on the same exits as every position card, and re-enters after a sale.
-
-**How orders are placed:**
-- Every buy is a limit order at the call's max price that fills now or cancels. Nothing is left resting on Kalshi.
-- Sells go at the bid or better and can never sell more than you hold.
-
-**Your money limits**, all checked before every order:
-
-| Limit | Default | What it does |
-|---|---|---|
-| Budget | $50 | Most it will ever have at risk (open positions at cost) |
-| Max $ per trade | $10 | Most one order may cost |
-| Daily loss stop | $40 | Buying stops for the day once today's realized losses plus everything still open could reach this |
-| Max trades / day | 40 | |
-| Kalshi balance | | It never spends more cash than the account holds. Kalshi has no borrowing, and the bot can't withdraw or reach your bank. |
-
-**Server check:** orders use Kalshi's V2 order API (`POST /portfolio/events/orders`: one YES book, so buy YES = bid, buy NO = ask at 1 − price, and sells are `reduce_only` so they can only close what's held). Before any order reaches Kalshi, the server refuses it unless all of these hold:
-- It's for the BTC 15-minute series.
-- It's a fill-now-or-cancel (`immediate_or_cancel`) order with a price of 1–99¢ and a sane size.
-- Its total cost is at most $100 (`AUTO_MAX_ORDER_USD`).
-- It has no unknown fields.
-- It's within 20 orders a minute.
-
-**Profit lock (on by default, Live card checkbox):** once a live trade has been up at least **4¢ a contract**, the bot sells while it's still a win if both of these happen:
-- it gives back **half** of that peak profit
-- it shows at least one other sign of turning: the bot's odds down 8+ points from their peak, a reversal candle pattern, RSI rolling over, rejection at a band or level, or two strong candles against you
-
-The order shows as *lock profit: sell …* in Live orders. In the simulator, this raised the share of winning trades from 92% to 93% and cut the worst losing stretch from $400 to $363. It cost about 2% of profit, because sometimes the trade would have recovered. Uncheck it to hold for value instead.
-
-**Account sync matches Kalshi:** Kalshi's own records are the source of truth, checked on every sync:
-- **Fills** are read in full (every page) and on the right side. Newer fills give the side in `outcome_side`. Their `side` field can say "bid"/"ask", which older versions read as YES. Every trade records the exact fee Kalshi charged (`fee_cost`) instead of an estimate.
-- **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*. A market the bot ordered in within the last 20 seconds is checked on the next sync, after its fills arrive.
-- **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
-- **Orders:** every bot order in the Live log is matched to Kalshi's record of it, showing *✓ Kalshi: 55 filled at 48¢ avg, fees $0.97*.
-
-Live results profit and loss uses those exact fills and fees, and the card says how many trades it covers.
-
-**Live results (Settings):** how the bot's **real** trades went, for Today, 7 days or All: profit and loss, trades, win rate, average per trade, best and worst. It's split by how each trade sold (take profit, profit lock, cut loss, held to settlement) and by confidence at the buy. It also shows how many buy orders filled, didn't fill or errored, with the most common errors. It counts only trades the bot bought, not ones you placed yourself in the Kalshi app.
-
-**Learns from real trades (on by default, in the Live results card):** every 10 new closed bot trades, it looks at the last 30:
-- **Min confidence:** goes up 2 points if the trades just over the bar (within 5 points of it) lost money. Goes down 2 points if the last 30 made money with 60%+ wins. It never goes under the risk level's bar or over 95.
-- **Trade size:** 20% smaller after a losing 30 (down to half size), 10% bigger after a winning 30 (up to 1.5×).
-
-Every change is listed with the date and reason, and you can turn it off or reset it. 30 trades is a small sample, which is why the steps are small.
-
-**Entry ideas tested and left off:** each was run against the live setup in the simulator (+$629 per 100 windows):
-- **No new calls in the last 1 or 2 minutes:** $492 / $308. Late calls are where the model is most accurate.
-- **Skip volatility spikes:** $628–629, no measurable effect.
-- **Skip after Kalshi's price jumps 5 or 10 pts in 30s:** $307 / $431. Slightly better with a slow connection, but it gives up most of the profit.
-- **Split the first buy in half:** $338, with a smaller worst stretch ($280 vs $338).
-
-The settings exist (`noCallLastMin`, `maxVolRatio`, `jumpSkip`, `firstSize`) but stay off.
-
-**Use my Kalshi balance (on by default, Live card checkbox):** the budget is the cash in your Kalshi account (less a small cushion), and each trade can use up to *% of balance per trade* (25% by default). The bot grows and shrinks with your account, and the *Daily loss stop* and *Max trades / day* still apply. Uncheck it to use fixed dollar limits instead.
-
-**When Kalshi says "insufficient balance":** the order's entry in Live orders shows exactly what happened, for example *buy 3 YES needed ~$2.16; Kalshi cash $11.59, $10.00 of it held by 1 waiting order*. Then the bot:
-1. Re-reads your balance and the orders still waiting on Kalshi.
-2. Cancels any of **its own** leftover waiting orders that are tying up cash. It never touches orders you placed yourself.
-3. Sizes the next order to what's actually free.
-4. Backs off: 15 seconds, then 1 minute, then 5, then 15 while it keeps happening. You get one pop-up per streak, not one every retry, and the next order that goes through resets it.
-
-**Bot's own price on calls (on by default, Live card checkbox):** when a call fires, the buy is a limit order at the bot's max price that waits on Kalshi for up to 2 minutes. Before, it was fill-now-or-cancel, which gave up if Kalshi's price was a cent too high. Kalshi fills it as soon as a seller comes down to the bot's price.
-- The app cancels the order the moment the call ends.
-- **STOP** cancels everything that's waiting.
-- Each order also carries an expiry, so Kalshi itself cancels it within 2 minutes (and 1 minute before the market closes) even if your phone dies. The server refuses any waiting order that would last longer than 5 minutes.
-- Waiting buys count toward your budget while they wait.
-
-Some Kalshi accounts refuse waiting orders with "insufficient balance" even when plenty of cash is free, while orders that fill right away go through. When that happens, the bot sends the same buy as a fill-now order immediately. It then turns *Use the bot's own price* off and remembers that across restarts. Tick the box again to retry waiting orders. If Kalshi (or the server) ever refuses a waiting order, the bot immediately sends the same buy as a fill-now order instead, and keeps using fill-now orders until the app restarts. The Live card says so. The server also pulls a waiting order's expiry back into range if the phone's clock is a few minutes off.
-
-Tested in the simulator against fill-now: +$7 per 100 windows, worst losing stretch $338 instead of $363, and much better with a slow connection (+$43 vs +$30 at a 10-second delay).
-
-What it deliberately does **not** do: post its own price when there's no call, or keep a waiting sell posted. Both were tested. The no-call version lost money in every variant tried, even on a perfectly priced Kalshi, because those orders mostly fill when the market knows something the bot doesn't. Waiting sells have the same risk of selling too cheap right as a position gains value.
-
-**Instant orders:** while Live is on, the app reads Kalshi's prices every second (not every 3). Each order is a single request: the server, which sits next to Kalshi, reads the live order book and places the order immediately. That saves a second round trip over mobile data.
-- **Buys** go out only if something is for sale at or under the max price, sized to what's there. If the bargain is already gone, no order is sent and it doesn't count as a try.
-- **Sells** step to the live bid if it's within 2¢.
-- After a fill, the position syncs right away, so the sell can follow at once.
-
-Measured against the stand-in Kalshi, from a price change to the order arriving at Kalshi: buys went from 5.3s to **1.0s**, and sells from 5.9s to **1.0s**.
-
-**Doesn't miss calls:** if an order doesn't fill (the price moved in the second it took) or errors, it tries the same call again, up to 3 orders at least 5 seconds apart. It also picks up a call that was already active when you turned Live on or reopened the app. It never buys the same call twice. Only buys that went through count toward *Max trades / day*. While Live is on and the app is on screen, it keeps the screen awake. In Low Power Mode iPhone may still lock it, so set Auto-Lock to Never while trading.
-
-**Right now line:** while it's on, the Live card always says what it's doing. For example: *Waiting for a call: YES is at confidence 73 (needs 80, or a 10-pt gap) with a 9-pt worst-case gap*. If an order fails, the card also shows Kalshi's exact error. It only runs while the app is open on screen. iPhone pauses it when the app is in the background or the phone is locked.
-
-**Turning it on and off:**
-- Turning it on needs a confirmation tick plus typing **LIVE**.
-- A red **LIVE AUTO-TRADING** strip with a **STOP** button sits on the Live screen while it's on.
-- It switches itself off if Kalshi refuses an order for permissions (a read-only key) or after 3 failed orders in a row.
-- **STOP doesn't sell open positions.** They keep their sell signals, and you can sell them on Kalshi.
-
-**Rules:**
-- Turn it on on one phone only.
-- Only keep money in Kalshi you're fine losing.
-- The strategy is tested in simulation and Practice, not proven on live money.
-
 ### Link your Kalshi account (optional)
 
 Settings → **Kalshi account**. On Kalshi, go to Account → API keys → Create key, then copy the key ID and download the private key file. Paste the key ID, then paste the key or pick the file, and tap **Link account**. The app checks the key by reading your balance.
@@ -224,18 +122,22 @@ Once linked, the app reads your **fills** (every buy and sell, with exact price,
 - Buying the other side nets out, the way Kalshi does it.
 - Positions you hold to settlement are scored when the market settles.
 - Positions sync to the alert server as before, so SELL NOW pushes keep working with the app closed.
-- Fees in P&L are estimated with Kalshi's taker formula.
+- Fees in P&L are Kalshi's actual fees when the fill reports them, otherwise Kalshi's taker formula.
 
 Security:
 - **The key never leaves the phone.** It's imported as a non-extractable WebCrypto key in IndexedDB, so it can sign requests but can't be read back out, not even by the app's own code. The pasted text is cleared right away.
 - Each request is signed on the phone (Ed25519 or RSA-PSS, matching the key type Kalshi issued). The server only forwards the signature headers.
-- Reads: the server forwards GET requests only for `portfolio/fills`, `positions`, `balance`, `settlements` and `orders`, and never caches the responses.
-- Orders: these are placed only when you turn on **Live auto-trading** (see below). The server checks every order before it reaches Kalshi.
+- Read-only: the server forwards GET requests only for `portfolio/fills`, `positions`, `balance` and `settlements`, and never caches the responses. It has no way to place or cancel orders, so a read-only Kalshi key is enough.
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
+
+**Account sync matches Kalshi:** Kalshi's own records are the source of truth, checked on every sync:
+- **Fills** are read in full (every page) and on the right side. Newer fills give the side in `outcome_side`. Their `side` field can say "bid"/"ask", which older versions read as YES. Every trade records the exact fee Kalshi charged (`fee_cost`) instead of an estimate.
+- **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
+- **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
 ### Risk level
 
-Settings → **Risk level**. Each level sets the whole strategy, and Practice's limits move with it:
+Settings → **Risk level**. Each level sets the whole strategy:
 
 | | Safe | **Balanced (default)** | Aggressive |
 |---|---|---|---|
@@ -245,7 +147,6 @@ Settings → **Risk level**. Each level sets the whole strategy, and Practice's 
 | Max price | half the gap | half the gap | **tighter (¼ of the gap)** |
 | Cut a loser when Kalshi pays | 3 pts over the bot | 3 pts over | **1 pt over** (still after the 30s hold) |
 | Bet size | ¼ Kelly, ≤ $25 | ¼ Kelly, ≤ $25 | **½ Kelly, ≤ $50** |
-| Practice | conf 90+, $5, $20/day, 10 trades | conf 85+, $5, $20/day, 10 trades | conf 80+, $10, $40/day, 40 trades |
 
 **How Aggressive was chosen:**
 1. A random search tried 100 strategy configurations at a fixed bet size, scored across 6 simulated Kalshi market types at instant and ~10s fills.
@@ -270,7 +171,7 @@ The cost is swings: Aggressive's worst stretch was ~$90–200 (up to ~$280 by ha
 
 Doubling the bet size again would double profit, but the worst stretch would reach ~$560, over 5× the $100 bankroll the bot sizes from, so it was not shipped. If you really have a bigger bankroll, set *Bankroll* in Settings and stakes scale with it.
 
-**Every level re-enters.** After you sell (or Practice sells), the call on that market is released, and a new call can fire after the cooldown. Aggressive scales in by opening on a small gap and adding each time the gap clears the next tier. Phones holding the call get an **Add** push.
+**Every level re-enters.** After you sell, the call on that market is released, and a new call can fire after the cooldown. Aggressive scales in by opening on a small gap and adding each time the gap clears the next tier. Phones holding the call get an **Add** push.
 
 Editing the gap or confidence by hand shows as *Custom*.
 
@@ -295,35 +196,6 @@ Things tested and left off by default:
 - **Requiring the edge to hold 30–60s** before calling: almost no calls left.
 - **Blending in Kalshi's price** (*marketWeight*): fewer calls, no gain.
 - **Capping edges** that look too good (*maxEdge*): steadier, but not more profitable.
-
-### Auto-trade practice
-
-Settings → **Auto-trade practice**. Turn it on and the app runs the rules an auto-trader would use, on live Kalshi prices, and logs every trade it **would** make. **It never places an order.**
-
-The rules:
-- **Buy** on a new BUY THE LOW call with confidence at or above *Min confidence* (default 85), at Kalshi's ask, only if the ask is at or under the call's max price.
-- **One buy per window**, sized to *Max $ per trade* (default $5).
-- **Stop buying for the day** after *Max trades / day* (default 10) or the *Daily loss limit* (default $20). Open positions count as fully at risk, so the limit can't be overrun.
-- **Sell** on the same exits as real positions: take profit as soon as Kalshi pays what the bot thinks it's worth, and cut only after the hold-steady wait. Otherwise hold to settlement.
-
-A **PRACTICE** strip on the Live screen shows what it's holding and today's P&L. The card shows today's and all-time results and the log, including why it skipped a call.
-
-Caveats:
-- It only runs while the app is open on screen.
-- Fills assume the price on screen at that moment. Real orders can fill a bit worse.
-
-Run it for a few days and compare the practice P&L with what the market actually did before considering real auto-trading.
-
-### Range watch (experiment, inside Practice)
-
-The ceiling/floor chart rule runs side by side with the bot's practice trades on its own paper book:
-- **Ceiling and floor** are the highest high and lowest low of the last 20 one-minute candles, each touched at least twice, with a range at least 2× the average candle.
-- **Rejected at the ceiling:** paper-buy NO. **Rejected at the floor:** paper-buy YES.
-- One trade per window, held to settlement, sized like practice.
-
-It never changes the bot's calls or places orders. The Practice card shows Range watch next to the bot's practice results.
-
-Offline, on ~1,100 real candles from Oct 4, the rule was right about half the time overall. Floor bounces worked and ceiling rejections failed, likely because of that day's uptrend, so it's being measured live before it can influence anything.
 
 ### Trusting its gut
 
@@ -354,10 +226,9 @@ While the app is open, it checks itself every 2 rounds: every 30 minutes, at :00
 - Kalshi and BTC prices are fresh
 - The phone's clock matches the server (Kalshi refuses orders from a wrong clock)
 - The Kalshi link and balance sync work (a deleted or wrong API key shows here)
-- The live auto-trader: a stuck or failed order, low cash, a full budget, or a Min confidence that found no trades in an hour when a lower one would have
 - Push notifications are on
 
-Each problem comes with what to do about it. You're told once, with a toast and a notification, when a **new** problem appears. Problems that stay don't re-alert, and the Live card shows a line while any problem is open.
+Each problem comes with what to do about it. You're told once, with a toast and a notification, when a **new** problem appears. Problems that stay don't re-alert. The card also shows the two-rejections rule's scorecard.
 
 ### Push notifications (app closed)
 

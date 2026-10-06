@@ -1,10 +1,9 @@
-// Link to a Kalshi account with a Kalshi API key, done entirely on the phone. Reading fills and balance;
-// orders are placed only by live auto-trading (autotrade.js), which the user turns on with explicit limits.
+// Link to a Kalshi account with a Kalshi API key, done entirely on the phone. Read-only: fills, positions,
+// settlements and balance. The app never places orders.
 // Kalshi signs API requests with the key: signature = sign(timestamp + METHOD + path), RSA-PSS for
 // RSA keys and Ed25519 for the newer short keys ("MC4CAQAwBQYDK2Vw…"). The private key
 // is imported as a non-extractable WebCrypto key, so after linking even this app's own code can't read
-// it back out, and it never leaves the device. The server forwards signed portfolio reads, and order POSTs only
-// after checking them (server.js validateOrder).
+// it back out, and it never leaves the device. The server only forwards signed portfolio reads.
 
 const b64 = (bytes) => { let s = ''; for (const x of bytes) s += String.fromCharCode(x); return btoa(s); };
 const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));

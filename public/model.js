@@ -141,17 +141,14 @@ export const DEFAULTS = {
 // grows, re-enters fast and bets twice Safe's size. Simulated on fresh seeds with instant fills it made 2.4-16x
 // Safe's profit where there was an edge; its worst losing stretch was ~$90-200 vs Safe's ~$15-40.
 export const RISK_LEVELS = {
-  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
-    practiceConfidence: 90, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'Fewest calls, biggest gaps only' },
-  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25,
-    practiceConfidence: 85, practiceMax: 5, practiceLoss: 20, practiceTrades: 10, hint: 'About 2× the calls of Safe' },
+  safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
+  balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
   // it was not picked on (beat the previous Aggressive in 11 of 12 market/fill-speed cells).
   aggressive: { label: 'Aggressive', minEdge: 0.02, minConfidence: 80, scaleIn: true, scaleStep: 0.015, reentrySec: 5, limitEdgeFrac: 0.25, cutMargin: 0.01, kellyFraction: 0.5, maxStake: 50,
-    bigEdgeOverride: 0.10,
-    practiceConfidence: 80, practiceMax: 10, practiceLoss: 40, practiceTrades: 40, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
+    bigEdgeOverride: 0.10, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
-// The strategy settings a risk level sets (practice limits are applied separately)
+// The strategy settings a risk level sets
 export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
 export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
@@ -261,12 +258,6 @@ export const EXIT_DEFAULTS = {
   cutConfirmSec: 30, // ...and to keep doing so this long before SELL NOW (one bad tick isn't a reason)
   takeConfirmSec: 0, // same wait for a profitable sell
   smoothSec: 0,      // exit decisions use the bot's odds averaged over this many seconds
-  // Profit lock (live auto-trader): once a position was up at least lockArm per contract, sell while still in profit
-  // if it gives back lockGiveback of that peak profit AND shows at least lockSigns other signs of turning
-  profitLock: false,
-  lockArm: 0.04,
-  lockGiveback: 0.5,
-  lockSigns: 1,
 };
 
 // When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
@@ -293,13 +284,6 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
 
   if (inProfit && net >= pSide) {
     return { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` };
-  }
-  if (s.profitLock && inProfit && pos.peakBid != null) {
-    const peakGain = pos.peakBid - kalshiFee(pos.peakBid) - entryCost, gave = peakGain - pnlPer;
-    const turning = signs.filter((x) => !/^Sell price down/.test(x)).length; // signs besides the price drop itself
-    if (peakGain >= s.lockArm - 1e-9 && gave >= s.lockGiveback * peakGain - 1e-9 && turning >= s.lockSigns) {
-      return { ...base, signs, action: 'SELL', kind: 'lock', why: `Locking in profit: it was up ${c(peakGain)} a contract and has given back ${c(gave)}, with signs it's turning (${signs.filter((x) => !/^Sell price down/.test(x)).join('; ') || 'price falling'}). Sell while it's still a win.` };
-    }
   }
   if (!inProfit && net >= pSide + s.cutMargin) {
     return { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };
