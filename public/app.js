@@ -1244,7 +1244,13 @@ $('settingsForm').addEventListener('change', () => setTimeout(renderRisk)); // a
 let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 // Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
 const livePause = { buyUntil: 0, why: '', tickers: {} };
-let ownPriceRefused = '';
+let ownPriceRefused = liveCfg.ownPriceOff || ''; // why Kalshi won't take waiting orders (remembered across restarts)
+// Kalshi won't take the bot's waiting orders: turn "own price" off (the checkbox shows it) and remember why
+function refuseOwnPrice(why) {
+  if (!ownPriceRefused) toast('LIVE: Kalshi won\'t take waiting orders on your account. Using fill-now orders instead.');
+  ownPriceRefused = why;
+  Object.assign(liveCfg, { ownPrice: false, ownPriceOff: why }); saveLive(); renderLive();
+}
 let liveShrink = 1, cashFails = 0; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-1500)); }
 
@@ -1317,9 +1323,8 @@ async function sendLive(order, meta, label) {
     entry.status = 'error'; entry.error = e.message;
     if (meta.rest && (e.status === 400 || e.status === 422) && !/insufficient|balance/i.test(e.message)) {
       // A waiting (own-price) order was refused: don't keep failing. Switch to fill-now orders and send this one now.
-      ownPriceRefused = e.message;
+      refuseOwnPrice(e.message);
       entry.error = `${e.message} · waiting orders refused, switched to fill-now`;
-      toast('LIVE: Kalshi refused a waiting order. Switching to fill-now orders.');
       liveBusy = false;
       await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
       return;
@@ -1330,6 +1335,15 @@ async function sendLive(order, meta, label) {
       // what this order needed: buys pay price + fee per contract; a sell only closes what's held
       const need = meta.action === 'buy' ? meta.count * (meta.cents / 100 + kalshiFee(meta.cents / 100)) : 0;
       entry.error = `insufficient balance: ${meta.action} ${meta.count} ${meta.side} needed ~$${need.toFixed(2)}; Kalshi cash $${(bal ?? 0).toFixed(2)}${held > 0 ? `, $${held.toFixed(2)} of it held by ${state.kalshi.held.count} waiting order${state.kalshi.held.count > 1 ? 's' : ''}` : ''}`;
+      // A waiting (own-price) order refused although the cash clearly covers it: Kalshi won't take waiting orders on
+      // this account (only orders that fill right away went through). Stop using them and send this buy as fill-now.
+      if (meta.rest && bal != null && need > 0 && need <= bal - held - 0.05) {
+        refuseOwnPrice(`Kalshi refused waiting orders with "insufficient balance" although $${(bal - held).toFixed(2)} was free`);
+        entry.error += ' · Kalshi won\'t take waiting orders here: sent as fill-now instead';
+        liveBusy = false;
+        await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
+        return;
+      }
       // the bot's own leftover waiting orders on Kalshi tie up cash: cancel any it isn't actively using
       const ours = new Set(state.liveOrders.flatMap((o) => [o.id, o.clientId]).filter(Boolean));
       const using = new Set(state.liveOrders.filter((o) => isResting(o)).map((o) => o.id));
@@ -1456,7 +1470,7 @@ function seenLine() {
 function renderLiveWhy() {
   const lastErr = [...state.liveOrders].reverse().find((o) => o.at > Date.now() - 600000);
   $('lvWhy').innerHTML = !liveCfg.live ? esc(state.liveWhy)
-    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${ownPriceRefused ? `<br><b class="neg">Waiting orders refused by Kalshi</b> (${esc(ownPriceRefused)}): using fill-now orders until the app restarts.` : ''}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
+    : `<b>Right now:</b> ${esc(state.liveWhy || 'checking…')}${ownPriceRefused ? `<br><b>Using fill-now orders:</b> ${esc(ownPriceRefused)}. (Tick "Use the bot's own price" to try waiting orders again.)` : ''}${lastErr?.status === 'error' ? `<br><b class="neg">Last order failed:</b> ${esc(lastErr.error || 'unknown error')}` : ''}${seenLine()}${state.healthNote ? `<br><b class="neg">${esc(state.healthNote)}</b>` : ''}<br><small>${wakeLock ? 'Screen kept awake while live trading is on. ' : ''}Keep this app open on screen: iPhone pauses it in the background or when locked${wakeLock ? '' : ' (set Auto-Lock to Never while trading if the screen keeps locking)'}.</small>`;
 }
 
 function renderLiveStrip() {
@@ -1503,7 +1517,7 @@ for (const [id, k, min, max] of [['lvBudget', 'budget', 1, 100000], ['lvMax', 'm
 $('lvLock').addEventListener('change', (e) => { liveCfg.profitLock = e.target.checked; saveLive(); renderLive(); });
 $('lvUseBal').addEventListener('change', (e) => { liveCfg.useBalance = e.target.checked; saveLive(); renderLive(); });
 $('lvPct').addEventListener('change', (e) => { const v = Number(e.target.value); if (Number.isFinite(v)) liveCfg.balancePct = Math.min(100, Math.max(1, v)); saveLive(); renderLive(); });
-$('lvOwn').addEventListener('change', (e) => { liveCfg.ownPrice = e.target.checked; if (!e.target.checked) cancelAllResting('own prices turned off'); saveLive(); renderLive(); });
+$('lvOwn').addEventListener('change', (e) => { liveCfg.ownPrice = e.target.checked; if (e.target.checked) { ownPriceRefused = ''; delete liveCfg.ownPriceOff; } if (!e.target.checked) cancelAllResting('own prices turned off'); saveLive(); renderLive(); });
 $('lvOn').addEventListener('click', () => {
   if (!state.kalshi.key) return toast('Link your Kalshi account first');
   if (!$('lvAck').checked) return toast('Tick the box to confirm you understand it trades real money');
