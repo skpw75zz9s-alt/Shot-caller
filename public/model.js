@@ -135,6 +135,10 @@ export const DEFAULTS = {
   noCallLastMin: 0,     // entry filters for new calls (0 = off): no new call with fewer than this many minutes left,
   maxVolRatio: 0,       // ...or when 1-minute vol is more than this many times its 2-hour norm,
   jumpSkip: 0,          // ...or when Kalshi's price for the side moved this much in the last 30 seconds
+  minHold: 0,           // Steady: a new call needs this chance (0-1) that its confidence stays above holdFloor all round (0 = off)
+  holdFloor: 0.8,       // ...the confidence floor that "holding" means (80)
+  steadySec: 0,         // Steady: the bot's odds must have stayed at minConfidence or more for this long before a call
+  lockCall: false,      // Steady: once a side is called, never switch to the other side that round
   learn: true,          // use what the server learned over days and weeks (time-of-week volatility, calibration, basis)
 };
 
@@ -142,6 +146,10 @@ export const DEFAULTS = {
 // grows, re-enters fast and bets twice Safe's size. Simulated on fresh seeds with instant fills it made 2.4-16x
 // Safe's profit where there was an edge; its worst losing stretch was ~$90-200 vs Safe's ~$15-40.
 export const RISK_LEVELS = {
+  // Steady: only calls whose confidence is likely to last. In simulation, calls at confidence 85+ with hold odds of
+  // 80%+ kept their confidence above 80 for the rest of the round 93% of the time (85+ alone: 84%; 85-90 alone: 65%)
+  // and won about 98%. No big-gap exception, no switching sides mid-round.
+  steady: { label: 'Steady', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0, minHold: 0.8, steadySec: 60, lockCall: true, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Calls that hold: confidence 85+ that held for a minute and is likely to stay above 80 all round' },
   safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
   balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
@@ -150,9 +158,9 @@ export const RISK_LEVELS = {
     bigEdgeOverride: 0.10, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
 // The strategy settings a risk level sets
-export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
-export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key]]));
-export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence) ?? 'custom';
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key] ?? DEFAULTS[key]]));
+export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence && (RISK_LEVELS[k].minHold ?? 0) === (s.minHold ?? 0)) ?? 'custom';
 
 // Decide the call for one market.
 // pShift nudges P(YES) by evidence the price model can't see (e.g. rejection trends), in probability points.
@@ -293,4 +301,38 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
     ...base, signs, action: 'HOLD', kind: 'hold',
     why: `Bot gives it ${c(pSide)}. Selling now gets you ${c(net)} after fees, less than it's worth${signs.length ? ', even with flip signs showing' : ''}. Sell at ${c(target)} or hold to settlement.`,
   };
+}
+
+// ---------- hold odds: will this call's confidence last the round? ----------
+// Confidence moves with BTC. holdOdds simulates the rest of the window (fixed pseudo-random paths, so the number
+// doesn't jitter between ticks; each path also draws its own volatility, since the bot's estimate can be off) and
+// returns the share of paths where the side's confidence never drops below `floor` before the last `stopMin` minutes.
+const HOLD_PATHS = 300, HOLD_DT = 1 / 6; // minutes per step (10s)
+let holdNormals = null;
+function holdRandom() {
+  if (holdNormals) return holdNormals;
+  let s = 20261006 >>> 0;
+  const u = () => { s = (s * 1664525 + 1013904223) >>> 0; return (s + 0.5) / 2 ** 32; };
+  const n = HOLD_PATHS * (16 / HOLD_DT + 1);
+  holdNormals = new Float64Array(n);
+  for (let i = 0; i < n; i++) holdNormals[i] = Math.sqrt(-2 * Math.log(u())) * Math.cos(2 * Math.PI * u());
+  return holdNormals;
+}
+export function holdOdds({ market, strike, spot, sigmaMin, minutesLeft, side, floor = 0.8, stopMin = 1, confVol = 1.25 }) {
+  if (!spot || !sigmaMin || !side || !(minutesLeft > stopMin)) return null;
+  const z = holdRandom();
+  const steps = Math.floor((minutesLeft - stopMin) / HOLD_DT);
+  const per = 16 / HOLD_DT + 1;
+  let held = 0;
+  for (let k = 0; k < HOLD_PATHS; k++) {
+    const vol = sigmaMin * Math.exp(0.2 * z[k * per] - 0.02); // this path's volatility
+    let x = Math.log(spot), ok = true;
+    for (let i = 1; i <= steps; i++) {
+      x += vol * Math.sqrt(HOLD_DT) * z[k * per + i];
+      const p = probYes(market, strike, Math.exp(x), sigmaMin * confVol, minutesLeft - i * HOLD_DT, 0);
+      if (p == null || (side === 'YES' ? p : 1 - p) < floor) { ok = false; break; }
+    }
+    if (ok) held++;
+  }
+  return held / HOLD_PATHS;
 }

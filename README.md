@@ -182,9 +182,24 @@ Security:
 
 ### Risk level
 
-Settings → **Risk level**. Each level sets the whole strategy:
+Settings → **Risk level**. Each level sets the whole strategy.
 
-| | Safe | **Balanced (default)** | Aggressive |
+**Steady (default since v5.3): calls that hold.** Confidence moves with BTC, so no call can promise to stay at 85–90 all round. Steady only calls when that's likely, using three rules:
+- **Confidence 85+ that has lasted.** The bot's odds must have stayed at 85+ for a full minute, not one lucky tick.
+- **Hold odds of 80%+.** The bot simulates 300 paths of BTC for the rest of the window, each with its own volatility. In at least 80% of them, the side's confidence must stay above 80 until the last minute. Every call card shows these hold odds.
+- **Locked call.** Once a side is called, it never switches sides that round.
+
+In simulation (9,000+ moments at confidence 85+):
+
+| Calls | Confidence stayed above 80 all round | Won |
+|---|---|---|
+| Confidence 85–90 alone | 65% | 92–94% |
+| Confidence 85+ alone | 84% | 96.5–97.5% |
+| **Steady (85+ and hold odds 80%+)** | **93%** | **98.4–98.9%** |
+
+The hold odds came true: predicted 78% held 79–81% of the time, and predicted 90% held 87–88%. Steady makes fewer calls, and calls that hold are often priced high on Kalshi, so each win pays less. It still isn't 100%: about 1 in 15 Steady calls drops below 80 at some point, and a few lose. Phones on Balanced moved to Steady in v5.3, and Balanced is still available.
+
+| | Safe | Balanced | Aggressive |
 |---|---|---|---|
 | Min gap / confidence (win odds) | 8 pts / 90, or a 15-pt worst-case gap | 6 pts / 85, or a 12-pt gap | **2 pts / 80**, or a 10-pt gap |
 | Scales in | no | no | yes, tiers 1.5 pts apart |

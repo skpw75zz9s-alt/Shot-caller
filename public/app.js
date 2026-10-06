@@ -41,6 +41,9 @@ const SETTINGS_META = [
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
   ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (BTC streams live)', 'num'],
 ];
+// A fresh install has nothing to migrate: skip straight past the old upgrade steps (the v4.1 step used to double a new
+// phone's confidence bar to 95). Only the latest step (default risk level) runs.
+if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
 const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
@@ -89,6 +92,14 @@ if (store.get('settingsVersion', 1) < 11) {
   const lvl = Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - settings.minEdge) < 1e-9 && { safe: 60, balanced: 55, aggressive: 40 }[k] === settings.minConfidence);
   if (lvl) Object.assign(settings, riskSettings(lvl)); else settings.minConfidence = dbl(settings.minConfidence);
   store.set('settings', settings); store.set('settingsVersion', 11);
+}
+
+// v5.3: Steady (calls whose confidence is likely to hold all round) replaces Balanced as the default
+if (store.get('settingsVersion', 1) < 12) {
+  // (also phones hit by the old fresh-install bug: Balanced's gap with the bar doubled to 95 and no big-gap exception)
+  const freshBug = Math.abs(settings.minEdge - 0.06) < 1e-9 && settings.minConfidence === 95 && !settings.bigEdgeOverride;
+  if (riskLevelOf(settings) === 'balanced' || freshBug) { Object.assign(settings, riskSettings('steady')); store.set('steadyNote', true); }
+  store.set('settings', settings); store.set('settingsVersion', 12);
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
@@ -363,13 +374,16 @@ function render() {
     }
     const otherSide = sig.called === 'YES' ? 'NO' : 'YES';
     const sticking = sig.stance === 'holding' && now - (sig.calledAt ?? now) > 60000; // the first minute of a call is just the call
-    $('reason').textContent = call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
+    $('reason').textContent = call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
+      : call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
       : sig.cooldown ? `Just sold on this market. A fresh call can come in ${sig.cooldown}s if the gap is still there.`
       : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
       : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
       : ev.side && settings.doubleRejRule !== false && live.rej?.double && live.rej.double.dir !== (ev.side === 'YES' ? 1 : -1) ? `${sideName(ev.side)} looks cheap, but not calling it: ${live.rej.double.label}`
+      : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.holdOk ? `Confidence ${sig.deep.score}, but it stays above ${Math.round(settings.holdFloor * 100)} to the end in only ${sig.hold == null ? '—' : Math.round(sig.hold * 100)}% of simulated paths (Steady needs ${Math.round(settings.minHold * 100)}%). Waiting for a call that holds.`
+      : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.steadyOk ? `Confidence ${sig.deep.score}: making sure it holds for ${settings.steadySec}s before calling (one good tick isn't enough).`
       : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
       : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${sig.confNeed}` : ev.reason;
     $('odds').innerHTML = oddsRows(ev, settings.minEdge);
@@ -378,7 +392,8 @@ function render() {
     const waiting = call && !buyNow && settings.waitForDip;
     $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
-      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin' : ev.side ? 'Low price, not confident' : 'No low price';
+      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
+      : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price';
     callEl.textContent = call ?? 'PASS';
     callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
     $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
@@ -1223,6 +1238,9 @@ function renderHealth() {
   renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));
+buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk buttons were blank)
+renderRisk();
+if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }
 loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();

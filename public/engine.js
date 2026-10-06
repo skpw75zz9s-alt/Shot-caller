@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
@@ -127,7 +127,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     });
     const point = side === 'YES' ? ev.evYes : ev.evNo;
     const price = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
-    return { side, timing, deep, robustEdge, point, price, score: deep?.score ?? -1 };
+    // Hold odds: the chance this side's confidence stays above holdFloor for the rest of the round
+    const hold = ev.open && deep && deep.score >= 70 ? holdOdds({ market: row.m, strike: row.strike, spot: snap.mSpot ?? snap.spot, sigmaMin: (row.sigma ?? snap.sigmaMin) * s.volMultiplier, minutesLeft: ev.minutesLeft, side, floor: s.holdFloor }) : null;
+    if (hold != null) deep.checks.push({ pts: 0, ok: hold >= 0.8 ? true : hold < 0.6 ? false : null, label: `Confidence stays above ${Math.round(s.holdFloor * 100)} to the end in ${Math.round(hold * 100)}% of simulated paths` });
+    return { side, timing, deep, robustEdge, point, price, hold, score: deep?.score ?? -1 };
   };
   // Has the gap for `side` held for persistSec? (quoteLog keeps Kalshi asks and the bot's odds every ~2s)
   const persisted = (side, edgeNeed) => {
@@ -146,6 +149,14 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const bigGap = (a) => s.bigEdgeOverride > 0 && a.robustEdge != null && a.robustEdge >= s.bigEdgeOverride - 1e-9;
   // Entry filters for NEW calls (all off unless set): too late in the window, a volatility spike, or Kalshi's price
   // for the side just jumped (someone knows something / the low already got bought)
+  // Steady: the bot's odds for the side have stayed at the confidence bar for steadySec (not one lucky tick)
+  const steady = (side) => {
+    if (!(s.steadySec > 0)) return true;
+    const log = snap.quoteLog?.[row.m.ticker] || [], since = now - s.steadySec * 1000;
+    if (!log.length || log[0].t > since + 2500) return false;
+    return log.filter((e) => e.t >= since).every((e) => e.p != null && (side === 'YES' ? e.p : 1 - e.p) * 100 >= s.minConfidence);
+  };
+  const holds = (a) => !(s.minHold > 0) || (a.hold != null && a.hold >= s.minHold - 1e-9);
   const entryOk = (side) => {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
@@ -175,12 +186,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (passes(b, ...need.switching, true) && entryOk(lean)) { pick = b; stance = 'switching'; }
+      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean)) pick = shown;
+    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
@@ -205,6 +216,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
+    hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
     side: a?.side ?? lean, callSide, price: pick?.price ?? null, limit, edge: pick?.point ?? null,
@@ -277,7 +289,7 @@ export function buyMessage(row, sig, spot) {
     tag: `buy-${m.ticker}`,
     title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
     body: `${sig.limit ? `Act now: buy only at ${pc(sig.limit)} or less, skip if it's higher. ` : ''}Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
-      `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
+      `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.hold != null ? ` · holds ${Math.round(sig.hold * 100)}%` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
 }
 
