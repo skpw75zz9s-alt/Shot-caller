@@ -998,7 +998,7 @@ async function syncKalshi() {
     if (!state.kalshi.balanceAt || Date.now() - state.kalshi.balanceAt > (liveCfg.live ? 20000 : 60000)) {
       state.kalshi.balance = balanceDollars(await kalshiGet('balance')); state.kalshi.balanceAt = Date.now();
       // what Kalshi is holding for waiting orders (can't be spent); a failure here never blocks the sync
-      try { const out = await kalshiGet('orders', { status: 'resting', limit: 100 }); state.kalshi.held = heldByOrders(out.orders); } catch { state.kalshi.held = null; }
+      try { const out = await kalshiGet('orders', { status: 'resting', limit: 100 }); state.kalshi.held = heldByOrders(out.orders); state.kalshi.resting = (out.orders || []).map((o) => ({ id: o.order_id, clientId: o.client_order_id, ticker: o.ticker })); } catch { state.kalshi.held = null; state.kalshi.resting = []; }
     }
   } catch (e) {
     state.kalshi.error = e.message;
@@ -1245,7 +1245,7 @@ let liveBusy = false, liveErrors = 0, liveBusySince = 0;
 // Pauses so it never hammers: per market after "bargain gone" (3s), all buys after a rate limit or low cash
 const livePause = { buyUntil: 0, why: '', tickers: {} };
 let ownPriceRefused = '';
-let liveShrink = 1; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
+let liveShrink = 1, cashFails = 0; // drops after an "insufficient balance", back to 1 after an order goes through // set when Kalshi (or the server) refuses a waiting order: the bot falls back to fill-now orders
 function saveLive() { store.set('liveCfg', liveCfg); store.set('liveOrders', state.liveOrders.slice(-1500)); }
 
 function stopLive(why) {
@@ -1279,7 +1279,7 @@ function cancelAllResting(why) { for (const o of state.liveOrders.filter((x) => 
 async function sendLive(order, meta, label) {
   liveBusy = true; liveBusySince = Date.now();
   const entry = { at: Date.now(), ticker: order.ticker, action: meta.action, side: meta.side, count: meta.count, cents: meta.cents, status: 'sent', label,
-    kind: meta.kind ?? null, conf: meta.conf ?? null, // for the Live results report
+    kind: meta.kind ?? null, conf: meta.conf ?? null, clientId: order.client_order_id, // for the Live results report and cleanup
     ...(meta.rest ? { expiresAt: meta.expiresAt, restCost: meta.restCost || 0 } : {}) };
   state.liveOrders.push(entry); saveLive(); renderLive();
   try {
@@ -1304,7 +1304,7 @@ async function sendLive(order, meta, label) {
       if (!(left === 0)) { entry.status = 'resting'; entry.restCost = meta.restCost * (Number.isFinite(left) && meta.count ? left / meta.count : 1); }
       else entry.status = 'filled';
     }
-    liveErrors = 0; liveShrink = 1; state.kalshi.spendable = null;
+    liveErrors = 0; liveShrink = 1; cashFails = 0; state.kalshi.spendable = null;
     toast(`LIVE: ${label} · ${entry.status}${entry.filled != null ? ` (${entry.filled} filled)` : ''}`);
     state.kalshi.balanceAt = 0; // refresh the balance with the fills
     if (entry.filled !== 0) { syncKalshi(); setTimeout(syncKalshi, 1500); } // pick up the new position right away so sells can follow instantly
@@ -1324,15 +1324,27 @@ async function sendLive(order, meta, label) {
       await sendLive(fillNow(order), { ...meta, rest: false, expiresAt: null }, label.replace(/\(bot's price, waits until [^)]*\)/, 'max'));
       return;
     }
-    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: re-read the real balance, re-size, try again
+    if (/insufficient|balance/i.test(e.message)) { // not a failure to stop for: find out why, fix what we can, back off
       state.kalshi.balanceAt = 0; await syncKalshi();
-      const held = state.kalshi.held?.held || 0;
-      if (meta.action === 'buy' && held > 0 && state.kalshi.balance != null) state.kalshi.spendable = Math.max(0, state.kalshi.balance - held);
-      Object.assign(livePause, { buyUntil: Date.now() + 15000, why: held > 0
-        ? `Kalshi is holding $${held.toFixed(2)} for ${state.kalshi.held.count} waiting order${state.kalshi.held.count > 1 ? 's' : ''}, so only $${Math.max(0, state.kalshi.balance - held).toFixed(2)} can be spent: sizing to that`
-        : 'Kalshi said insufficient balance: re-read the balance, trying again smaller in 15s' });
+      const bal = state.kalshi.balance, held = state.kalshi.held?.held || 0;
+      // what this order needed: buys pay price + fee per contract; a sell only closes what's held
+      const need = meta.action === 'buy' ? meta.count * (meta.cents / 100 + kalshiFee(meta.cents / 100)) : 0;
+      entry.error = `insufficient balance: ${meta.action} ${meta.count} ${meta.side} needed ~$${need.toFixed(2)}; Kalshi cash $${(bal ?? 0).toFixed(2)}${held > 0 ? `, $${held.toFixed(2)} of it held by ${state.kalshi.held.count} waiting order${state.kalshi.held.count > 1 ? 's' : ''}` : ''}`;
+      // the bot's own leftover waiting orders on Kalshi tie up cash: cancel any it isn't actively using
+      const ours = new Set(state.liveOrders.flatMap((o) => [o.id, o.clientId]).filter(Boolean));
+      const using = new Set(state.liveOrders.filter((o) => isResting(o)).map((o) => o.id));
+      const stale = (state.kalshi.resting || []).filter((r) => (ours.has(r.id) || ours.has(r.clientId)) && !using.has(r.id));
+      for (const r of stale) kalshiDelete(r.id).catch(() => {});
+      if (meta.action === 'buy' && held > 0 && bal != null) state.kalshi.spendable = Math.max(0, bal - held);
       liveShrink = Math.max(0.25, liveShrink * 0.6); // next orders smaller until one goes through
-      toast('LIVE: Kalshi said insufficient balance. Re-sizing to your real balance.');
+      // back off: 15s, 1 min, 5 min, then 15 min while it keeps happening (reset by the next order that goes through)
+      cashFails++;
+      const wait = [15, 60, 300, 900][Math.min(cashFails, 4) - 1] * 1000;
+      Object.assign(livePause, { buyUntil: Date.now() + wait, why: stale.length
+        ? `Cancelled ${stale.length} leftover bot order${stale.length > 1 ? 's' : ''} holding your Kalshi cash; buying again in ${Math.round(wait / 1000)}s`
+        : held > 0 ? `Kalshi is holding $${held.toFixed(2)} for waiting orders you placed in Kalshi, so only $${Math.max(0, (bal ?? 0) - held).toFixed(2)} can be spent: next try in ${wait >= 60000 ? `${wait / 60000} min` : `${wait / 1000}s`}`
+        : `Kalshi said insufficient balance (cash $${(bal ?? 0).toFixed(2)}, order ~$${need.toFixed(2)}): trying smaller in ${wait >= 60000 ? `${wait / 60000} min` : `${wait / 1000}s`}` });
+      if (cashFails === 1) toast(`LIVE: ${livePause.why}`); // once per streak, not every retry
       return;
     }
     liveErrors++;

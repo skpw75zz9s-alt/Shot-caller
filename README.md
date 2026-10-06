@@ -173,7 +173,11 @@ The settings exist (`noCallLastMin`, `maxVolRatio`, `jumpSkip`, `firstSize`) but
 
 **Use my Kalshi balance (on by default, Live card checkbox):** the budget is the cash in your Kalshi account (less a small cushion), and each trade can use up to *% of balance per trade* (25% by default). The bot grows and shrinks with your account, and the *Daily loss stop* and *Max trades / day* still apply. Uncheck it to use fixed dollar limits instead.
 
-**When Kalshi says "insufficient balance":** the bot re-reads your balance and the orders still waiting on Kalshi (yours from the Kalshi app or older ones). Kalshi holds money for those orders, and it can't be spent even though it shows in the balance. The bot then sizes to what's actually free and tries again smaller about 15 seconds later. The Health check shows *Kalshi is holding $X for N waiting orders*. Cancel old ones in the Kalshi app (Portfolio → Orders) to free that money.
+**When Kalshi says "insufficient balance":** the order's entry in Live orders shows exactly what happened, for example *buy 3 YES needed ~$2.16; Kalshi cash $11.59, $10.00 of it held by 1 waiting order*. Then the bot:
+1. Re-reads your balance and the orders still waiting on Kalshi.
+2. Cancels any of **its own** leftover waiting orders that are tying up cash. It never touches orders you placed yourself.
+3. Sizes the next order to what's actually free.
+4. Backs off: 15 seconds, then 1 minute, then 5, then 15 while it keeps happening. You get one pop-up per streak, not one every retry, and the next order that goes through resets it.
 
 **Bot's own price on calls (on by default, Live card checkbox):** when a call fires, the buy is a limit order at the bot's max price that waits on Kalshi for up to 2 minutes. Before, it was fill-now-or-cancel, which gave up if Kalshi's price was a cent too high. Kalshi fills it as soon as a seller comes down to the bot's price.
 - The app cancels the order the moment the call ends.
