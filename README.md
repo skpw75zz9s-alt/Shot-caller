@@ -90,6 +90,13 @@ Kalshi settles on CF Benchmarks' BRTI, which is built from several exchanges, no
 - **What's left over:** the remaining gap to Kalshi's settlement is learned as the basis (see below).
 - **Switching it off:** set `INDEX=off` to use only Coinbase.
 - **Not yet tested live:** the exchange feeds couldn't be reached from the development sandbox. The code is covered by unit tests with sample replies.
+- **Live check:** run `npm run livecheck` anywhere with internet access. It checks that:
+  - each exchange answers and its price parses;
+  - the exchanges agree on an index estimate;
+  - Kalshi lists an open market;
+  - Kalshi reports settlement values, which the basis learner needs.
+
+  On the deployed app, open `/api/index` (signed in) to see the live estimate and which exchanges it used.
 
 ### Learning the market (day, week, year)
 
