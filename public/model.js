@@ -273,6 +273,12 @@ export const EXIT_DEFAULTS = {
   cutConfirmSec: 30, // ...and to keep doing so this long before SELL NOW (one bad tick isn't a reason)
   takeConfirmSec: 0, // same wait for a profitable sell
   smoothSec: 0,      // exit decisions use the bot's odds averaged over this many seconds
+  // Bail out (stop loss): sell a losing position once the bot's odds for it fall under this, even below value.
+  // In simulation (2 × ~9,000 calls), bailing under 40% cut the calls that lost everything from 5.2% to 1.6% and the
+  // average loss from 94¢ to 73¢ a contract, for about 0.3¢ a contract overall (a third of bails would have won).
+  // 0 turns it off.
+  bailBelow: 0.4,
+  bailLastSec: 30,   // ...but not in the last 30 seconds (the price is nearly settled by then)
 };
 
 // When to sell an open position. pos = { side, price, contracts, peakBid, peakP }.
@@ -299,6 +305,9 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
 
   if (inProfit && net >= pSide) {
     return { ...base, signs, action: 'SELL', kind: 'take', why: `Kalshi's sell price ${c(bid)} has caught up to the bot's ${c(pSide)}. The low is gone, so take the profit.` };
+  }
+  if (!inProfit && s.bailBelow > 0 && pSide < s.bailBelow && minutesLeft * 60 > s.bailLastSec) {
+    return { ...base, signs, action: 'SELL', kind: 'bail', why: `Bail out: the bot now gives it only ${c(pSide)} (under ${c(s.bailBelow)}). Sell at ${c(bid)} and keep ${c(net)} of each $1 instead of risking all of it.` };
   }
   if (!inProfit && net >= pSide + s.cutMargin) {
     return { ...base, signs, action: 'SELL', kind: 'cut', why: `Bot now gives it only ${c(pSide)}, less than the ${c(bid)} you can sell at. Cut it.` };

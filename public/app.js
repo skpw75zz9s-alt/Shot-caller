@@ -69,6 +69,7 @@ const SETTINGS_META = [
   ['oddsDrop', 'Odds drop (pts)', 'Flag a flip sign if the bot\'s odds fall this far from their peak (a warning, not a sell)', 'cents'],
   ['cutConfirmSec', 'Hold steady (sec)', 'A sell at a loss has to stay true this long before SELL NOW, so one jumpy tick doesn\'t shake you out', 'num'],
   ['cutMargin', 'Cut margin (pts)', 'A sell at a loss needs Kalshi to pay at least this much more than the bot\'s odds', 'cents'],
+  ['bailBelow', 'Bail-out line (%)', 'BAIL OUT when the bot\'s odds on its call (or your position) fall under this: stops a bad call before it loses everything. 0 = off', 'cents'],
   ['tradeAmount', 'Fixed trade amount ($)', 'What "I bought it" records each time. 0 = use the bot\'s suggested amount', 'num'],
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
@@ -633,7 +634,8 @@ function renderSuggestions(snap, live, sig, now) {
     setClass(el, `suggest ${e.kind}`);
     const size = e.contracts && e.price ? ` · ${dollars(e.contracts * e.price)}${e.kind === 'light' ? ' (light)' : ''}` : '';
     setText($('sugTitle'), `${e.title}${size}`); setText($('sugWhy'), e.why);
-    if (e.kind !== 'wait') items.push({ kind: e.kind, label: e.kind === 'confident' ? 'CONFIDENT BUY' : e.kind === 'light' ? 'BUY LIGHT' : 'BUY', text: `${e.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(e.price)}${size}`, why: e.why });
+    if (e.kind === 'bail') items.push({ kind: 'bail', label: 'BAIL OUT', text: e.title.replace(/^BAIL OUT of /, ''), why: e.why });
+    else if (e.kind !== 'wait') items.push({ kind: e.kind, label: e.kind === 'confident' ? 'CONFIDENT BUY' : e.kind === 'light' ? 'BUY LIGHT' : 'BUY', text: `${e.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(e.price)}${size}`, why: e.why });
     // a light buy is worth one heads-up per round and side
     if (e.kind === 'light') alerts.event('light', e.title, e.why, `light:${live.m.ticker}:${e.side}`);
   }
@@ -767,6 +769,19 @@ function render() {
     setText($('callSub'), call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
     if (call) cardCls.push(call.toLowerCase());
     if (waiting) cardCls.push('waiting');
+    // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
+    const bail = sig.bail;
+    if (bail) {
+      if (setText(callEl, 'BAIL OUT')) pop(callEl);
+      setClass(callEl, 'call bail');
+      setText($('callSub'), `${bail.side === 'YES' ? 'UP' : 'DOWN'} call went bad${bail.bid ? ` · sell at ${Math.round(bail.bid * 100)}¢` : ''}`);
+      setText($('reason'), `The bot's odds on its ${bail.side === 'YES' ? 'UP' : 'DOWN'} call fell to ${Math.round(bail.p * 100)}% (bail line ${Math.round((settings.bailBelow ?? 0.4) * 100)}%). If you bought it, sell now and keep ${bail.bid ? `about ${Math.round(bail.bid * 100)}¢ of each $1` : 'part of it'} instead of risking all of it.`);
+      cardCls.length = 2; cardCls.push('bail');
+      if (!state.alerted[`bail:${m.ticker}`]) {
+        state.alerted[`bail:${m.ticker}`] = true;
+        alerts.event('sell', `BAIL OUT: ${bail.side === 'YES' ? 'UP' : 'DOWN'}${bail.bid ? ` at ${Math.round(bail.bid * 100)}¢` : ''}`, `bot's odds fell to ${Math.round(bail.p * 100)}%`, `bail:${m.ticker}`);
+      }
+    }
 
     entry.hidden = !side;
     if (side) {

@@ -18,6 +18,7 @@ export function suggestEntry(sig, ev, s) {
   if (!sig || !ev) return { kind: 'none' };
   const conf = sig.deep?.score ?? null, hold = sig.hold ?? null;
   const name = (side) => (side === 'YES' ? 'UP' : 'DOWN');
+  if (sig.bail) return { kind: 'bail', title: `BAIL OUT of ${name(sig.bail.side)}${sig.bail.bid ? ` at ${Math.round(sig.bail.bid * 100)}¢` : ''}`, why: `The call went bad: the bot's odds fell to ${Math.round(sig.bail.p * 100)}%. Sell if you're in; no new buys this round.` };
   if (sig.callSide) {
     const confident = conf != null && conf >= CONFIDENT.conf && hold != null && hold >= CONFIDENT.hold;
     return {
@@ -47,6 +48,7 @@ export function suggestExit(ex) {
   if (!ex) return { kind: 'none' };
   if (ex.action === 'SELL' && ex.kind === 'take') return { kind: 'sellHigh', title: 'SELL HIGH', why: ex.why };
   if (ex.action === 'SELL' && ex.kind === 'cut') return { kind: 'bail', title: 'BAIL', why: ex.why };
+  if (ex.action === 'SELL' && ex.kind === 'bail') return { kind: 'bail', title: 'BAIL OUT', why: ex.why };
   if (ex.kind === 'steady') return { kind: 'watch', title: 'GETTING CLOSE', why: ex.why };
   if (ex.action === 'WAIT') return { kind: 'settle', title: 'SETTLING', why: ex.why };
   return { kind: 'hold', title: 'HOLD', why: ex.why };

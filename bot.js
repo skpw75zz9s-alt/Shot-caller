@@ -3,7 +3,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, riskSettings } from './public/model.js';
-import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
+import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
 import { createIndex, defaultSources } from './index.js';
@@ -267,6 +267,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
           if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, market.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
+          // The bot's call went bad: bail out (phones tracking a position on it get the position's own sell alert)
+          if (s.notifySell && sig.bail && !d.positions.some((p) => p.ticker === snap.live.m.ticker)) fire(`bail:${snap.live.m.ticker}`, bailMessage(snap.live, sig), 120, 'sell', { ticker: snap.live.m.ticker, posId: `bail:${snap.live.m.ticker}` });
           // Aggressive scale-in: only phones holding that call hear about the add
           if (s.notifyBuy && sig.add && d.positions.some((p) => p.ticker === snap.live.m.ticker && p.side === sig.callSide)) {
             fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, market.spot), 45, 'add', { ticker: snap.live.m.ticker });

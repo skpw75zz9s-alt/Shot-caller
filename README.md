@@ -289,6 +289,23 @@ That's about 37% more calls, every one still at confidence 85+, for under a poin
 
 Stability is information, not a filter. In a simulation with calm, normal and jumpy stretches (20,000 rounds × 3 seeds), skipping calls when it read "unstable" didn't raise the win rate. Those calls won more, not less, because the bot's own volatility already prices a jumpy market in. So it shows on the call and in "Why this call", but it doesn't block calls.
 
+### Bail out (v7.4)
+
+When a call goes bad, the bot calls the bail-out instead of riding it to zero. It sells once its odds for the called side fall under the **bail-out line (40% by default; Settings, 0 = off)**. It doesn't bail in the last 30 seconds, when the price is nearly settled.
+- **Deck:** the call card flips to **BAIL OUT** and shows the price to sell at. It also shows in Suggestions, plays the "Bail!" sound and sends a push with the app closed. It stays up for the rest of the round, with no new buys.
+- **Your tracked positions:** the position card says BAIL OUT right away, with no 30-second wait.
+- **Auto-trader:** sells on it the same way.
+
+From a simulation of 2 × ~9,000 calls, priced as a fair market:
+
+| Bail when the bot's odds fall under | Calls that lose everything | Average loss | Cost per contract |
+|---|---|---|---|
+| never | 5.2% | 94¢ | — |
+| **40% (default)** | **1.6%** | **73¢** | **0.3¢** |
+| 50% | 1.3% | 62¢ | 0.4¢ |
+
+The trade-off: about a third of bailed calls would have come back and won. Bailing gives up a little on average to stop the big losses.
+
 ### Auto-trader (v7)
 
 Settings → **Auto-trader**. It buys the bot's **Steady** calls (whatever risk level the screen shows) and sells on the SELL HIGH / BAIL signals.

@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
@@ -217,13 +217,20 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const tiers = s.scaleIn ? [s.minEdge, s.minEdge + st, s.minEdge + 2 * st, s.minEdge + 4 * st] : [s.minEdge];
   const reached = (e) => tiers.reduce((k, t, i) => (e != null && e >= t - 1e-9 ? i : k), -1);
   let add = false;
-  if (fire) { mem.side = callSide; mem.at = now; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
+  // Bail out on the bot's own call: its odds for the called side fell under bailBelow (see EXIT_DEFAULTS). Once
+  // called, the bail stands for the rest of the round.
+  const bailBelow = settings?.bailBelow ?? EXIT_D.bailBelow, bailLastSec = settings?.bailLastSec ?? EXIT_D.bailLastSec;
+  if (called && !mem.bail && bailBelow > 0 && ev.pYes != null && ev.minutesLeft * 60 > bailLastSec) {
+    const pc = called === 'YES' ? ev.pYes : 1 - ev.pYes;
+    if (pc < bailBelow) mem.bail = { side: called, at: now, p: pc, bid: called === 'YES' ? ev.quote.yesBid : ev.quote.noBid, entry: mem.price ?? null };
+  }
+  if (fire) { mem.side = callSide; mem.at = now; mem.price = pick.price; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
   else if (callSide && callSide === called && tiers.length > 1 && pick.deep && (pick.score >= s.minConfidence || bigGap(pick))) {
     const next = (mem.tier ?? 0) + 1;
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    stability: stab, steadyNeed,
+    stability: stab, steadyNeed, bail: mem.bail ?? null,
     hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
@@ -266,7 +273,7 @@ export function positionCheck(pos, snap, settings, now = snap.now) {
   let changed = false;
   // Hold steady: a sell has to stay a sell for a while before it's SELL NOW (no waiting in the last minute)
   if (ex.action === 'SELL') {
-    const wait = (ex.kind === 'cut' ? s.cutConfirmSec : s.takeConfirmSec) * 1000;
+    const wait = (ex.kind === 'cut' ? s.cutConfirmSec : ex.kind === 'bail' ? 0 : s.takeConfirmSec) * 1000;
     if (pos.sellSince?.kind !== ex.kind) { pos.sellSince = { kind: ex.kind, t: now }; changed = true; }
     const held = now - pos.sellSince.t;
     if (held < wait && minutesLeft > 1) {
@@ -287,6 +294,13 @@ const dollars = (v) => `$${v.toFixed(2)}`;
 export const sideName = (side) => (side === 'YES' ? 'YES · Above' : 'NO · Below');
 
 const btc = (spot) => (spot ? ` · BTC $${Math.round(spot).toLocaleString('en-US')}` : '');
+
+// The bot's own call went bad: bail out (sig.bail from buySignal)
+export function bailMessage(row, sig) {
+  const b = sig.bail, side = sideName(b.side);
+  return { tag: `bail-${row.m.ticker}`, title: `🚨 BAIL OUT: ${side}${b.bid ? ` · sell at ${pc(b.bid)}` : ''}`,
+    body: `The bot's odds on its ${side} call fell to ${pc(b.p)}. If you bought it, selling now keeps ${b.bid ? `about ${pc(b.bid)} of each $1` : 'part of it'} instead of risking all of it.` };
+}
 
 export function buyMessage(row, sig, spot) {
   const { m, ev, strike } = row;
@@ -345,5 +359,5 @@ export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;
   const cashOut = ex.net != null ? ` · cash out ${dollars(ex.net * pos.contracts)}` : '';
-  return { tag: `sell-${pos.id}`, title: `${ex.kind === 'take' ? 'SELL HIGH' : ex.kind === 'cut' ? 'BAIL' : 'SELL NOW'}: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
+  return { tag: `sell-${pos.id}`, title: `${ex.kind === 'take' ? 'SELL HIGH' : ex.kind === 'cut' ? 'BAIL' : ex.kind === 'bail' ? 'BAIL OUT' : 'SELL NOW'}: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
 }
