@@ -20,6 +20,29 @@ import { slotLabel } from './learner.js';
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
+// Writes that skip when nothing changed: re-setting the same HTML or text still makes the phone re-lay-out the page
+// (and restarts CSS animations inside it), several times a second
+function setHTML(el, html) { if (el && el.__h !== html) { el.innerHTML = html; el.__h = html; el.__t = undefined; return true; } return false; }
+function setText(el, text) {
+  const t = String(text ?? '');
+  if (!el || el.__t === t) return false;
+  const was = el.__t; el.textContent = t; el.__t = t; el.__h = undefined;
+  return was !== undefined; // true when it changed (not the first write)
+}
+function setClass(el, cls) { if (el && el.className !== cls) el.className = cls; }
+function setHidden(el, on) { on = !!on; if (el && el.hidden !== on) el.hidden = on; }
+function setStyle(el, prop, v) { if (el && el.__s?.[prop] !== v) { (el.__s ||= {})[prop] = v; el.style[prop] = v; } }
+// One bounce on an element whose value just changed (Web Animations, so re-rendering its classes can't cut it off)
+function pop(el) {
+  if (!el?.animate || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  el.animate([{ transform: 'scale(.7)', opacity: 0 }, { transform: 'scale(1.08)', opacity: 1, offset: 0.6 }, { transform: 'scale(1)' }], { duration: 420, easing: 'cubic-bezier(.2, 1.4, .4, 1)' });
+}
+// The ticker slims down once you scroll (hysteresis: it doesn't flicker at the edge)
+addEventListener('scroll', () => {
+  const y = scrollY, on = document.body.classList.contains('scrolled');
+  if (!on && y > 160) document.body.classList.add('scrolled');
+  else if (on && y < 60) document.body.classList.remove('scrolled');
+}, { passive: true });
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
@@ -254,7 +277,7 @@ function renderPositions(snap) {
       <div class="pos-btns">${pos.source === 'kalshi' ? '' : `<button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button>`}<button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
   }).join('');
-  $('positions').innerHTML = html;
+  setHTML($('positions'), html);
 }
 
 // ---------- one-tap tracking ----------
@@ -264,12 +287,12 @@ const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minut
 let undoTimer = null;
 let autopilot = null; // the Auto-trader (public/autopilot.js), made once the key store is ready
 function toast(text, undo) {
-  $('toastText').textContent = text;
-  $('toastUndo').hidden = !undo;
-  $('toastUndo').onclick = () => { undo?.(); $('toast').hidden = true; render(); };
-  $('toast').hidden = false;
+  setText($('toastText'), text);
+  setHidden($('toastUndo'), !undo);
+  $('toastUndo').onclick = () => { undo?.(); setHidden($('toast'), true); render(); };
+  setHidden($('toast'), false);
   clearTimeout(undoTimer);
-  undoTimer = setTimeout(() => { $('toast').hidden = true; }, 7000);
+  undoTimer = setTimeout(() => { setHidden($('toast'), true); }, 7000);
 }
 
 // ---------- alerts ----------
@@ -302,29 +325,29 @@ const compute = () => snapshot({ markets: state.markets, candles: state.candles,
 // Deep dive (confidence and its reasons) and the window's rejection trends.
 function renderDeep(row, sig) {
   const deep = sig?.deep, rej = row?.rej;
-  $('deepCard').hidden = !deep;
-  $('conf').hidden = !deep;
+  setHidden($('deepCard'), !deep);
+  setHidden($('conf'), !deep);
   if (deep) {
-    $('conf').className = `conf ${confTier(deep.score)}`;
-    $('conf').textContent = `Confidence ${deep.score}`;
-    $('deepScore').textContent = `Confidence ${deep.score}`;
-    $('deepScore').className = confTier(deep.score);
-    $('deepChecks').innerHTML = deep.checks.map((c) =>
+    setClass($('conf'), `conf ${confTier(deep.score)}`);
+    if (setText($('conf'), `Confidence ${deep.score}`)) pop($('conf'));
+    setText($('deepScore'), `Confidence ${deep.score}`);
+    setClass($('deepScore'), confTier(deep.score));
+    setHTML($('deepChecks'), deep.checks.map((c) =>
       `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('') +
-      learnedNotes(row).map((x) => `<li class="meh"><i>🧠</i><span>${esc(x)}</span><b></b></li>`).join('');
+      learnedNotes(row).map((x) => `<li class="meh"><i>🧠</i><span>${esc(x)}</span><b></b></li>`).join(''));
   }
-  $('rejCard').hidden = !rej;
+  setHidden($('rejCard'), !rej);
   if (!rej) return;
   const shift = row.ev.pShift || 0;
-  $('rejBias').textContent = `${rej.bias[0].toUpperCase()}${rej.bias.slice(1)}${Math.abs(shift) >= 0.005 ? ` · ${shift > 0 ? '+' : '−'}${Math.abs(shift * 100).toFixed(1)} pts on YES` : ''}`;
-  $('rejBias').className = rej.bias === 'bullish' ? 'pos' : rej.bias === 'bearish' ? 'neg' : '';
-  $('rejCaps').textContent = rej.strikeCaps;
-  $('rejFloors').textContent = rej.strikeFloors;
-  $('rejHigh').textContent = rej.highRejects;
-  $('rejLow').textContent = rej.lowHolds;
+  setText($('rejBias'), `${rej.bias[0].toUpperCase()}${rej.bias.slice(1)}${Math.abs(shift) >= 0.005 ? ` · ${shift > 0 ? '+' : '−'}${Math.abs(shift * 100).toFixed(1)} pts on YES` : ''}`);
+  setClass($('rejBias'), rej.bias === 'bullish' ? 'pos' : rej.bias === 'bearish' ? 'neg' : '');
+  setText($('rejCaps'), rej.strikeCaps);
+  setText($('rejFloors'), rej.strikeFloors);
+  setText($('rejHigh'), rej.highRejects);
+  setText($('rejLow'), rej.lowHolds);
   const w = (rej.wickBias + 1) / 2; // 0 = all upper wicks (sellers), 1 = all lower wicks (buyers)
-  $('wickFill').style.cssText = w >= 0.5 ? `left:50%;width:${(w - 0.5) * 100}%;background:var(--yes)` : `left:${w * 100}%;width:${(0.5 - w) * 100}%;background:var(--no)`;
-  $('rejSummary').innerHTML = rej.summary.map((x) => `<li>${esc(x)}</li>`).join('');
+  setStyle($('wickFill'), 'cssText', w >= 0.5 ? `left:50%;width:${(w - 0.5) * 100}%;background:var(--yes)` : `left:${w * 100}%;width:${(0.5 - w) * 100}%;background:var(--no)`);
+  setHTML($('rejSummary'), rej.summary.map((x) => `<li>${esc(x)}</li>`).join(''));
 }
 
 // What the long-term memory changed in this window's odds
@@ -428,39 +451,39 @@ function renderTape(force = false) {
   const st = state.feedStatus || {};
   const liveFeed = (n) => (n === 'Coinbase' ? isLive() : st[n]?.state === 'live' && now - (st[n].lastAt || 0) < 120000);
   const off = settings.multiFeeds === false;
-  $('feedChips').innerHTML = [...ALL_FEEDS.map((n) => {
+  setHTML($('feedChips'), [...ALL_FEEDS.map((n) => {
     const s = n === 'Coinbase' ? (isLive() ? 'live' : 'down') : off ? 'off' : liveFeed(n) ? 'live' : st[n]?.state || 'connecting';
     return `<span class="${s}">${n}</span>`;
-  }), `<span class="${state.kalshiTapeAt && now - state.kalshiTapeAt < 15000 ? 'live' : 'connecting'}">Kalshi</span>`].join('');
+  }), `<span class="${state.kalshiTapeAt && now - state.kalshiTapeAt < 15000 ? 'live' : 'connecting'}">Kalshi</span>`].join(''));
   tape.rate = tape.rate.filter((t) => t > now - 60000);
-  $('tapeRate').textContent = `${tape.rate.length} trades/min`;
+  setText($('tapeRate'), `${tape.rate.length} BTC trades/min`);
   const tab = state.tapeTab;
   // Per-exchange split of the round (BTC) or the Kalshi contract's taker flow
-  $('tapeEx').hidden = tab === 'kalshi'; $('kalshiFlow').hidden = tab !== 'kalshi';
+  setHidden($('tapeEx'), tab === 'kalshi'); setHidden($('kalshiFlow'), tab !== 'kalshi');
   if (tab !== 'kalshi') {
     const by = byExchange(tape.ex);
-    $('tapeEx').innerHTML = Object.entries(by).sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell)).map(([n, e]) => {
+    setHTML($('tapeEx'), Object.entries(by).sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell)).map(([n, e]) => {
       const tot = e.buy + e.sell, b = tot ? e.buy / tot : 0.5;
       return `<span>${n}</span><span class="bar" title="buy ${Math.round(b * 100)}%"><i style="width:${(b * 100).toFixed(0)}%"></i></span><em>${Math.round(b * 100)}% buy · ${usd(tot, 0)}</em>`;
-    }).join('') || '<span class="muted">Waiting for trades this round…</span>';
+    }).join('') || '<span class="muted">No BTC exchange trades yet this round</span>');
   } else {
     const kf = kalshiFlow(tape.kalshi);
-    $('kalshiFlow').innerHTML = `<div>UP (YES) bought<b>${Math.round(kf.YES.count).toLocaleString()}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${Math.round(kf.NO.count).toLocaleString()}</b>${usd(kf.NO.usd, 0)}</div>`;
+    setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${Math.round(kf.YES.count).toLocaleString()}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${Math.round(kf.NO.count).toLocaleString()}</b>${usd(kf.NO.usd, 0)}</div>`);
   }
   tape.list.sort((a, b) => b.t - a.t); // feeds arrive a little out of order; the tape reads newest first
   const rows = tape.list.filter((x) => (tab === 'all' ? true : tab === 'kalshi' ? x.kalshi : !x.kalshi)).slice(0, 40);
   const seen = state.tapeTop;
   state.tapeTop = rows[0];
-  $('tape').innerHTML = rows.map((x, i) => {
+  setHTML($('tape'), rows.map((x, i) => {
     const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
     if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${Math.round(x.count).toLocaleString()} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
     return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${Math.round(x.price).toLocaleString()}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
-  }).join('') || `<li><span class="muted">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</span></li>`;
+  }).join('') || `<li><span class="muted">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</span></li>`);
 }
 
 function setTile(id, text, cls = '', sub = null) {
-  const el = $(id); el.textContent = text; el.className = cls;
-  if (sub != null) $(`${id}Sub`).textContent = sub;
+  const el = $(id); setText(el, text); setClass(el, cls);
+  if (sub != null) setText($(`${id}Sub`), sub);
 }
 
 function dataHealth(now) {
@@ -483,48 +506,48 @@ function renderDeck(snap, live, sig, now) {
   setTile('stRecord', st.graded ? `${st.wins}–${st.graded - st.wins}` : 'no calls yet', st.graded ? (st.wins / st.graded >= 0.8 ? 'ok' : 'warn') : '',
     st.graded ? `${Math.round((st.wins / st.graded) * 100)}% won${br?.graded ? ` · ${br.streak ? `${br.streak.kind}${br.streak.n} streak` : 'bot record'}` : ' on this phone'}` : 'graded at settlement');
   setTile('dataHealth', health, hcls);
-  $('timeLeft').textContent = live ? mmss(live.ev.minutesLeft) : '—';
+  setText($('timeLeft'), live ? mmss(live.ev.minutesLeft) : '—');
   const lf = live?.learnedAdj;
-  $('learnedNow').textContent = !lf ? '—' : `vol ×${lf.volFactor.toFixed(2)}${lf.basis ? ` · basis ${lf.basis >= 0 ? '+' : '−'}$${Math.abs(lf.basis).toFixed(0)}` : ''}`;
+  setText($('learnedNow'), !lf ? '—' : `vol ×${lf.volFactor.toFixed(2)}${lf.basis ? ` · basis ${lf.basis >= 0 ? '+' : '−'}$${Math.abs(lf.basis).toFixed(0)}` : ''}`);
 
   // Hold meter + Kalshi price boxes
   const q = live?.ev.quote;
-  $('upAsk').textContent = q?.yesAsk != null ? `${(q.yesAsk * 100).toFixed(0)}¢` : '—';
-  $('downAsk').textContent = q?.noAsk != null ? `${(q.noAsk * 100).toFixed(0)}¢` : '—';
-  $('upBot').textContent = live?.ev.pYes != null ? `bot ${Math.round(live.ev.pYes * 100)}%` : '';
-  $('downBot').textContent = live?.ev.pYes != null ? `bot ${Math.round((1 - live.ev.pYes) * 100)}%` : '';
+  setText($('upAsk'), q?.yesAsk != null ? `${(q.yesAsk * 100).toFixed(0)}¢` : '—');
+  setText($('downAsk'), q?.noAsk != null ? `${(q.noAsk * 100).toFixed(0)}¢` : '—');
+  setText($('upBot'), live?.ev.pYes != null ? `bot ${Math.round(live.ev.pYes * 100)}%` : '');
+  setText($('downBot'), live?.ev.pYes != null ? `bot ${Math.round((1 - live.ev.pYes) * 100)}%` : '');
   const conf = sig?.deep?.score ?? null, hold = sig?.hold ?? null;
-  $('holdBox').hidden = conf == null;
+  setHidden($('holdBox'), conf == null);
   if (conf != null) {
     const flipRisk = hold == null ? null : Math.round((1 - hold) * 100);
     setTile('confBig', `${conf}`, conf >= 85 ? 'ok' : conf >= 70 ? 'warn' : 'bad');
     setTile('holdBig', hold == null ? '—' : `${Math.round(hold * 100)}%`, hold == null ? '' : hold >= 0.8 ? 'ok' : hold >= 0.6 ? 'warn' : 'bad');
     setTile('flipBig', flipRisk == null ? '—' : `${flipRisk}/100`, flipRisk == null ? '' : flipRisk <= 20 ? 'ok' : flipRisk <= 40 ? 'warn' : 'bad');
-    $('holdFill').style.width = `${hold == null ? 0 : Math.round(hold * 100)}%`;
-    $('holdNote').textContent = `${sig.side === 'YES' ? 'UP' : 'DOWN'} side · hold odds = chance confidence stays above ${Math.round(settings.holdFloor * 100)} until the last minute (300 simulated paths)${sig.locked ? ' · call locked' : ''}`;
+    setStyle($('holdFill'), 'width', `${hold == null ? 0 : Math.round(hold * 100)}%`);
+    setText($('holdNote'), `${sig.side === 'YES' ? 'UP' : 'DOWN'} side · hold odds = chance confidence stays above ${Math.round(settings.holdFloor * 100)} until the last minute (300 simulated paths)${sig.locked ? ' · call locked' : ''}`);
   }
 
   // Tug of war
   const fs = flowStats(flow, now);
   const pr = pressureUpdate(flow, now);
   const buy = fs.nowBuyShare;
-  $('tugBuy').textContent = buy == null ? '—' : `${(buy * 100).toFixed(1)}%`;
-  $('tugSell').textContent = buy == null ? '—' : `${((1 - buy) * 100).toFixed(1)}%`;
-  $('tugFill').style.width = `${buy == null ? 50 : (1 - buy) * 100}%`;
-  $('tugMark').style.left = `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`;
-  $('tugLead').textContent = buy == null ? '' : buy >= 0.6 ? 'BUYERS DOMINANT' : buy <= 0.4 ? 'SELLERS DOMINANT' : 'BALANCED';
-  $('tugLead').className = buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '';
+  setText($('tugBuy'), buy == null ? '—' : `${(buy * 100).toFixed(1)}%`);
+  setText($('tugSell'), buy == null ? '—' : `${((1 - buy) * 100).toFixed(1)}%`);
+  setStyle($('tugFill'), 'width', `${buy == null ? 50 : (1 - buy) * 100}%`);
+  setStyle($('tugMark'), 'left', `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`);
+  setText($('tugLead'), buy == null ? '' : buy >= 0.6 ? 'BUYERS DOMINANT' : buy <= 0.4 ? 'SELLERS DOMINANT' : 'BALANCED');
+  setClass($('tugLead'), buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '');
   $('tugBull').classList.toggle('dom', buy != null && buy >= 0.55); // the winning side's animal steps up
   $('tugBear').classList.toggle('dom', buy != null && buy <= 0.45);
-  $('tugNow').textContent = fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).';
-  $('tugRound').textContent = fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—';
-  $('tugRound').className = fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '';
-  $('tugRoundSub').textContent = fs.prints ? `buy ${usd(fs.buyUsd, 0)} / sell ${usd(fs.sellUsd, 0)} · ${fs.prints} prints` : 'since the round opened';
-  $('tugWhales').textContent = fs.whaleBuys + fs.whaleSells ? `${fs.whaleBuys} buy · ${fs.whaleSells} sell` : '—';
-  $('tugWhaleSub').textContent = `trades ≥ ${usd(alerts.prefs().whaleMin, 0)}`;
+  setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
+  setText($('tugRound'), fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—');
+  setClass($('tugRound'), fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '');
+  setText($('tugRoundSub'), fs.prints ? `buy ${usd(fs.buyUsd, 0)} / sell ${usd(fs.sellUsd, 0)} · ${fs.prints} prints` : 'since the round opened');
+  setText($('tugWhales'), fs.whaleBuys + fs.whaleSells ? `${fs.whaleBuys} buy · ${fs.whaleSells} sell` : '—');
+  setText($('tugWhaleSub'), `trades ≥ ${usd(alerts.prefs().whaleMin, 0)}`);
   const fc = live ? floorCeiling(snap.bars, Date.parse(live.m.open_time)) : null, ms = modelSpot();
-  $('floorDist').textContent = fc && ms ? usd(ms - fc.floor, 0) : '—';
-  $('ceilDist').textContent = fc && ms ? usd(fc.ceiling - ms, 0) : '—';
+  setText($('floorDist'), fc && ms ? usd(ms - fc.floor, 0) : '—');
+  setText($('ceilDist'), fc && ms ? usd(fc.ceiling - ms, 0) : '—');
   if (pr.flipped) alerts.event('pressure', `Pressure flipped: ${pr.side === 'buy' ? 'buyers' : 'sellers'} took over`, '60%+ of the last 2 minutes, held 10s');
 
   // Market events: round change (sit out), BTC crossing the target, flip warnings, feed health
@@ -563,9 +586,9 @@ function renderDeck(snap, live, sig, now) {
 
   // Live notes
   const head = live && sig?.deep ? `BTC ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
-  $('notesWhen').textContent = `updated ${clock(now)}`;
-  $('notes').innerHTML = (head ? `<li><time>now</time><span>${esc(head)}</span></li>` : '') +
-    state.notes.slice(0, 12).map((n) => `<li class="${noteClass(n.key)}"><time>${clock(n.t)}</time><span>${esc(n.text)}</span></li>`).join('');
+  setText($('notesWhen'), `updated ${clock(now)}`);
+  setHTML($('notes'), (head ? `<li><time>now</time><span>${esc(head)}</span></li>` : '') +
+    state.notes.slice(0, 12).map((n) => `<li class="${noteClass(n.key)}"><time>${clock(n.t)}</time><span>${esc(n.text)}</span></li>`).join(''));
   if ($('view-chart').classList.contains('active')) drawChartTab();
 }
 
@@ -576,9 +599,9 @@ function renderSuggestions(snap, live, sig, now) {
   const el = $('suggest');
   el.hidden = !live || e.kind === 'none';
   if (!el.hidden) {
-    el.className = `suggest ${e.kind}`;
+    setClass(el, `suggest ${e.kind}`);
     const size = e.contracts && e.price ? ` · ${dollars(e.contracts * e.price)}${e.kind === 'light' ? ' (light)' : ''}` : '';
-    $('sugTitle').textContent = `${e.title}${size}`; $('sugWhy').textContent = e.why;
+    setText($('sugTitle'), `${e.title}${size}`); setText($('sugWhy'), e.why);
     if (e.kind !== 'wait') items.push({ kind: e.kind, label: e.kind === 'confident' ? 'CONFIDENT BUY' : e.kind === 'light' ? 'BUY LIGHT' : 'BUY', text: `${e.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(e.price)}${size}`, why: e.why });
     // a light buy is worth one heads-up per round and side
     if (e.kind === 'light') alerts.event('light', e.title, e.why, `light:${live.m.ticker}:${e.side}`);
@@ -591,16 +614,16 @@ function renderSuggestions(snap, live, sig, now) {
     const label = { sellHigh: 'SELL HIGH', bail: 'BAIL', watch: 'WATCH', hold: 'HOLD' }[x.kind];
     items.push({ kind: x.kind, label, text: `${pos.side === 'YES' ? 'UP' : 'DOWN'} from ${pc(pos.price)}${c.bid != null ? ` · sells at ${pc(c.bid)}` : ''}${c.ex.pnl != null ? ` (${money(c.ex.pnl)})` : ''}`, why: x.kind === 'hold' ? `Worth ${pc(c.pSide)} to the bot; holding beats selling now.` : x.why });
   }
-  $('sugCard').hidden = !items.length;
-  $('sugWhen').textContent = items.length ? clock(now) : '';
-  $('sugList').innerHTML = items.map((i) => `<li class="${i.kind}"><b>${i.label}</b><span>${esc(i.text)}<small>${esc(i.why)}</small></span></li>`).join('');
+  setHidden($('sugCard'), !items.length);
+  setText($('sugWhen'), items.length ? clock(now) : '');
+  setHTML($('sugList'), items.map((i) => `<li class="${i.kind}"><b>${i.label}</b><span>${esc(i.text)}<small>${esc(i.why)}</small></span></li>`).join(''));
 }
 
 // ---------- Chart tab ----------
 const chartState = { tf: store.get('chartTf', 'round'), show: { ...chartDefaults(), ...store.get('chartShow', {}) }, cache: {}, drawnAt: 0 };
 function buildChartControls() {
-  $('tfBtns').innerHTML = Object.entries(TIMEFRAMES).map(([k, t]) => `<button data-tf="${k}" class="${chartState.tf === k ? 'on' : ''}">${t.label}</button>`).join('');
-  $('chartToggles').innerHTML = CHART_TOGGLES.map(([k, label]) => `<label><input type="checkbox" data-show="${k}" ${chartState.show[k] ? 'checked' : ''}>${esc(label)}</label>`).join('');
+  setHTML($('tfBtns'), Object.entries(TIMEFRAMES).map(([k, t]) => `<button data-tf="${k}" class="${chartState.tf === k ? 'on' : ''}">${t.label}</button>`).join(''));
+  setHTML($('chartToggles'), CHART_TOGGLES.map(([k, label]) => `<label><input type="checkbox" data-show="${k}" ${chartState.show[k] ? 'checked' : ''}>${esc(label)}</label>`).join(''));
 }
 $('tfBtns').addEventListener('click', (e) => { const k = e.target.dataset.tf; if (!k) return; chartState.tf = k; store.set('chartTf', k); buildChartControls(); drawChartTab(true); });
 $('chartToggles').addEventListener('change', (e) => { const k = e.target.dataset.show; if (!k) return; chartState.show[k] = e.target.checked; store.set('chartShow', chartState.show); drawChartTab(true); });
@@ -659,17 +682,16 @@ function render() {
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
-  $('boughtBtn').hidden = !showBuy || !!state.kalshi.key; // linked: buys arrive from Kalshi on their own
-  $('autoNote').hidden = !showBuy || !state.kalshi.key;
+  setHidden($('boughtBtn'), !showBuy || !!state.kalshi.key); // linked: buys arrive from Kalshi on their own
+  setHidden($('autoNote'), !showBuy || !state.kalshi.key);
   const card = $('callCard'), callEl = $('call'), entry = $('entry');
-  card.className = 'card call-card';
-  entry.className = 'entry';
+  const cardCls = ['card', 'call-card'], entryCls = ['entry'];
   let timing = null;
 
   if (!live) {
-    $('marketTitle').textContent = state.marketsAt ? `No open ${settings.series} markets` : 'Loading markets…';
-    callEl.textContent = '—'; callEl.className = 'call pass';
-    ['countdown', 'reason', 'order', 'entry', 'callLabel', 'odds'].forEach((id) => { $(id).textContent = ''; });
+    setText($('marketTitle'), state.marketsAt ? `No open ${settings.series} markets` : 'Loading markets…');
+    setText(callEl, '—'); setClass(callEl, 'call pass');
+    ['countdown', 'reason', 'order', 'entry', 'callLabel', 'odds'].forEach((id) => setText($(id), ''));
     entry.hidden = true;
   } else {
     const { m, ev, strike } = live;
@@ -678,17 +700,18 @@ function render() {
     timing = sig.timing;
     const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings }) : null;
 
-    $('marketTitle').textContent = m.title || m.ticker;
-    $('countdown').textContent = `closes in ${mmss(ev.minutesLeft)}`;
+    setText($('marketTitle'), m.title || m.ticker);
+    setText($('countdown'), `closes in ${mmss(ev.minutesLeft)}`);
     const waitingToCall = ev.callsAt && now < ev.callsAt;
     state.clock = { close: Date.parse(m.close_time), callsAt: waitingToCall ? ev.callsAt : null };
+    roundBar(state.clock.close, now);
     if (waitingToCall && sig.deep) { // a read on the window, not a call yet
-      $('conf').className = 'conf';
-      $('conf').textContent = `Preview · confidence ${sig.deep.score} · no call yet`;
+      setClass($('conf'), 'conf');
+      setText($('conf'), `Preview · confidence ${sig.deep.score} · no call yet`);
     }
     const otherSide = sig.called === 'YES' ? 'NO' : 'YES';
     const sticking = sig.stance === 'holding' && now - (sig.calledAt ?? now) > 60000; // the first minute of a call is just the call
-    $('reason').textContent = call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
+    setText($('reason'), call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
       : call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
@@ -699,36 +722,36 @@ function render() {
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.holdOk ? `Confidence ${sig.deep.score}, but it stays above ${Math.round(settings.holdFloor * 100)} to the end in only ${sig.hold == null ? '—' : Math.round(sig.hold * 100)}% of simulated paths (Steady needs ${Math.round(settings.minHold * 100)}%). Waiting for a call that holds.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.steadyOk ? `Confidence ${sig.deep.score}: making sure it holds for ${settings.steadySec}s before calling (one good tick isn't enough).`
       : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
-      : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${sig.confNeed}` : ev.reason;
-    $('odds').innerHTML = oddsRows(ev, settings.minEdge);
+      : ev.side ? `Low price, but confidence ${sig.deep?.score ?? '—'} is below ${sig.confNeed}` : ev.reason);
+    setHTML($('odds'), oddsRows(ev, settings.minEdge));
 
     // Call + entry timing
     const waiting = call && !buyNow && settings.waitForDip;
-    $('callLabel').textContent = call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
+    setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
-      : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price';
-    callEl.textContent = call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT';
-    callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
-    $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
-    if (call) card.classList.add(call.toLowerCase());
-    if (waiting) card.classList.add('waiting');
+      : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
+    if (setText(callEl, call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
+    setClass(callEl, `call ${(call ?? 'pass').toLowerCase()}`);
+    setText($('callSub'), call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
+    if (call) cardCls.push(call.toLowerCase());
+    if (waiting) cardCls.push('waiting');
 
     entry.hidden = !side;
     if (side) {
       const label = timing.state === 'NOW' ? `Candles: dip now, good timing for ${side}` : timing.state === 'CHASE' ? 'Candles: chasing, price just ran' : `Candles: no dip yet for ${side}`;
-      entry.classList.add(timing.state.toLowerCase());
-      entry.innerHTML = `<b>${label}</b><span>${esc(timing.reasons.slice(0, 4).join(' · '))}</span>` +
-        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : '');
+      entryCls.push(timing.state.toLowerCase());
+      setHTML(entry, `<b>${label}</b><span>${esc(timing.reasons.slice(0, 4).join(' · '))}</span>` +
+        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : ''));
     }
 
-    if (!call) $('order').textContent = '';
+    if (!call) setText($('order'), '');
     else if (buyNow || !settings.waitForDip) {
       const age = sig.calledAt ? Math.round((now - sig.calledAt) / 1000) : 0;
-      $('order').textContent = `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)}` +
-        `${sig.limit ? ` · max ${pc(sig.limit)}, skip if higher` : ''} · +${(sig.edge * 100).toFixed(0)} pts edge${age >= 5 ? ` · called ${age}s ago` : ''}`;
+      setText($('order'), `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)}` +
+        `${sig.limit ? ` · max ${pc(sig.limit)}, skip if higher` : ''} · +${(sig.edge * 100).toFixed(0)} pts edge${age >= 5 ? ` · called ${age}s ago` : ''}`);
     }
-    else $('order').textContent = limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(call)} (now ${pc(sig.price)})` : 'Hold off: no dip yet';
+    else setText($('order'), limit ? `Limit ${dollars(sig.contracts * limit.price)} at ${pc(limit.price)} ${sideName(call)} (now ${pc(sig.price)})` : 'Hold off: no dip yet');
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
@@ -751,34 +774,43 @@ function render() {
       }
     }
 
-    $('strike').textContent = usd(strike);
+    setText($('strike'), usd(strike));
     const d = modelSpot() && strike ? modelSpot() - strike : null;
-    $('dist').textContent = d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`;
+    setText($('dist'), d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`);
     sign($('dist'), d);
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
+  setClass(card, cardCls.join(' ')); setClass(entry, entryCls.join(' '));
   renderDeck(snap, live, sig, now);
   autopilot?.tick({ live, snap, sig, settings });
 
-  $('spot').textContent = usd(state.spot);
+  setText($('spot'), usd(state.spot));
   renderTicker(live?.strike ?? null);
-  $('vol').textContent = sigmaMin ? `${(sigmaMin * 100).toFixed(3)}%` : '—';
+  setText($('vol'), sigmaMin ? `${(sigmaMin * 100).toFixed(3)}%` : '—');
   const r = timing?.rsi;
-  $('rsi').textContent = r == null ? '—' : r.toFixed(0);
-  $('rsi').className = r == null ? '' : r < 35 ? 'pos' : r > 65 ? 'neg' : '';
-  $('levels').textContent = timing?.support ? `${Math.round(timing.support).toLocaleString()} / ${Math.round(timing.resistance).toLocaleString()}` : '—';
+  setText($('rsi'), r == null ? '—' : r.toFixed(0));
+  setClass($('rsi'), r == null ? '' : r < 35 ? 'pos' : r > 65 ? 'neg' : '');
+  setHTML($('levels'), timing?.support ? `<span class="neg">▲ ${Math.round(timing.resistance).toLocaleString()}</span><span class="pos">▼ ${Math.round(timing.support).toLocaleString()}</span>` : '—');
 
-  $('others').innerHTML = rows.filter((x) => x !== live && x.ev.minutesLeft > 0).slice(0, 6).map(({ m, ev }) =>
+  setHTML($('others'), rows.filter((x) => x !== live && x.ev.minutesLeft > 0).slice(0, 6).map(({ m, ev }) =>
     `<div class="card mini"><span>${esc(m.yes_sub_title || m.ticker)}<br><small>${mmss(ev.minutesLeft)} · bot ${pct(ev.pYes)} YES</small></span>` +
-    `<span class="pill ${ev.call.toLowerCase()}">${ev.call}</span></div>`).join('');
+    `<span class="pill ${ev.call.toLowerCase()}">${ev.call}</span></div>`).join(''));
   renderHistory();
 }
 
 // ---------- candlestick chart ----------
+let chartKey = null;
 function drawChart(allBars, strike, openTime, timing, limit, rej) {
-  const cv = $('chart'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
+  const cv = $('chart');
   const w = cv.clientWidth, h = 220, axis = 52;
+  if (!w) return; // the Deck isn't showing: draw when it is
+  // Redraw only when something on it changed (it used to redraw on every price tick)
+  const lb = allBars[allBars.length - 1];
+  const key = [w, allBars.length, lb?.t, lb?.o, lb?.h, lb?.l, lb?.c, strike, openTime, timing?.support, timing?.resistance, timing?.state, limit?.dipLevel, (rej?.events || []).length, Math.floor(Date.now() / 60000)].join('|');
+  if (key === chartKey) return;
+  chartKey = key;
+  const ctx = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
@@ -798,11 +830,12 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   const openIdx = bars.findIndex((b) => b.t >= openTime);
   if (openIdx >= 0) { ctx.fillStyle = '#38bdf80d'; ctx.fillRect(X(openIdx) - slot / 2, 0, w - axis - X(openIdx) + slot / 2, h); }
 
+  const labels = []; // right-edge labels, spread apart below so they never print on top of each other
   const hline = (v, color, dash, text) => {
     if (v == null) return;
     ctx.strokeStyle = color; ctx.setLineDash(dash); ctx.lineWidth = 1; ctx.beginPath();
     ctx.moveTo(0, Y(v)); ctx.lineTo(w - axis, Y(v)); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = color; ctx.font = '10px system-ui'; ctx.fillText(text, w - axis + 4, Y(v) + 3);
+    labels.push({ y: Y(v) + 3, text, color, font: '10px system-ui' });
   };
   hline(timing?.support, '#22c55e88', [2, 3], 'support');
   hline(timing?.resistance, '#ef444488', [2, 3], 'resist');
@@ -836,21 +869,24 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   });
   ctx.textAlign = 'start';
 
-  // Last price tag
+  // Last price tag, then every label, nudged apart
   const last = bars[bars.length - 1].c;
-  ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 10px system-ui';
-  ctx.fillText(Math.round(last).toLocaleString(), w - axis + 4, Math.min(h - 4, Math.max(10, Y(last) + 3)));
+  labels.push({ y: Y(last) + 3, text: Math.round(last).toLocaleString(), color: '#e6edf3', font: 'bold 10px system-ui', first: true });
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < labels.length; i++) labels[i].y = Math.max(10, labels[i].y, i ? labels[i - 1].y + 12 : 0);
+  for (let i = labels.length - 1; i >= 0; i--) labels[i].y = Math.min(h - 4 - (labels.length - 1 - i) * 12, labels[i].y);
+  for (const l of labels) { ctx.fillStyle = l.color; ctx.font = l.font; ctx.fillText(l.text, w - axis + 4, l.y); }
 }
 
 function renderHistory() {
   const tp = state.trades.reduce((a, t) => a + t.pnl, 0), tw = state.trades.filter((t) => t.pnl > 0).length;
-  $('tPnl').textContent = state.trades.length ? money(tp) : '—';
+  setText($('tPnl'), state.trades.length ? money(tp) : '—');
   sign($('tPnl'), tp);
-  $('tWins').textContent = state.trades.length ? `${tw}/${state.trades.length}` : '—';
-  $('tradeList').innerHTML = state.trades.slice(0, 50).map((t) =>
+  setText($('tWins'), state.trades.length ? `${tw}/${state.trades.length}` : '—');
+  setHTML($('tradeList'), state.trades.slice(0, 50).map((t) =>
     `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
-    '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>';
+    '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>');
   renderRecord();
   renderMemory();
 }
@@ -858,7 +894,7 @@ function renderHistory() {
 // What the bot has learned about the market (from the server, which watches every window around the clock)
 function renderMemory() {
   const st = state.memory?.status;
-  if (!st) { $('memSummary').textContent = 'Not loaded yet. The server learns the market around the clock and shares it here.'; return; }
+  if (!st) { setText($('memSummary'), 'Not loaded yet. The server learns the market around the clock and shares it here.'); return; }
   const days = st.since ? Math.max(1, Math.round((Date.now() - st.since) / 86400000)) : 0;
   const lines = [];
   lines.push(st.minutes ? `Watched BTC for ${days} day${days === 1 ? '' : 's'} (${st.minutes.toLocaleString()} one-minute moves)${st.backfilling ? ', still reading history' : ''}, graded ${st.windows.toLocaleString()} window${st.windows === 1 ? '' : 's'}.` : 'Just started watching the market.');
@@ -867,17 +903,17 @@ function renderMemory() {
   if (indexFresh() && state.index.used.length > 1) lines.push(`Price: median of ${state.index.used.join(', ')} (Kalshi settles on a multi-exchange index; right now it's ${state.index.offset >= 0 ? '+' : '−'}$${Math.abs(state.index.offset).toFixed(2)} vs Coinbase).`);
   lines.push(st.basisN >= 10 ? `Kalshi's settlement index vs Coinbase: ${st.basis >= 0 ? '+' : '−'}$${Math.abs(st.basis).toFixed(2)} (middle of the last ${st.basisN} settlements), included in the odds.` : `Learning the gap between Coinbase and Kalshi's settlement index: ${st.basisN} of 10 settlements.`);
   if (settings.learn === false) lines.push('Off in Settings: the bot isn\'t using any of this right now.');
-  $('memSummary').textContent = lines.join(' ');
+  setText($('memSummary'), lines.join(' '));
   // Weekday volatility by half hour (New York time)
   const prof = st.profile;
   if (prof) {
     const day = [...Array(48).keys()].map((h) => { const xs = [1, 2, 3, 4, 5].map((d) => prof[d * 48 + h]).filter((x) => x != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0; });
     const max = Math.max(...day, 1e-9);
-    $('memBars').innerHTML = day.map((x, h) => `<i style="height:${Math.max(4, (x / max) * 100)}%" title="${slotLabel(48 + h).slice(4)}: ${x.toFixed(2)}×"></i>`).join('');
-    $('memBarsWrap').hidden = false;
+    setHTML($('memBars'), day.map((x, h) => `<i style="height:${Math.max(4, (x / max) * 100)}%" title="${slotLabel(48 + h).slice(4)}: ${x.toFixed(2)}×"></i>`).join(''));
+    setHidden($('memBarsWrap'), false);
   }
   const rows = (st.calibration || []).filter((b) => b.n >= 20);
-  $('memCal').innerHTML = rows.map((b) => `<li><span><b>Said ${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</b><small>${b.n} window${b.n === 1 ? '' : 's'} · won ${Math.round(b.won * 100)}%${b.shift ? ` · corrected ${b.shift > 0 ? '+' : '−'}${(Math.abs(b.shift) * 100).toFixed(1)} pts` : ' · no correction needed'}</small></span></li>`).join('');
+  setHTML($('memCal'), rows.map((b) => `<li><span><b>Said ${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</b><small>${b.n} window${b.n === 1 ? '' : 's'} · won ${Math.round(b.won * 100)}%${b.shift ? ` · corrected ${b.shift > 0 ? '+' : '−'}${(Math.abs(b.shift) * 100).toFixed(1)} pts` : ' · no correction needed'}</small></span></li>`).join(''));
 }
 
 // ---------- the official bot record (server: every call it made, around the clock) ----------
@@ -889,43 +925,44 @@ function renderBotRecord() {
   const r = state.botRecord;
   if (!r) return;
   const losses = r.graded - r.wins, pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
-  $('brLevel').textContent = `${r.level} settings`;
-  $('brWL').textContent = r.graded ? `${r.wins}–${losses}` : '0–0';
-  $('brPct').textContent = pctOf(r.wins, r.graded);
-  $('brPct').className = !r.graded ? '' : r.wins / r.graded >= 0.8 ? 'pos' : r.wins / r.graded < 0.6 ? 'neg' : '';
-  $('brStreak').textContent = r.streak ? `${r.streak.kind}${r.streak.n}` : '—';
-  $('brStreak').className = r.streak?.kind === 'W' ? 'pos' : r.streak?.kind === 'L' ? 'neg' : '';
+  setText($('brLevel'), `${r.level} settings`);
+  setText($('brWL'), r.graded ? `${r.wins}–${losses}` : '0–0');
+  setText($('brPct'), pctOf(r.wins, r.graded));
+  setClass($('brPct'), !r.graded ? '' : r.wins / r.graded >= 0.8 ? 'pos' : r.wins / r.graded < 0.6 ? 'neg' : '');
+  setText($('brStreak'), r.streak ? `${r.streak.kind}${r.streak.n}` : '—');
+  setClass($('brStreak'), r.streak?.kind === 'W' ? 'pos' : r.streak?.kind === 'L' ? 'neg' : '');
   const since = r.since ? new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
-  $('brSub').textContent = !r.calls.length ? 'No calls yet. The bot calls on its own around the clock (Steady settings), and every call shows up here, win or lose.'
+  setText($('brSub'), !r.calls.length ? 'No calls yet. The bot calls on its own around the clock (Steady settings), and every call shows up here, win or lose.'
     : `Every call the bot made${since ? ` since ${since}` : ''}, around the clock, graded against Kalshi's result. It said ${r.said != null ? Math.round(r.said) : '—'}% on average and won ${pctOf(r.wins, r.graded)}. $10 on every call, held to settlement: ${money(r.usd)}. Best win streak: ${r.bestWin}.` +
-      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`;
+      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`);
   const days = dailyRecord(r.calls, 14), top = Math.max(1, ...days.map((d) => d.w + d.l));
-  $('brDays').innerHTML = days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join('');
-  $('brBuckets').innerHTML = ['90+', '80–89', '70–79', 'under 70'].filter((k) => r.buckets?.[k]).map((k) => {
+  setHTML($('brDays'), days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join(''));
+  $('brDays').classList.toggle('empty', !days.some((d) => d.w + d.l));
+  setHTML($('brBuckets'), ['90+', '80–89', '70–79', 'under 70'].filter((k) => r.buckets?.[k]).map((k) => {
     const b = r.buckets[k];
     return `<li><span><b>Confidence ${k}</b><small>${b.calls} call${b.calls > 1 ? 's' : ''} · said ${Math.round(b.said)}% · won ${pctOf(b.wins, b.calls)}</small></span><b class="${b.usd >= 0 ? 'pos' : 'neg'}">${money(b.usd)}</b></li>`;
-  }).join('');
+  }).join(''));
   const now = Date.now();
-  $('brCalls').innerHTML = r.calls.slice(-12).reverse().map((e) => {
+  setHTML($('brCalls'), r.calls.slice(-12).reverse().map((e) => {
     const up = e.side === 'YES', graded = e.result === 'yes' || e.result === 'no', won = graded && e.side.toLowerCase() === e.result;
     const badge = graded ? (won ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>') : e.result === 'unknown' ? '<span class="badge">VOID</span>' : Date.parse(e.closeTime) > now ? '<span class="badge live">LIVE</span>' : '<span class="badge">SETTLING</span>';
     const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${pc(e.price)}</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}</small></span>${badge}</li>`;
-  }).join('') || '<li><span></span><span class="muted">The first call will show up here.</span><span></span></li>';
+  }).join('') || '<li><span></span><span class="muted">The first call will show up here.</span><span></span></li>');
 }
 
 // The bot's call record: what it claimed (confidence = win odds) next to how often its calls really won
 function renderRecord() {
   const st = callStats(state.callLog);
   const pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
-  $('recSummary').textContent = !st.calls ? 'No calls yet. Every BUY THE LOW call the bot makes while the app is open is logged here and graded when Kalshi settles it.'
+  setText($('recSummary'), !st.calls ? 'No calls yet. Every BUY THE LOW call the bot makes while the app is open is logged here and graded when Kalshi settles it.'
     : !st.graded ? `${st.calls} call${st.calls > 1 ? 's' : ''} logged, waiting for Kalshi to settle them.`
-    : `${st.graded} call${st.graded > 1 ? 's' : ''} graded${st.calls > st.graded ? ` (${st.calls - st.graded} waiting for Kalshi)` : ''}: won ${st.wins} (${pctOf(st.wins, st.graded)})${st.said != null ? `, the bot said ${Math.round(st.said)}% on average` : ''}. $10 on every call, held to settlement: ${money(st.usd)}.${st.graded < 30 ? ' Under 30 calls is too few to judge: luck still dominates.' : ''}`;
+    : `${st.graded} call${st.graded > 1 ? 's' : ''} graded${st.calls > st.graded ? ` (${st.calls - st.graded} waiting for Kalshi)` : ''}: won ${st.wins} (${pctOf(st.wins, st.graded)})${st.said != null ? `, the bot said ${Math.round(st.said)}% on average` : ''}. $10 on every call, held to settlement: ${money(st.usd)}.${st.graded < 30 ? ' Under 30 calls is too few to judge: luck still dominates.' : ''}`);
   const order = ['90+', '80–89', '70–79', 'under 70'];
-  $('recBuckets').innerHTML = order.filter((k) => st.buckets[k]).map((k) => {
+  setHTML($('recBuckets'), order.filter((k) => st.buckets[k]).map((k) => {
     const b = st.buckets[k];
     return `<li><span><b>Confidence ${k}</b><small>${b.calls} call${b.calls > 1 ? 's' : ''} · said ${Math.round(b.said)}% · won ${pctOf(b.wins, b.calls)}</small></span><b class="${b.usd >= 0 ? 'pos' : 'neg'}">${money(b.usd)}</b></li>`;
-  }).join('');
+  }).join(''));
 }
 
 // ---------- live BTC price ----------
@@ -968,26 +1005,40 @@ function queueRender() {
   setTimeout(() => { renderQueued = false; render(); }, 250);
 }
 
+// The price rolls to its new value instead of jumping (skipped with reduce motion)
+let priceTween = null;
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+function tweenPrice(el, from, to) {
+  if (priceTween) cancelAnimationFrame(priceTween.raf);
+  if (reduceMotion() || document.hidden) { priceTween = null; setText(el, `BTC ${usd(to)}`); return; }
+  const start = performance.now(), dur = 450;
+  const step = (t) => {
+    const k = Math.min(1, (t - start) / dur), e = 1 - (1 - k) ** 3;
+    setText(el, `BTC ${usd(from + (to - from) * e)}`);
+    if (k < 1) priceTween.raf = requestAnimationFrame(step); else priceTween = null;
+  };
+  priceTween = { raf: requestAnimationFrame(step) };
+}
 function renderTicker(strike) {
   const live = isLive(), spot = state.spot;
-  $('liveBadge').textContent = live ? 'LIVE' : spot ? 'DELAYED' : '…';
-  $('liveBadge').className = `tk-badge ${live ? 'live' : ''}`;
-  $('livePrice').textContent = spot ? `BTC ${usd(spot)}` : 'BTC —';
+  setText($('liveBadge'), live ? 'LIVE' : spot ? 'DELAYED' : '…');
+  setClass($('liveBadge'), `tk-badge ${live ? 'live' : ''}`);
+  if (!priceTween && !(spot && shownSpot && spot !== shownSpot)) setText($('livePrice'), spot ? `BTC ${usd(spot)}` : 'BTC —');
   if (spot && shownSpot && spot !== shownSpot) {
-    const el = $('ticker');
+    const el = $('ticker'), up = spot > shownSpot;
     el.classList.remove('up', 'down');
-    void el.offsetWidth; // restart the flash animation
-    el.classList.add(spot > shownSpot ? 'up' : 'down');
+    el.classList.add(up ? 'up' : 'down');
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => el.classList.remove('up', 'down'), 600);
+    tweenPrice($('livePrice'), shownSpot, spot);
   }
   shownSpot = spot;
   const day = spot && state.open24h ? spot - state.open24h : null;
-  $('liveMove').textContent = day == null ? '' : `24h ${day >= 0 ? '+' : '-'}${usd(Math.abs(day), 0)} (${((day / state.open24h) * 100).toFixed(2)}%)`;
-  $('liveMove').className = `tk-move ${day > 0 ? 'pos' : day < 0 ? 'neg' : ''}`;
+  setText($('liveMove'), day == null ? '' : `24h ${day >= 0 ? '+' : '-'}${usd(Math.abs(day), 0)} (${((day / state.open24h) * 100).toFixed(2)}%)`);
+  setClass($('liveMove'), `tk-move ${day > 0 ? 'pos' : day < 0 ? 'neg' : ''}`);
   const d = spot && strike ? modelSpot() - strike : null;
-  $('liveTarget').textContent = d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${usd(Math.abs(d), 0)} ${d >= 0 ? 'above' : 'below'} target${indexFresh() && state.index.used.length > 1 ? ` · index of ${state.index.used.length} exchanges` : ''}`;
-  $('liveTarget').className = `tk-target ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
+  setText($('liveTarget'), d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${usd(Math.abs(d), 0)} ${d >= 0 ? 'above' : 'below'} target${indexFresh() && state.index.used.length > 1 ? ` · index of ${state.index.used.length} exchanges` : ''}`);
+  setClass($('liveTarget'), `tk-target ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`);
 }
 
 // ---------- push notifications ----------
@@ -1064,12 +1115,12 @@ function renderPush(msg) {
       : 'This browser doesn\'t support push notifications.';
   }
   if (!text) text = on ? 'On ✓ BUY THE LOW and SELL NOW alerts arrive even with the app closed.' : 'Off. Alerts only show while the app is open.';
-  $('pushStatus').textContent = text;
+  setText($('pushStatus'), text);
   $('pushStatus').classList.toggle('on', on && !msg);
-  $('pushOn').hidden = on || !pushSupported();
-  $('pushTest').hidden = !on;
-  $('pushOff').hidden = !on;
-  $('pushNudge').hidden = on || store.get('nudgeDismissed', false);
+  setHidden($('pushOn'), on || !pushSupported());
+  setHidden($('pushTest'), !on);
+  setHidden($('pushOff'), !on);
+  setHidden($('pushNudge'), on || store.get('nudgeDismissed', false));
 }
 
 // ---------- access & admin ----------
@@ -1089,11 +1140,11 @@ async function loadAccess() {
     const st = await getJSON('access/status');
     state.access = st;
     rememberAccess(st);
-    $('accessLine').textContent = st.role === 'admin' ? 'Admin (no expiry)'
+    setText($('accessLine'), st.role === 'admin' ? 'Admin (no expiry)'
       : st.access ? `Active until ${day(st.expires)} · code ${st.code} (use it to unlock your other devices)`
-      : 'No access';
-    $('adminCard').hidden = st.role !== 'admin';
-    $('adminLogin').hidden = st.role === 'admin';
+      : 'No access');
+    setHidden($('adminCard'), st.role !== 'admin');
+    setHidden($('adminLogin'), st.role === 'admin');
     if (st.role === 'admin') loadAdmin();
   } catch { /* offline */ }
 }
@@ -1106,22 +1157,22 @@ async function loadAdmin() {
     const now = Date.now();
     const pending = members.filter((m) => m.status === 'pending' || (m.paidAt && m.paidAt > (m.approvedAt || 0) && m.status !== 'denied' && m.status !== 'revoked'));
     const others = members.filter((m) => !pending.includes(m) && m.status !== 'pending');
-    $('admPending').innerHTML = pending.map((m) => `<li><span><b>${m.code}</b><small>${m.paidAt ? `says paid ${clock(m.paidAt)} · ${day(m.paidAt)}` : 'hasn\'t tapped "I\'ve paid" yet'}${m.expires > now ? ' · renewing' : ''}</small></span>
+    setHTML($('admPending'), pending.map((m) => `<li><span><b>${m.code}</b><small>${m.paidAt ? `says paid ${clock(m.paidAt)} · ${day(m.paidAt)}` : 'hasn\'t tapped "I\'ve paid" yet'}${m.expires > now ? ' · renewing' : ''}</small></span>
       <span class="adm-btns"><button data-adm="approve" data-code="${m.code}">Approve</button><button data-adm="deny" data-code="${m.code}" class="ghost">Deny</button></span></li>`).join('') ||
-      '<li class="muted">Nobody waiting. You\'ll get a push when someone taps "I\'ve paid" (turn on notifications).</li>';
-    $('admMembers').innerHTML = others.map((m) => {
+      '<li class="muted">Nobody waiting. You\'ll get a push when someone taps "I\'ve paid" (turn on notifications).</li>');
+    setHTML($('admMembers'), others.map((m) => {
       const active = m.status === 'active' && m.expires > now;
       const label = active ? `active until ${day(m.expires)}` : m.status === 'active' ? `expired ${day(m.expires)}` : m.status;
       return `<li><span><b>${m.code}</b><small>${label} · ${m.devices} device${m.devices === 1 ? '' : 's'}</small></span>
         <span class="adm-btns">${active ? `<button data-adm="approve" data-code="${m.code}" class="ghost">+${state.access?.days ?? ''}d</button><button data-adm="revoke" data-code="${m.code}" class="ghost">Revoke</button>` : `<button data-adm="approve" data-code="${m.code}">Approve</button>`}</span></li>`;
-    }).join('') || '<li class="muted">No members yet.</li>';
-  } catch (e) { $('admErr').textContent = e.message; }
+    }).join('') || '<li class="muted">No members yet.</li>');
+  } catch (e) { setText($('admErr'), e.message); }
 }
 
 async function adminAction(action, body) {
-  $('admErr').textContent = '';
+  setText($('admErr'), '');
   try { await postJSON(`admin/${action}`, body); await loadAdmin(); }
-  catch (e) { $('admErr').textContent = e.message; }
+  catch (e) { setText($('admErr'), e.message); }
 }
 $('adminCard').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-adm]');
@@ -1150,11 +1201,11 @@ function adminPolling(on) {
 
 // ---------- settings ----------
 function buildSettings() {
-  $('settingsForm').innerHTML = SETTINGS_META.map(([k, label, hint, kind]) => {
+  setHTML($('settingsForm'), SETTINGS_META.map(([k, label, hint, kind]) => {
     if (kind === 'bool') return `<label><span>${label}<small>${hint}</small></span><input type="checkbox" name="${k}" ${settings[k] ? 'checked' : ''}></label>`;
     const v = kind === 'cents' ? Math.round(settings[k] * 1000) / 10 : settings[k];
     return `<label><span>${label}<small>${hint}</small></span><input name="${k}" ${kind === 'text' ? '' : 'inputmode="decimal"'} value="${esc(v)}"></label>`;
-  }).join('');
+  }).join(''));
   $('settingsForm').addEventListener('change', (e) => {
     const meta = SETTINGS_META.find((x) => x[0] === e.target.name);
     if (!meta) return;
@@ -1186,12 +1237,12 @@ async function tick() {
     if (Date.now() - state.marketsAt > settings.refreshSec * 1000 || closed) jobs.push(refreshMarkets());
     refreshIndex().catch(() => { state.index = null; }); // optional: without it the bot uses Coinbase alone
     await Promise.all(jobs);
-    $('status').className = 'dot ok';
+    setClass($('status'), 'dot ok');
     $('status').title = 'connected';
     settlePositions();
   } catch (e) {
     console.warn(e);
-    $('status').className = 'dot err';
+    setClass($('status'), 'dot err');
     $('status').title = e.message;
   }
   render();
@@ -1215,10 +1266,10 @@ $('status').addEventListener('click', () => window.alert($('status').title || 'c
 $('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
 $('pushOff').addEventListener('click', () => pushDisable());
 $('pushTest').addEventListener('click', async () => {
-  $('pushTest').textContent = 'Sending…';
-  try { await postJSON('push/test', { endpoint: pushSub.endpoint }); $('pushTest').textContent = 'Sent ✓'; }
-  catch (e) { $('pushTest').textContent = 'Send test'; renderPush(`Test failed: ${e.message}`); }
-  setTimeout(() => { $('pushTest').textContent = 'Send test'; }, 3000);
+  setText($('pushTest'), 'Sending…');
+  try { await postJSON('push/test', { endpoint: pushSub.endpoint }); setText($('pushTest'), 'Sent ✓'); }
+  catch (e) { setText($('pushTest'), 'Send test'); renderPush(`Test failed: ${e.message}`); }
+  setTimeout(() => { setText($('pushTest'), 'Send test'); }, 3000);
 });
 $('nudgeGo').addEventListener('click', () => document.querySelector('nav button[data-view=settings]').click());
 $('nudgeX').addEventListener('click', () => { store.set('nudgeDismissed', true); renderPush(); });
@@ -1274,17 +1325,27 @@ document.addEventListener('visibilitychange', () => {
 // Between polls only the clocks move, so update just those each second (a full redraw every second
 // cost the most phone battery). Full redraw if no poll or price tick has rendered for ~3 seconds,
 // and when the opening wait ends so the call appears right on time.
+// The thin bar under the countdown: how much of the 15-minute round is gone (moves smoothly, 1s steps)
+function roundBar(close, now = Date.now()) {
+  const el = $('roundBar');
+  if (!el) return;
+  const k = close ? Math.min(1, Math.max(0, 1 - (close - now) / 900000)) : 0;
+  const v = `scaleX(${k.toFixed(4)})`;
+  if (el.style.transform !== v) el.style.transform = v;
+  el.parentElement.classList.toggle('late', close != null && close - now < 120000);
+}
 function tickClocks() {
   const now = Date.now(), c = state.clock;
   if (!document.hidden && now - bootAt > 20000 && healthDue(state.health?.at, now)) runHealth();
   if (now - (state.renderedAt || 0) > 2900 || (c?.callsAt && now >= c.callsAt) || (c && now >= c.close)) return render();
   if (c) {
-    $('countdown').textContent = `closes in ${mmss((c.close - now) / 60000)}`;
-    if (c.callsAt) $('reason').textContent = `Calls start in ${mmss((c.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`;
+    setText($('countdown'), `closes in ${mmss((c.close - now) / 60000)}`);
+    roundBar(c.close, now);
+    if (c.callsAt) setText($('reason'), `Calls start in ${mmss((c.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`);
   }
   for (const el of document.querySelectorAll('.pos-clock')) {
     const left = (Number(el.dataset.close) - now) / 60000;
-    el.textContent = left > 0 ? mmss(left) : 'closed';
+    setText(el, left > 0 ? mmss(left) : 'closed');
   }
 }
 setInterval(tickClocks, 1000);
@@ -1441,9 +1502,9 @@ async function checkAgainstKalshi() {
 
 function renderKalshi() {
   const k = state.kalshi, linked = !!k.key;
-  $('kForm').hidden = linked;
-  $('kLinked').hidden = !linked;
-  $('kErr').textContent = k.error || '';
+  setHidden($('kForm'), linked);
+  setHidden($('kLinked'), !linked);
+  setText($('kErr'), k.error || '');
   if (!linked) return;
   const bal = k.balance != null ? ` · balance ${dollars(k.balance)}` : '';
   const last = k.lastSync ? ` · synced ${clock(k.lastSync)}` : ' · syncing…';
@@ -1451,7 +1512,7 @@ function renderKalshi() {
   const check = !v ? '' : v.error ? ` · couldn't check against Kalshi (${v.error})`
     : v.fixes.length ? ` · corrected from Kalshi at ${clock(v.at)}: ${v.fixes.join('; ')}`
     : ` · ✓ matches Kalshi (${v.positions} open position${v.positions === 1 ? '' : 's'}, checked ${clock(v.at)})${k.lastFix && Date.now() - k.lastFix.at < 3600000 ? ` · last correction ${clock(k.lastFix.at)}: ${k.lastFix.fixes.join('; ')}` : ''}`;
-  $('kStatus').textContent = `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}${check}. Your ${settings.series} buys and sells show up on their own.`;
+  setText($('kStatus'), `Linked (key ${k.keyId.slice(0, 8)}…)${bal}${last}${check}. Your ${settings.series} buys and sells show up on their own.`);
 }
 
 async function loadKalshi() {
@@ -1469,9 +1530,9 @@ $('kFile').addEventListener('change', async (e) => {
 });
 $('kLink').addEventListener('click', async () => {
   const keyId = $('kKeyId').value.trim(), pem = $('kPem').value;
-  $('kErr').textContent = '';
+  setText($('kErr'), '');
   if (!/^[A-Za-z0-9-]{8,64}$/.test(keyId)) { state.kalshi.error = 'Enter the API key ID from Kalshi'; return renderKalshi(); }
-  $('kLink').textContent = 'Linking…';
+  setText($('kLink'), 'Linking…');
   try {
     const key = await importKey(pem);
     state.kalshi = { key, keyId };
@@ -1485,7 +1546,7 @@ $('kLink').addEventListener('click', async () => {
   } catch (e) {
     state.kalshi = { key: null, keyId: null, error: e.message };
   } finally {
-    $('kLink').textContent = 'Link account';
+    setText($('kLink'), 'Link account');
     renderKalshi();
   }
 });
@@ -1505,10 +1566,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 
 function renderRisk() {
   const cur = riskLevelOf(settings);
-  $('riskBtns').innerHTML = Object.entries(RISK_LEVELS).map(([k, r]) => `<button type="button" data-risk="${k}" class="${cur === k ? 'on' : ''}">${r.label}</button>`).join('');
-  $('riskHint').textContent = cur === 'custom'
+  setHTML($('riskBtns'), Object.entries(RISK_LEVELS).map(([k, r]) => `<button type="button" data-risk="${k}" class="${cur === k ? 'on' : ''}">${r.label}</button>`).join(''));
+  setText($('riskHint'), cur === 'custom'
     ? `Custom: min gap ${(settings.minEdge * 100).toFixed(0)} pts, confidence ${settings.minConfidence}. Tap a level to reset.`
-    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}${RISK_LEVELS[cur].bigEdgeOverride ? ` (or a ${Math.round(RISK_LEVELS[cur].bigEdgeOverride * 100)}-pt worst-case gap)` : ''}; bets up to $${RISK_LEVELS[cur].maxStake}.`;
+    : `${RISK_LEVELS[cur].hint}. Calls need a gap of ${(RISK_LEVELS[cur].minEdge * 100).toFixed(0)} pts and confidence ${RISK_LEVELS[cur].minConfidence}${RISK_LEVELS[cur].bigEdgeOverride ? ` (or a ${Math.round(RISK_LEVELS[cur].bigEdgeOverride * 100)}-pt worst-case gap)` : ''}; bets up to $${RISK_LEVELS[cur].maxStake}.`);
 }
 $('riskBtns').addEventListener('click', (e) => {
   const k = e.target.closest('button[data-risk]')?.dataset.risk;
@@ -1568,7 +1629,7 @@ function ruleStats(log) {
 setInterval(() => { if (!document.hidden) settleLogs(); }, 30000);
 function renderRuleScore() {
   const rs = ruleStats(state.ruleLog);
-  $('ruleScore').textContent = rs.fired ? `Two-rejections rule scorecard: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule scorecard: hasn\'t fired yet (it\'s scored on every market while the app is open)';
+  setText($('ruleScore'), rs.fired ? `Two-rejections rule scorecard: fired ${rs.fired} time${rs.fired > 1 ? 's' : ''} · price went the expected way 5 min later ${rs.right5} of ${rs.five} · the side it favored won ${rs.won} of ${rs.settled} settled` : 'Two-rejections rule scorecard: hasn\'t fired yet (it\'s scored on every market while the app is open)');
 }
 
 // ---------- health check (every 2 rounds) ----------
@@ -1603,9 +1664,9 @@ function renderHealth() {
   if (!h) return;
   const bad = h.items.filter((r) => r.level !== 'ok');
   const next = (Math.floor(h.at / 1800000) + 1) * 1800000;
-  $('healthStatus').textContent = `${bad.length ? `${bad.length} problem${bad.length > 1 ? 's' : ''}` : 'All good'} · checked ${clock(h.at)} · next ${clock(next)} (every 2 rounds)`;
-  $('healthList').innerHTML = [...bad, ...h.items.filter((r) => r.level === 'ok')].map((r) =>
-    `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(r.label)}${r.fix ? `<small>${esc(r.fix)}</small>` : ''}</span></li>`).join('');
+  setText($('healthStatus'), `${bad.length ? `${bad.length} problem${bad.length > 1 ? 's' : ''}` : 'All good'} · checked ${clock(h.at)} · next ${clock(next)} (every 2 rounds)`);
+  setHTML($('healthList'), [...bad, ...h.items.filter((r) => r.level === 'ok')].map((r) =>
+    `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(r.label)}${r.fix ? `<small>${esc(r.fix)}</small>` : ''}</span></li>`).join(''));
   renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));

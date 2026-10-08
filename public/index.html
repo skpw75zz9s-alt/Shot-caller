@@ -50,6 +50,7 @@
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
         <div class="countdown" id="countdown">--:--</div>
+        <div class="round-bar" aria-hidden="true"><i id="roundBar"></i></div>
         <div class="call-label" id="callLabel"></div>
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
@@ -124,13 +125,13 @@
 
       <div class="grid grid3">
         <div class="stat"><label>Live BTC</label><b id="spot">—</b></div>
-        <div class="stat"><label>Price to beat</label><b id="strike">—</b></div>
+        <div class="stat"><label>Target</label><b id="strike">—</b></div>
         <div class="stat"><label>Distance</label><b id="dist">—</b></div>
         <div class="stat"><label>Time left</label><b id="timeLeft">—</b></div>
         <div class="stat"><label>Data health</label><b id="dataHealth">—</b></div>
         <div class="stat"><label>Vol (1m)</label><b id="vol">—</b></div>
         <div class="stat"><label>RSI (14, 1m)</label><b id="rsi">—</b></div>
-        <div class="stat"><label>Support / resist</label><b id="levels" class="small">—</b></div>
+        <div class="stat"><label>Resist / support</label><b id="levels" class="small">—</b></div>
         <div class="stat"><label>Learned now</label><b id="learnedNow" class="small">—</b></div>
       </div>
 
@@ -140,7 +141,7 @@
       </div>
 
       <div id="others"></div>
-      <p class="fine">Signals only. Never places orders. The bot's price is Coinbase shifted onto a multi-exchange estimate of the index Kalshi settles on. Confidence and hold odds are model estimates, not guarantees: the Record tab shows how often calls really won. For information only, not financial advice. You're responsible for your own trades.</p>
+      <p class="fine">Signals first: it only places orders if you turn on the Auto-trader (Settings). The bot's price is Coinbase shifted onto a multi-exchange estimate of the index Kalshi settles on. Confidence and hold odds are model estimates, not guarantees: the Record tab shows how often calls really won. For information only, not financial advice. You're responsible for your own trades.</p>
     </section>
 
     <section id="view-chart" class="view">
@@ -317,7 +318,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v7.0 · auto-trader: Test, Demo, Live</p>
+      <p class="fine" id="version">Shot Caller v7.1 · smoother, animated</p>
     </section>
   </main>
 

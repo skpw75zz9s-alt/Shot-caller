@@ -208,7 +208,7 @@ canvas { width: 100%; display: block; }
 .toast { position: fixed; left: 12px; right: 12px; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 20; display: flex; align-items: center; gap: 10px; max-width: 536px; margin: 0 auto; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line-2); border-left: 3px solid var(--accent); border-radius: 8px; font: 500 12px var(--mono); box-shadow: 0 10px 30px #000a; }
 .toast span { flex: 1; }
 .toast button { width: auto; margin: 0; padding: 6px 12px; background: transparent; color: var(--accent); border: 1px solid var(--accent); font-size: 11px; }
-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 4px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: #05070df2; backdrop-filter: blur(12px); border-top: 1px solid #22d3ee22; }
+nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 4px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: #05070dfa; border-top: 1px solid #22d3ee22; } /* no backdrop blur: it repainted the whole screen behind the bar on every tick */
 nav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; color: var(--dim); margin: 0; padding: 7px 0 6px; border-radius: 10px; font-size: 9.5px; letter-spacing: .6px; border: 1px solid transparent; }
 nav button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 nav button.active { color: var(--accent); border-color: #22d3ee44; background: #22d3ee0f; box-shadow: 0 0 14px #22d3ee22; }
@@ -453,3 +453,97 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
 .at-strip button { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 800; background: var(--no); border-color: var(--no); color: #fff; flex: none; }
 .at-strip.live { border-color: var(--no); box-shadow: 0 0 12px #ff4d6d33; }
 .at-strip.demo { border-color: var(--accent); }
+
+/* ---------- v7.1 motion & polish ----------
+   Everything here animates only transform and opacity (the phone's GPU does those without repainting the page).
+   "Reduce motion" in the phone's settings turns it all off at the end of this block. */
+@keyframes viewIn { from { opacity: 0; } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(.985); } }
+@keyframes popIn { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes ping { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes glowPulse { 50% { opacity: .35; } }
+
+/* tab switch: the new tab fades in and its cards rise in one after another */
+.view.active { animation: viewIn .25s ease-out both; }
+.view.active > .card, .view.active > .grid, .view.active > details, .view.active > .sec, .view.active > ul, .view.active > p {
+  animation: cardIn .42s cubic-bezier(.2, .8, .2, 1) both; }
+.view.active > :nth-child(2) { animation-delay: .04s; } .view.active > :nth-child(3) { animation-delay: .08s; }
+.view.active > :nth-child(4) { animation-delay: .12s; } .view.active > :nth-child(5) { animation-delay: .16s; }
+.view.active > :nth-child(6) { animation-delay: .2s; } .view.active > :nth-child(n+7) { animation-delay: .24s; }
+
+/* buttons press in, everything that changes color eases */
+button { transition: transform .12s ease, background-color .2s, color .2s, border-color .2s, box-shadow .25s, opacity .2s; -webkit-tap-highlight-color: transparent; }
+button:active { transform: scale(.96); filter: none; }
+nav button { transition: color .2s, background-color .25s, border-color .25s, box-shadow .3s, transform .12s; }
+nav button.active svg { animation: popIn .35s cubic-bezier(.2, 1.4, .4, 1); }
+.risk-btns button, .tf-btns button, .seg button { transition: all .2s; }
+.card { transition: border-color .4s, box-shadow .4s, background-color .4s; }
+
+/* the connection dot sends out a ring while data flows */
+.dot { position: relative; }
+.dot.ok::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--yes); animation: ping 1.2s ease-out 3; } /* a few rings when it connects, then still */
+
+/* the price ticker: rolls to new prices (app.js) and shrinks to one slim line once you scroll down */
+.ticker { transition: padding .25s ease, background-color .6s, border-color .6s; will-change: transform; }
+.tk-price { transition: font-size .25s ease; }
+.tk-right { max-height: 22px; transition: max-height .25s ease, opacity .2s; overflow: hidden; }
+body.scrolled .ticker { padding: 6px 12px; }
+body.scrolled .tk-price { font-size: 18px; }
+body.scrolled .tk-right { max-height: 0; opacity: 0; }
+
+/* how much of the 15-minute round has gone */
+.round-bar { position: relative; height: 3px; margin: 6px auto 2px; max-width: 220px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.round-bar i { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: linear-gradient(90deg, var(--accent), var(--violet)); transition: transform 1s linear; }
+.round-bar.late i { background: linear-gradient(90deg, var(--amber), var(--no)); }
+
+/* calls glow in their color */
+.call.yes, .call.no { text-shadow: 0 0 24px currentColor; }
+
+/* moving bars glide instead of jumping */
+.track .fill { transition: left .5s ease, width .5s ease; }
+.wick-bar i { transition: left .5s ease, width .5s ease; }
+
+/* the live tape and notes: new rows slide in */
+.tape-list li.new { animation: slideDown .35s ease-out, flash .8s ease-out; }
+.note-list li:first-child { animation: slideDown .35s ease-out; }
+
+/* skeleton shimmer while something is still loading (—) */
+.stat b:empty::before { content: ''; display: block; height: 1em; border-radius: 4px; background: linear-gradient(90deg, var(--line) 25%, var(--line-2) 50%, var(--line) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+
+/* ---------- cosmetics ---------- */
+.tf-btns { gap: 4px; }
+.tf-btns button { flex: 1 1 auto; min-width: 0; padding: 7px 2px; white-space: nowrap; letter-spacing: -.2px; }
+.deep-head { flex-wrap: wrap; gap: 4px 10px; }
+.deep-head > span { white-space: nowrap; }
+.deep-head > b { margin-left: auto; text-align: right; font-size: 12px; }
+.order:empty, .reason:empty { display: none; }
+#levels span { display: block; font-size: 12px; line-height: 1.35; }
+.pos-btns button { letter-spacing: .3px; }
+.rec-days.empty > div { display: none; }
+.rec-days.empty { align-items: center; justify-content: center; }
+.rec-days.empty::after { content: 'Daily wins and losses fill in here'; font-size: 11px; color: var(--dim); }
+
+/* Auto-trader card */
+.at-card h4 { margin: 14px 0 6px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.at-card .err:empty { display: none; }
+.at-card .fine { text-align: left; }
+.at-modes button.on { animation: popIn .3s cubic-bezier(.2, 1.4, .4, 1); }
+.at-log li:first-child:not(.calm) { animation: slideDown .35s ease-out; }
+.at-strip { animation: slideDown .3s ease-out; }
+.at-strip span::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; animation: glowPulse 1.2s ease-in-out infinite; }
+.at-strip.live span::before { background: var(--no); }
+.at-today b { transition: color .3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
+}
+
+/* the dominant beast roars a few times when the lead changes, then holds still (an endless roar kept the phone busy) */
+.tug-sides .dom .beast { animation-iteration-count: 3; }
+/* confidence / hold odds / flip risk: three tidy columns, label over number */
+.hold-row { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto; grid-auto-flow: column; gap: 2px 8px; text-align: center; }
+.hold-row b { font-size: 20px; transition: color .3s; }
+/* two-up button rows: one line each */
+.pos-btns button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; letter-spacing: .3px; }

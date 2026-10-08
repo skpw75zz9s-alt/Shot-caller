@@ -124,30 +124,34 @@ export function createAutopilot({ $, esc, store, API, idb, toast, getJSON, paywa
   // ---------- the card ----------
   const usd = (x) => `${x < 0 ? '-' : ''}$${Math.abs(x).toFixed(2)}`;
   const signed$ = (x) => `${x >= 0 ? '+' : '-'}$${Math.abs(x).toFixed(2)}`;
+  // Writes that skip when nothing changed (no re-layout, and new log lines animate in only when they're new)
+  const html = (el, v) => { if (el.__h === v) return false; const first = el.__h === undefined; el.innerHTML = v; el.__h = v; return !first; };
+  const text = (el, v) => { if (el.__t === v) return false; el.textContent = v; el.__t = v; return true; };
+  const pop = (el) => { if (!el?.animate || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return; for (const b of el.querySelectorAll?.('b') || []) b.animate([{ transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 350, easing: 'ease-out' }); };
   const time = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   function renderCard() {
     const tr = active(), st = tr?.state(), unlock = liveUnlocked(traders.test.state());
-    $('atModes').innerHTML = Object.entries(MODES).map(([k, label]) => `<button type="button" data-mode="${k}" class="${cfg.mode === k ? 'on' : ''}${k === 'live' && !unlock.ok ? ' locked' : ''}">${k === 'live' && !unlock.ok ? '🔒 ' : ''}${label}</button>`).join('');
+    html($('atModes'), Object.entries(MODES).map(([k, label]) => `<button type="button" data-mode="${k}" class="${cfg.mode === k ? 'on' : ''}${k === 'live' && !unlock.ok ? ' locked' : ''}">${k === 'live' && !unlock.ok ? '🔒 ' : ''}${label}</button>`).join(''));
     $('atDemo').hidden = cfg.mode !== 'demo' && !(cfg.mode === 'off' && $('atDemo').dataset.show);
-    $('atDemoStatus').textContent = demoCred ? `Demo key linked (${demoCred.keyId.slice(0, 8)}…)` : 'Link a key from demo.kalshi.co (a demo account, fake money). It stays on this phone like your real key.';
+    text($('atDemoStatus'), demoCred ? `Demo key linked (${demoCred.keyId.slice(0, 8)}…)` : 'Link a key from demo.kalshi.co (a demo account, fake money). It stays on this phone like your real key.');
     $('atDemoForm').hidden = !!demoCred;
     $('atDemoUnlink').hidden = !demoCred;
     const why = cfg.mode === 'off' ? 'Off: it isn\'t trading.' : st?.stopped ? `Stopped: ${st.stopped}` : lastWhy || 'Watching for the bot\'s next call…';
-    $('atStatus').textContent = cfg.mode === 'off' ? `Off.${unlock.ok ? '' : ` Live unlocks after ${LIVE_UNLOCK} clean Test trades (${unlock.settled} so far${unlock.serious ? ', but Test hit an error: reset Test and run it again' : ''}).`}` : `${MODES[cfg.mode]}: ${why}`;
+    text($('atStatus'), cfg.mode === 'off' ? `Off.${unlock.ok ? '' : ` Live unlocks after ${LIVE_UNLOCK} clean Test trades (${unlock.settled} so far${unlock.serious ? ', but Test hit an error: reset Test and run it again' : ''}).`}` : `${MODES[cfg.mode]}: ${why}`);
     $('atStop').hidden = cfg.mode === 'off';
     $('atResume').hidden = !st || !(st.stopped || st.pausedUntil > Date.now());
     if (tr) {
       const t = tr.today(), s = tr.stats();
-      $('atToday').innerHTML = `<div><label>Today</label><b class="${t.realized > 0 ? 'pos' : t.realized < 0 ? 'neg' : ''}">${signed$(t.realized)}</b></div>
+      if (html($('atToday'), `<div><label>Today</label><b class="${t.realized > 0 ? 'pos' : t.realized < 0 ? 'neg' : ''}">${signed$(t.realized)}</b></div>
         <div><label>Open</label><b>${usd(t.open)}</b></div><div><label>Buys today</label><b>${t.buys}/${cfg.maxTrades}</b></div>
         <div><label>All ${MODES[cfg.mode]}</label><b class="${s.pnl > 0 ? 'pos' : s.pnl < 0 ? 'neg' : ''}">${signed$(s.pnl)}</b></div>
-        <div><label>Won</label><b>${s.wins}/${s.closed}</b></div><div><label>${cfg.mode === 'test' ? 'Test cash' : 'Errors'}</label><b>${cfg.mode === 'test' ? usd(testEx.balance()) : s.errors}</b></div>`;
-    } else $('atToday').innerHTML = '';
-    $('atLog').innerHTML = (st?.log || []).slice(0, 20).map((x) => `<li class="at-${esc(x.kind)}"><span>${time(x.t)}</span> ${esc(x.text)}</li>`).join('') || '<li class="calm">Nothing yet</li>';
+        <div><label>Won</label><b>${s.wins}/${s.closed}</b></div><div><label>${cfg.mode === 'test' ? 'Test cash' : 'Errors'}</label><b>${cfg.mode === 'test' ? usd(testEx.balance()) : s.errors}</b></div>`)) pop($('atToday'));
+    } else html($('atToday'), '');
+    html($('atLog'), (st?.log || []).slice(0, 20).map((x) => `<li class="at-${esc(x.kind)}"><span>${time(x.t)}</span> ${esc(x.text)}</li>`).join('') || '<li class="calm">Nothing yet</li>');
     $('atResetTest').hidden = cfg.mode !== 'test' && cfg.mode !== 'off';
     const strip = $('atStrip');
     strip.hidden = cfg.mode === 'off';
-    if (cfg.mode !== 'off') { strip.className = `at-strip ${cfg.mode}`; $('atStripText').textContent = `🤖 Auto-trader ${MODES[cfg.mode].toUpperCase()}${cfg.mode === 'live' ? ' · REAL MONEY' : ''} · ${st?.stopped ? 'stopped' : lastWhy || 'watching'}`; }
+    if (cfg.mode !== 'off') { strip.className = `at-strip ${cfg.mode}`; text($('atStripText'), `🤖 Auto-trader ${MODES[cfg.mode].toUpperCase()}${cfg.mode === 'live' ? ' · REAL MONEY' : ''} · ${st?.stopped ? 'stopped' : lastWhy || 'watching'}`); }
   }
 
   function buildLimits() {

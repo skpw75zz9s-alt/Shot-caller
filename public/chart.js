@@ -65,14 +65,21 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
 
   // grid + axis
   ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = C.text; ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+  const axisLabels = []; // printed last, skipping any a price tag covers
+  tagYs.length = 0;
   for (let k = 0; k <= 4; k++) {
     const v = lo - pad + ((hi - lo + 2 * pad) * k) / 4, y = Y(v);
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke();
-    ctx.fillText(fmt(v), plotW + 6, y + 3);
+    axisLabels.push([fmt(v), y]);
   }
   // time labels
   const every = Math.max(1, Math.round(bars.length / 5));
-  for (let i = 0; i < bars.length; i += every) ctx.fillText(new Date(bars[i].t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/, ''), X(i) - 12, H - 4);
+  for (let i = 0, lastX = -99; i < bars.length; i += every) {
+    const text = new Date(bars[i].t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/, '');
+    const x = Math.max(2, X(i) - 12), tw = ctx.measureText(text).width;
+    if (x < lastX + 6) continue; // would print on top of the one before
+    ctx.fillText(text, x, H - 4); lastX = x + tw;
+  }
   // Bull or bear behind the candles: who has the trend (fast EMA above the slow one = bull)
   const l9 = e9[e9.length - 1], l21 = e21[e21.length - 1];
   const trend = l9 != null && l21 != null ? (l9 >= l21 ? 'bull' : 'bear') : null;
@@ -140,14 +147,18 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
     ctx.textAlign = 'start';
   }
   // EMA 9 x 21 crosses: a little bull where the fast line crosses up, a bear where it crosses down
-  if (show.beasts) for (let i = 1; i < bars.length; i++) {
+  if (show.beasts) for (let i = 1, lastX = -99; i < bars.length; i++) {
     if ([e9[i], e21[i], e9[i - 1], e21[i - 1]].some((v) => v == null)) continue;
     const was = e9[i - 1] >= e21[i - 1], is = e9[i] >= e21[i];
     if (was === is) continue;
+    if (X(i) - lastX < 30) continue; // crosses packed together: one marker, not a pile of them
+    lastX = X(i);
     if (is) beast(ctx, 'bull', X(i), Y(bars[i].l) + 16, 16, 0.9); else beast(ctx, 'bear', X(i), Y(bars[i].h) - 14, 16, 0.9);
   }
   if (show.beasts && trend) { ctx.font = '800 10px system-ui'; ctx.fillStyle = trend === 'bull' ? C.up : C.dn; ctx.fillText(trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', 6, bot - 6); }
   if (show.labels) tag(ctx, plotW, Y(closes[closes.length - 1]), fmt(o.spot ?? closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true);
+  ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = C.text;
+  for (const [text, y] of axisLabels) if (!tagYs.some((t) => Math.abs(t - y) < 14)) ctx.fillText(text, plotW + 6, y + 3);
   // legend
   ctx.font = '600 10px system-ui'; let lx = 6, ly = 10;
   for (const [on, col, text] of [[show.strike && o.strike, C.strike, 'target'], [show.floorCeil && fc, C.floor, 'floor'], [show.floorCeil && fc, C.ceil, 'ceiling'], [show.ema, C.ema9, 'EMA9'], [show.ema, C.ema21, 'EMA21'], [show.vwap, C.vwap, 'VWAP'], [show.cone && o.cone?.length, C.ema9, 'cone 50/90%']]) {
@@ -188,7 +199,9 @@ function line(ctx, ys, X, Y, col, dash = []) {
   ys.forEach((v, i) => { if (v == null) { on = false; return; } on ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)); on = true; });
   ctx.stroke(); ctx.setLineDash([]);
 }
+const tagYs = []; // where the main chart's price tags went (axis labels keep clear of them)
 function tag(ctx, x, y, text, col, solid = false) {
+  tagYs.push(y);
   ctx.font = '600 10px ui-monospace, monospace';
   const tw = ctx.measureText(text).width + 8;
   ctx.fillStyle = solid ? col : '#0b0f17'; ctx.strokeStyle = col;
