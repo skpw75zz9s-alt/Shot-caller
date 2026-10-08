@@ -8,6 +8,7 @@ import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } fr
 import { generateVapidKeys, sendPush } from './push.js';
 import { createIndex, defaultSources } from './index.js';
 import { allowAlert, hourlyWindow } from './public/notify.js';
+import { callStats, logCall, settleCalls, streaks, unsettledCalls } from './public/record.js';
 import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
 
 const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, updateMinutes: 60, ...DEFAULTS, ...EXIT_DEFAULTS };
@@ -29,6 +30,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
   const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
   const LEARN_SERIES = 'KXBTC15M';
+  // The official bot record: every call the server's own bot makes on the default (Steady) settings, around the
+  // clock, graded against Kalshi's result. Kept in record.json next to the data file; the same for every user.
+  const OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings('steady') };
+  const recordFile = dataFile.replace(/[^/\\]+$/, 'record.json');
+  let record = [], recordDirty = false, recordSavedAt = 0;
+  const officialMem = {};
   const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
   const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
 
@@ -59,6 +66,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       log.warn('Generated new VAPID keys. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY so phones stay subscribed across redeploys.');
     }
     vapid.subject = env.VAPID_SUBJECT || 'https://github.com/skpw75zz9s-alt/Shot-caller';
+    try { const r = JSON.parse(await readFile(recordFile, 'utf8')); if (Array.isArray(r)) record = r; } catch { /* no record yet */ }
     try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L }; } catch { /* first run: learns from scratch */ }
     await save();
     if (learn) startLearning();
@@ -323,6 +331,23 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 2 * 3600000) delete lw[t];
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
+    // The official call for this round (same engine and rules as the phones on Steady)
+    if (snap.live) {
+      const sig = buySignal(snap.live, snap, OFFICIAL, now, officialMem);
+      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN }, 20000)) { recordDirty = true; saveRecord(); }
+    }
+    for (const [k, c] of Object.entries(officialMem)) if (!(c.at > now - 2 * 3600000)) delete officialMem[k];
+  }
+  async function saveRecord() {
+    recordDirty = false; recordSavedAt = Date.now();
+    try {
+      await mkdir(dirname(recordFile), { recursive: true });
+      await writeFile(`${recordFile}.tmp`, JSON.stringify(record));
+      await rename(`${recordFile}.tmp`, recordFile);
+    } catch (e) { log.error('saving the bot record failed', e.message); }
+  }
+  function officialRecord() {
+    return { level: 'Steady', since: record[0]?.at ?? null, ...callStats(record), ...streaks(record), calls: record.slice(-400) };
   }
   function learnFrom(t) {
     const w = lw[t];
@@ -348,6 +373,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const pending = new Set();
     for (const d of devices.values()) if (d.tracker) for (const w of pendingWindows(d.tracker, now)) pending.add(w.ticker);
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 60000) pending.add(t);
+    for (const e of unsettledCalls(record, now)) pending.add(e.ticker);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
         const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
@@ -359,6 +385,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       } catch { /* retry next tick */ }
     }
     for (const t of Object.keys(lw)) learnFrom(t);
+    for (const e of unsettledCalls(record, now)) {
+      if (results.has(e.ticker)) { settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; }
+      else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
+    }
+    if (recordDirty) saveRecord();
     if (settledValue.size > 500) settledValue.delete(settledValue.keys().next().value);
     for (const d of devices.values()) {
       if (!d.tracker) continue;
@@ -375,5 +406,5 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
   return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices,
-    learned: () => publicLearned(learned), learnStatus, index: () => index.read(), backfill, saveLearned, startLearning };
+    learned: () => publicLearned(learned), learnStatus, record: officialRecord, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
 }

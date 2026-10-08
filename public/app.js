@@ -13,7 +13,7 @@ import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
-import { callStats, logCall, settleCalls, unsettledCalls } from './record.js';
+import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
 
 const API = './api';
@@ -471,9 +471,9 @@ function renderDeck(snap, live, sig, now) {
   setTile('stClock', new Date(now - (state.skewMs || 0)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }), '',
     state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
   setTile('stContract', live ? live.m.ticker.replace(/^KXBTC15M-/, '') : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
-  const st = callStats(state.callLog);
-  setTile('stRecord', st.graded ? `${st.wins}/${st.graded} won` : 'no calls yet', st.graded ? (st.wins / st.graded >= 0.8 ? 'ok' : 'warn') : '',
-    st.graded ? `${Math.round((st.wins / st.graded) * 100)}% · bot said ${st.said != null ? Math.round(st.said) : '—'}%` : 'graded at settlement');
+  const br = state.botRecord, st = br?.graded ? br : callStats(state.callLog);
+  setTile('stRecord', st.graded ? `${st.wins}–${st.graded - st.wins}` : 'no calls yet', st.graded ? (st.wins / st.graded >= 0.8 ? 'ok' : 'warn') : '',
+    st.graded ? `${Math.round((st.wins / st.graded) * 100)}% won${br?.graded ? ` · ${br.streak ? `${br.streak.kind}${br.streak.n} streak` : 'bot record'}` : ' on this phone'}` : 'graded at settlement');
   setTile('dataHealth', health, hcls);
   $('timeLeft').textContent = live ? mmss(live.ev.minutesLeft) : '—';
   const lf = live?.learnedAdj;
@@ -843,6 +843,40 @@ function renderMemory() {
   $('memCal').innerHTML = rows.map((b) => `<li><span><b>Said ${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</b><small>${b.n} window${b.n === 1 ? '' : 's'} · won ${Math.round(b.won * 100)}%${b.shift ? ` · corrected ${b.shift > 0 ? '+' : '−'}${(Math.abs(b.shift) * 100).toFixed(1)} pts` : ' · no correction needed'}</small></span></li>`).join('');
 }
 
+// ---------- the official bot record (server: every call it made, around the clock) ----------
+async function refreshBotRecord() {
+  try { state.botRecord = await getJSON('record'); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
+}
+setInterval(() => { if (!document.hidden) refreshBotRecord(); }, 60000);
+function renderBotRecord() {
+  const r = state.botRecord;
+  if (!r) return;
+  const losses = r.graded - r.wins, pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  $('brLevel').textContent = `${r.level} settings`;
+  $('brWL').textContent = r.graded ? `${r.wins}–${losses}` : '0–0';
+  $('brPct').textContent = pctOf(r.wins, r.graded);
+  $('brPct').className = !r.graded ? '' : r.wins / r.graded >= 0.8 ? 'pos' : r.wins / r.graded < 0.6 ? 'neg' : '';
+  $('brStreak').textContent = r.streak ? `${r.streak.kind}${r.streak.n}` : '—';
+  $('brStreak').className = r.streak?.kind === 'W' ? 'pos' : r.streak?.kind === 'L' ? 'neg' : '';
+  const since = r.since ? new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
+  $('brSub').textContent = !r.calls.length ? 'No calls yet. The bot calls on its own around the clock (Steady settings), and every call shows up here, win or lose.'
+    : `Every call the bot made${since ? ` since ${since}` : ''}, around the clock, graded against Kalshi's result. It said ${r.said != null ? Math.round(r.said) : '—'}% on average and won ${pctOf(r.wins, r.graded)}. $10 on every call, held to settlement: ${money(r.usd)}. Best win streak: ${r.bestWin}.` +
+      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`;
+  const days = dailyRecord(r.calls, 14), top = Math.max(1, ...days.map((d) => d.w + d.l));
+  $('brDays').innerHTML = days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join('');
+  $('brBuckets').innerHTML = ['90+', '80–89', '70–79', 'under 70'].filter((k) => r.buckets?.[k]).map((k) => {
+    const b = r.buckets[k];
+    return `<li><span><b>Confidence ${k}</b><small>${b.calls} call${b.calls > 1 ? 's' : ''} · said ${Math.round(b.said)}% · won ${pctOf(b.wins, b.calls)}</small></span><b class="${b.usd >= 0 ? 'pos' : 'neg'}">${money(b.usd)}</b></li>`;
+  }).join('');
+  const now = Date.now();
+  $('brCalls').innerHTML = r.calls.slice(-12).reverse().map((e) => {
+    const up = e.side === 'YES', graded = e.result === 'yes' || e.result === 'no', won = graded && e.side.toLowerCase() === e.result;
+    const badge = graded ? (won ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>') : e.result === 'unknown' ? '<span class="badge">VOID</span>' : Date.parse(e.closeTime) > now ? '<span class="badge live">LIVE</span>' : '<span class="badge">SETTLING</span>';
+    const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${pc(e.price)}</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}</small></span>${badge}</li>`;
+  }).join('') || '<li><span></span><span class="muted">The first call will show up here.</span><span></span></li>';
+}
+
 // The bot's call record: what it claimed (confidence = win odds) next to how often its calls really won
 function renderRecord() {
   const st = callStats(state.callLog);
@@ -1137,6 +1171,7 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
   if (b.dataset.view === 'settings') loadAccess();
   if (b.dataset.view === 'chart') drawChartTab(true);
   if (b.dataset.view === 'alerts') alerts.render();
+  if (b.dataset.view === 'history') refreshBotRecord();
   adminPolling(b.dataset.view === 'settings');
 }));
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
@@ -1539,6 +1574,7 @@ try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so a
 loadAccess();
 liveConnect();
 feedsOn();
+refreshBotRecord();
 pushInit();
 tick();
 schedule();

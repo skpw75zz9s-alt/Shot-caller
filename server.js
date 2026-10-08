@@ -211,6 +211,8 @@ export const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
     // What the server has learned about the market (the phone prices with it too)
+    // The official bot record (every call the server's bot made, graded against Kalshi's result)
+    if (path === '/api/record') return send(res, 200, bot.record());
     if (path === '/api/learn') return send(res, 200, { learned: bot.learned(), status: bot.learnStatus() });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }

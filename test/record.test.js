@@ -32,3 +32,14 @@ test('waits for close, grades on Kalshi result, scores claimed vs real win odds'
   // $10 per call to settlement after fees: T1 +$2.50 - fee, T2 +$1.11 - fee, T3 -$10 - fee
   assert.ok(s.usd < -6 && s.usd > -7, `usd ${s.usd}`);
 });
+
+test('streaks and the daily record', async () => {
+  const { streaks, dailyRecord } = await import('../public/record.js');
+  const day = Date.parse('2026-10-08T15:00:00Z');
+  const e = (side, result, dt = 0) => ({ side, result, closeTime: new Date(day - dt).toISOString() });
+  const log = [e('YES', 'yes'), e('NO', 'no'), e('YES', 'no'), e('YES', 'yes'), e('NO', 'no'), e('YES', 'yes'), e('YES', 'unknown')];
+  assert.deepEqual(streaks(log), { streak: { kind: 'W', n: 3 }, bestWin: 3 });
+  assert.deepEqual(streaks([]), { streak: null, bestWin: 0 });
+  const d = dailyRecord([...log, e('YES', 'no', 86400000)], 3, day, 'UTC');
+  assert.deepEqual(d.map((x) => [x.w, x.l]), [[0, 0], [0, 1], [5, 1]]);
+});

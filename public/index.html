@@ -40,7 +40,7 @@
         <div class="tile"><label>Feeds</label><b id="stFeed">—</b><small id="stFeedSub"></small></div>
         <div class="tile"><label>Clock</label><b id="stClock">—</b><small id="stClockSub">server-synced</small></div>
         <div class="tile"><label>Contract</label><b id="stContract">—</b><small id="stContractSub"></small></div>
-        <div class="tile"><label>Verified record</label><b id="stRecord">—</b><small id="stRecordSub"></small></div>
+        <div class="tile"><label>Bot record</label><b id="stRecord">—</b><small id="stRecordSub"></small></div>
       </div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
@@ -201,7 +201,21 @@
     </section>
 
     <section id="view-history" class="view">
-      <h2 class="sec">Bot's call record</h2>
+      <div class="card rec-card" id="botRec">
+        <div class="deep-head"><span>Official bot record</span><b id="brLevel"></b></div>
+        <div class="rec-hero">
+          <div><b id="brWL">—</b><small>won – lost</small></div>
+          <div><b id="brPct">—</b><small>win rate</small></div>
+          <div><b id="brStreak">—</b><small>streak</small></div>
+        </div>
+        <p class="push-status" id="brSub">Loading the bot's record…</p>
+        <div class="rec-days" id="brDays"></div>
+        <div class="mem-axis"><span>14 days ago</span><span>today</span></div>
+        <ul class="history" id="brBuckets"></ul>
+        <h4 class="rec-h">Latest calls</h4>
+        <ul class="rec-calls" id="brCalls"></ul>
+      </div>
+      <h2 class="sec">Calls seen on this phone</h2>
       <p class="push-status" id="recSummary"></p>
       <ul id="recBuckets" class="history"></ul>
       <h2 class="sec">My trades</h2>
@@ -265,7 +279,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.3 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.4 · calls only (no auto-trading)</p>
     </section>
   </main>
 

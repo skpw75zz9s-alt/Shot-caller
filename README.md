@@ -44,7 +44,11 @@ Six tabs along the bottom:
   - **Bull / bear charge:** when the 1-minute chart turns bullish (EMA 9 crosses above EMA 21 and holds for 15 seconds), the bull gallops across the screen with "BULLS TAKING OVER". A bearish turn sends the bear the other way.
     - The first trend after opening the app doesn't count, and a quick wiggle across doesn't either.
     - Both animations can be switched off and previewed in Alerts. Quiet mode silences them, and the phone's reduce-motion setting turns them into a simple fade.
-- **Record.** The bot's graded call record, your trades, and what the bot has learned.
+- **Record.** The official bot record, calls seen on this phone, your trades, and what the bot has learned.
+  - **Official bot record:** the server's own bot runs on the default Steady settings around the clock, with or without phones connected. Every call it makes is graded against Kalshi's real result, and every user sees the same record.
+  - It shows wins and losses, win rate, the current streak, the best win streak, and the confidence it claimed versus how often it won. It also shows $10 a call held to settlement after fees, a 14-day win/loss chart, results by confidence, and the latest calls (WIN / LOSS / LIVE).
+  - The Deck's "Bot record" tile shows it too.
+  - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 

@@ -397,3 +397,21 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
   .lk-card, .lk-beast, .lk-call, .lk-row, .lk-sub, .lock, .lock .shackle, .lk-ring, .ch-runner, .ch-runner img, .dust, .ch-text { animation: none !important; }
   .lock .shackle { transform: none; } .ch-runner { left: calc(50% - 48px); } .dust { display: none; }
 }
+
+/* official bot record */
+.rec-hero { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; text-align: center; margin: 4px 0 10px; }
+.rec-hero > div { background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 4px; }
+.rec-hero b { display: block; font: 800 26px var(--mono); color: var(--text); text-shadow: 0 0 16px #22d3ee44; }
+.rec-hero small { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.rec-hero b.pos { color: var(--yes); text-shadow: 0 0 16px #2ee6a666; } .rec-hero b.neg { color: var(--no); text-shadow: 0 0 16px #ff4d6d66; }
+.rec-days { display: flex; align-items: flex-end; gap: 3px; height: 60px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.rec-days div { flex: 1; display: flex; flex-direction: column-reverse; height: 100%; gap: 1px; }
+.rec-days i { display: block; border-radius: 2px; } .rec-days i.w { background: var(--yes); box-shadow: 0 0 6px #2ee6a666; } .rec-days i.l { background: var(--no); }
+.rec-h { margin: 12px 0 6px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.rec-calls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rec-calls li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+.rec-calls img { width: 26px; height: 26px; }
+.rec-calls b { font-family: var(--mono); } .rec-calls small { display: block; color: var(--muted); font-size: 10.5px; }
+.badge { font: 800 10px var(--mono); letter-spacing: 1px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); }
+.badge.win { color: var(--yes); border-color: #2ee6a666; background: #2ee6a614; } .badge.loss { color: var(--no); border-color: #ff4d6d66; background: #ff4d6d14; }
+.badge.live { color: var(--accent); border-color: #22d3ee66; }

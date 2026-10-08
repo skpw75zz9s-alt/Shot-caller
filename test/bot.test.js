@@ -199,3 +199,25 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
   await b2.load();
   assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
 });
+
+test('official bot record: the server bot calls on its own (Steady) and grades the call', async () => {
+  Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-rec-')), 'data.json');
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet });
+  await b.load();
+  const p = fakeBrowser();
+  b.sync({ subscription: { endpoint: `${svc.base}/push/rec`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
+  for (let s = 0; s <= 75; s += 3) await b.tick(NOW + s * 1000); // Steady wants a minute of steady odds first
+  let r = b.record();
+  assert.equal(r.calls.length, 1, 'one locked call for the round');
+  assert.equal(r.calls[0].side, 'YES');
+  assert.equal(r.level, 'Steady');
+  assert.equal(r.graded, 0);
+  await b.tick(NOW + 8 * 60000); // the round settled YES
+  r = b.record();
+  assert.equal(r.graded, 1); assert.equal(r.wins, 1);
+  assert.deepEqual(r.streak, { kind: 'W', n: 1 });
+  await b.saveRecord();
+  assert.equal(JSON.parse(await readFile(join(file, '..', 'record.json'), 'utf8')).length, 1, 'kept on disk');
+  b.stop();
+});

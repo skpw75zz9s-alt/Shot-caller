@@ -7,11 +7,11 @@ import { confBucket } from './analysis.js';
 const MAX = 500;
 
 // One entry per call (a switch to the other side is a new call). Returns true if it was added.
-export function logCall(log, { ticker, side, price, conf, at, closeTime, n = 1 }) {
+export function logCall(log, { ticker, side, price, conf, hold = null, at, closeTime, n = 1 }, max = MAX) {
   if (!ticker || !side || !(price > 0 && price < 1)) return false;
   if (log.some((e) => e.ticker === ticker && e.side === side && e.n === n)) return false;
-  log.push({ ticker, side, price, conf: conf ?? null, at, closeTime, n, result: null });
-  if (log.length > MAX) log.splice(0, log.length - MAX);
+  log.push({ ticker, side, price, conf: conf ?? null, hold, at, closeTime, n, result: null });
+  if (log.length > max) log.splice(0, log.length - max);
   return true;
 }
 
@@ -43,4 +43,30 @@ export function callStats(log) {
     said: withConf.length ? sum(withConf, (e) => e.conf) / withConf.length : null, // average claimed win odds
     usd: sum(graded, (e) => usd10(e, won(e))), buckets,
   };
+}
+
+// Win/loss streaks over graded calls (oldest first): the current run and the best winning run
+export function streaks(log) {
+  let cur = 0, kind = null, best = 0, run = 0;
+  for (const e of log) {
+    if (e.result !== 'yes' && e.result !== 'no') continue;
+    const won = e.side.toLowerCase() === e.result;
+    run = won ? run + 1 : 0; best = Math.max(best, run);
+    const k = won ? 'W' : 'L';
+    if (k === kind) cur++; else { kind = k; cur = 1; }
+  }
+  return { streak: kind ? { kind, n: cur } : null, bestWin: best };
+}
+
+// Wins and losses per day (in the viewer's time zone), newest last, for the last `days` days
+export function dailyRecord(log, days = 14, now = Date.now(), tz) {
+  const key = (t) => new Date(t).toLocaleDateString('en-CA', tz ? { timeZone: tz } : undefined); // YYYY-MM-DD
+  const out = new Map();
+  for (let i = days - 1; i >= 0; i--) out.set(key(now - i * 86400000), { w: 0, l: 0 });
+  for (const e of log) {
+    if (e.result !== 'yes' && e.result !== 'no') continue;
+    const d = out.get(key(Date.parse(e.closeTime)));
+    if (d) d[e.side.toLowerCase() === e.result ? 'w' : 'l']++;
+  }
+  return [...out.entries()].map(([day, v]) => ({ day, ...v }));
 }
