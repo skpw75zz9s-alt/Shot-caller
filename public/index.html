@@ -69,6 +69,7 @@
         <div class="order" id="order"></div>
         <button id="boughtBtn" class="buy-btn" hidden>I bought it</button>
         <p id="autoNote" class="auto-note" hidden>Kalshi linked: when you buy, it shows up here on its own</p>
+        <div id="atStrip" class="at-strip" hidden><span id="atStripText"></span><button id="atStripStop" type="button">STOP</button></div>
         <div class="entry" id="entry" hidden></div>
       </div>
 
@@ -266,10 +267,35 @@
           <div class="pos-btns"><label class="file-btn">Choose key file<input id="kFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="kLink">Link account</button></div>
           <p class="fine">On Kalshi: Account → API keys → Create key. Copy the key ID and download the private key file.
             The key stays on this phone: it's locked in so that even this app can't read it back out, and it's never sent to our server.
-            Linking only reads your trades and balance: the app never places orders. A read-only key is enough. Delete the key on Kalshi any time to cut access.</p>
+            Linking reads your trades and balance. A read-only key is enough, unless you turn on the Auto-trader in Live mode (that needs a key with trading permission). Delete the key on Kalshi any time to cut access.</p>
         </div>
         <div id="kLinked" class="pos-btns" hidden><button id="kSync">Sync now</button><button id="kUnlink" class="ghost">Unlink</button></div>
         <p class="err" id="kErr"></p>
+      </div>
+      <div class="card push-card at-card" id="atCard">
+        <h3>Auto-trader</h3>
+        <p id="atStatus" class="push-status">Off.</p>
+        <div class="risk-btns at-modes" id="atModes"></div>
+        <p class="fine"><b>Test</b> trades the bot's Steady calls on Kalshi's live prices with pretend money: nothing is sent.
+          <b>Demo</b> sends real orders to Kalshi's demo exchange (fake money). <b>Live</b> uses real money and unlocks after Test runs clean.
+          It buys only the bot's locked calls, sells on its SELL HIGH / BAIL signals, and only uses orders that fill right away or cancel,
+          sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. Keep the app open while it trades.</p>
+        <div class="num-grid" id="atLimits"></div>
+        <div class="pos-grid at-today" id="atToday"></div>
+        <div class="pos-btns"><button id="atStop" class="stop-btn" hidden>STOP</button><button id="atResume" hidden>Resume</button><button id="atResetTest" class="ghost">Reset Test</button></div>
+        <div id="atDemo" hidden>
+          <h4>Demo key</h4>
+          <p class="push-status" id="atDemoStatus"></p>
+          <div id="atDemoForm">
+            <div class="adm-row"><label>Demo API key ID<input id="atDemoKeyId" autocomplete="off" autocapitalize="off" spellcheck="false"></label></div>
+            <div class="adm-row"><label>Demo private key<textarea id="atDemoPem" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label></div>
+            <div class="pos-btns"><button id="atDemoLink">Link demo key</button></div>
+          </div>
+          <div class="pos-btns"><button id="atDemoUnlink" class="ghost" hidden>Unlink demo key</button></div>
+        </div>
+        <p class="err" id="atErr"></p>
+        <h4>What it did</h4>
+        <ul class="at-log" id="atLog"></ul>
       </div>
       <div class="card push-card health-card" id="healthCard">
         <h3>Health check</h3>
@@ -291,7 +317,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.8 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v7.0 · auto-trader: Test, Demo, Live</p>
     </section>
   </main>
 

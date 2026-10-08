@@ -436,3 +436,20 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
 
 .ev-row.slot small { display: block; color: var(--muted); font-size: 10.5px; }
 .file-btn.mini { flex: none; padding: 5px 9px; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); border-radius: 8px; }
+
+/* ---------- Auto-trader ---------- */
+.at-modes button { flex: 1 1 20%; }
+.at-modes button.locked { opacity: .55; }
+.at-today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stop-btn { background: var(--no); border-color: var(--no); color: #fff; font-weight: 800; letter-spacing: 1px; }
+.at-log { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 12px; }
+.at-log li { padding: 5px 0; border-bottom: 1px solid var(--line); color: var(--text); overflow-wrap: anywhere; }
+.at-log li span { color: var(--muted); font: 11px var(--mono); margin-right: 4px; }
+.at-log li.at-error, .at-log li.at-pause { color: var(--no); }
+.at-log li.at-fill, .at-log li.at-win { color: var(--yes); }
+.at-log li.calm { color: var(--muted); }
+.at-strip { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg); font-size: 12px; }
+.at-strip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-strip button { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 800; background: var(--no); border-color: var(--no); color: #fff; flex: none; }
+.at-strip.live { border-color: var(--no); box-shadow: 0 0 12px #ff4d6d33; }
+.at-strip.demo { border-color: var(--accent); }

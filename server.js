@@ -10,6 +10,8 @@ import { createAccess } from './access.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
+// Kalshi's demo exchange (fake money): the auto-trader's Demo mode sends real orders here to prove them end to end
+const KALSHI_DEMO = process.env.KALSHI_DEMO_API || 'https://demo-api.kalshi.co/trade-api/v2';
 const COINBASE = process.env.COINBASE_API || 'https://api.exchange.coinbase.com';
 const PAYWALL = process.env.PAYWALL !== 'off';
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -36,8 +38,10 @@ const ready = Promise.all([bot.load(), access.load()]);
 setInterval(() => access.prune(), 3600000).unref();
 
 // Only read-only market-data endpoints are reachable through the proxy.
+const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
 const ROUTES = [
-  { prefix: '/api/kalshi/', upstream: KALSHI, allow: /^(markets(\/[A-Za-z0-9._-]+)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/ },
+  { prefix: '/api/kalshi/', upstream: KALSHI, allow: KALSHI_PUBLIC },
+  { prefix: '/api/kalshi-demo/', upstream: KALSHI_DEMO, allow: KALSHI_PUBLIC },
   { prefix: '/api/coinbase/', upstream: COINBASE, allow: /^products\/BTC-USD\/(ticker|candles)$/ },
 ];
 
@@ -83,30 +87,72 @@ async function proxy(route, url, req, res) {
   }
 }
 
-// /api/kalshi-auth/* — a linked Kalshi account, read-only. The phone signs each request with its Kalshi API key (the
-// key never reaches this server); we only forward the signature headers. Portfolio reads only, never cached. This
-// server can't place or cancel orders: there's no route for it.
+// /api/kalshi-auth/* — a linked Kalshi account. The phone signs each request with its Kalshi API key (the key
+// never reaches this server); we only forward the signature headers. GETs: portfolio reads only, never cached.
+// POST orders: the auto-trader's orders, each checked by validateOrder first. `x-kalshi-env: demo` sends the request
+// to Kalshi's demo exchange instead (fake money). Nothing can cancel orders or touch anything else.
 const AUTH_READS = new Set(['fills', 'positions', 'balance', 'settlements']);
 const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status', 'count_filter', 'settlement_status']);
-export const kalshiAuthFor = (base) => async function kalshiAuth(req, res, endpoint, url) {
-  if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/` });
-  if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
-  if (!AUTH_READS.has(endpoint)) return send(res, 404, { error: 'not allowed' });
+const ORDER_SERIES = (process.env.AUTO_SERIES || 'KXBTC15M').split(',').filter(Boolean);
+const ORDER_MAX_USD = Number(process.env.AUTO_MAX_ORDER_USD || 100);
+const ORDER_KEYS = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type']);
+
+// Every order is checked here before it reaches Kalshi (V2 shape: one YES book, bid/ask, dollar strings): only the
+// BTC 15-minute series, only fill-now-or-cancel (nothing ever rests on Kalshi holding cash), whole contracts at
+// whole cents, a hard dollar cap on anything that opens a position, no extra fields. Returns the problem, or null.
+export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD } = {}) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'order must be an object';
+  for (const k of Object.keys(o)) if (!ORDER_KEYS.has(k)) return `field not allowed: ${k}`;
+  if (typeof o.ticker !== 'string' || !/^[A-Z0-9]+-[A-Z0-9-]{1,60}$/.test(o.ticker) || !series.some((s) => o.ticker.startsWith(`${s}-`))) return 'only the BTC 15-minute markets can be traded';
+  if (typeof o.client_order_id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(o.client_order_id)) return 'client_order_id required';
+  if (!['bid', 'ask'].includes(o.side)) return 'side must be bid or ask';
+  if (o.time_in_force !== 'immediate_or_cancel') return 'only fill-now-or-cancel orders (nothing left resting)';
+  if (typeof o.count !== 'string' || !/^\d{1,4}\.00$/.test(o.count) || Number(o.count) < 1 || Number(o.count) > 1000) return 'count must be "1.00"-"1000.00" contracts';
+  if (typeof o.price !== 'string' || !/^0\.\d\d00$/.test(o.price) || Number(o.price) < 0.01 || Number(o.price) > 0.99) return 'price must be whole cents, "0.0100"-"0.9900"';
+  if (typeof o.reduce_only !== 'boolean') return 'reduce_only must be true or false';
+  if (o.self_trade_prevention_type !== undefined && o.self_trade_prevention_type !== 'taker_at_cross') return 'unsupported self_trade_prevention_type';
+  // Opening a position costs price per contract on a bid (YES) and 1 - price on an ask (NO)
+  const cost = Number(o.count) * (o.side === 'bid' ? Number(o.price) : 1 - Number(o.price));
+  if (!o.reduce_only && cost > maxUsd + 1e-9) return `order over the $${maxUsd} cap`;
+  return null;
+}
+
+const orderHits = new Map(); // per phone address: at most 30 orders a minute reach Kalshi
+export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function kalshiAuth(req, res, endpoint, url) {
+  if (endpoint === 'info') return send(res, 200, { pathPrefix: `${new URL(base).pathname.replace(/\/$/, '')}/portfolio/`, orderPath: 'events/orders' });
+  const isOrder = endpoint === 'orders' && req.method === 'POST';
+  if (req.method !== 'GET' && !isOrder) return send(res, 405, { error: 'method not allowed' });
+  if (!isOrder && !AUTH_READS.has(endpoint)) return send(res, 404, { error: 'not allowed' });
   const key = req.headers['x-kalshi-key'], ts = req.headers['x-kalshi-ts'], sig = req.headers['x-kalshi-sig'];
   if (!/^[A-Za-z0-9-]{8,64}$/.test(key || '') || !/^\d{12,14}$/.test(ts || '') || !/^[A-Za-z0-9+/=]{40,1024}$/.test(sig || '')) {
     return send(res, 400, { error: 'missing or malformed Kalshi signature' });
   }
+  const upstream = req.headers['x-kalshi-env'] === 'demo' ? demoBase : base;
+  let body;
+  if (isOrder) {
+    const ip = clientIp(req), now = Date.now();
+    const hits = (orderHits.get(ip) || []).filter((t) => t > now - 60000);
+    if (hits.length >= 30) return send(res, 429, { error: 'too many orders: wait a minute' });
+    hits.push(now); orderHits.set(ip, hits);
+    if (orderHits.size > 5000) orderHits.delete(orderHits.keys().next().value);
+    body = await readBody(req);
+    const bad = validateOrder(body);
+    if (bad) return send(res, 422, { error: { code: 'refused_by_shot_caller', message: `order refused: ${bad}` } });
+  }
   const q = new URLSearchParams();
-  for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
+  if (!isOrder) for (const [k, v] of url.searchParams) if (AUTH_QUERY.has(k) && v.length <= 200) q.append(k, v);
   try {
-    const r = await fetch(`${base}/portfolio/${endpoint}${q.size ? `?${q}` : ''}`, {
-      headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig },
+    const r = await fetch(`${upstream}/portfolio/${isOrder ? 'events/orders' : endpoint}${q.size ? `?${q}` : ''}`, { // V2 order path
+      method: isOrder ? 'POST' : 'GET',
+      headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0', 'KALSHI-ACCESS-KEY': key, 'KALSHI-ACCESS-TIMESTAMP': ts, 'KALSHI-ACCESS-SIGNATURE': sig, ...(isOrder ? { 'content-type': 'application/json' } : {}) },
+      body: isOrder ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(8000),
     });
     // Kalshi's 401 (bad key) goes out as 403 so the app doesn't mistake it for the paywall's 401
     sendEntry(req, res, r.status === 401 ? 403 : r.status, { raw: Buffer.from(await r.text()) }, 'application/json', { 'cache-control': 'no-store, private' });
   } catch (e) {
-    send(res, 502, { error: `Kalshi didn't answer: ${e.message}` });
+    // a timeout on an order: it may have gone through. The phone retries with the same client_order_id and checks
+    send(res, 504, { error: `Kalshi didn't answer: ${e.message}` });
   }
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);

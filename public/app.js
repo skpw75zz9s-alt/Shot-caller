@@ -11,6 +11,7 @@ import { createFx, trendTurn } from './fx.js';
 import { suggestEntry, suggestExit } from './suggest.js';
 import { ema } from './indicators.js';
 import { confTier } from './analysis.js';
+import { createAutopilot } from './autopilot.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -261,6 +262,7 @@ function renderPositions(snap) {
 // automatically, and the amount is the bot's suggestion (or the fixed amount from Settings).
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 let undoTimer = null;
+let autopilot = null; // the Auto-trader (public/autopilot.js), made once the key store is ready
 function toast(text, undo) {
   $('toastText').textContent = text;
   $('toastUndo').hidden = !undo;
@@ -756,6 +758,7 @@ function render() {
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
   renderDeck(snap, live, sig, now);
+  autopilot?.tick({ live, snap, sig, settings });
 
   $('spot').textContent = usd(state.spot);
   renderTicker(live?.strike ?? null);
@@ -1610,6 +1613,7 @@ buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk 
 renderRisk();
 if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }
 loadKalshi();
+autopilot = createAutopilot({ $, esc, store, API, idb, toast, getJSON, paywalled, liveCred: () => state.kalshi, render: queueRender });
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();

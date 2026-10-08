@@ -4,7 +4,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/skpw75zz9s-alt/Shot-caller)
 
-> **Signals only.** It never places orders: you place trades yourself. Linking a Kalshi account (optional) only reads your trades so positions and P&L track themselves.
+> **Signals first.** Out of the box it never places orders: you trade yourself. The optional **Auto-trader** (v7) can trade the bot's calls, starting in Test mode with pretend money; real-money Live mode stays locked until Test has run clean. Linking a Kalshi account only reads your trades unless you turn Live on.
 > No model reliably beats these markets. Watch the paper P&L in the History tab before you risk real money.
 
 ## The app (v6)
@@ -260,13 +260,39 @@ Once linked, the app reads your **fills** (every buy and sell, with exact price,
 Security:
 - **The key never leaves the phone.** It's imported as a non-extractable WebCrypto key in IndexedDB, so it can sign requests but can't be read back out, not even by the app's own code. The pasted text is cleared right away.
 - Each request is signed on the phone (Ed25519 or RSA-PSS, matching the key type Kalshi issued). The server only forwards the signature headers.
-- Read-only: the server forwards GET requests only for `portfolio/fills`, `positions`, `balance` and `settlements`, and never caches the responses. It has no way to place or cancel orders, so a read-only Kalshi key is enough.
+- Reads: the server forwards GET requests only for `portfolio/fills`, `positions`, `balance` and `settlements`, and never caches the responses.
+- Orders: only the Auto-trader sends them, and only in Demo or Live mode. The server re-checks every order (`validateOrder`): BTC 15-minute markets only, fill-now-or-cancel only, whole cents, at most $100 to open a position (`AUTO_MAX_ORDER_USD`), no extra fields, at most 30 a minute. It can't cancel orders or reach anything else. A read-only key is enough unless you use Live.
 - **Unlink** deletes the key from the phone. Deleting the key on Kalshi cuts access everywhere.
 
 **Account sync matches Kalshi:** Kalshi's own records are the source of truth, checked on every sync:
 - **Fills** are read in full (every page) and on the right side. Newer fills give the side in `outcome_side`. Their `side` field can say "bid"/"ask", which older versions read as YES. Every trade records the exact fee Kalshi charged (`fee_cost`) instead of an estimate.
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
+
+### Auto-trader (v7)
+
+Settings → **Auto-trader**. It buys the bot's **Steady** calls (whatever risk level the screen shows) and sells on the SELL HIGH / BAIL signals.
+
+| Mode | What happens |
+|---|---|
+| **Off** | Nothing (the default; Demo and Live also switch back to Off when the app reloads) |
+| **Test** | A simulator on Kalshi's live order book: fills at the real prices, with Kalshi's fee, against a pretend balance. Nothing is sent |
+| **Demo** | Real orders on Kalshi's demo exchange (fake money), with a separate demo key from demo.kalshi.co |
+| **Live** | Real orders, real money, with your linked key (needs trading permission). Locked until Test has settled 10 trades without a serious error, then asks you to confirm |
+
+Your limits (all editable): **max per trade** ($10), **daily loss stop** ($30, counting what's still open), **max buys a day** (20), **max open at once** ($40). **STOP** is on the card and on the Deck tab while it runs. Each mode keeps its own history and P&L.
+
+Built so the old auto-trader's errors can't happen (`public/trader.js`):
+- **No "insufficient balance".** It only sends fill-now-or-cancel orders, so nothing rests on Kalshi holding cash. Right before each buy it re-reads the balance and the order book, and sizes the order so contracts × max price + Kalshi's fee (rounded up per fill, a cent extra per price level) fits under the cash with a 5¢ cushion. If one contract doesn't fit, no order goes out.
+- **No rate-limit errors.** One request at a time, at least 350 ms apart.
+- **Never buys twice.** Each order has its own client order id, and a retry reuses it. If an answer gets lost (a timeout, or the app closed mid-order), it reads the position back from Kalshi before doing anything else and books what actually filled.
+- **Never oversells.** Sells are reduce-only and sized from Kalshi's own position count.
+- **Errors stop it.** Three Kalshi errors in a row pause it for 15 minutes. A refused key or a refused order stops it until you tap Resume.
+
+Tested against a strict fake Kalshi (`test/trader.test.js`):
+- The fake refuses anything off: wrong fields or formats, collateral plus fees over the balance, reduce-only overselling, reused order ids, requests too close together.
+- Thousands of simulated rounds, including a "bad day" where 5% of requests fail or time out after going through.
+- Results: zero refused orders, no double buys, its ledger always matches the fake exchange's positions, and every limit held.
 
 ### Risk level
 

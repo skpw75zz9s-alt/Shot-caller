@@ -121,23 +121,40 @@ test('Kalshi account reads: signed GETs to portfolio only, headers forwarded, ne
   srv.close(); kal.close();
 });
 
-test('no orders, ever: the server can only read a linked Kalshi account', async () => {
+test('orders: only checked fill-now orders on the BTC 15-minute markets reach Kalshi; demo goes to the demo exchange', async () => {
   const got = [];
-  const kal = http.createServer((req, res) => { got.push({ method: req.method, url: req.url }); res.setHeader('content-type', 'application/json'); res.end('{}'); });
-  await new Promise((r) => kal.listen(0, r));
-  const { kalshiAuthFor } = await import('../server.js');
-  const handler = kalshiAuthFor(`http://127.0.0.1:${kal.address().port}/trade-api/v2`);
+  const mk = (name) => http.createServer((req, res) => {
+    let raw = ''; req.on('data', (c) => { raw += c; });
+    req.on('end', () => { got.push({ at: name, method: req.method, url: req.url, body: raw ? JSON.parse(raw) : null }); res.setHeader('content-type', 'application/json'); res.end('{"order":{"fill_count":"2.00"}}'); });
+  });
+  const kal = mk('live'), demo = mk('demo');
+  await new Promise((r) => kal.listen(0, r)); await new Promise((r) => demo.listen(0, r));
+  const { kalshiAuthFor, validateOrder } = await import('../server.js');
+  const handler = kalshiAuthFor(`http://127.0.0.1:${kal.address().port}/trade-api/v2`, `http://127.0.0.1:${demo.address().port}/trade-api/v2`);
   const srv = http.createServer((req, res) => handler(req, res, req.url.split('?')[0].split('/').pop(), new URL(req.url, 'http://x')));
   await new Promise((r) => srv.listen(0, r));
   const at = `http://127.0.0.1:${srv.address().port}/api/kalshi-auth`;
   const h = { 'x-kalshi-key': 'good-key-1234', 'x-kalshi-ts': '1700000000000', 'x-kalshi-sig': 'B'.repeat(88), 'content-type': 'application/json' };
+  const order = { ticker: 'KXBTC15M-26OCT05-T1', client_order_id: 'abcd-1234-efgh', side: 'bid', count: '3.00', price: '0.4500', time_in_force: 'immediate_or_cancel', reduce_only: false, self_trade_prevention_type: 'taker_at_cross' };
   try {
-    const order = { ticker: 'KXBTC15M-26OCT05-T1', side: 'bid', count: '3.00', price: '0.4500', time_in_force: 'immediate_or_cancel' };
-    assert.equal((await fetch(`${at}/orders`, { method: 'POST', headers: h, body: JSON.stringify(order) })).status, 405, 'placing an order');
+    assert.equal(validateOrder(order), null);
+    assert.match(validateOrder({ ...order, time_in_force: 'good_till_canceled' }), /fill-now/);
+    assert.match(validateOrder({ ...order, ticker: 'KXPRES-28' }), /BTC 15-minute/);
+    assert.match(validateOrder({ ...order, price: '0.4550' }), /whole cents/);
+    assert.match(validateOrder({ ...order, count: '500.00', price: '0.9000' }), /cap/);
+    assert.equal(validateOrder({ ...order, count: '500.00', price: '0.9000', side: 'ask', reduce_only: true }), null, 'sells are not capped');
+    assert.match(validateOrder({ ...order, expiration_time: 1 }), /not allowed/);
+    const r = await fetch(`${at}/orders`, { method: 'POST', headers: h, body: JSON.stringify(order) });
+    assert.equal(r.status, 200);
+    assert.deepEqual(got[0], { at: 'live', method: 'POST', url: '/trade-api/v2/portfolio/events/orders', body: order });
+    await fetch(`${at}/orders`, { method: 'POST', headers: { ...h, 'x-kalshi-env': 'demo' }, body: JSON.stringify(order) });
+    assert.equal(got[1].at, 'demo');
+    const bad = await fetch(`${at}/orders`, { method: 'POST', headers: h, body: JSON.stringify({ ...order, time_in_force: 'good_till_canceled' }) });
+    assert.equal(bad.status, 422);
+    assert.match((await bad.json()).error.message, /order refused/);
     assert.equal((await fetch(`${at}/orders`, { method: 'DELETE', headers: h })).status, 405, 'cancelling');
-    assert.equal((await fetch(`${at}/orders`, { headers: h })).status, 404, 'not even reading orders');
-    assert.equal(got.length, 0, 'nothing reached Kalshi');
-    assert.equal((await fetch(`${at}/positions?count_filter=position`, { headers: h })).status, 200, 'reads still work');
-    assert.deepEqual(got, [{ method: 'GET', url: '/trade-api/v2/portfolio/positions?count_filter=position' }]);
-  } finally { srv.close(); kal.close(); }
+    assert.equal((await fetch(`${at}/orders`, { headers: h })).status, 404, 'reading orders');
+    assert.equal((await fetch(`${at}/positions`, { method: 'POST', headers: h, body: '{}' })).status, 405);
+    assert.equal(got.length, 2, 'nothing else reached Kalshi');
+  } finally { srv.close(); kal.close(); demo.close(); }
 });
