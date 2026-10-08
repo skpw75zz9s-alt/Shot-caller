@@ -55,6 +55,7 @@
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
         <div class="conf" id="conf" hidden></div>
+        <div class="stab-chip" id="stabChip" hidden><span class="thumb" id="stabThumb"></span><b id="stabLabel"></b><small id="stabScore"></small></div>
         <div class="suggest" id="suggest" hidden><b id="sugTitle"></b><span id="sugWhy"></span></div>
         <div class="hold" id="holdBox" hidden>
           <div class="hold-row"><span>Confidence</span><b id="confBig">—</b><span>Hold odds</span><b id="holdBig">—</b><span>Flip risk</span><b id="flipBig">—</b></div>
@@ -145,6 +146,25 @@
     </section>
 
     <section id="view-chart" class="view">
+      <div class="card pulse" id="pulseCard">
+        <div class="deep-head"><span>Market pulse</span><b id="pulseWhen"></b></div>
+        <div class="pulse-stab" id="pulseStab">
+          <span class="thumb big" id="pulseThumb"></span>
+          <div class="pulse-stab-txt"><b id="pulseLevel">Measuring…</b><small id="pulseWhy">Needs about 20 minutes of candles</small></div>
+          <div class="pulse-score"><b id="pulseScore">—</b><small>/100</small></div>
+        </div>
+        <div class="stab-bar"><i id="pulseStabFill"></i></div>
+        <ul class="stab-parts" id="pulseParts"></ul>
+        <div class="pulse-press">
+          <img src="bear.svg" alt="" class="beast sm" id="pulseBear">
+          <div class="pulse-press-mid">
+            <div class="pulse-press-nums"><span class="neg">Sell <b id="pulseSell">—</b></span><b id="pulseLead" class="pulse-lead">Pressure</b><span class="pos">Buy <b id="pulseBuy">—</b></span></div>
+            <div class="tug-bar"><i id="pulseTugFill"></i><em id="pulseTugMark"></em></div>
+            <small class="muted" id="pulseNow">Buy vs sell pressure: last 2 minutes of trades on 5 exchanges</small>
+          </div>
+          <img src="bull.svg" alt="" class="beast sm" id="pulseBull">
+        </div>
+      </div>
       <div class="card chart-pro">
         <div class="tf-btns" id="tfBtns"></div>
         <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
@@ -318,7 +338,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v7.1 · smoother, animated</p>
+      <p class="fine" id="version">Shot Caller v7.2 · market pulse</p>
     </section>
   </main>
 

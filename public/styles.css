@@ -547,3 +547,45 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .hold-row b { font-size: 20px; transition: color .3s; }
 /* two-up button rows: one line each */
 .pos-btns button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; letter-spacing: .3px; }
+
+/* ---------- market stability: 👍 stable · 🤷 moderate · red 👍 unstable ---------- */
+@keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
+@keyframes thumbBob { 50% { transform: translateY(-3px) rotate(-6deg); } }
+.thumb { display: inline-block; font-size: 18px; line-height: 1; }
+.thumb.stable { filter: drop-shadow(0 0 6px #2ee6a6aa); animation: thumbBob .6s ease-in-out 2; }
+.thumb.moderate { filter: drop-shadow(0 0 6px #fbbf2499); }
+/* the red thumbs up: the emoji tinted red */
+.thumb.unstable { filter: grayscale(1) brightness(.55) sepia(1) saturate(14) hue-rotate(-58deg) drop-shadow(0 0 6px #ff4d6daa); animation: wobble .5s ease-in-out 4; }
+.stab-chip { display: inline-flex; align-items: center; gap: 6px; margin: 6px auto 0; padding: 4px 12px 4px 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg); font-size: 11px; letter-spacing: .4px; text-transform: uppercase; animation: popIn .35s cubic-bezier(.2, 1.4, .4, 1); }
+.stab-chip small { font: 600 11px var(--mono); color: var(--muted); text-transform: none; }
+.stab-chip.stable { border-color: #2ee6a666; color: var(--yes); }
+.stab-chip.moderate { border-color: #fbbf2466; color: var(--amber); }
+.stab-chip.unstable { border-color: #ff4d6d88; color: var(--no); box-shadow: 0 0 12px #ff4d6d33; }
+.call-card .stab-chip { display: flex; width: max-content; }
+.call-card .stab-chip[hidden] { display: none; }
+
+.pulse-stab { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); transition: border-color .4s, background-color .4s; }
+.pulse-stab.stable { border-color: #2ee6a655; background: #2ee6a60a; }
+.pulse-stab.moderate { border-color: #fbbf2455; background: #fbbf240a; }
+.pulse-stab.unstable { border-color: #ff4d6d77; background: #ff4d6d0d; }
+.thumb.big { font-size: 34px; }
+.pulse-stab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pulse-stab-txt b { font: 800 16px var(--sans); letter-spacing: .5px; text-transform: uppercase; }
+.pulse-stab.stable .pulse-stab-txt b { color: var(--yes); } .pulse-stab.moderate .pulse-stab-txt b { color: var(--amber); } .pulse-stab.unstable .pulse-stab-txt b { color: var(--no); }
+.pulse-stab-txt small { font-size: 11px; color: var(--muted); }
+.pulse-score { text-align: right; } .pulse-score b { font: 800 24px var(--mono); } .pulse-score small { font: 600 11px var(--mono); color: var(--muted); }
+.stab-bar { position: relative; height: 6px; margin: 8px 0 6px; border-radius: 3px; background: linear-gradient(90deg, #ff4d6d33 0 45%, #fbbf2433 45% 70%, #2ee6a633 70%); overflow: hidden; }
+.stab-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: var(--muted); transition: width .6s cubic-bezier(.2, .8, .2, 1), background-color .4s; }
+.stab-bar i.stable { background: var(--yes); box-shadow: 0 0 8px #2ee6a688; } .stab-bar i.moderate { background: var(--amber); } .stab-bar i.unstable { background: var(--no); box-shadow: 0 0 8px #ff4d6d88; }
+.stab-parts { list-style: none; margin: 0 0 10px; padding: 0; font-size: 12px; color: var(--muted); }
+.stab-parts li { display: flex; gap: 8px; padding: 3px 0; animation: slideDown .3s ease-out; }
+.stab-parts li b { font: 700 11px var(--mono); color: var(--no); min-width: 28px; }
+.stab-parts li.calm b { color: var(--yes); }
+
+.pulse-press { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.pulse-press-mid { flex: 1; min-width: 0; }
+.pulse-press-nums { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px var(--mono); }
+.pulse-press-nums b { font-size: 14px; }
+.pulse-lead { font: 800 10px var(--sans) !important; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); }
+.beast.sm { width: 34px; height: 34px; }
+.pulse-press .beast.dom { opacity: 1; filter: none; transform: scale(1.15); animation: roar 1.6s ease-in-out 3; }

@@ -259,3 +259,45 @@ export function deepDive({ winProb = null, ev, side, rej, timing, sigmaMin, sigm
   checks.unshift({ pts: 0, ok: odds >= 50, label: `Wins about ${odds} times in 100 (bot's odds, most cautious volatility guess)` });
   return { score: odds, points, sizeMult: points < 35 ? 0.5 : 1, checks };
 }
+
+// Market stability, 0-100: how settled the tape is right now, so the bot can tell a calm market (where its odds are
+// most trustworthy) from a jumpy one (where the volatility it measured may already be stale). Each part subtracts:
+//   volatility spike  1-minute vol vs its 2-hour norm
+//   shock candle      a candle in the last 10 minutes far bigger than the usual one
+//   whipsaw           the bot's own odds crossing 50/50, or swinging a lot, over the last 3 minutes
+//   Kalshi jumps      the contract's price jumping 6¢+ between quotes
+//   busier ahead      the learned volatility for the coming minutes vs the last half hour (time-of-week)
+// level: 'stable' (70+), 'moderate' (45-69), 'unstable' (under 45), or 'unknown' without enough candles.
+export const STABILITY_LEVELS = { stable: 70, moderate: 45 };
+export function stability({ bars = [], sigmaMin = null, sigmaLong = null, log = [], now = Date.now(), aheadFactor = 1 }) {
+  const closed = bars.filter((b) => b.t + 60000 <= now);
+  if (closed.length < 20) return { score: null, level: 'unknown', parts: [] };
+  const parts = [];
+  const hit = (pts, label) => { pts = Math.round(pts); if (pts > 0) parts.push({ pts: -pts, label }); return pts; };
+  let pen = 0;
+  if (sigmaMin && sigmaLong) {
+    const r = sigmaMin / sigmaLong;
+    pen += hit(clamp((r - 1.15) / (2.2 - 1.15), 0, 1) * 35, `Volatility ${r.toFixed(1)}× its 2-hour norm`);
+  }
+  const ranges = closed.slice(-60).map((b) => b.h - b.l).sort((a, b) => a - b);
+  const med = ranges[Math.floor(ranges.length / 2)];
+  if (med > 0) {
+    const big = Math.max(...closed.slice(-10).map((b) => b.h - b.l)) / med;
+    pen += hit(clamp((big - 2.5) / (5 - 2.5), 0, 1) * 25, `A ${big.toFixed(1)}× candle in the last 10 minutes`);
+  }
+  const recent = (log || []).filter((e) => e.p != null && now - e.t <= 180000);
+  if (recent.length >= 10) {
+    let crosses = 0;
+    for (let i = 1; i < recent.length; i++) if ((recent[i].p >= 0.5) !== (recent[i - 1].p >= 0.5)) crosses++;
+    pen += hit(Math.min(25, crosses * 10), `Bot's odds crossed 50/50 ${crosses} time${crosses === 1 ? '' : 's'} in 3 min`);
+    const ps = recent.map((e) => e.p), swing = Math.max(...ps) - Math.min(...ps);
+    pen += hit(clamp((swing - 0.2) / 0.3, 0, 1) * 15, `Bot's odds swung ${Math.round(swing * 100)} pts in 3 min`);
+    let jumps = 0;
+    for (let i = 1; i < recent.length; i++) for (const k of ['yesAsk', 'noAsk']) if (recent[i][k] != null && recent[i - 1][k] != null && Math.abs(recent[i][k] - recent[i - 1][k]) >= 0.06 - 1e-9) { jumps++; break; }
+    pen += hit(Math.min(15, jumps * 5), `Kalshi's price jumped ${jumps} time${jumps === 1 ? '' : 's'} in 3 min`);
+  }
+  if (aheadFactor > 1.2) pen += hit(clamp((aheadFactor - 1.2) / 0.3, 0, 1) * 10, `The next minutes are usually ${aheadFactor.toFixed(1)}× busier at this time of week`);
+  const score = clamp(Math.round(100 - pen), 0, 100);
+  const level = score >= STABILITY_LEVELS.stable ? 'stable' : score >= STABILITY_LEVELS.moderate ? 'moderate' : 'unstable';
+  return { score, level, parts };
+}

@@ -10,7 +10,7 @@ import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
 import { suggestEntry, suggestExit } from './suggest.js';
 import { ema } from './indicators.js';
-import { confTier } from './analysis.js';
+import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -493,6 +493,26 @@ function dataHealth(now) {
   return [isLive() ? 'LIVE' : 'CURRENT', 'ok'];
 }
 
+// Market stability (analysis.js): 👍 stable, 🤷 moderate, red 👍 unstable. On the call card and the Chart tab.
+const STAB = { stable: ['👍', 'Stable', 'Calm, settled market: the bot\'s odds are on firm ground'], moderate: ['🤷', 'Moderate', 'Some chop: odds can wobble more than usual'], unstable: ['👍', 'Unstable', 'Jumpy market: expect big swings, size down'], unknown: ['…', 'Measuring…', 'Needs about 20 minutes of candles'] };
+function renderStability(st, now) {
+  const [icon, label, why] = STAB[st.level] || STAB.unknown;
+  const changed = state.stabLevel != null && state.stabLevel !== st.level;
+  state.stabLevel = st.level;
+  for (const id of ['stabThumb', 'pulseThumb']) { const el = $(id); setText(el, icon); setClass(el, `thumb ${st.level}${id === 'pulseThumb' ? ' big' : ''}`); if (changed) pop(el); }
+  setHidden($('stabChip'), st.level === 'unknown');
+  setClass($('stabChip'), `stab-chip ${st.level}`);
+  setText($('stabLabel'), `Market ${label.toLowerCase()}`);
+  setText($('stabScore'), st.score == null ? '' : `${st.score}/100`);
+  setClass($('pulseStab'), `pulse-stab ${st.level}`);
+  setText($('pulseLevel'), label);
+  setText($('pulseWhy'), why);
+  setText($('pulseScore'), st.score == null ? '—' : String(st.score));
+  setStyle($('pulseStabFill'), 'width', `${st.score ?? 0}%`);
+  setClass($('pulseStabFill'), st.level);
+  setHTML($('pulseParts'), st.parts.length ? st.parts.map((p) => `<li><b>${p.pts}</b>${esc(p.label)}</li>`).join('') : st.score != null ? '<li class="calm"><b>✓</b>Nothing unsettling: steady volatility, no shock candles, no whipsaw</li>' : '');
+  setText($('pulseWhen'), clock(now));
+}
 function renderDeck(snap, live, sig, now) {
   // Status tiles
   const [health, hcls] = dataHealth(now);
@@ -539,6 +559,17 @@ function renderDeck(snap, live, sig, now) {
   setClass($('tugLead'), buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '');
   $('tugBull').classList.toggle('dom', buy != null && buy >= 0.55); // the winning side's animal steps up
   $('tugBear').classList.toggle('dom', buy != null && buy <= 0.45);
+  // The same pressure on the Chart tab's Market pulse card
+  setText($('pulseBuy'), buy == null ? '—' : `${Math.round(buy * 100)}%`);
+  setText($('pulseSell'), buy == null ? '—' : `${Math.round((1 - buy) * 100)}%`);
+  setStyle($('pulseTugFill'), 'width', `${buy == null ? 50 : (1 - buy) * 100}%`);
+  setStyle($('pulseTugMark'), 'left', `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`);
+  setText($('pulseLead'), buy == null ? 'Pressure' : buy >= 0.6 ? 'Buyers in control' : buy <= 0.4 ? 'Sellers in control' : 'Balanced');
+  setClass($('pulseLead'), `pulse-lead ${buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : ''}`);
+  setText($('pulseNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}` : 'Buy vs sell pressure: needs the live feeds (open the app in front)');
+  $('pulseBull').classList.toggle('dom', buy != null && buy >= 0.55);
+  $('pulseBear').classList.toggle('dom', buy != null && buy <= 0.45);
+  renderStability(sig?.stability ?? stability({ bars: snap.bars, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, now }), now);
   setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
   setText($('tugRound'), fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—');
   setClass($('tugRound'), fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '');

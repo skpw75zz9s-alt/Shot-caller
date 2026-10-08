@@ -269,6 +269,16 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Market pulse: stability and pressure (v7.2)
+
+The Chart tab opens with **Market pulse**:
+- **Stability, 0-100.** 👍 **stable** (70+), 🤷 **moderate** (45-69), red 👍 **unstable** (under 45). It also shows as a chip under the call.
+  - Points come off for: 1-minute volatility above its 2-hour norm, a shock candle in the last 10 minutes, the bot's odds whipsawing across 50/50, Kalshi's price jumping 6¢+, and a usually busier time of week coming up (`stability()` in `public/analysis.js`).
+  - Each deduction is listed under the score.
+- **Buy vs sell pressure**: the same tug of war as the Deck, from the last 2 minutes of trades on 5 exchanges.
+
+Stability is information, not a filter. In a simulation with calm, normal and jumpy stretches (20,000 rounds × 3 seeds), skipping calls when it read "unstable" didn't raise the win rate. Those calls won more, not less, because the bot's own volatility already prices a jumpy market in. So it shows on the call and in "Why this call", but it doesn't block calls.
+
 ### Auto-trader (v7)
 
 Settings → **Auto-trader**. It buys the bot's **Steady** calls (whatever risk level the screen shows) and sells on the SELL HIGH / BAIL signals.

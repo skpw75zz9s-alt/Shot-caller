@@ -2,7 +2,7 @@
 // make the same calls from the same data.
 import { DEFAULTS, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
-import { deepDive, freshRejection, quoteTrend, rejections } from './analysis.js';
+import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
@@ -110,6 +110,9 @@ function edgeUnder(row, snap, s, side, volScale) {
 export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const s = { ...DEFAULTS, ...settings };
   const { ev } = row;
+  // How settled the market is (shown with the call; tested in simulation as a filter and it didn't raise the win
+  // rate, because the bot's volatility already prices a jumpy market in, so it informs rather than blocks)
+  const stab = stability({ bars: snap.bars, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, log: snap.quoteLog?.[row.m.ticker], now, aheadFactor: row.learnedAdj?.volFactor ?? 1 });
   // Everything the bot knows about buying one side right now
   const assess = (side) => {
     const timing = entrySignal(snap.bars, side, now);
@@ -129,6 +132,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const price = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     // Hold odds: the chance this side's confidence stays above holdFloor for the rest of the round
     const hold = ev.open && deep && deep.score >= 70 ? holdOdds({ market: row.m, strike: row.strike, spot: snap.mSpot ?? snap.spot, sigmaMin: (row.sigma ?? snap.sigmaMin) * s.volMultiplier, minutesLeft: ev.minutesLeft, side, floor: s.holdFloor }) : null;
+    if (deep && stab.score != null) deep.checks.push({ pts: 0, ok: stab.level === 'stable' ? true : stab.level === 'unstable' ? false : null, label: `Market ${stab.level} (stability ${stab.score}/100)${stab.parts[0] ? `: ${stab.parts[0].label.toLowerCase()}` : ''}` });
     if (hold != null) deep.checks.push({ pts: 0, ok: hold >= 0.8 ? true : hold < 0.6 ? false : null, label: `Confidence stays above ${Math.round(s.holdFloor * 100)} to the end in ${Math.round(hold * 100)}% of simulated paths` });
     return { side, timing, deep, robustEdge, point, price, hold, score: deep?.score ?? -1 };
   };
@@ -216,6 +220,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
+    stability: stab,
     hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,
