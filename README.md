@@ -54,7 +54,10 @@ Six tabs along the bottom:
     - Sitting out a round says "Wait." and a sell signal shouts "Bail!".
     - A win rings a cash register.
     - Everything else has its own tone.
-  - The clips are `public/sounds/*.mp3`, synthesized from scratch by `scripts/make-sounds.py`: no samples, no licenses. Rerun it to tweak them.
+  - The clips are `public/sounds/*.mp3`:
+    - "Wait." and "Bail!" are a natural neural voice: Piper's LibriTTS voice, speaker 135, made by `scripts/make-voice.py`. The voice is trained on LibriTTS (CC BY 4.0, openslr.org/60), so commercial use is fine with credit; the Learn tab gives it.
+    - The bull, bear and cash register are synthesized by `scripts/make-sounds.py`.
+  - **Your own sounds:** Alerts → Sounds lets anyone pick an audio file on their phone for each slot (bull, bear, wait, bail, cash register), for example a free one from Pixabay or Freesound. It's kept on that phone in IndexedDB, works offline, and Reset brings back the built-in one.
   - Phones need one tap to allow sound. Push notifications with the app closed use the phone's normal notification sound, because the web can't attach custom sounds to them.
   - **Call lock-in animation:** when the bot makes a call, the bull (UP) or bear (DOWN) slams in, the padlock snaps shut, and "CALL LOCKED" shows with the confidence, hold odds and price. It lasts about 3 seconds; tap to dismiss.
   - **Bull / bear charge:** when the 1-minute chart turns bullish (EMA 9 crosses above EMA 21 and holds for 15 seconds), the bull gallops across the screen with "BULLS TAKING OVER". A bearish turn sends the bear the other way.

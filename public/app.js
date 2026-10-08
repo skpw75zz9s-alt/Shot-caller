@@ -357,7 +357,9 @@ function oddsRows(ev, minEdge) {
 // The side the model leans to, even below the edge threshold, so timing has something to read.
 
 // ---------- v6 deck: status tiles, hold meter, price boxes, tug of war, live notes, market events ----------
-const alerts = createAlertCenter({ $, store, esc, clock, onNote: (key, title, text) => addNote(key, `${title}${text ? ` · ${text}` : ''}`) });
+const alerts = createAlertCenter({ $, store, esc, clock, onNote: (key, title, text) => addNote(key, `${title}${text ? ` · ${text}` : ''}`),
+  // your own sound files, kept on this phone (IndexedDB holds the file itself, so it works offline)
+  custom: { get: (n) => idb('readonly', (st) => st.get(`sound:${n}`)), set: (n, v) => idb('readwrite', (st) => (v ? st.put(v, `sound:${n}`) : st.delete(`sound:${n}`))) } });
 const flow = newFlow();
 const fx = createFx($);
 const trendState = {};

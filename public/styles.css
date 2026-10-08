@@ -433,3 +433,6 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
 .sug-list .hold b, .sug-list .watch b, .sug-list .settle b { color: var(--muted); border: 1px solid var(--line-2); }
 .pos-card.sell.take { border-color: #2ee6a688; border-left-color: var(--yes); background: linear-gradient(180deg, #2ee6a614, var(--panel) 50%); }
 .pos-card.sell.take .pos-action { color: var(--yes); }
+
+.ev-row.slot small { display: block; color: var(--muted); font-size: 10.5px; }
+.file-btn.mini { flex: none; padding: 5px 9px; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); border-radius: 8px; }

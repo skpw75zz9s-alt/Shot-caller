@@ -4,7 +4,10 @@ import { ALERT_DEFAULTS, ALERT_EVENTS, ALERT_GROUPS, SOUND_FILES, TONES, alertPr
 
 const KIND = { sellHigh: 'good', light: 'warn', win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad', flip: 'warn', fliprisk: 'warn', sell: 'warn', cross: 'warn', pressure: 'warn' };
 
-export function createAlertCenter({ $, store, esc, clock, onNote }) {
+// The sound slots you can replace with your own file (kept on this phone in IndexedDB)
+export const SOUND_SLOTS = [['bull', 'UP call (bull)'], ['bear', 'DOWN call (bear)'], ['wait', 'Sit out ("Wait.")'], ['bail', 'Bail ("Bail!")'], ['register', 'Win / sell high (cash register)']];
+
+export function createAlertCenter({ $, store, esc, clock, onNote, custom = null }) {
   let prefs = alertPrefs(store.get('alertPrefs', {}));
   const log = { last: {}, history: store.get('alertHistory', []) };
   let audio = null;
@@ -15,8 +18,11 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
   const clips = {}; // name -> Promise<AudioBuffer | null>
   function load(name) {
     if (!audio) return Promise.resolve(null);
-    return (clips[name] ||= fetch(`sounds/${name}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((b) => b && new Promise((ok, fail) => audio.decodeAudioData(b, ok, fail))).catch(() => null)); // Safari wants callbacks
+    const decode = (b) => b && new Promise((ok, fail) => audio.decodeAudioData(b, ok, fail)); // Safari wants callbacks
+    const builtIn = () => fetch(`sounds/${name}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : null)).then(decode);
+    // your own sound for this slot wins; if it won't play, fall back to the built-in one
+    return (clips[name] ||= Promise.resolve(custom?.get(name)).then((c) => (c?.blob ? c.blob.arrayBuffer().then(decode) : builtIn()))
+      .catch(() => builtIn()).catch(() => null));
   }
   function unlock() {
     try { audio ||= new (window.AudioContext || window.webkitAudioContext)(); audio.resume?.(); } catch { audio = null; }
@@ -86,12 +92,34 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
     $('alVolume').value = prefs.volume; $('alBanner').value = prefs.bannerSec; $('alCooldown').value = prefs.cooldownSec;
     $('alWhale').value = prefs.whaleMin; $('alFlip').value = prefs.flipRisk;
     $('alUnlock').textContent = audio?.state === 'running' ? 'Sound is on for this visit ✓' : 'Tap to enable sound on this phone';
+    renderSlots();
     $('alertGroups').innerHTML = ALERT_GROUPS.map((g) => `<div class="card ev-card"><h3>${esc(g.title)}</h3>${g.events.map(([k]) => {
       const e = prefs.events[k];
       return `<div class="ev-row"><span>${esc(ALERT_EVENTS[k].label)}</span><label><input type="checkbox" data-ev="${k}" data-f="sound" ${e.sound ? 'checked' : ''}>Sound</label><label><input type="checkbox" data-ev="${k}" data-f="visual" ${e.visual ? 'checked' : ''}>Banner</label><button data-preview="${k}">Preview</button></div>`;
     }).join('')}</div>`).join('');
     renderHistory();
   }
+
+  // ---------- your own sounds ----------
+  async function renderSlots() {
+    const el = $('soundSlots');
+    if (!el) return;
+    const mine = await Promise.all(SOUND_SLOTS.map(([n]) => Promise.resolve(custom?.get(n)).catch(() => null)));
+    el.innerHTML = SOUND_SLOTS.map(([n, label], i) => `<div class="ev-row slot"><span>${esc(label)}<small>${mine[i]?.name ? `yours: ${esc(mine[i].name)}` : 'built-in'}</small></span>
+      <button data-slot-play="${n}">Play</button><label class="file-btn mini">Choose<input type="file" accept="audio/*" data-slot="${n}" hidden></label>${mine[i] ? `<button data-slot-reset="${n}">Reset</button>` : '<span></span>'}</div>`).join('');
+  }
+  $('soundSlots')?.addEventListener('click', async (e) => {
+    const p = e.target.dataset.slotPlay, r = e.target.dataset.slotReset;
+    if (p) { unlock(); play('preview', p); }
+    if (r && custom) { await custom.set(r, null); delete clips[r]; renderSlots(); }
+  });
+  $('soundSlots')?.addEventListener('change', async (e) => {
+    const n = e.target.dataset.slot, f = e.target.files?.[0];
+    if (!n || !f || !custom) return;
+    if (f.size > 3e6) { window.alert('That file is over 3 MB: pick a shorter clip.'); return; }
+    await custom.set(n, { blob: f, name: f.name }); delete clips[n];
+    unlock(); play('preview', n); renderSlots();
+  });
 
   // ---------- controls ----------
   const num = (id, key, min, max) => $(id).addEventListener('change', () => { const n = Number($(id).value); if (Number.isFinite(n)) { prefs[key] = Math.min(max, Math.max(min, n)); save(); } render(); });

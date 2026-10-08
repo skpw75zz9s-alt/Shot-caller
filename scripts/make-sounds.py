@@ -1,8 +1,7 @@
 # Makes the app's alert sounds (public/sounds/*.mp3), all synthesized here: no samples, no licenses.
 #   bull.mp3      UP call: a snort and a bellow
 #   bear.mp3      DOWN call: a growling roar
-#   wait.mp3      sit out: a deep voice saying "Wait."
-#   bail.mp3      sell signal: an alarm blip and a voice shouting "Bail!"
+#   (wait.mp3 and bail.mp3, the spoken alerts, are made by scripts/make-voice.py)
 #   register.mp3  win: a cash register (key clunk, drawer, bell, coins)
 # Needs numpy, scipy and ffmpeg (with libflite for the voices and libmp3lame).  Run: python3 scripts/make-sounds.py
 import os, subprocess, tempfile, wave
@@ -122,5 +121,9 @@ def save(name, x):
     print(f'{name}.mp3  {len(x) / SR:.2f}s')
 
 if __name__ == '__main__':
-    for name, fn in (('bull', bull), ('bear', bear), ('wait', wait), ('bail', bail), ('register', register)):
+    # wait.mp3 and bail.mp3 now come from scripts/make-voice.py (a natural Piper voice); the robotic Flite versions
+    # are still here behind --robot-voice
+    import sys
+    todo = [('bull', bull), ('bear', bear), ('register', register)] + ([('wait', wait), ('bail', bail)] if '--robot-voice' in sys.argv else [])
+    for name, fn in todo:
         save(name, fn())
