@@ -44,6 +44,11 @@ export function healthCheck(h) {
     else add('ok', 'kalshi-sync', `Kalshi linked · balance $${(h.balance ?? 0).toFixed(2)}`);
   }
 
+  // Server storage (admins only: members can't fix it). On Railway without a volume, each deploy wipes members,
+  // push subscriptions, what the bot learned and the bot record.
+  if (h.admin && h.storagePersistent === false) add('warn', 'storage', 'Server data resets on every deploy (no Railway volume)', 'Railway → your service → Settings → Volumes → + New Volume, mount path /data. It\'s picked up on its own after the next deploy.');
+  else if (h.admin && h.storagePersistent) add('ok', 'storage', 'Server data is saved across deploys');
+
   // Push notifications (not required, but alerts with the app closed need them)
   if (h.pushSupported && !h.pushOn) add('warn', 'push', 'Push notifications are off', 'Settings → Turn on push notifications, for alerts with the app closed.');
   else if (h.pushOn) add('ok', 'push', 'Push notifications on');

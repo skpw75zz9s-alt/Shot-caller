@@ -14,7 +14,11 @@ const COINBASE = process.env.COINBASE_API || 'https://api.exchange.coinbase.com'
 const PAYWALL = process.env.PAYWALL !== 'off';
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
-const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
+// Where the server keeps its data (members, push subscriptions, what it learned, the bot record). A Railway volume is
+// picked up on its own (Railway sets RAILWAY_VOLUME_MOUNT_PATH when one is attached); DATA_DIR overrides it.
+const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || join(ROOT, 'data');
+// On Railway without a volume, every deploy starts from an empty disk
+const STORAGE = { dir: DATA_DIR, persistent: !process.env.RAILWAY_PROJECT_ID || !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) };
 
 export const access = createAccess({
   file: join(DATA_DIR, 'access.json'),
@@ -189,7 +193,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, bot: bot.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status() });
 
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);

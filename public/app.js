@@ -1536,13 +1536,19 @@ function renderRuleScore() {
 
 // ---------- health check (every 2 rounds) ----------
 const bootAt = Date.now();
+// Is the server's data kept across deploys? (for the admin's health check)
+async function refreshStorage() {
+  try { const r = await fetch('healthz'); state.storagePersistent = (await r.json())?.storage?.persistent ?? null; } catch { /* offline */ }
+}
 function runHealth(manual = false) {
+  if (state.access?.role === 'admin' && state.storagePersistent === undefined) { state.storagePersistent = null; refreshStorage().then(() => runHealth(manual)); return; }
   const now = Date.now();
   const items = healthCheck({
     now, marketsAt: state.marketsAt, candlesAt: state.candlesAt, spotAt: state.spotAt, streaming: isLive(), skewMs: state.skewMs ?? null,
     noMarket: !!state.marketsAt && !state.markets.some((m) => Date.parse(m.close_time) > now),
     linked: !!state.kalshi.key, balanceAt: state.kalshi.balanceAt, kalshiError: state.kalshi.error, balance: state.kalshi.balance,
     pushSupported: 'PushManager' in window, pushOn: !!state.pushOn,
+    admin: state.access?.role === 'admin', storagePersistent: state.storagePersistent,
   });
   const fresh = newProblems(state.health?.items, items);
   state.health = { at: now, items };

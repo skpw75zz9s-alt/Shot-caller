@@ -29,3 +29,11 @@ test('runs every 2 rounds, lined up with :00 and :30; only new problems are anno
   const p = [{ key: 'btc', level: 'bad' }], c = [{ key: 'btc', level: 'bad' }, { key: 'push', level: 'warn' }];
   assert.deepEqual(newProblems(p, c).map((x) => x.key), ['push']);
 });
+
+test('admins are told when server data resets on every deploy; members are not', () => {
+  const warn = healthCheck({ ...good, admin: true, storagePersistent: false }).find((x) => x.key === 'storage');
+  assert.equal(warn.level, 'warn');
+  assert.match(warn.fix, /Volumes/);
+  assert.equal(healthCheck({ ...good, admin: true, storagePersistent: true }).find((x) => x.key === 'storage').level, 'ok');
+  assert.equal(healthCheck({ ...good, admin: false, storagePersistent: false }).find((x) => x.key === 'storage'), undefined);
+});
