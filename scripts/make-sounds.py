@@ -124,6 +124,7 @@ if __name__ == '__main__':
     # wait.mp3 and bail.mp3 now come from scripts/make-voice.py (a natural Piper voice); the robotic Flite versions
     # are still here behind --robot-voice
     import sys
-    todo = [('bull', bull), ('bear', bear), ('register', register)] + ([('wait', wait), ('bail', bail)] if '--robot-voice' in sys.argv else [])
+    # bull.mp3 and bear.mp3 are now real recordings (see the README); the synthesized ones are behind --synth-animals
+    todo = [('register', register)] + ([('bull', bull), ('bear', bear)] if '--synth-animals' in sys.argv else []) + ([('wait', wait), ('bail', bail)] if '--robot-voice' in sys.argv else [])
     for name, fn in todo:
         save(name, fn())
