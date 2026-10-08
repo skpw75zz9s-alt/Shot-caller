@@ -56,7 +56,7 @@ Six tabs along the bottom:
     - Everything else has its own tone.
   - The clips are `public/sounds/*.mp3`:
     - "Wait." and "Bail!" are a natural neural voice: Piper's LibriTTS voice, speaker 135, made by `scripts/make-voice.py`. The voice is trained on LibriTTS (CC BY 4.0, openslr.org/60), so commercial use is fine with credit; the Learn tab gives it.
-    - The bull and bear are real recordings supplied by the app owner, trimmed and leveled. Before wider distribution, confirm the rights to them: the bull came from a YouTube sound-effects upload. The synthesized versions are still available with `scripts/make-sounds.py --synth-animals`.
+    - The bull and bear are real recordings supplied by the app owner (posted as free to use), trimmed and leveled. The synthesized versions are still available with `scripts/make-sounds.py --synth-animals`.
     - The cash register is synthesized by `scripts/make-sounds.py`.
   - **Your own sounds:** Alerts → Sounds lets anyone pick an audio file on their phone for each slot (bull, bear, wait, bail, cash register), for example a free one from Pixabay or Freesound. It's kept on that phone in IndexedDB, works offline, and Reset brings back the built-in one.
   - Phones need one tap to allow sound. Push notifications with the app closed use the phone's normal notification sound, because the web can't attach custom sounds to them.
