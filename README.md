@@ -272,12 +272,12 @@ Security:
 ### Market pulse: stability and pressure (v7.2)
 
 The Chart tab opens with **Market pulse**:
-- **Stability, 0-100.** 👍 **stable** (70+), 🤷 **moderate** (45-69), red 👍 **unstable** (under 45). It also shows as a chip under the call.
+- **Stability, 0-100.** 👍 **stable** (70+), 🤷 **moderate** (45-69), red 👎 **unstable** (under 45). It also shows as a chip under the call.
   - Points come off for: 1-minute volatility above its 2-hour norm, a shock candle in the last 10 minutes, the bot's odds whipsawing across 50/50, Kalshi's price jumping 6¢+, and a usually busier time of week coming up (`stability()` in `public/analysis.js`).
   - Each deduction is listed under the score.
 - **Buy vs sell pressure**: the same tug of war as the Deck, from the last 2 minutes of trades on 5 exchanges.
 
-**More calls at the same 85+ bar.** Steady waits for the confidence to hold before it calls. That wait now follows stability: **30s** when 👍 stable, **60s** when 🤷 moderate, **90s** when red 👍 unstable (Sniper: 45 / 90 / 135s). In the same simulation (3 × ~13,000 rounds):
+**More calls at the same 85+ bar.** Steady waits for the confidence to hold before it calls. That wait now follows stability: **30s** when 👍 stable, **60s** when 🤷 moderate, **90s** when red 👎 unstable (Sniper: 45 / 90 / 135s). In the same simulation (3 × ~13,000 rounds):
 
 | Wait before calling | Calls per 100 rounds | Won |
 |---|---|---|

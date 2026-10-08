@@ -493,8 +493,8 @@ function dataHealth(now) {
   return [isLive() ? 'LIVE' : 'CURRENT', 'ok'];
 }
 
-// Market stability (analysis.js): 👍 stable, 🤷 moderate, red 👍 unstable. On the call card and the Chart tab.
-const STAB = { stable: ['👍', 'Stable', 'Calm, settled market: the bot\'s odds are on firm ground'], moderate: ['🤷', 'Moderate', 'Some chop: odds can wobble more than usual'], unstable: ['👍', 'Unstable', 'Jumpy market: expect big swings, size down'], unknown: ['…', 'Measuring…', 'Needs about 20 minutes of candles'] };
+// Market stability (analysis.js): 👍 stable, 🤷 moderate, red 👎 unstable. On the call card and the Chart tab.
+const STAB = { stable: ['👍', 'Stable', 'Calm, settled market: the bot\'s odds are on firm ground'], moderate: ['🤷', 'Moderate', 'Some chop: odds can wobble more than usual'], unstable: ['👎', 'Unstable', 'Jumpy market: expect big swings, size down'], unknown: ['…', 'Measuring…', 'Needs about 20 minutes of candles'] };
 function renderStability(st, now) {
   const [icon, label, why] = STAB[st.level] || STAB.unknown;
   const changed = state.stabLevel != null && state.stabLevel !== st.level;

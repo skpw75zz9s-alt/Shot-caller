@@ -548,14 +548,14 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 /* two-up button rows: one line each */
 .pos-btns button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; letter-spacing: .3px; }
 
-/* ---------- market stability: 👍 stable · 🤷 moderate · red 👍 unstable ---------- */
+/* ---------- market stability: 👍 stable · 🤷 moderate · red 👎 unstable ---------- */
 @keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
 @keyframes thumbBob { 50% { transform: translateY(-3px) rotate(-6deg); } }
 .thumb { display: inline-block; font-size: 18px; line-height: 1; }
 .thumb.stable { filter: drop-shadow(0 0 6px #2ee6a6aa); animation: thumbBob .6s ease-in-out 2; }
 .thumb.moderate { filter: drop-shadow(0 0 6px #fbbf2499); }
-/* the red thumbs up: the emoji tinted red */
-.thumb.unstable { filter: grayscale(1) brightness(.55) sepia(1) saturate(14) hue-rotate(-58deg) drop-shadow(0 0 6px #ff4d6daa); animation: wobble .5s ease-in-out 4; }
+/* the red thumbs down: the emoji tinted red */
+.thumb.unstable { filter: grayscale(1) brightness(.55) sepia(1) saturate(14) hue-rotate(-30deg) drop-shadow(0 0 6px #ff4d6daa); animation: wobble .5s ease-in-out 4; }
 .stab-chip { display: inline-flex; align-items: center; gap: 6px; margin: 6px auto 0; padding: 4px 12px 4px 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg); font-size: 11px; letter-spacing: .4px; text-transform: uppercase; animation: popIn .35s cubic-bezier(.2, 1.4, .4, 1); }
 .stab-chip small { font: 600 11px var(--mono); color: var(--muted); text-transform: none; }
 .stab-chip.stable { border-color: #2ee6a666; color: var(--yes); }
