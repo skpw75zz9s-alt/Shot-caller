@@ -306,18 +306,36 @@ From a simulation of 2 × ~9,000 calls, priced as a fair market:
 
 The trade-off: about a third of bailed calls would have come back and won. Bailing gives up a little on average to stop the big losses.
 
-### Auto-trader (v7)
+### Auto-trader (v8: runs on the server, phone can be closed)
 
-Settings → **Auto-trader**. It buys the bot's **Steady** calls (whatever risk level the screen shows) and sells on the SELL HIGH / BAIL signals.
+Settings → **Auto-trader**. It buys the bot's **Steady** calls (the server's official call, the same one the Record tab grades) and sells on SELL HIGH and BAIL OUT.
+- **It runs on the server**, every 5 seconds around the clock (`autotrade.js`), so it keeps trading with your phone closed.
+- It also keeps going through redeploys: its settings, keys and history live in the data volume.
+- The app is just the remote control: it shows what the server did and sends your changes, and a toast tells you about fills that happened while it was closed.
 
 | Mode | What happens |
 |---|---|
-| **Off** | Nothing (the default; Demo and Live also switch back to Off when the app reloads) |
+| **Off** | Nothing (the default) |
 | **Test** | A simulator on Kalshi's live order book: fills at the real prices, with Kalshi's fee, against a pretend balance. Nothing is sent |
-| **Demo** | Real orders on Kalshi's demo exchange (fake money), with a separate demo key from demo.kalshi.co |
-| **Live** | Real orders, real money, with your linked key (needs trading permission). Locked until Test has settled 10 trades without a serious error, then asks you to confirm |
+| **Demo** | Real orders on Kalshi's demo exchange (fake money), with a demo key from demo.kalshi.co |
+| **Live** | Real orders, real money, with your Kalshi key (needs trading permission). Locked until Test has settled 10 trades without a serious error, then asks you to confirm |
 
-Your limits (all editable): **max per trade** ($10), **daily loss stop** ($30, counting what's still open), **max buys a day** (20), **max open at once** ($40). **STOP** is on the card and on the Deck tab while it runs. Each mode keeps its own history and P&L.
+**One-time setup: `KEY_SECRET`.** The server only holds Kalshi keys if it has this secret.
+1. In Railway, open the service → **Variables** → **New Variable**.
+2. Name it `KEY_SECRET` and give it a long random value (32+ characters; a password manager's generator is fine).
+3. Redeploy, then give the server your key in the Auto-trader card ("Keys on the server").
+
+Test mode doesn't need a key. `/healthz` shows `"autotrade":{"canHoldKeys":true}` once the secret is set.
+
+How the server keeps your key:
+- **Encrypted.** The key is encrypted with AES-256-GCM, using a key derived from `KEY_SECRET`. The secret lives only in Railway's variables, never on disk next to the encrypted key.
+- **Per person.** Each member has their own keys, settings and history.
+- **Never sent back.** The key is only used to sign requests to Kalshi; the phone only ever sees the first 8 characters of the key ID.
+- **Only these orders.** Every order still goes through `validateOrder` (BTC 15-minute markets only, fill-now-or-cancel, the $100 cap).
+- **You can cut it off.** Delete the key from the card any time, or delete it on Kalshi to cut it off everywhere.
+- **Checked first.** A key is tested against Kalshi (it reads your balance) before it's saved.
+
+Your limits (all editable): **max per trade** ($10), **daily loss stop** ($30, counting what's still open), **max buys a day** (20), **max open at once** ($40). **STOP** is on the card and on the Deck tab while it runs; it turns the server's trader off. Each mode keeps its own history and P&L.
 
 Built so the old auto-trader's errors can't happen (`public/trader.js`):
 - **No "insufficient balance".** It only sends fill-now-or-cancel orders, so nothing rests on Kalshi holding cash. Right before each buy it re-reads the balance and the order book, and sizes the order so contracts × max price + Kalshi's fee (rounded up per fill, a cent extra per price level) fits under the cash with a 5¢ cushion. If one contract doesn't fit, no order goes out.

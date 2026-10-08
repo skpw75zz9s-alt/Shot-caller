@@ -300,20 +300,20 @@
         <p class="fine"><b>Test</b> trades the bot's Steady calls on Kalshi's live prices with pretend money: nothing is sent.
           <b>Demo</b> sends real orders to Kalshi's demo exchange (fake money). <b>Live</b> uses real money and unlocks after Test runs clean.
           It buys only the bot's locked calls, sells on its SELL HIGH / BAIL signals, and only uses orders that fill right away or cancel,
-          sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. Keep the app open while it trades.</p>
+          sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. It runs on the server around the clock: close the app and it keeps going.</p>
         <div class="num-grid" id="atLimits"></div>
         <div class="pos-grid at-today" id="atToday"></div>
         <div class="pos-btns"><button id="atStop" class="stop-btn" hidden>STOP</button><button id="atResume" hidden>Resume</button><button id="atResetTest" class="ghost">Reset Test</button></div>
-        <div id="atDemo" hidden>
-          <h4>Demo key</h4>
-          <p class="push-status" id="atDemoStatus"></p>
-          <div id="atDemoForm">
-            <div class="adm-row"><label>Demo API key ID<input id="atDemoKeyId" autocomplete="off" autocapitalize="off" spellcheck="false"></label></div>
-            <div class="adm-row"><label>Demo private key<textarea id="atDemoPem" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label></div>
-            <div class="pos-btns"><button id="atDemoLink">Link demo key</button></div>
-          </div>
-          <div class="pos-btns"><button id="atDemoUnlink" class="ghost" hidden>Unlink demo key</button></div>
+        <h4>Keys on the server</h4>
+        <p class="push-status" id="atKeyStatus"></p>
+        <div id="atKeyForm">
+          <div class="adm-row"><label>Which key<select id="atKeyEnv"><option value="live">Kalshi (real money)</option><option value="demo">Kalshi demo (fake money)</option></select></label></div>
+          <div class="adm-row"><label>API key ID<input id="atKeyId" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="a1b2c3d4-…"></label></div>
+          <div class="adm-row"><label>Private key<textarea id="atKeyPem" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label></div>
+          <div class="pos-btns"><label class="file-btn">Choose key file<input id="atKeyFile" type="file" accept=".key,.pem,.txt,text/plain" hidden></label><button id="atKeySend">Give the server this key</button></div>
+          <p class="fine">So it can trade with your phone closed, the server keeps this key, encrypted with a secret that's never stored next to it. It's only used to sign orders on the BTC 15-minute markets within your limits, and never sent back to any phone. Delete it here any time, or delete the key on Kalshi to cut it off everywhere. For Live, the key needs trading permission.</p>
         </div>
+        <div class="pos-btns"><button id="atKeyDelLive" class="ghost" hidden>Delete Kalshi key</button><button id="atKeyDelDemo" class="ghost" hidden>Delete demo key</button></div>
         <p class="err" id="atErr"></p>
         <h4>What it did</h4>
         <ul class="at-log" id="atLog"></ul>
@@ -338,7 +338,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v7.4 · bail-out calls</p>
+      <p class="fine" id="version">Shot Caller v8.0 · trades with your phone closed</p>
     </section>
   </main>
 

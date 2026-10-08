@@ -7,6 +7,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBot } from './bot.js';
 import { createAccess } from './access.js';
+import { createAutoTrade } from './autotrade.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -30,11 +31,15 @@ export const access = createAccess({
     body: `Someone says they sent $${cfg.price} to $${cfg.cashtag} with note ${m.code}. Check Cash App, then approve it in Settings → Admin.`,
   }),
 });
+// The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
+// the Kalshi keys it holds.
+export let autotrade = null; // made below, once validateOrder exists
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
+  onObserve: (o) => autotrade?.step(o),
+  keepAlive: () => (autotrade?.running() ?? 0) > 0,
 });
-const ready = Promise.all([bot.load(), access.load()]);
 setInterval(() => access.prune(), 3600000).unref();
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -156,6 +161,24 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
   }
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
+autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder });
+const ready = Promise.all([bot.load(), access.load(), autotrade.load()]);
+
+// /api/auto/*: the phone's controls for its owner's server-side Auto-trader
+const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
+async function autoApi(req, res, action, token) {
+  const owner = ownerOf(token);
+  if (!owner) return send(res, 401, { error: 'sign in first', paywall: true });
+  if (action === 'state' && req.method === 'GET') return send(res, 200, autotrade.state(owner));
+  if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+  const body = await readBody(req);
+  const out = action === 'key' ? await autotrade.setKey(owner, body)
+    : action === 'key-delete' ? await autotrade.deleteKey(owner, body)
+    : action === 'config' ? await autotrade.configure(owner, body)
+    : await autotrade.control(owner, action);
+  if (action === 'config' || action === 'key') bot.start(); // make sure the loop is running
+  send(res, out.status, out.body);
+}
 
 async function readBody(req) {
   let raw = '';
@@ -239,7 +262,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() } });
 
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);
@@ -256,6 +279,8 @@ export const server = http.createServer(async (req, res) => {
 
     const push = path.match(/^\/api\/push\/(\w+)$/);
     if (push && req.method === 'POST') return await pushApi(req, res, push[1], token);
+    const auto = path.match(/^\/api\/auto\/([\w-]+)$/);
+    if (auto) return await autoApi(req, res, auto[1], token);
     const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
     if (ka) return await kalshiAuth(req, res, ka[1], url);
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
@@ -278,5 +303,5 @@ export const server = http.createServer(async (req, res) => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
-  ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices) bot.start(); });
+  ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
 }

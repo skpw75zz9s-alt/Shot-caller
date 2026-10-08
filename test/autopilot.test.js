@@ -1,15 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAutopilot, liveUnlocked, LIVE_UNLOCK } from '../public/autopilot.js';
-import { DEFAULTS, riskSettings } from '../public/model.js';
 
 // Just enough of the page for the Auto-trader card
 function fakePage() {
   const els = {};
-  const $ = (id) => (els[id] ||= { id, innerHTML: '', textContent: '', value: '', hidden: false, dataset: {}, handlers: {}, addEventListener(t, f) { this.handlers[t] = f; } });
+  const $ = (id) => (els[id] ||= { id, innerHTML: '', textContent: '', value: '', hidden: false, dataset: {}, handlers: {}, addEventListener(t, f) { this.handlers[t] = f; }, querySelector: () => null });
   return { $, els };
 }
-const mem = () => { const m = {}; return { m, get: (k, d) => (k in m ? JSON.parse(m[k]) : d), set: (k, v) => { m[k] = JSON.stringify(v); } }; };
+globalThis.document ||= { hidden: false, activeElement: null, addEventListener() {} };
 
 test('Live stays locked until Test has settled enough trades with no serious error', () => {
   const closed = Array.from({ length: LIVE_UNLOCK }, () => ({ closed: true }));
@@ -19,31 +18,25 @@ test('Live stays locked until Test has settled enough trades with no serious err
   assert.equal(liveUnlocked({ ledger: closed, log: [{ kind: 'error', err: 'cash' }] }).ok, false, 'insufficient balance is not');
 });
 
-test('Test mode: buys the locked call on the live book, never sends anything, and a reload never restarts real trading', async () => {
-  const { $, els } = fakePage(), store = mem();
-  store.set('traderCfg', { mode: 'test' });
-  const sent = [];
-  const getJSON = async (path) => {
-    sent.push(path);
-    if (path.endsWith('/orderbook')) return { orderbook_fp: { yes_dollars: [['0.3800', '50.00']], no_dollars: [['0.6000', '40.00'], ['0.5900', '90.00']] } };
-    throw new Error('not here');
-  };
-  const ap = createAutopilot({ $, esc: String, store, API: './api', idb: async () => null, toast: () => {}, getJSON, paywalled: () => {}, liveCred: () => ({}), render: () => {} });
+test('the card is a remote control: it shows the server\'s trader and sends changes there; the phone never trades', async () => {
+  const { $, els } = fakePage();
+  const state = { canHoldKeys: true, cfg: { mode: 'test', perTrade: 10, dailyLoss: 30, maxTrades: 20, maxOpen: 40, testCash: 100 }, keys: { live: null, demo: null }, unlock: { ok: false, settled: 3, serious: false },
+    why: 'Waiting for a call', stopped: false, paused: false, today: { buys: 1, realized: 0.5, open: 4.6, worst: -4.1 }, stats: { trades: 2, closed: 1, wins: 1, pnl: 0.5, open: 1, errors: 0 }, testCash: 95.4, log: [{ t: 1, kind: 'fill', text: 'BUY UP 10' }] };
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => { calls.push({ url, method: opts.method || 'GET', body: opts.body ? JSON.parse(opts.body) : null }); return { ok: true, status: 200, json: async () => state }; };
+  const toasts = [];
+  createAutopilot({ $, esc: String, API: './api', toast: (t) => toasts.push(t), paywalled: () => {}, fetchImpl });
   await new Promise((r) => setTimeout(r, 10));
-  const settings = { ...DEFAULTS, ...riskSettings('steady') };
-  const close = new Date(Date.now() + 10 * 60000).toISOString();
-  const live = { m: { ticker: 'KXBTC15M-X', close_time: close }, ev: { minutesLeft: 10, quote: { yesAsk: 0.4, yesBid: 0.38 } } };
-  const snap = { now: Date.now(), rows: [live], bars: [], quoteLog: {} };
-  ap.tick({ live, snap, sig: { callSide: 'YES', limit: 0.42, contracts: 12, deep: { score: 90 } }, settings });
-  await new Promise((r) => setTimeout(r, 1500)); // the trader spaces its requests
-  const st = ap.traders.test.state();
-  assert.equal(st.ledger.length, 1);
-  assert.equal(st.ledger[0].count, 12);
-  assert.ok(sent.every((p) => p.startsWith('kalshi/markets/')), 'only public market data was read');
-  assert.match(els.atStripText.textContent, /TEST/);
+  assert.equal(calls[0].url, './api/auto/state');
+  assert.match(els.atStatus.textContent, /running on the server \(phone can be closed\)/);
+  assert.match(els.atStripText.textContent, /TEST · on the server/);
   assert.match(els.atModes.innerHTML, /🔒 Live/);
-  // reload with Live on: comes back Off
-  store.set('traderCfg', { mode: 'live' });
-  const ap2 = createAutopilot({ $, esc: String, store, API: './api', idb: async () => null, toast: () => {}, getJSON, paywalled: () => {}, liveCred: () => ({}), render: () => {} });
-  assert.equal(ap2.mode(), 'off');
+  assert.match(els.atToday.innerHTML, /\$95\.40/);
+  // tapping Live while locked: nothing sent
+  await els.atModes.handlers.click({ target: { closest: () => ({ dataset: { mode: 'live' } }) } });
+  assert.equal(calls.filter((c) => c.method === 'POST').length, 0);
+  assert.match(toasts.at(-1), /Run Test first/);
+  // STOP goes to the server
+  await els.atStop.handlers.click();
+  assert.deepEqual(calls.at(-1), { url: './api/auto/stop', method: 'POST', body: {} });
 });

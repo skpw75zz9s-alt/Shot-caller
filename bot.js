@@ -19,7 +19,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // learn: watch the market around the clock (even with no phones subscribed), backfill a few weeks of BTC history
 // on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
 // indexSources: exchanges for the BTC index estimate (index.js); INDEX=off uses Coinbase alone.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -240,7 +240,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   async function tick(now = Date.now()) {
-    if (busy || (!devices.size && !learn)) return;
+    if (busy || (!devices.size && !learn && !keepAlive())) return;
     busy = true;
     try {
       await refresh(now);
@@ -334,8 +334,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 2 * 3600000) delete lw[t];
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as the phones on Steady)
+    const sig = snap.live ? buySignal(snap.live, snap, OFFICIAL, now, officialMem) : null;
+    // The server-side Auto-trader trades the same official call (autotrade.js)
+    try { onObserve?.({ snap, sig, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
     if (snap.live) {
-      const sig = buySignal(snap.live, snap, OFFICIAL, now, officialMem);
       if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN }, 20000)) { recordDirty = true; saveRecord(); }
     }
     for (const [k, c] of Object.entries(officialMem)) if (!(c.at > now - 2 * 3600000)) delete officialMem[k];

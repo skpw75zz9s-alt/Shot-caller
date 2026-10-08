@@ -594,3 +594,4 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 @keyframes alarm { 0%, 100% { box-shadow: 0 0 0 0 #ff4d6d00; } 50% { box-shadow: 0 0 0 4px #ff4d6d44, 0 0 24px #ff4d6d55; } }
 .call.bail { color: var(--no); text-shadow: 0 0 24px #ff4d6d88; font-size: clamp(40px, 13vw, 64px); }
 .call-card.bail { border-color: #ff4d6d99; background: linear-gradient(180deg, #ff4d6d14, var(--panel) 60%); animation: alarm 1s ease-in-out 6; }
+.adm-row select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 9px 10px; font: 600 14px var(--sans); }

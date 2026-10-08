@@ -828,7 +828,6 @@ function render() {
   }
   setClass(card, cardCls.join(' ')); setClass(entry, entryCls.join(' '));
   renderDeck(snap, live, sig, now);
-  autopilot?.tick({ live, snap, sig, settings });
 
   setText($('spot'), usd(state.spot));
   renderTicker(live?.strike ?? null);
@@ -1720,7 +1719,7 @@ buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk 
 renderRisk();
 if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }
 loadKalshi();
-autopilot = createAutopilot({ $, esc, store, API, idb, toast, getJSON, paywalled, liveCred: () => state.kalshi, render: queueRender });
+autopilot = createAutopilot({ $, esc, API, toast, paywalled });
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();

@@ -22,6 +22,30 @@ export const TRADER_DEFAULTS = {
   slipCents: 1,      // sells accept up to this much under the bid, so they fill
   testCash: 100,     // the simulator's starting balance ($)
 };
+export const MODES = { off: 'Off', test: 'Test', demo: 'Demo', live: 'Live' };
+// Limits the user can edit: [key, label, min, max]
+export const LIMITS = [
+  ['perTrade', 'Max per trade ($)', 1, 100],
+  ['dailyLoss', 'Daily loss stop ($)', 1, 1000],
+  ['maxTrades', 'Max buys a day', 1, 200],
+  ['maxOpen', 'Max open at once ($)', 1, 1000],
+  ['testCash', 'Test balance ($)', 5, 100000],
+];
+// Live unlocks once Test has settled LIVE_UNLOCK trades without a serious error (one that means the trader itself
+// is wrong: a cash refusal, a bad request, a refused key; not Kalshi having a hiccup)
+export const LIVE_UNLOCK = 10;
+const SERIOUS = new Set(['cash', 'bad', 'key']);
+export function liveUnlocked(testState) {
+  const settled = (testState?.ledger || []).filter((e) => e.closed).length;
+  const serious = (testState?.log || []).some((x) => x.kind === 'error' && SERIOUS.has(x.err));
+  return { ok: settled >= LIVE_UNLOCK && !serious, settled, serious };
+}
+// A limits update, clamped to the allowed ranges (anything else in `body` is ignored)
+export function cleanLimits(body, cur = TRADER_DEFAULTS) {
+  const out = {};
+  for (const [k, , min, max] of LIMITS) if (body?.[k] != null && Number.isFinite(Number(body[k]))) out[k] = Math.min(max, Math.max(min, Math.floor(Number(body[k]))));
+  return { ...cur, ...out };
+}
 const CUSHION = 0.05;             // dollars kept back from the cash: rounding and fees on Kalshi's side
 const GAP_MS = 350;               // at least this long between two requests to Kalshi
 const r2 = (x) => Math.round(x * 100) / 100;
