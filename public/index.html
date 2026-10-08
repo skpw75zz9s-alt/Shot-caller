@@ -67,7 +67,7 @@
       </div>
 
       <div class="card tug" id="tugCard">
-        <div class="deep-head"><span>Tug of war · Coinbase trades</span><b id="tugLead"></b></div>
+        <div class="deep-head"><span>Tug of war · all exchanges</span><b id="tugLead"></b></div>
         <div class="tug-sides">
           <div class="sell" id="tugBear"><img src="bear.svg" alt="" class="beast"><div><label>Sell pressure</label><b id="tugSell">—</b></div></div>
           <div class="buy" id="tugBull"><div><label>Buy pressure</label><b id="tugBuy">—</b></div><img src="bull.svg" alt="" class="beast"></div>
@@ -81,6 +81,16 @@
           <div class="tile"><label>To ceiling</label><b id="ceilDist">—</b><small>round high</small></div>
         </div>
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
+      </div>
+
+      <div class="card tape-card">
+        <div class="deep-head"><span>Live orders · all markets</span><b id="tapeRate"></b></div>
+        <div class="feed-chips" id="feedChips"></div>
+        <div class="seg" id="tapeTabs"><button data-tape="all" class="on">All</button><button data-tape="btc">BTC exchanges</button><button data-tape="kalshi">Kalshi contract</button></div>
+        <div id="tapeEx" class="ex-table"></div>
+        <div id="kalshiFlow" class="kflow" hidden></div>
+        <ul id="tape" class="tape-list"></ul>
+        <small class="fine-left">Every executed trade, as it happens: BTC/USD on Coinbase, Kraken, Bitstamp, Gemini and Binance.US (straight from their public feeds), plus trades on the live Kalshi contract. Buy/sell is the aggressor's side. 🐋 = a trade at or above your whale minimum.</small>
       </div>
 
       <div class="card notes">
@@ -181,7 +191,7 @@
           <li><b>RSI 14:</b> momentum, 0-100; above 70 is stretched up, below 30 stretched down. <b>MACD:</b> trend momentum; bars above zero mean it's building up.</li>
         </ul>
         <h3>Tug of war and whales</h3>
-        <p>Every trade on Coinbase has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy pressure (the bull) and sell pressure (the bear) are each side's share of the dollar volume over the last 2 minutes, and the side that's winning steps up and pulses; round flow is the total since the open. Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
+        <p>Every exchange trade has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy pressure (the bull) and sell pressure (the bear) are each side's share of the dollar volume over the last 2 minutes, and the side that's winning steps up and pulses; round flow is the total since the open. The tug of war counts every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US, and the Live orders tape shows them as they happen, next to the trades on the Kalshi contract itself (who's buying UP and DOWN, and at what price). Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
         <h3>Honest limits</h3>
         <p>No call is certain. Even 98% calls lose about 1 time in 50, and calls that safe are priced high on Kalshi, so a loss costs much more than a win pays. Check the Record tab: it grades every call against Kalshi's real result.</p>
       </div>
@@ -252,7 +262,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.1 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.2 · calls only (no auto-trading)</p>
     </section>
   </main>
 

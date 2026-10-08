@@ -17,6 +17,13 @@ Six tabs along the bottom:
   - **Kalshi prices:** UP and DOWN buy prices in cents, next to the bot's odds.
   - **Contract stats:** live BTC, price to beat, distance, time left, data health, and what the bot learned.
   - **Tug of war:** the bear (sell pressure) against the bull (buy pressure); the winning side grows and pulses. It shows buy versus sell pressure from Coinbase's live trades over the last 2 minutes, round flow, whale trades, and the distance to the round's floor and ceiling.
+  - **Live orders · all markets:** a live tape of every BTC/USD trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US, plus the trades on the live Kalshi contract.
+    - The phone connects straight to each exchange's public WebSocket, with no keys and no server in between. Kalshi's trades are polled every 3 seconds through the server's market-data proxy.
+    - It shows a status chip per feed, trades per minute, and each exchange's buy/sell split for the round.
+    - A Kalshi view shows how many UP and DOWN contracts takers bought, and for how much.
+    - Whale trades are marked 🐋.
+    - All exchanges feed the tug of war and whale alerts.
+    - Turn the extra exchanges off in Settings ("Live orders from all exchanges") to save data. Coinbase stays on.
   - **Live notes:** a running feed of what just happened.
   - **Why this call / rejections:** both fold away.
 - **Chart.**
@@ -39,7 +46,7 @@ Six tabs along the bottom:
 
 **Flip risk** is 100 minus the hold odds. Hold odds come from 300 simulated paths and were tested against outcomes (see Risk level), so flip risk is a measured number, not a made-up score.
 
-**Order flow and whales** come from the `matches` channel of Coinbase's public feed. Coinbase reports the resting (maker) side of each trade, so the buyer or seller who crossed the spread is the opposite one. They're shown as context and don't move the call: they haven't been tested as predictors of the 15-minute result.
+**Order flow and whales** come from every exchange's public trade feed (see `public/feeds.js`). Each feed is turned into the aggressor's side. Coinbase and Gemini report the resting (maker) side, so it's flipped. Binance.US says whether the buyer was the maker. Kraken and Bitstamp give the aggressor directly. They're shown as context and don't move the call: they haven't been tested as predictors of the 15-minute result.
 
 ## How it calls shots
 

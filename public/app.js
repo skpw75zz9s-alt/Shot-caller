@@ -3,7 +3,8 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
 import { CHART_TOGGLES, chartDefaults, drawPro } from './chart.js';
-import { addTrade, flowStats, newFlow, pressureUpdate, takerSide } from './flow.js';
+import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
+import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
 import { sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { confTier } from './analysis.js';
@@ -25,6 +26,7 @@ const SETTINGS_META = [
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, even if volatility is 20% off either way, to call BUY THE LOW', 'cents'],
   ['minConfidence', 'Min confidence (0-100)', 'Win odds a call needs before BUY THE LOW fires (80 = wins about 8 times in 10)', 'num'],
   ['rejectionWeight', 'Rejection weight', 'How much rejection trends move the bot\'s odds (0 = off, 1 = up to ±5 pts)', 'num'],
+  ['multiFeeds', 'Live orders from all exchanges', 'Also stream trades from Kraken, Bitstamp, Gemini and Binance.US (more data). Off: Coinbase only', 'bool'],
   ['learn', 'Use what the bot learned', 'Price with the market patterns the server has learned over days and weeks (see History)', 'bool'],
   ['waitForDip', 'Also wait for candle dip', 'Only alert when the candles also show a dip', 'bool'],
   ['notifyBuy', 'Notify: buy the low', 'Alert when Kalshi is below the bot\'s odds', 'bool'],
@@ -49,7 +51,7 @@ const SETTINGS_META = [
 // A fresh install has nothing to migrate: skip straight past the old upgrade steps (the v4.1 step used to double a new
 // phone's confidence bar to 95). Only the latest step (default risk level) runs.
 if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
-const settings = { series: 'KXBTC15M', refreshSec: 3, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+const settings = { series: 'KXBTC15M', refreshSec: 3, multiFeeds: true, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
@@ -359,12 +361,87 @@ function addNote(key, text, t = Date.now()) {
 }
 const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad' }[k] || (k === 'info' ? '' : 'warn'));
 
-function onTrade(m) {
-  const price = Number(m.price), size = Number(m.size), t = Date.parse(m.time) || Date.now();
-  const live = state.markets.find((x) => Date.parse(x.close_time) > t);
+// ---------- live orders from all markets (public/feeds.js) ----------
+// Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
+const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [] };
+function handleTrades(trades) {
   const p = alerts.prefs();
-  const w = addTrade(flow, { t, price, size, side: takerSide(m.side) }, { round: live ? Date.parse(live.open_time) : null, whaleMin: p.whaleMin });
-  if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on Coinbase`, `whale:${w.t}`);
+  for (const x of trades) {
+    const live = state.markets.find((m) => Date.parse(m.close_time) > x.t);
+    const round = live ? Date.parse(live.open_time) : null;
+    if (round !== tape.round) { tape.round = round; tape.ex = []; }
+    tape.ex.push(x);
+    if (tape.ex.length > 20000) tape.ex.splice(0, 5000);
+    const w = addTrade(flow, x, { round, whaleMin: p.whaleMin });
+    x.whale = !!w;
+    tape.list.unshift(x); tape.rate.push(Date.now());
+    if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
+  }
+  if (tape.list.length > 200) tape.list.length = 200;
+}
+const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; } });
+function feedsOn() { if (settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); }
+
+// Kalshi's own tape for the live contract (public, through the server's market-data proxy)
+async function pollKalshiTrades() {
+  const live = state.markets.find((m) => Date.parse(m.close_time) > Date.now());
+  if (!live || document.hidden) return;
+  if (tape.kalshiTicker !== live.ticker) { tape.kalshiTicker = live.ticker; tape.kalshi = []; tape.kalshiSeen.clear(); }
+  try {
+    const fresh = parseKalshiTrades(await getJSON(`kalshi/markets/trades?ticker=${encodeURIComponent(live.ticker)}&limit=100`)).filter((x) => !tape.kalshiSeen.has(x.id)).reverse();
+    for (const x of fresh) {
+      tape.kalshiSeen.add(x.id); tape.kalshi.push(x);
+      tape.list.unshift({ ...x, ex: 'Kalshi', kalshi: true });
+    }
+    if (tape.list.length > 200) tape.list.length = 200;
+    state.kalshiTapeAt = Date.now();
+  } catch { /* next poll */ }
+}
+setInterval(pollKalshiTrades, 3000);
+
+state.tapeTab = 'all';
+$('tapeTabs').addEventListener('click', (e) => {
+  const k = e.target.dataset.tape; if (!k) return;
+  state.tapeTab = k;
+  for (const b of $('tapeTabs').children) b.classList.toggle('on', b.dataset.tape === k);
+  renderTape(true);
+});
+const hms = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }).replace(/\s?[AP]M/, '');
+function renderTape(force = false) {
+  const now = Date.now();
+  if (!force && now - (state.tapeAt || 0) < 500) return;
+  state.tapeAt = now;
+  const st = state.feedStatus || {};
+  const liveFeed = (n) => (n === 'Coinbase' ? isLive() : st[n]?.state === 'live' && now - (st[n].lastAt || 0) < 120000);
+  const off = settings.multiFeeds === false;
+  $('feedChips').innerHTML = [...ALL_FEEDS.map((n) => {
+    const s = n === 'Coinbase' ? (isLive() ? 'live' : 'down') : off ? 'off' : liveFeed(n) ? 'live' : st[n]?.state || 'connecting';
+    return `<span class="${s}">${n}</span>`;
+  }), `<span class="${state.kalshiTapeAt && now - state.kalshiTapeAt < 15000 ? 'live' : 'connecting'}">Kalshi</span>`].join('');
+  tape.rate = tape.rate.filter((t) => t > now - 60000);
+  $('tapeRate').textContent = `${tape.rate.length} trades/min`;
+  const tab = state.tapeTab;
+  // Per-exchange split of the round (BTC) or the Kalshi contract's taker flow
+  $('tapeEx').hidden = tab === 'kalshi'; $('kalshiFlow').hidden = tab !== 'kalshi';
+  if (tab !== 'kalshi') {
+    const by = byExchange(tape.ex);
+    $('tapeEx').innerHTML = Object.entries(by).sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell)).map(([n, e]) => {
+      const tot = e.buy + e.sell, b = tot ? e.buy / tot : 0.5;
+      return `<span>${n}</span><span class="bar" title="buy ${Math.round(b * 100)}%"><i style="width:${(b * 100).toFixed(0)}%"></i></span><em>${Math.round(b * 100)}% buy · ${usd(tot, 0)}</em>`;
+    }).join('') || '<span class="muted">Waiting for trades this round…</span>';
+  } else {
+    const kf = kalshiFlow(tape.kalshi);
+    $('kalshiFlow').innerHTML = `<div>UP (YES) bought<b>${Math.round(kf.YES.count).toLocaleString()}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${Math.round(kf.NO.count).toLocaleString()}</b>${usd(kf.NO.usd, 0)}</div>`;
+  }
+  tape.list.sort((a, b) => b.t - a.t); // feeds arrive a little out of order; the tape reads newest first
+  const rows = tape.list.filter((x) => (tab === 'all' ? true : tab === 'kalshi' ? x.kalshi : !x.kalshi)).slice(0, 40);
+  const seen = state.tapeTop;
+  state.tapeTop = rows[0];
+  $('tape').innerHTML = rows.map((x, i) => {
+    const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
+    if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${Math.round(x.count).toLocaleString()} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
+    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${Math.round(x.price).toLocaleString()}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
+  }).join('') || `<li><span class="muted">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</span></li>`;
 }
 
 function setTile(id, text, cls = '', sub = null) {
@@ -383,7 +460,8 @@ function renderDeck(snap, live, sig, now) {
   // Status tiles
   const [health, hcls] = dataHealth(now);
   const ix = indexFresh() && state.index.used.length > 1 ? `index of ${state.index.used.length} exchanges` : 'Coinbase price';
-  setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${ix}${isLive() ? ' · trade feed on' : ''}`);
+  const feedsLive = ALL_FEEDS.filter((n) => (n === 'Coinbase' ? isLive() : state.feedStatus?.[n]?.state === 'live' && now - (state.feedStatus[n].lastAt || 0) < 120000)).length;
+  setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS.length} trade feeds · ${ix}`);
   setTile('stClock', new Date(now - (state.skewMs || 0)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }), '',
     state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
   setTile('stContract', live ? live.m.ticker.replace(/^KXBTC15M-/, '') : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
@@ -424,7 +502,7 @@ function renderDeck(snap, live, sig, now) {
   $('tugLead').className = buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '';
   $('tugBull').classList.toggle('dom', buy != null && buy >= 0.55); // the winning side's animal steps up
   $('tugBear').classList.toggle('dom', buy != null && buy <= 0.45);
-  $('tugNow').textContent = isLive() ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded on Coinbase${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feed (opens when the app is in front).';
+  $('tugNow').textContent = fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).';
   $('tugRound').textContent = fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—';
   $('tugRound').className = fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '';
   $('tugRoundSub').textContent = fs.prints ? `buy ${usd(fs.buyUsd, 0)} / sell ${usd(fs.sellUsd, 0)} · ${fs.prints} prints` : 'since the round opened';
@@ -455,6 +533,8 @@ function renderDeck(snap, live, sig, now) {
   const down = hcls === 'bad';
   if (state.feedDown == null) state.feedDown = down;
   else if (down !== state.feedDown) { state.feedDown = down; alerts.event(down ? 'feedDown' : 'feedUp', down ? 'Live data lost' : 'Live data back', down ? 'prices are more than 30s old; calls paused until they refresh' : 'prices are fresh again'); }
+
+  renderTape();
 
   // Live notes
   const head = live && sig?.deep ? `BTC ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
@@ -777,7 +857,7 @@ function liveConnect() {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'heartbeat') { state.liveAt = Date.now(); return; }
-    if (m.type === 'match') { onTrade(m); return; }
+    if (m.type === 'match') { handleTrades(parseCoinbase(m).filter(Boolean)); return; }
     if (m.type !== 'ticker' || !m.price) return;
     state.spot = Number(m.price); state.spotAt = Date.now();
     state.open24h = Number(m.open_24h) || state.open24h;
@@ -1002,6 +1082,7 @@ function buildSettings() {
     pushSyncSoon();
     if (k === 'series') { state.marketsAt = 0; state.markets = []; }
     if (k === 'refreshSec') schedule();
+    if (k === 'multiFeeds') feedsOn();
     render();
   });
 }
@@ -1099,6 +1180,7 @@ function removePosition(id) {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) liveDisconnect();
   else { liveConnect(); tick(); }
+  feedsOn();
 });
 // Between polls only the clocks move, so update just those each second (a full redraw every second
 // cost the most phone battery). Full redraw if no poll or price tick has rendered for ~3 seconds,
@@ -1439,6 +1521,7 @@ loadKalshi();
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();
+feedsOn();
 pushInit();
 tick();
 schedule();

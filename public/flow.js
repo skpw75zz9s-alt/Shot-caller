@@ -19,7 +19,7 @@ export function addTrade(f, trade, { round, whaleMin = 100000 } = {}) {
   f.recent.push({ t: trade.t, usd, side: trade.side });
   while (f.recent.length && f.recent[0].t < trade.t - RECENT_MS) f.recent.shift();
   if (usd >= whaleMin) {
-    const w = { t: trade.t, usd, side: trade.side, price: trade.price, size: trade.size };
+    const w = { t: trade.t, usd, side: trade.side, price: trade.price, size: trade.size, ex: trade.ex ?? null };
     f.whales.unshift(w);
     f.whales.length = Math.min(f.whales.length, 30);
     return w;
