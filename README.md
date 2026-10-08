@@ -7,6 +7,39 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 > **Signals only.** It never places orders: you place trades yourself. Linking a Kalshi account (optional) only reads your trades so positions and P&L track themselves.
 > No model reliably beats these markets. Watch the paper P&L in the History tab before you risk real money.
 
+## The app (v6)
+
+Six tabs along the bottom:
+
+- **Deck.** The command deck:
+  - **Status tiles:** live feed, a server-synced clock, the active contract, and the bot's verified record.
+  - **The call:** UP, DOWN or SIT OUT, with a confidence / hold odds / flip risk meter.
+  - **Kalshi prices:** UP and DOWN buy prices in cents, next to the bot's odds.
+  - **Contract stats:** live BTC, price to beat, distance, time left, data health, and what the bot learned.
+  - **Tug of war:** buy versus sell pressure from Coinbase's live trades over the last 2 minutes, round flow, whale trades, and the distance to the round's floor and ceiling.
+  - **Live notes:** a running feed of what just happened.
+  - **Why this call / rejections:** both fold away.
+- **Chart.**
+  - Timeframes: round, 1m, 5m, 15m, 1h, 4h, 1D.
+  - Toggleable overlays: target, EMA 9/21, RMA 9/21, Bollinger 20 ±2σ, VWAP from the round open, round floor/ceiling, the forecast cone, volume, RSI 14 and MACD 12/26/9 panes, call markers and price labels.
+  - The **forecast cone** is the bot's own: where BTC usually ends by the close at the bot's volatility, showing the middle 50% and 90% of outcomes.
+- **Alerts.**
+  - Sound and banner switches for every event, each with a Preview button.
+  - Events covered:
+    - calls, wins and losses, sat-out rounds;
+    - flip warnings (the bot leans against your call for 10s) and high flip risk (hold odds below your threshold for 10s);
+    - BTC crossing the target, pressure flips, whale buys and sells;
+    - position sell signals, and live data lost or back.
+  - Quiet mode, volume, banner length, repeat cooldown, whale minimum and flip-risk threshold, plus an alert history.
+  - Tones are generated in the browser; no sound files are needed. Phones need one tap to allow sound.
+- **Record.** The bot's graded call record, your trades, and what the bot has learned.
+- **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
+- **Settings.** As before.
+
+**Flip risk** is 100 minus the hold odds. Hold odds come from 300 simulated paths and were tested against outcomes (see Risk level), so flip risk is a measured number, not a made-up score.
+
+**Order flow and whales** come from the `matches` channel of Coinbase's public feed. Coinbase reports the resting (maker) side of each trade, so the buyer or seller who crossed the spread is the opposite one. They're shown as context and don't move the call: they haven't been tested as predictors of the 15-minute result.
+
 ## How it calls shots
 
 1. **Data.** Kalshi's public API gives the open market, its strike and its YES/NO quotes. Coinbase gives BTC spot and 1-minute candles. Coinbase stands in for the CF Benchmarks index (BRTI) that Kalshi settles on.

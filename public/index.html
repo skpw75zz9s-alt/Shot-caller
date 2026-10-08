@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#06080c">
+  <meta name="theme-color" content="#05070d">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Shot Caller</title>
@@ -16,8 +16,9 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="banner" class="banner" hidden><b id="bannerTitle"></b><span id="bannerText"></span></div>
   <header>
-    <h1>Shot Caller <span class="tag">BTC · 15m</span></h1>
+    <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <span class="tag">BTC · 15m</span></h1>
     <span id="status" class="dot" title="connection"></span>
   </header>
   <div class="ticker" id="ticker">
@@ -34,6 +35,12 @@
   <main>
     <section id="view-live" class="view active">
       <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
+      <div class="tiles4">
+        <div class="tile"><label>Feeds</label><b id="stFeed">—</b><small id="stFeedSub"></small></div>
+        <div class="tile"><label>Clock</label><b id="stClock">—</b><small id="stClockSub">server-synced</small></div>
+        <div class="tile"><label>Contract</label><b id="stContract">—</b><small id="stContractSub"></small></div>
+        <div class="tile"><label>Verified record</label><b id="stRecord">—</b><small id="stRecordSub"></small></div>
+      </div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
@@ -42,6 +49,15 @@
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
         <div class="conf" id="conf" hidden></div>
+        <div class="hold" id="holdBox" hidden>
+          <div class="hold-row"><span>Confidence</span><b id="confBig">—</b><span>Hold odds</span><b id="holdBig">—</b><span>Flip risk</span><b id="flipBig">—</b></div>
+          <div class="hold-bar"><i id="holdFill"></i></div>
+          <small id="holdNote">Hold odds: the chance confidence stays above 80 until the last minute, from 300 simulated paths.</small>
+        </div>
+        <div class="price-boxes">
+          <div class="pbox up"><label>UP · YES</label><b id="upAsk">—</b><small id="upBot"></small></div>
+          <div class="pbox down"><label>DOWN · NO</label><b id="downAsk">—</b><small id="downBot"></small></div>
+        </div>
         <div class="odds" id="odds"></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
@@ -50,13 +66,32 @@
         <div class="entry" id="entry" hidden></div>
       </div>
 
-      <div class="card deep" id="deepCard" hidden>
-        <div class="deep-head"><span>Deep dive</span><b id="deepScore"></b></div>
-        <ul id="deepChecks" class="checks"></ul>
+      <div class="card tug" id="tugCard">
+        <div class="deep-head"><span>Tug of war · Coinbase trades</span><b id="tugLead"></b></div>
+        <div class="tug-sides"><div class="sell"><label>Sell pressure</label><b id="tugSell">—</b></div><div class="buy"><label>Buy pressure</label><b id="tugBuy">—</b></div></div>
+        <div class="tug-bar"><i id="tugFill"></i><em id="tugMark"></em></div>
+        <small class="muted" id="tugNow">Last 2 minutes of executed volume. Needs the live feed.</small>
+        <div class="tiles2">
+          <div class="tile"><label>Round flow</label><b id="tugRound">—</b><small id="tugRoundSub"></small></div>
+          <div class="tile"><label>Whales this round</label><b id="tugWhales">—</b><small id="tugWhaleSub"></small></div>
+          <div class="tile"><label>To floor</label><b id="floorDist">—</b><small>round low</small></div>
+          <div class="tile"><label>To ceiling</label><b id="ceilDist">—</b><small>round high</small></div>
+        </div>
+        <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
       </div>
 
-      <div class="card deep" id="rejCard" hidden>
-        <div class="deep-head"><span>Rejections this window</span><b id="rejBias"></b></div>
+      <div class="card notes">
+        <div class="deep-head"><span>Live notes</span><b id="notesWhen"></b></div>
+        <ul id="notes" class="note-list"></ul>
+      </div>
+
+      <details class="card deep" id="deepCard" hidden open>
+        <summary class="deep-head"><span>Why this call</span><b id="deepScore"></b></summary>
+        <ul id="deepChecks" class="checks"></ul>
+      </details>
+
+      <details class="card deep" id="rejCard" hidden>
+        <summary class="deep-head"><span>Rejections this round</span><b id="rejBias"></b></summary>
         <div class="rej-grid">
           <div><label>Target rejected</label><b id="rejCaps" class="neg">0</b></div>
           <div><label>Target held</label><b id="rejFloors" class="pos">0</b></div>
@@ -65,36 +100,100 @@
         </div>
         <div class="wick"><span>Sellers</span><span class="wick-bar"><i id="wickFill"></i><i class="mid"></i></span><span>Buyers</span></div>
         <ul id="rejSummary" class="rej-sum"></ul>
-      </div>
+      </details>
 
-      <div class="grid">
-        <div class="stat"><label>BTC spot</label><b id="spot">—</b></div>
-        <div class="stat"><label>Strike</label><b id="strike">—</b></div>
+      <div class="grid grid3">
+        <div class="stat"><label>Live BTC</label><b id="spot">—</b></div>
+        <div class="stat"><label>Price to beat</label><b id="strike">—</b></div>
         <div class="stat"><label>Distance</label><b id="dist">—</b></div>
+        <div class="stat"><label>Time left</label><b id="timeLeft">—</b></div>
+        <div class="stat"><label>Data health</label><b id="dataHealth">—</b></div>
         <div class="stat"><label>Vol (1m)</label><b id="vol">—</b></div>
         <div class="stat"><label>RSI (14, 1m)</label><b id="rsi">—</b></div>
         <div class="stat"><label>Support / resist</label><b id="levels" class="small">—</b></div>
+        <div class="stat"><label>Learned now</label><b id="learnedNow" class="small">—</b></div>
       </div>
 
       <div class="card">
-        <div class="chart-head"><span>1-min candles</span><span><i class="lg up">▲</i>/<i class="lg dn">▼</i> reversal <i class="lg rj">✕</i> rejection</span></div>
+        <div class="chart-head"><span>This round · 1-min</span><span><i class="lg up">▲</i>/<i class="lg dn">▼</i> reversal <i class="lg rj">✕</i> rejection</span></div>
         <canvas id="chart" height="220"></canvas>
       </div>
 
       <div id="others"></div>
-      <p class="fine">Signals only. Never places orders. Spot comes from Coinbase and stands in for the CF Benchmarks index that Kalshi settles on. Candlestick patterns on 1-minute bars are weak signals. Check the candle-dip hit rate in History before you trust them. Past calls don't predict future results.</p>
+      <p class="fine">Signals only. Never places orders. The bot's price is Coinbase shifted onto a multi-exchange estimate of the index Kalshi settles on. Confidence and hold odds are model estimates, not guarantees: the Record tab shows how often calls really won. For information only, not financial advice. You're responsible for your own trades.</p>
+    </section>
+
+    <section id="view-chart" class="view">
+      <div class="card chart-pro">
+        <div class="tf-btns" id="tfBtns"></div>
+        <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
+        <canvas id="proChart" height="300"></canvas>
+        <canvas id="rsiChart" height="90"></canvas>
+        <canvas id="macdChart" height="90"></canvas>
+        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). ▲▼ mark the bot's calls.</p>
+      </div>
+    </section>
+
+    <section id="view-alerts" class="view">
+      <div class="card alerts-card">
+        <h3>Alert center</h3>
+        <p class="push-status">Pick what beeps and what shows a banner. One banner at a time; everything also goes to the history below. Push notifications (Settings) still bring buy and sell calls when the app is closed.</p>
+        <div class="sw-row"><label><input type="checkbox" id="alSounds"> Sounds</label><label><input type="checkbox" id="alVisuals"> Banners</label><label><input type="checkbox" id="alQuiet"> Quiet mode</label></div>
+        <button id="alUnlock" class="ghost">Tap to enable sound on this phone</button>
+        <div class="num-grid">
+          <label>Volume %<input id="alVolume" inputmode="numeric"></label>
+          <label>Banner seconds<input id="alBanner" inputmode="numeric"></label>
+          <label>Repeat cooldown (s)<input id="alCooldown" inputmode="numeric"></label>
+          <label>Whale minimum ($)<input id="alWhale" inputmode="numeric"></label>
+          <label>High flip risk (of 100)<input id="alFlip" inputmode="numeric"></label>
+        </div>
+      </div>
+      <div id="alertGroups"></div>
+      <div class="card">
+        <div class="deep-head"><span>Alert history</span><button id="alClear" class="link">Clear</button></div>
+        <ul id="alertHistory" class="note-list"></ul>
+      </div>
+      <div class="pos-btns"><button id="alReset" class="ghost">Reset alert settings</button></div>
+    </section>
+
+    <section id="view-learn" class="view">
+      <div class="card learn">
+        <h3>How Shot Caller calls a round</h3>
+        <ol>
+          <li><b>The question.</b> Each Kalshi 15-minute BTC market asks one thing: will BTC finish above the target (UP / YES) or below it (DOWN / NO)? Kalshi settles on the average of an index built from several exchanges over the final minute.</li>
+          <li><b>The bot's odds.</b> From where BTC is, how far it is from the target, how much time is left and how wild BTC has been, the bot works out the chance each side wins. It takes the most cautious of three volatility guesses, so its confidence leans low on purpose.</li>
+          <li><b>The gap.</b> A side is only worth buying when Kalshi's price is below the bot's odds by enough to beat Kalshi's fee. That's "buy the low".</li>
+          <li><b>Hold odds and flip risk.</b> Confidence moves as BTC moves. The bot simulates the rest of the round 300 ways and counts how often confidence stays above 80 to the end: that's hold odds. Flip risk is the rest. In testing, predicted hold odds came true within a few points.</li>
+          <li><b>Steady and Sniper.</b> Steady (default) calls only when confidence is 85+, has held for a minute, and hold odds are 80%+. Sniper wants 90+, held 90 seconds, hold odds 90%+. Once called, the side is locked for the round.</li>
+          <li><b>Learning.</b> The server watches every round, around the clock: how wild each half hour of the week usually is, whether its odds came true, and the gap between Coinbase and Kalshi's index.</li>
+        </ol>
+        <h3>The chart</h3>
+        <ul>
+          <li><b>EMA 9 / 21:</b> fast and slow trend lines; the fast one above the slow one means the short-term trend is up.</li>
+          <li><b>RMA:</b> a smoother, slower average (the kind RSI uses).</li>
+          <li><b>Bollinger 20 ±2σ:</b> a band around the 20-bar average; touches of the edges mean a stretched move.</li>
+          <li><b>VWAP:</b> the average price traded since the round opened, weighted by volume.</li>
+          <li><b>Floor / ceiling:</b> the round's low and high so far.</li>
+          <li><b>Forecast cone:</b> where BTC usually ends by the close at the bot's volatility. If the target is outside the outer cone, the round is close to decided.</li>
+          <li><b>RSI 14:</b> momentum, 0-100; above 70 is stretched up, below 30 stretched down. <b>MACD:</b> trend momentum; bars above zero mean it's building up.</li>
+        </ul>
+        <h3>Tug of war and whales</h3>
+        <p>Every trade on Coinbase has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy and sell pressure is each side's share of the dollar volume over the last 2 minutes; round flow is the total since the open. Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
+        <h3>Honest limits</h3>
+        <p>No call is certain. Even 98% calls lose about 1 time in 50, and calls that safe are priced high on Kalshi, so a loss costs much more than a win pays. Check the Record tab: it grades every call against Kalshi's real result.</p>
+      </div>
     </section>
 
     <section id="view-history" class="view">
+      <h2 class="sec">Bot's call record</h2>
+      <p class="push-status" id="recSummary"></p>
+      <ul id="recBuckets" class="history"></ul>
       <h2 class="sec">My trades</h2>
       <div class="grid">
         <div class="stat"><label>Realized P&amp;L</label><b id="tPnl">—</b></div>
         <div class="stat"><label>Trades won</label><b id="tWins">—</b></div>
       </div>
       <ul id="tradeList" class="history"></ul>
-      <h2 class="sec">Bot's call record</h2>
-      <p class="push-status" id="recSummary"></p>
-      <ul id="recBuckets" class="history"></ul>
       <h2 class="sec">What the bot has learned</h2>
       <p class="push-status" id="memSummary"></p>
       <div id="memBarsWrap" class="mem-wrap" hidden><div class="mem-bars" id="memBars"></div><div class="mem-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>12a</span></div><small class="muted">Usual volatility by half hour on weekdays, New York time</small></div>
@@ -150,16 +249,19 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v5.4 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.0 · calls only (no auto-trading)</p>
     </section>
   </main>
 
   <div id="toast" class="toast" hidden><span id="toastText"></span><button id="toastUndo">Undo</button></div>
 
   <nav>
-    <button data-view="live" class="active">Live</button>
-    <button data-view="history">History</button>
-    <button data-view="settings">Settings</button>
+    <button data-view="live" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Deck</button>
+    <button data-view="chart"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-6 4 3 6-8"/></svg>Chart</button>
+    <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
+    <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
+    <button data-view="learn"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
+    <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
 
   <script type="module" src="app.js"></script>

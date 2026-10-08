@@ -7,7 +7,7 @@ import { basisOf, calShift, volFactor } from './learner.js';
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
 export const parseCandles = (rows) =>
-  rows.map((r) => ({ t: r[0] * 1000, l: r[1], h: r[2], o: r[3], c: r[4] })).sort((a, b) => a.t - b.t);
+  rows.map((r) => ({ t: r[0] * 1000, l: r[1], h: r[2], o: r[3], c: r[4], v: r[5] ?? 0 })).sort((a, b) => a.t - b.t);
 
 // Kalshi lists the strike as floor_strike. If it's missing, use the BTC price at the window open.
 // `strikes` caches those fallbacks per ticker.

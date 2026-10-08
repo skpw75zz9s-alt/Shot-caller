@@ -1,6 +1,11 @@
 import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings } from './model.js';
 import { patterns } from './candles.js';
-import { addMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
+import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
+import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
+import { CHART_TOGGLES, chartDefaults, drawPro } from './chart.js';
+import { addTrade, flowStats, newFlow, pressureUpdate, takerSide } from './flow.js';
+import { sustained } from './alerts.js';
+import { createAlertCenter } from './alertui.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -98,7 +103,7 @@ if (store.get('settingsVersion', 1) < 11) {
 if (store.get('settingsVersion', 1) < 12) {
   // (also phones hit by the old fresh-install bug: Balanced's gap with the bar doubled to 95 and no big-gap exception)
   const freshBug = Math.abs(settings.minEdge - 0.06) < 1e-9 && settings.minConfidence === 95 && !settings.bigEdgeOverride;
-  if (riskLevelOf(settings) === 'balanced' || freshBug) { Object.assign(settings, riskSettings('steady')); store.set('steadyNote', true); }
+  if (riskLevelOf(settings) === 'balanced' || freshBug) { Object.assign(settings, riskSettings('steady')); if (store.get('settings', null) != null) store.set('steadyNote', true); } // (a brand-new phone just starts on Steady: no note)
   store.set('settings', settings); store.set('settingsVersion', 12);
 }
 
@@ -215,6 +220,7 @@ function renderPositions(snap) {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifySell) alert(sellMessage(pos, check, state.spot), 'sell', { posId: pos.id });
+        alerts.event('sell', `SELL ${pos.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(bid)}`, ex.why, `sell:${pos.id}`);
       }
     }
 
@@ -342,6 +348,172 @@ function oddsRows(ev, minEdge) {
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
 
+// ---------- v6 deck: status tiles, hold meter, price boxes, tug of war, live notes, market events ----------
+const alerts = createAlertCenter({ $, store, esc, clock, onNote: (key, title, text) => addNote(key, `${title}${text ? ` · ${text}` : ''}`) });
+const flow = newFlow();
+const watch = {}; // sustained conditions for alerts (alerts.js)
+state.notes = [];
+function addNote(key, text, t = Date.now()) {
+  state.notes.unshift({ t, key, text });
+  state.notes.length = Math.min(state.notes.length, 40);
+}
+const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad' }[k] || (k === 'info' ? '' : 'warn'));
+
+function onTrade(m) {
+  const price = Number(m.price), size = Number(m.size), t = Date.parse(m.time) || Date.now();
+  const live = state.markets.find((x) => Date.parse(x.close_time) > t);
+  const p = alerts.prefs();
+  const w = addTrade(flow, { t, price, size, side: takerSide(m.side) }, { round: live ? Date.parse(live.open_time) : null, whaleMin: p.whaleMin });
+  if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on Coinbase`, `whale:${w.t}`);
+}
+
+function setTile(id, text, cls = '', sub = null) {
+  const el = $(id); el.textContent = text; el.className = cls;
+  if (sub != null) $(`${id}Sub`).textContent = sub;
+}
+
+function dataHealth(now) {
+  const mAge = now - (state.marketsAt || 0), sAge = now - (state.spotAt || 0);
+  if (!state.marketsAt || !state.spotAt) return ['STARTING', 'warn'];
+  if (mAge > 30000 || sAge > 30000) return ['STALE', 'bad'];
+  return [isLive() ? 'LIVE' : 'CURRENT', 'ok'];
+}
+
+function renderDeck(snap, live, sig, now) {
+  // Status tiles
+  const [health, hcls] = dataHealth(now);
+  const ix = indexFresh() && state.index.used.length > 1 ? `index of ${state.index.used.length} exchanges` : 'Coinbase price';
+  setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${ix}${isLive() ? ' · trade feed on' : ''}`);
+  setTile('stClock', new Date(now - (state.skewMs || 0)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }), '',
+    state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
+  setTile('stContract', live ? live.m.ticker.replace(/^KXBTC15M-/, '') : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
+  const st = callStats(state.callLog);
+  setTile('stRecord', st.graded ? `${st.wins}/${st.graded} won` : 'no calls yet', st.graded ? (st.wins / st.graded >= 0.8 ? 'ok' : 'warn') : '',
+    st.graded ? `${Math.round((st.wins / st.graded) * 100)}% · bot said ${st.said != null ? Math.round(st.said) : '—'}%` : 'graded at settlement');
+  setTile('dataHealth', health, hcls);
+  $('timeLeft').textContent = live ? mmss(live.ev.minutesLeft) : '—';
+  const lf = live?.learnedAdj;
+  $('learnedNow').textContent = !lf ? '—' : `vol ×${lf.volFactor.toFixed(2)}${lf.basis ? ` · basis ${lf.basis >= 0 ? '+' : '−'}$${Math.abs(lf.basis).toFixed(0)}` : ''}`;
+
+  // Hold meter + Kalshi price boxes
+  const q = live?.ev.quote;
+  $('upAsk').textContent = q?.yesAsk != null ? `${(q.yesAsk * 100).toFixed(0)}¢` : '—';
+  $('downAsk').textContent = q?.noAsk != null ? `${(q.noAsk * 100).toFixed(0)}¢` : '—';
+  $('upBot').textContent = live?.ev.pYes != null ? `bot ${Math.round(live.ev.pYes * 100)}%` : '';
+  $('downBot').textContent = live?.ev.pYes != null ? `bot ${Math.round((1 - live.ev.pYes) * 100)}%` : '';
+  const conf = sig?.deep?.score ?? null, hold = sig?.hold ?? null;
+  $('holdBox').hidden = conf == null;
+  if (conf != null) {
+    const flipRisk = hold == null ? null : Math.round((1 - hold) * 100);
+    setTile('confBig', `${conf}`, conf >= 85 ? 'ok' : conf >= 70 ? 'warn' : 'bad');
+    setTile('holdBig', hold == null ? '—' : `${Math.round(hold * 100)}%`, hold == null ? '' : hold >= 0.8 ? 'ok' : hold >= 0.6 ? 'warn' : 'bad');
+    setTile('flipBig', flipRisk == null ? '—' : `${flipRisk}/100`, flipRisk == null ? '' : flipRisk <= 20 ? 'ok' : flipRisk <= 40 ? 'warn' : 'bad');
+    $('holdFill').style.width = `${hold == null ? 0 : Math.round(hold * 100)}%`;
+    $('holdNote').textContent = `${sig.side === 'YES' ? 'UP' : 'DOWN'} side · hold odds = chance confidence stays above ${Math.round(settings.holdFloor * 100)} until the last minute (300 simulated paths)${sig.locked ? ' · call locked' : ''}`;
+  }
+
+  // Tug of war
+  const fs = flowStats(flow, now);
+  const pr = pressureUpdate(flow, now);
+  const buy = fs.nowBuyShare;
+  $('tugBuy').textContent = buy == null ? '—' : `${(buy * 100).toFixed(1)}%`;
+  $('tugSell').textContent = buy == null ? '—' : `${((1 - buy) * 100).toFixed(1)}%`;
+  $('tugFill').style.width = `${buy == null ? 50 : (1 - buy) * 100}%`;
+  $('tugMark').style.left = `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`;
+  $('tugLead').textContent = buy == null ? '' : buy >= 0.6 ? 'BUYERS DOMINANT' : buy <= 0.4 ? 'SELLERS DOMINANT' : 'BALANCED';
+  $('tugLead').className = buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '';
+  $('tugNow').textContent = isLive() ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded on Coinbase${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feed (opens when the app is in front).';
+  $('tugRound').textContent = fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—';
+  $('tugRound').className = fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '';
+  $('tugRoundSub').textContent = fs.prints ? `buy ${usd(fs.buyUsd, 0)} / sell ${usd(fs.sellUsd, 0)} · ${fs.prints} prints` : 'since the round opened';
+  $('tugWhales').textContent = fs.whaleBuys + fs.whaleSells ? `${fs.whaleBuys} buy · ${fs.whaleSells} sell` : '—';
+  $('tugWhaleSub').textContent = `trades ≥ ${usd(alerts.prefs().whaleMin, 0)}`;
+  const fc = live ? floorCeiling(snap.bars, Date.parse(live.m.open_time)) : null, ms = modelSpot();
+  $('floorDist').textContent = fc && ms ? usd(ms - fc.floor, 0) : '—';
+  $('ceilDist').textContent = fc && ms ? usd(fc.ceiling - ms, 0) : '—';
+  if (pr.flipped) alerts.event('pressure', `Pressure flipped: ${pr.side === 'buy' ? 'buyers' : 'sellers'} took over`, '60%+ of the last 2 minutes, held 10s');
+
+  // Market events: round change (sit out), BTC crossing the target, flip warnings, feed health
+  if (live) {
+    const tk = live.m.ticker;
+    if (state.deckTicker && state.deckTicker !== tk) {
+      const prev = state.deckTicker;
+      if (!state.callLog.some((e) => e.ticker === prev)) alerts.event('sitout', 'Sat out last round', `${prev}: no call met the bar`, `sit:${prev}`);
+      addNote('info', `New round ${tk.replace(/^KXBTC15M-/, '')} · target ${usd(live.strike, 0)}`);
+    }
+    state.deckTicker = tk;
+    const above = ms && live.strike ? ms > live.strike : null;
+    if (above != null && state.deckAbove != null && state.deckAbove.tk === tk && state.deckAbove.v !== above) alerts.event('cross', `BTC crossed ${above ? 'above' : 'below'} the target`, `${usd(ms, 0)} vs ${usd(live.strike, 0)}`, `cross:${tk}`);
+    if (above != null) state.deckAbove = { tk, v: above };
+    const lean = leanSide(live.ev), called = sig?.called;
+    if (sustained(watch, 'flip', !!called && !!lean && lean !== called && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: bot now leans ${lean === 'YES' ? 'UP' : 'DOWN'}`, `against the ${called === 'YES' ? 'UP' : 'DOWN'} call · held 10s`, `flip:${tk}`);
+    const risky = !!called && hold != null && (1 - hold) * 100 >= alerts.prefs().flipRisk;
+    if (sustained(watch, 'fliprisk', risky, now)) alerts.event('fliprisk', `High flip risk: ${Math.round((1 - hold) * 100)}/100`, `hold odds ${Math.round(hold * 100)}% on the ${called === 'YES' ? 'UP' : 'DOWN'} call`, `fliprisk:${tk}`);
+  }
+  const down = hcls === 'bad';
+  if (state.feedDown == null) state.feedDown = down;
+  else if (down !== state.feedDown) { state.feedDown = down; alerts.event(down ? 'feedDown' : 'feedUp', down ? 'Live data lost' : 'Live data back', down ? 'prices are more than 30s old; calls paused until they refresh' : 'prices are fresh again'); }
+
+  // Live notes
+  const head = live && sig?.deep ? `BTC ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
+  $('notesWhen').textContent = `updated ${clock(now)}`;
+  $('notes').innerHTML = (head ? `<li><time>now</time><span>${esc(head)}</span></li>` : '') +
+    state.notes.slice(0, 12).map((n) => `<li class="${noteClass(n.key)}"><time>${clock(n.t)}</time><span>${esc(n.text)}</span></li>`).join('');
+  if ($('view-chart').classList.contains('active')) drawChartTab();
+}
+
+// ---------- Chart tab ----------
+const chartState = { tf: store.get('chartTf', 'round'), show: { ...chartDefaults(), ...store.get('chartShow', {}) }, cache: {}, drawnAt: 0 };
+function buildChartControls() {
+  $('tfBtns').innerHTML = Object.entries(TIMEFRAMES).map(([k, t]) => `<button data-tf="${k}" class="${chartState.tf === k ? 'on' : ''}">${t.label}</button>`).join('');
+  $('chartToggles').innerHTML = CHART_TOGGLES.map(([k, label]) => `<label><input type="checkbox" data-show="${k}" ${chartState.show[k] ? 'checked' : ''}>${esc(label)}</label>`).join('');
+}
+$('tfBtns').addEventListener('click', (e) => { const k = e.target.dataset.tf; if (!k) return; chartState.tf = k; store.set('chartTf', k); buildChartControls(); drawChartTab(true); });
+$('chartToggles').addEventListener('change', (e) => { const k = e.target.dataset.show; if (!k) return; chartState.show[k] = e.target.checked; store.set('chartShow', chartState.show); drawChartTab(true); });
+async function chartBars(tf) {
+  const T = TIMEFRAMES[tf];
+  if (T.gran === 60) return state.candles;
+  const c = chartState.cache[tf];
+  if (c && Date.now() - c.at < 60000) return c.bars;
+  if (!chartState.loading) {
+    chartState.loading = true;
+    getJSON(`coinbase/products/BTC-USD/candles?granularity=${T.gran}`).then((rows) => {
+      const bars = parseCandles(rows);
+      chartState.cache[tf] = { at: Date.now(), bars: T.combine > 1 ? aggregate(bars, (T.gran / 60) * T.combine) : bars };
+      drawChartTab(true);
+    }).catch(() => {}).finally(() => { chartState.loading = false; });
+  }
+  return c?.bars ?? [];
+}
+async function drawChartTab(force = false) {
+  const now = Date.now();
+  if (!force && now - chartState.drawnAt < 1000) return;
+  chartState.drawnAt = now;
+  if (!$('tfBtns').children.length) buildChartControls();
+  const tf = chartState.tf, T = TIMEFRAMES[tf];
+  const snap = compute(), live = snap.live;
+  let bars = await chartBars(tf);
+  const open = live ? Date.parse(live.m.open_time) : null, close = live ? Date.parse(live.m.close_time) : null;
+  if (T.gran === 60) bars = withLive(bars, now);
+  if (tf === 'round' && open) bars = bars.filter((b) => b.t >= open - 10 * 60000);
+  if (tf === '1m') bars = bars.slice(-60);
+  bars = bars.slice(-120);
+  const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
+  const showCone = (tf === 'round' || tf === '1m') && live;
+  const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}` }));
+  drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
+    strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine,
+  });
+}
+// 1-minute candles with the live price folded into the current minute
+function withLive(bars, now) {
+  if (!bars.length || !state.spot) return bars;
+  const t = Math.floor(now / 60000) * 60000, last = bars[bars.length - 1], s = state.spot;
+  if (last.t === t) return [...bars.slice(0, -1), { ...last, c: s, h: Math.max(last.h, s), l: Math.min(last.l, s) }];
+  return [...bars, { t, o: last.c, h: Math.max(last.c, s), l: Math.min(last.c, s), c: s, v: 0 }];
+}
+
 function render() {
   state.renderedAt = Date.now();
   state.clock = null;
@@ -403,7 +575,7 @@ function render() {
       : sig.called ? `Called ${sig.called} earlier · no new buy`
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price';
-    callEl.textContent = call ?? 'PASS';
+    callEl.textContent = call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT';
     callEl.className = `call ${(call ?? 'pass').toLowerCase()}`;
     $('callSub').textContent = call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '';
     if (call) card.classList.add(call.toLowerCase());
@@ -432,6 +604,7 @@ function render() {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
+        alerts.event('call', `Call: ${call === 'YES' ? 'UP' : 'DOWN'} at ${pc(sig.price)}`, `confidence ${sig.deep?.score ?? '—'}${sig.hold != null ? ` · hold odds ${Math.round(sig.hold * 100)}%` : ''} · target ${usd(strike, 0)}`, key);
       }
     }
     // Aggressive scale-in: tell people who hold the call that the gap grew
@@ -450,6 +623,7 @@ function render() {
     sign($('dist'), d);
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
+  renderDeck(snap, live, sig, now);
 
   $('spot').textContent = usd(state.spot);
   renderTicker(live?.strike ?? null);
@@ -596,12 +770,13 @@ function liveConnect() {
   try { ws = new WebSocket(LIVE_WS); } catch { ws = null; return; }
   ws.onopen = () => {
     wsRetry = 0;
-    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker', 'heartbeat'] }));
+    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker', 'heartbeat', 'matches'] }));
   };
   ws.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'heartbeat') { state.liveAt = Date.now(); return; }
+    if (m.type === 'match') { onTrade(m); return; }
     if (m.type !== 'ticker' || !m.price) return;
     state.spot = Number(m.price); state.spotAt = Date.now();
     state.open24h = Number(m.open_24h) || state.open24h;
@@ -861,6 +1036,8 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
   b.classList.add('active');
   $(`view-${b.dataset.view}`).classList.add('active');
   if (b.dataset.view === 'settings') loadAccess();
+  if (b.dataset.view === 'chart') drawChartTab(true);
+  if (b.dataset.view === 'alerts') alerts.render();
   adminPolling(b.dataset.view === 'settings');
 }));
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
@@ -1200,7 +1377,12 @@ async function settleLogs() {
       if (!result && Date.parse(closeTime) < now - 6 * 3600000) result = 'unknown'; // voided or never reported
       if (!result) continue;
       for (const e of state.ruleLog) if (e.ticker === ticker && !e.result) e.result = result;
+      const graded = state.callLog.filter((e) => e.ticker === ticker && !e.result);
       settleCalls(state.callLog, ticker, result);
+      for (const e of graded) if (result === 'yes' || result === 'no') {
+        const won = e.side.toLowerCase() === result;
+        alerts.event(won ? 'win' : 'loss', `Call ${won ? 'WON' : 'lost'}: ${e.side === 'YES' ? 'UP' : 'DOWN'}`, `${ticker} settled ${result.toUpperCase()} · bot said ${e.conf ?? '—'}`, `${won ? 'win' : 'loss'}:${ticker}`);
+      }
       store.set('ruleLog', state.ruleLog); store.set('callLog', state.callLog);
     } catch { /* next time */ }
   }
