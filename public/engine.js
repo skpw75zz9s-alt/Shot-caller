@@ -153,10 +153,13 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const bigGap = (a) => s.bigEdgeOverride > 0 && a.robustEdge != null && a.robustEdge >= s.bigEdgeOverride - 1e-9;
   // Entry filters for NEW calls (all off unless set): too late in the window, a volatility spike, or Kalshi's price
   // for the side just jumped (someone knows something / the low already got bought)
-  // Steady: the bot's odds for the side have stayed at the confidence bar for steadySec (not one lucky tick)
+  // Steady: the bot's odds for the side have stayed at the confidence bar for steadySec (not one lucky tick).
+  // With steadyByStability the wait follows the market: half in a stable one, 1.5× in an unstable one.
+  const steadyNeed = !(s.steadySec > 0) ? 0 : !s.steadyByStability ? s.steadySec
+    : Math.round(s.steadySec * (stab.level === 'stable' ? 0.5 : stab.level === 'unstable' ? 1.5 : 1));
   const steady = (side) => {
-    if (!(s.steadySec > 0)) return true;
-    const log = snap.quoteLog?.[row.m.ticker] || [], since = now - s.steadySec * 1000;
+    if (!(steadyNeed > 0)) return true;
+    const log = snap.quoteLog?.[row.m.ticker] || [], since = now - steadyNeed * 1000;
     if (!log.length || log[0].t > since + 2500) return false;
     return log.filter((e) => e.t >= since).every((e) => e.p != null && (side === 'YES' ? e.p : 1 - e.p) * 100 >= s.minConfidence);
   };
@@ -220,7 +223,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    stability: stab,
+    stability: stab, steadyNeed,
     hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,

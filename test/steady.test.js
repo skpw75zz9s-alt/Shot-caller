@@ -49,3 +49,20 @@ test('Steady: needs a minute of steady odds, and never switches sides mid-round'
   const free = buySignal(flip.row, flip.snap, { ...st, lockCall: false }, NOW, { T: { side: 'NO', at: NOW - 120000, n: 1 } });
   assert.equal(free.callSide, 'YES', 'unlocked it would switch');
 });
+
+test('Steady waits by market stability: 30s when stable (👍), 60s moderate, 90s unstable', () => {
+  const st = riskSettings('steady');
+  const calm = setup(K + 150, 9, 80, 82, steadyLog(0.97, 40));
+  const a = buySignal(calm.row, calm.snap, st, NOW, {});
+  assert.equal(a.stability.level, 'stable');
+  assert.equal(a.steadyNeed, 30);
+  assert.ok(a.fire, '40s of steady odds is enough in a calm market');
+  assert.equal(buySignal(calm.row, calm.snap, { ...st, steadyByStability: false }, NOW, {}).fire, false, 'the fixed 60s wait would still be waiting');
+  // jumpy: volatility 2.2× its norm and a shock candle
+  const jumpy = setup(K + 150, 9, 80, 82, steadyLog(0.97, 70));
+  const shock = bars.map((b, i) => (i === bars.length - 3 ? { ...b, h: b.h + 120, l: b.l - 120 } : b));
+  const b = buySignal(jumpy.row, { ...jumpy.snap, bars: shock, sigmaMin: SIG * 2.2 }, st, NOW, {});
+  assert.equal(b.stability.level, 'unstable', JSON.stringify(b.stability));
+  assert.equal(b.steadyNeed, 90);
+  assert.ok(!b.fire && !b.steadyOk, '70s is not enough when unstable');
+});

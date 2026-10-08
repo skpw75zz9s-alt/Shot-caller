@@ -277,6 +277,16 @@ The Chart tab opens with **Market pulse**:
   - Each deduction is listed under the score.
 - **Buy vs sell pressure**: the same tug of war as the Deck, from the last 2 minutes of trades on 5 exchanges.
 
+**More calls at the same 85+ bar.** Steady waits for the confidence to hold before it calls. That wait now follows stability: **30s** when 👍 stable, **60s** when 🤷 moderate, **90s** when red 👍 unstable (Sniper: 45 / 90 / 135s). In the same simulation (3 × ~13,000 rounds):
+
+| Wait before calling | Calls per 100 rounds | Won |
+|---|---|---|
+| fixed 60s (before) | 49 | 95.5% |
+| by stability (now) | 67 | 94.8% |
+| no wait | 92 | 92.1% |
+
+That's about 37% more calls, every one still at confidence 85+, for under a point of win rate. Turn it off with `steadyByStability: false`.
+
 Stability is information, not a filter. In a simulation with calm, normal and jumpy stretches (20,000 rounds × 3 seeds), skipping calls when it read "unstable" didn't raise the win rate. Those calls won more, not less, because the bot's own volatility already prices a jumpy market in. So it shows on the call and in "Why this call", but it doesn't block calls.
 
 ### Auto-trader (v7)

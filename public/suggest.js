@@ -32,7 +32,7 @@ export function suggestEntry(sig, ev, s) {
   if (side && price != null && ev.open && !sig.called && edge != null && edge >= s.minEdge && sig.robust && conf != null && conf >= LIGHT.conf && (hold == null || hold >= LIGHT.hold)) {
     const missed = conf < s.minConfidence ? `confidence ${conf} is under your ${s.minConfidence} bar`
       : sig.holdOk === false ? `hold odds ${Math.round(hold * 100)}% are under the ${Math.round((s.minHold || 0) * 100)}% bar`
-        : sig.steadyOk === false ? `it hasn't held for ${s.steadySec}s yet` : null;
+        : sig.steadyOk === false ? `it hasn't held for ${sig.steadyNeed ?? s.steadySec}s yet` : null;
     if (missed) {
       const prob = side === 'YES' ? ev.pYes : 1 - ev.pYes;
       const contracts = Math.max(1, Math.floor(contractsFor(prob, price, s) * LIGHT.size));
