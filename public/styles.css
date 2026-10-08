@@ -264,7 +264,14 @@ nav button.active { color: var(--accent); border-color: #22d3ee44; background: #
 .pbox.up label, .pbox.up b { color: var(--yes); } .pbox.down label, .pbox.down b { color: var(--no); }
 .pbox b { display: block; font: 800 26px var(--mono); text-shadow: 0 0 16px currentColor; line-height: 1.2; }
 .pbox small { color: var(--muted); font-size: 10.5px; }
-.tug-sides { display: grid; grid-template-columns: 1fr 1fr; }
+.tug-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tug-sides > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tug-sides .buy { justify-content: flex-end; }
+.beast { width: 46px; height: 46px; flex: none; opacity: .55; filter: saturate(.6); transition: transform .4s, opacity .4s, filter .4s; }
+.tug-sides .dom .beast { opacity: 1; filter: none; transform: scale(1.18); animation: roar 1.6s ease-in-out infinite; }
+.tug-sides .sell.dom .beast { filter: drop-shadow(0 0 10px #ff4d6daa); } .tug-sides .buy.dom .beast { filter: drop-shadow(0 0 10px #2ee6a6aa); }
+@keyframes roar { 50% { transform: scale(1.28) rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) { .tug-sides .dom .beast { animation: none; } }
 .tug-sides label { display: block; font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 .tug-sides .sell label, .tug-sides .sell b { color: var(--no); } .tug-sides .buy { text-align: right; } .tug-sides .buy label, .tug-sides .buy b { color: var(--yes); }
 .tug-sides b { font: 800 30px var(--mono); text-shadow: 0 0 18px currentColor; }

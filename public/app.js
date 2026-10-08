@@ -422,6 +422,8 @@ function renderDeck(snap, live, sig, now) {
   $('tugMark').style.left = `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`;
   $('tugLead').textContent = buy == null ? '' : buy >= 0.6 ? 'BUYERS DOMINANT' : buy <= 0.4 ? 'SELLERS DOMINANT' : 'BALANCED';
   $('tugLead').className = buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : '';
+  $('tugBull').classList.toggle('dom', buy != null && buy >= 0.55); // the winning side's animal steps up
+  $('tugBear').classList.toggle('dom', buy != null && buy <= 0.45);
   $('tugNow').textContent = isLive() ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded on Coinbase${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feed (opens when the app is in front).';
   $('tugRound').textContent = fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—';
   $('tugRound').className = fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '';
@@ -495,15 +497,14 @@ async function drawChartTab(force = false) {
   let bars = await chartBars(tf);
   const open = live ? Date.parse(live.m.open_time) : null, close = live ? Date.parse(live.m.close_time) : null;
   if (T.gran === 60) bars = withLive(bars, now);
-  if (tf === 'round' && open) bars = bars.filter((b) => b.t >= open - 10 * 60000);
-  if (tf === '1m') bars = bars.slice(-60);
-  bars = bars.slice(-120);
+  // Indicators warm up on all the history; the chart shows the round (plus 10 minutes before it), or the last 60 / 120 bars
+  const viewFrom = tf === 'round' && open ? open - 10 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}` }));
   drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
     strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine,
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine, viewFrom,
   });
 }
 // 1-minute candles with the live price folded into the current minute

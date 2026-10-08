@@ -2,10 +2,20 @@
 // plus RSI and MACD panes. Canvas only, no libraries. `o.show` holds the indicator toggles.
 import { bollinger, ema, floorCeiling, macd, rma, rsiSeries, vwap } from './indicators.js';
 
+// The bull and the bear (public/bull.svg, bear.svg): trend watermark, call markers and EMA crosses
+const BEAST = typeof Image === 'undefined' ? {} : { bull: Object.assign(new Image(), { src: 'bull.svg' }), bear: Object.assign(new Image(), { src: 'bear.svg' }) };
+const beastReady = (k) => BEAST[k]?.complete && BEAST[k].naturalWidth > 0;
+function beast(ctx, k, x, y, size, alpha = 1) {
+  if (!beastReady(k)) return false;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.drawImage(BEAST[k], x - size / 2, y - size / 2, size, size); ctx.restore();
+  return true;
+}
+
 export const CHART_TOGGLES = [
   ['strike', 'Target (price to beat)', true], ['ema', 'EMA 9 / 21', true], ['rma', 'RMA 9 / 21', false], ['boll', 'Bollinger 20 ±2σ', true],
   ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone to the close', true],
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
+  ['beasts', 'Bull / bear trend + EMA crosses', true],
 ];
 export const chartDefaults = () => Object.fromEntries(CHART_TOGGLES.map(([k, , on]) => [k, on]));
 
@@ -22,13 +32,17 @@ function setup(cv, h) {
 }
 const fmt = (v) => Math.round(v).toLocaleString('en-US');
 
-// bars: candles with volume; o: { strike, openTime, closeTime, spot, cone: [{ t, lo50, hi50, lo90, hi90 }], markers: [{ t, side, label }], show, barMs, round }
-export function drawPro(main, rsiCv, macdCv, bars, o) {
+// all: candles with volume (more history than shown, so slow indicators are warmed up); o.viewFrom: first time shown.
+// o: { strike, openTime, closeTime, spot, cone: [{ t, lo50, hi50, lo90, hi90 }], markers: [{ t, side, label }], show, barMs, round, viewFrom }
+export function drawPro(main, rsiCv, macdCv, all, o) {
+  const start = Math.max(0, o.viewFrom ? all.findIndex((b) => b.t >= o.viewFrom) : 0);
+  const bars = all.slice(start);
+  const cut = (xs) => xs.slice(start);
   const show = o.show;
   const H = 300, axis = 60;
   const { ctx, w, h } = setup(main, H);
   if (bars.length < 2) { ctx.fillStyle = C.text; ctx.font = '12px system-ui'; ctx.fillText('Loading candles…', 12, 24); return; }
-  const closes = bars.map((b) => b.c);
+  const allCloses = all.map((b) => b.c), closes = cut(allCloses);
   const barMs = o.barMs || 60000;
   // Room on the right for the cone: the minutes left until the close (round view)
   const future = show.cone && o.cone?.length ? Math.max(0, Math.ceil((o.closeTime - bars[bars.length - 1].t) / barMs)) : 0;
@@ -37,8 +51,8 @@ export function drawPro(main, rsiCv, macdCv, bars, o) {
   const plotW = w - axis, slot = plotW / slots, bw = Math.max(1.5, slot * 0.62);
   const Xt = (t) => ((t - bars[0].t) / barMs) * slot + slot / 2;
   const X = (i) => Xt(bars[i].t);
-  const e9 = ema(closes, 9), e21 = ema(closes, 21), r9 = rma(closes, 9), r21 = rma(closes, 21), bb = bollinger(closes, 20, 2);
-  const vw = vwap(bars, o.round ? o.openTime : -Infinity);
+  const e9 = cut(ema(allCloses, 9)), e21 = cut(ema(allCloses, 21)), r9 = cut(rma(allCloses, 9)), r21 = cut(rma(allCloses, 21)), bb = cut(bollinger(allCloses, 20, 2));
+  const vw = cut(vwap(all, o.round ? o.openTime : bars[0].t));
   const fc = o.round ? floorCeiling(bars, o.openTime) : null;
 
   const ys = bars.flatMap((b) => [b.h, b.l]);
@@ -59,6 +73,13 @@ export function drawPro(main, rsiCv, macdCv, bars, o) {
   // time labels
   const every = Math.max(1, Math.round(bars.length / 5));
   for (let i = 0; i < bars.length; i += every) ctx.fillText(new Date(bars[i].t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/, ''), X(i) - 12, H - 4);
+  // Bull or bear behind the candles: who has the trend (fast EMA above the slow one = bull)
+  const l9 = e9[e9.length - 1], l21 = e21[e21.length - 1];
+  const trend = l9 != null && l21 != null ? (l9 >= l21 ? 'bull' : 'bear') : null;
+  if (show.beasts && trend) {
+    const size = Math.min(plotW, bot - top) * 0.62;
+    beast(ctx, trend, plotW / 2, top + (bot - top) / 2, size, 0.07);
+  }
   // round shading + close line
   if (o.round && o.openTime) {
     const x0 = Xt(o.openTime) - slot / 2;
@@ -114,10 +135,18 @@ export function drawPro(main, rsiCv, macdCv, bars, o) {
     const i = Math.min(bars.length - 1, Math.max(0, Math.round((m.t - bars[0].t) / barMs))), b = bars[i], up = m.side === 'YES';
     const y = up ? Y(b.l) + 14 : Y(b.h) - 6;
     ctx.fillStyle = up ? C.up : C.dn; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText(up ? '▲' : '▼', X(i), y);
-    if (show.labels && m.label) { ctx.font = '600 9px ui-monospace, monospace'; ctx.fillText(m.label, X(i), up ? y + 11 : y - 13); }
+    if (!beast(ctx, up ? 'bull' : 'bear', X(i), up ? y + 2 : y - 6, 22)) ctx.fillText(up ? '▲' : '▼', X(i), y);
+    if (show.labels && m.label) { ctx.font = '600 9px ui-monospace, monospace'; ctx.fillText(m.label, X(i), up ? y + 21 : y - 19); }
     ctx.textAlign = 'start';
   }
+  // EMA 9 x 21 crosses: a little bull where the fast line crosses up, a bear where it crosses down
+  if (show.beasts) for (let i = 1; i < bars.length; i++) {
+    if ([e9[i], e21[i], e9[i - 1], e21[i - 1]].some((v) => v == null)) continue;
+    const was = e9[i - 1] >= e21[i - 1], is = e9[i] >= e21[i];
+    if (was === is) continue;
+    if (is) beast(ctx, 'bull', X(i), Y(bars[i].l) + 16, 16, 0.9); else beast(ctx, 'bear', X(i), Y(bars[i].h) - 14, 16, 0.9);
+  }
+  if (show.beasts && trend) { ctx.font = '800 10px system-ui'; ctx.fillStyle = trend === 'bull' ? C.up : C.dn; ctx.fillText(trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', 6, bot - 6); }
   if (show.labels) tag(ctx, plotW, Y(closes[closes.length - 1]), fmt(o.spot ?? closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true);
   // legend
   ctx.font = '600 10px system-ui'; let lx = 6, ly = 10;
@@ -132,7 +161,7 @@ export function drawPro(main, rsiCv, macdCv, bars, o) {
   if (rsiCv) {
     rsiCv.hidden = !show.rsi;
     if (show.rsi) {
-      const r = setup(rsiCv, 90), rs = rsiSeries(closes, 14), Yr = (v) => 6 + (1 - v / 100) * (r.h - 12);
+      const r = setup(rsiCv, 90), rs = cut(rsiSeries(allCloses, 14)), Yr = (v) => 6 + (1 - v / 100) * (r.h - 12);
       pane(r.ctx, r.w - axis, Yr, [30, 70], 'RSI 14', r.w);
       line(r.ctx, rs, X, Yr, '#a78bfa');
       const last = rs[rs.length - 1]; if (last != null) tag(r.ctx, r.w - axis, Yr(last), last.toFixed(0), '#a78bfa', true);
@@ -142,7 +171,7 @@ export function drawPro(main, rsiCv, macdCv, bars, o) {
   if (macdCv) {
     macdCv.hidden = !show.macd;
     if (show.macd) {
-      const r = setup(macdCv, 90), m = macd(closes);
+      const r = setup(macdCv, 90), m = cut(macd(allCloses));
       const vals = m.flatMap((x) => [x.macd, x.signal, x.hist]).filter((v) => v != null);
       const ext = Math.max(...vals.map(Math.abs), 1e-9), Ym = (v) => r.h / 2 - (v / ext) * (r.h / 2 - 6);
       pane(r.ctx, r.w - axis, Ym, [0], 'MACD', r.w);

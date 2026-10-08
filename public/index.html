@@ -68,7 +68,10 @@
 
       <div class="card tug" id="tugCard">
         <div class="deep-head"><span>Tug of war · Coinbase trades</span><b id="tugLead"></b></div>
-        <div class="tug-sides"><div class="sell"><label>Sell pressure</label><b id="tugSell">—</b></div><div class="buy"><label>Buy pressure</label><b id="tugBuy">—</b></div></div>
+        <div class="tug-sides">
+          <div class="sell" id="tugBear"><img src="bear.svg" alt="" class="beast"><div><label>Sell pressure</label><b id="tugSell">—</b></div></div>
+          <div class="buy" id="tugBull"><div><label>Buy pressure</label><b id="tugBuy">—</b></div><img src="bull.svg" alt="" class="beast"></div>
+        </div>
         <div class="tug-bar"><i id="tugFill"></i><em id="tugMark"></em></div>
         <small class="muted" id="tugNow">Last 2 minutes of executed volume. Needs the live feed.</small>
         <div class="tiles2">
@@ -130,7 +133,7 @@
         <canvas id="proChart" height="300"></canvas>
         <canvas id="rsiChart" height="90"></canvas>
         <canvas id="macdChart" height="90"></canvas>
-        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). ▲▼ mark the bot's calls.</p>
+        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below.</p>
       </div>
     </section>
 
@@ -169,7 +172,7 @@
         </ol>
         <h3>The chart</h3>
         <ul>
-          <li><b>EMA 9 / 21:</b> fast and slow trend lines; the fast one above the slow one means the short-term trend is up.</li>
+          <li><b>EMA 9 / 21:</b> fast and slow trend lines; the fast one above the slow one means the short-term trend is up. The chart shows it as a big faded bull (up) or bear (down) behind the candles, with a small bull or bear where the lines cross.</li>
           <li><b>RMA:</b> a smoother, slower average (the kind RSI uses).</li>
           <li><b>Bollinger 20 ±2σ:</b> a band around the 20-bar average; touches of the edges mean a stretched move.</li>
           <li><b>VWAP:</b> the average price traded since the round opened, weighted by volume.</li>
@@ -178,7 +181,7 @@
           <li><b>RSI 14:</b> momentum, 0-100; above 70 is stretched up, below 30 stretched down. <b>MACD:</b> trend momentum; bars above zero mean it's building up.</li>
         </ul>
         <h3>Tug of war and whales</h3>
-        <p>Every trade on Coinbase has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy and sell pressure is each side's share of the dollar volume over the last 2 minutes; round flow is the total since the open. Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
+        <p>Every trade on Coinbase has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy pressure (the bull) and sell pressure (the bear) are each side's share of the dollar volume over the last 2 minutes, and the side that's winning steps up and pulses; round flow is the total since the open. Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
         <h3>Honest limits</h3>
         <p>No call is certain. Even 98% calls lose about 1 time in 50, and calls that safe are priced high on Kalshi, so a loss costs much more than a win pays. Check the Record tab: it grades every call against Kalshi's real result.</p>
       </div>
@@ -249,7 +252,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.0 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.1 · calls only (no auto-trading)</p>
     </section>
   </main>
 

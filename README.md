@@ -16,12 +16,13 @@ Six tabs along the bottom:
   - **The call:** UP, DOWN or SIT OUT, with a confidence / hold odds / flip risk meter.
   - **Kalshi prices:** UP and DOWN buy prices in cents, next to the bot's odds.
   - **Contract stats:** live BTC, price to beat, distance, time left, data health, and what the bot learned.
-  - **Tug of war:** buy versus sell pressure from Coinbase's live trades over the last 2 minutes, round flow, whale trades, and the distance to the round's floor and ceiling.
+  - **Tug of war:** the bear (sell pressure) against the bull (buy pressure); the winning side grows and pulses. It shows buy versus sell pressure from Coinbase's live trades over the last 2 minutes, round flow, whale trades, and the distance to the round's floor and ceiling.
   - **Live notes:** a running feed of what just happened.
   - **Why this call / rejections:** both fold away.
 - **Chart.**
   - Timeframes: round, 1m, 5m, 15m, 1h, 4h, 1D.
   - Toggleable overlays: target, EMA 9/21, RMA 9/21, Bollinger 20 ±2σ, VWAP from the round open, round floor/ceiling, the forecast cone, volume, RSI 14 and MACD 12/26/9 panes, call markers and price labels.
+  - **Bull and bear:** a big faded bull or bear behind the candles shows the trend (EMA 9 above or below EMA 21). Small ones mark EMA crosses, and bull and bear heads mark the bot's UP and DOWN calls. Indicators warm up on the full history, so they're ready even at the start of a round.
   - The **forecast cone** is the bot's own: where BTC usually ends by the close at the bot's volatility, showing the middle 50% and 90% of outcomes.
 - **Alerts.**
   - Sound and banner switches for every event, each with a Preview button.
