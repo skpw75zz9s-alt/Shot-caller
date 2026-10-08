@@ -61,7 +61,7 @@ test('sends BUY THE LOW once when Kalshi is below the bot odds', async () => {
   await bot.tick(NOW);
   assert.equal(svc.received.length, 1);
   const msg = lastPush();
-  assert.match(msg.title, /^Buy the low: YES · Above at 40% · max \d+%$/);
+  assert.match(msg.title, /^(Buy the low|Confident buy): YES · Above at 40% · max \d+%$/);
   assert.match(msg.body, /^Act now: buy only at \d+% or less, skip if it's higher\. Kalshi 40% vs bot \d+%.*BTC above \$100,000/);
   assert.match(msg.body, /BTC \$100,060$/);
   assert.equal(svc.received[0].headers.urgency, 'high');
@@ -90,7 +90,7 @@ test('sends SELL NOW for a tracked position only once the bid pays what it is wo
   Object.assign(quotes, { yes_bid: 99, yes_ask: 100 });
   await bot.tick(NOW + 20000);
   const msg = lastPush();
-  assert.match(msg.title, /^SELL NOW: YES · Above at 99% · cash out \$49\.\d\d \(\+\$\d+\.\d\d\)$/);
+  assert.match(msg.title, /^SELL HIGH: YES · Above at 99% · cash out \$49\.\d\d \(\+\$\d+\.\d\d\)$/);
   assert.match(msg.body, /take the profit/);
 });
 
@@ -135,7 +135,7 @@ test('updates set to every window: each new window sends one update with the las
   assert.doesNotMatch(msg.body, /grade/);
   assert.match(msg.body, /Now BTC \$100,060 \(\+\$10\) · bot leans (YES|NO) \d+%/);
   assert.match(msg.body, /calls start \d{1,2}:\d\d (AM|PM)\.$/, 'new window is 2.5 min old: bot is still watching');
-  assert.equal(fresh.filter((x) => /^Buy the low/.test(x.title)).length, 0, 'no calls in the first 5 minutes');
+  assert.equal(fresh.filter((x) => /^(Buy the low|Confident buy)/.test(x.title)).length, 0, 'no calls in the first 5 minutes');
   const local = new Date(NOW + 6 * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
   assert.ok(msg.title.includes(local), `${msg.title} should start at ${local} New York time`);
 

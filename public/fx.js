@@ -11,7 +11,7 @@ export function createFx($) {
   function clear() { clearTimeout(timer); const el = fx(); el.hidden = true; el.className = 'fx'; el.innerHTML = ''; }
 
   // side: 'YES' | 'NO'
-  function lockIn({ side, conf, hold, price }) {
+  function lockIn({ side, conf, hold, price, confident = false }) {
     const up = side === 'YES', el = fx();
     clearTimeout(timer);
     el.className = `fx lockin ${up ? 'up' : 'down'}`;
@@ -19,7 +19,7 @@ export function createFx($) {
       <div class="lk-ring"></div><div class="lk-ring r2"></div>
       <img src="${up ? 'bull' : 'bear'}.svg" alt="" class="lk-beast">
       <div class="lk-call">${up ? 'UP' : 'DOWN'}</div>
-      <div class="lk-row">${LOCK_SVG}<span>CALL LOCKED</span></div>
+      <div class="lk-row">${LOCK_SVG}<span>${confident ? 'CONFIDENT · LOCKED' : 'CALL LOCKED'}</span></div>
       <div class="lk-sub">${conf != null ? `confidence ${conf}` : ''}${hold != null ? ` · hold odds ${Math.round(hold * 100)}%` : ''}${price != null ? ` · buy at ${Math.round(price * 100)}¢` : ''}</div>
     </div>`;
     el.hidden = false;

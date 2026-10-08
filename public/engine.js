@@ -287,7 +287,7 @@ export function buyMessage(row, sig, spot) {
   const where = strike ? ` (BTC ${side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
   return {
     tag: `buy-${m.ticker}`,
-    title: `${sig.stance === 'switching' ? 'Switch: buy' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
+    title: `${sig.stance === 'switching' ? 'Switch: buy' : (sig.deep?.score ?? 0) >= 90 && (sig.hold ?? 0) >= 0.9 ? 'Confident buy:' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
     body: `${sig.limit ? `Act now: buy only at ${pc(sig.limit)} or less, skip if it's higher. ` : ''}Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
       `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.hold != null ? ` · holds ${Math.round(sig.hold * 100)}%` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
   };
@@ -337,5 +337,5 @@ export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;
   const cashOut = ex.net != null ? ` · cash out ${dollars(ex.net * pos.contracts)}` : '';
-  return { tag: `sell-${pos.id}`, title: `SELL NOW: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
+  return { tag: `sell-${pos.id}`, title: `${ex.kind === 'take' ? 'SELL HIGH' : ex.kind === 'cut' ? 'BAIL' : 'SELL NOW'}: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
 }

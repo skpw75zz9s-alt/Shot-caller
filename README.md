@@ -24,6 +24,16 @@ Six tabs along the bottom:
     - Whale trades are marked 🐋.
     - All exchanges feed the tug of war and whale alerts.
     - Turn the extra exchanges off in Settings ("Live orders from all exchanges") to save data. Coinbase stays on.
+  - **Suggestions** (top of the Deck, and a bar on the call card), from `public/suggest.js`:
+    - **CONFIDENT BUY:** the call clears the strictest bar (confidence 90+ and hold odds 90%+), full suggested size. The lock-in says "CONFIDENT · LOCKED", and pushes say "Confident buy".
+    - **BUY:** a call on your risk level.
+    - **BUY LIGHT:** a real gap that holds even if volatility is a bit off, confidence 80+ and hold odds 60%+, but under one of your level's bars. It says which bar it missed and suggests about a third of a normal bet. It's an optional, lower-conviction idea, not a call: it doesn't lock, isn't logged and isn't in the record.
+    - **WAIT:** nothing worth buying.
+    - For each position you hold:
+      - **SELL HIGH:** in profit, and Kalshi pays at least what it's worth. It rings the cash register.
+      - **BAIL:** losing, and Kalshi pays clearly more than it's worth. It shouts "Bail!".
+      - **WATCH:** a sell signal that's still being confirmed.
+      - **HOLD:** worth more than Kalshi pays.
   - **Live notes:** a running feed of what just happened.
   - **Why this call / rejections:** both fold away.
 - **Chart.**

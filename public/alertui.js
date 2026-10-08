@@ -2,7 +2,7 @@
 // for the rest), the Alerts tab and its history. The rules live in alerts.js.
 import { ALERT_DEFAULTS, ALERT_EVENTS, ALERT_GROUPS, SOUND_FILES, TONES, alertPrefs, routeAlert } from './alerts.js';
 
-const KIND = { win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad', flip: 'warn', fliprisk: 'warn', sell: 'warn', cross: 'warn', pressure: 'warn' };
+const KIND = { sellHigh: 'good', light: 'warn', win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad', flip: 'warn', fliprisk: 'warn', sell: 'warn', cross: 'warn', pressure: 'warn' };
 
 export function createAlertCenter({ $, store, esc, clock, onNote }) {
   let prefs = alertPrefs(store.get('alertPrefs', {}));

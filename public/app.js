@@ -8,6 +8,7 @@ import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKal
 import { callSound, sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
+import { suggestEntry, suggestExit } from './suggest.js';
 import { ema } from './indicators.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -216,6 +217,7 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
 function renderPositions(snap) {
   const html = state.positions.map((pos) => {
     const check = positionCheck(pos, snap, settings);
+    (state.posChecks ||= {})[pos.id] = check; // the Suggestions strip reads the same result
     const { row, minutesLeft, pSide, bid, ex } = check;
     if (check.changed) savePositions();
 
@@ -224,11 +226,13 @@ function renderPositions(snap) {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifySell) alert(sellMessage(pos, check, state.spot), 'sell', { posId: pos.id });
-        alerts.event('sell', `SELL ${pos.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(bid)}`, ex.why, `sell:${pos.id}`);
+        if (ex.kind === 'take') alerts.event('sellHigh', `SELL HIGH: ${pos.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(bid)}`, `cash out ${ex.net != null ? dollars(ex.net * pos.contracts) : ''} (${money(ex.pnl)})`, `sellHigh:${pos.id}`);
+        else alerts.event('sell', `BAIL: ${pos.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(bid)}`, ex.why, `sell:${pos.id}`);
       }
     }
 
-    const head = ex.action === 'SELL' ? `SELL NOW at ${pc(bid)}` : ex.action === 'WAIT' ? 'SETTLING' : 'HOLD';
+    const sx = suggestExit(ex);
+    const head = sx.kind === 'sellHigh' ? `SELL HIGH at ${pc(bid)}` : sx.kind === 'bail' ? `BAIL at ${pc(bid)}` : ex.action === 'SELL' ? `SELL NOW at ${pc(bid)}` : ex.action === 'WAIT' ? 'SETTLING' : 'HOLD';
     const worth = ex.net != null ? ex.net * pos.contracts : null;
     const where = row?.strike ? ` ${pos.side === 'YES' ? 'above' : 'below'} ${usd(row.strike, 0)}` : '';
     const signs = ex.signs?.length ? ex.signs.map((x) => `<li>${esc(x)}</li>`).join('') : '<li class="calm">No flip signs</li>';
@@ -540,6 +544,7 @@ function renderDeck(snap, live, sig, now) {
   if (state.feedDown == null) state.feedDown = down;
   else if (down !== state.feedDown) { state.feedDown = down; alerts.event(down ? 'feedDown' : 'feedUp', down ? 'Live data lost' : 'Live data back', down ? 'prices are more than 30s old; calls paused until they refresh' : 'prices are fresh again'); }
 
+  renderSuggestions(snap, live, sig, now);
   renderTape();
 
   // The chart's trend (EMA 9 vs 21 on 1-minute closes): when it turns and holds 15s, the bull or bear charges in
@@ -558,6 +563,33 @@ function renderDeck(snap, live, sig, now) {
   $('notes').innerHTML = (head ? `<li><time>now</time><span>${esc(head)}</span></li>` : '') +
     state.notes.slice(0, 12).map((n) => `<li class="${noteClass(n.key)}"><time>${clock(n.t)}</time><span>${esc(n.text)}</span></li>`).join('');
   if ($('view-chart').classList.contains('active')) drawChartTab();
+}
+
+// ---------- suggestions: confident buys, buy light, sell high (public/suggest.js) ----------
+function renderSuggestions(snap, live, sig, now) {
+  const items = [];
+  const e = live && live.ev.minutesLeft > 0 ? suggestEntry(sig, live.ev, settings) : { kind: 'none' };
+  const el = $('suggest');
+  el.hidden = !live || e.kind === 'none';
+  if (!el.hidden) {
+    el.className = `suggest ${e.kind}`;
+    const size = e.contracts && e.price ? ` · ${dollars(e.contracts * e.price)}${e.kind === 'light' ? ' (light)' : ''}` : '';
+    $('sugTitle').textContent = `${e.title}${size}`; $('sugWhy').textContent = e.why;
+    if (e.kind !== 'wait') items.push({ kind: e.kind, label: e.kind === 'confident' ? 'CONFIDENT BUY' : e.kind === 'light' ? 'BUY LIGHT' : 'BUY', text: `${e.side === 'YES' ? 'UP' : 'DOWN'} at ${pc(e.price)}${size}`, why: e.why });
+    // a light buy is worth one heads-up per round and side
+    if (e.kind === 'light') alerts.event('light', e.title, e.why, `light:${live.m.ticker}:${e.side}`);
+  }
+  for (const pos of state.positions) {
+    const c = state.posChecks?.[pos.id];
+    if (!c) continue;
+    const x = suggestExit(c.ex);
+    if (x.kind === 'none' || x.kind === 'settle') continue;
+    const label = { sellHigh: 'SELL HIGH', bail: 'BAIL', watch: 'WATCH', hold: 'HOLD' }[x.kind];
+    items.push({ kind: x.kind, label, text: `${pos.side === 'YES' ? 'UP' : 'DOWN'} from ${pc(pos.price)}${c.bid != null ? ` · sells at ${pc(c.bid)}` : ''}${c.ex.pnl != null ? ` (${money(c.ex.pnl)})` : ''}`, why: x.kind === 'hold' ? `Worth ${pc(c.pSide)} to the bot; holding beats selling now.` : x.why });
+  }
+  $('sugCard').hidden = !items.length;
+  $('sugWhen').textContent = items.length ? clock(now) : '';
+  $('sugList').innerHTML = items.map((i) => `<li class="${i.kind}"><b>${i.label}</b><span>${esc(i.text)}<small>${esc(i.why)}</small></span></li>`).join('');
 }
 
 // ---------- Chart tab ----------
@@ -701,7 +733,7 @@ function render() {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
-        if (alerts.prefs().lockAnim && !alerts.prefs().quiet) fx.lockIn({ side: call, conf: sig.deep?.score, hold: sig.hold, price: sig.price });
+        if (alerts.prefs().lockAnim && !alerts.prefs().quiet) fx.lockIn({ side: call, conf: sig.deep?.score, hold: sig.hold, price: sig.price, confident: (sig.deep?.score ?? 0) >= 90 && (sig.hold ?? 0) >= 0.9 });
         alerts.event('call', `Call: ${call === 'YES' ? 'UP' : 'DOWN'} at ${pc(sig.price)}`, `confidence ${sig.deep?.score ?? '—'}${sig.hold != null ? ` · hold odds ${Math.round(sig.hold * 100)}%` : ''} · target ${usd(strike, 0)}`, key, Date.now(), callSound(call));
       }
     }

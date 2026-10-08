@@ -42,6 +42,10 @@
         <div class="tile"><label>Contract</label><b id="stContract">—</b><small id="stContractSub"></small></div>
         <div class="tile"><label>Bot record</label><b id="stRecord">—</b><small id="stRecordSub"></small></div>
       </div>
+      <div class="card sug-card" id="sugCard" hidden>
+        <div class="deep-head"><span>Suggestions</span><b id="sugWhen"></b></div>
+        <ul id="sugList" class="sug-list"></ul>
+      </div>
       <div id="positions"></div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
@@ -50,6 +54,7 @@
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
         <div class="conf" id="conf" hidden></div>
+        <div class="suggest" id="suggest" hidden><b id="sugTitle"></b><span id="sugWhy"></span></div>
         <div class="hold" id="holdBox" hidden>
           <div class="hold-row"><span>Confidence</span><b id="confBig">—</b><span>Hold odds</span><b id="holdBig">—</b><span>Flip risk</span><b id="flipBig">—</b></div>
           <div class="hold-bar"><i id="holdFill"></i></div>
@@ -279,7 +284,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.5 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.6 · calls only (no auto-trading)</p>
     </section>
   </main>
 

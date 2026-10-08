@@ -10,6 +10,7 @@ export const ALERT_GROUPS = [
     ['win', 'Call won at settlement (cash register)', true, true],
     ['loss', 'Call lost at settlement', false, true],
     ['sitout', 'Round ended with no call ("Wait.")', true, false],
+    ['light', 'Buy light: a smaller bet just under the bar', false, true],
   ] },
   { title: 'Market warnings', events: [
     ['flip', 'Flip warning: the bot now leans against your call', true, true],
@@ -24,7 +25,8 @@ export const ALERT_GROUPS = [
     ['whaleSell', 'Whale sell', false, true],
   ] },
   { title: 'Your positions', events: [
-    ['sell', 'Sell signal on a position ("Bail!")', true, true],
+    ['sellHigh', 'Sell high: take the profit (cash register)', true, true],
+    ['sell', 'Bail: cut a losing position ("Bail!")', true, true],
   ] },
   { title: 'Feed health', events: [
     ['feedDown', 'Live data lost', true, true],
@@ -80,7 +82,7 @@ export function sustained(state, key, on, now = Date.now(), ms = 10000) {
 
 // Recorded sounds (public/sounds/*.mp3, made by scripts/make-sounds.py) for the big moments; a call picks bull or
 // bear by its side. Anything without a file plays its tone pattern below (also the fallback if a file can't load).
-export const SOUND_FILES = { win: 'register', sitout: 'wait', sell: 'bail', trendBull: 'bull', trendBear: 'bear' };
+export const SOUND_FILES = { win: 'register', sellHigh: 'register', sitout: 'wait', sell: 'bail', trendBull: 'bull', trendBear: 'bear' };
 export const callSound = (side) => (side === 'YES' ? 'bull' : 'bear');
 
 // Tone patterns per event: [frequency Hz, duration ms] notes; rising for good news, falling for bad
@@ -88,6 +90,6 @@ export const TONES = {
   call: [[660, 90], [880, 140]], win: [[523, 90], [659, 90], [784, 160]], loss: [[392, 140], [311, 200]], sitout: [[440, 80]],
   flip: [[880, 90], [660, 90], [880, 90]], fliprisk: [[600, 120], [600, 120]], cross: [[740, 100]], pressure: [[500, 80], [700, 80]],
   whaleBuy: [[300, 70], [450, 120]], whaleSell: [[450, 70], [300, 120]], sell: [[988, 100], [988, 100], [784, 160]],
-  feedDown: [[330, 250]], feedUp: [[523, 80], [659, 120]],
+  feedDown: [[330, 250]], feedUp: [[523, 80], [659, 120]], light: [[587, 70], [740, 110]],
   trendBull: [[392, 70], [523, 70], [659, 70], [784, 160]], trendBear: [[784, 70], [659, 70], [523, 70], [392, 160]],
 };
