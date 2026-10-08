@@ -350,3 +350,50 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
 .tape-list li.new { animation: flash .8s ease-out; }
 @keyframes flash { from { background: #22d3ee22; } }
 @media (prefers-reduced-motion: reduce) { .tape-list li.new { animation: none; } }
+
+/* ---------- big moments (fx.js) ---------- */
+.fx { position: fixed; inset: 0; z-index: 40; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+.fx.lockin { pointer-events: auto; background: radial-gradient(circle at 50% 45%, #05070dcc, #05070df2 70%); backdrop-filter: blur(3px); animation: fxIn .25s ease-out, fxOut .45s ease-in 2.75s forwards; }
+.lk-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 34px; border-radius: 24px; background: #0b1120; animation: slam .55s cubic-bezier(.2, 1.6, .4, 1) both; }
+.fx.up .lk-card { border: 2px solid var(--yes); box-shadow: 0 0 40px #2ee6a677, inset 0 0 30px #2ee6a622; --c: var(--yes); }
+.fx.down .lk-card { border: 2px solid var(--no); box-shadow: 0 0 40px #ff4d6d77, inset 0 0 30px #ff4d6d22; --c: var(--no); }
+.lk-beast { width: 120px; height: 120px; filter: drop-shadow(0 0 18px var(--c)); animation: beastIn .6s cubic-bezier(.2, 1.5, .4, 1) .08s both, breathe 1.4s ease-in-out .7s infinite; }
+.lk-call { font: 900 64px/1 var(--sans); letter-spacing: 6px; color: var(--c); text-shadow: 0 0 30px var(--c); animation: callIn .45s ease-out .2s both; }
+.lk-row { display: flex; align-items: center; gap: 10px; font: 800 15px var(--mono); letter-spacing: 3px; color: var(--text); animation: callIn .4s ease-out .45s both; }
+.lk-sub { font: 500 12px var(--mono); color: var(--muted); animation: callIn .4s ease-out .6s both; }
+.lock { width: 30px; height: 34px; fill: none; stroke: var(--c); stroke-width: 3.5; stroke-linecap: round; filter: drop-shadow(0 0 6px var(--c)); animation: clunk .25s ease-out 1.05s both; }
+.lock rect { fill: #05070d; } .lock circle { fill: var(--c); stroke: none; }
+.lock .shackle { transform: translateY(-9px); animation: snap .22s cubic-bezier(.5, 0, .7, 1.4) .85s forwards; }
+.lk-ring { position: absolute; inset: -2px; border-radius: 24px; border: 2px solid var(--c); opacity: 0; animation: ring 1s ease-out 1.05s both; }
+.lk-ring.r2 { animation-delay: 1.25s; }
+@keyframes fxIn { from { opacity: 0; } } @keyframes fxOut { to { opacity: 0; } }
+@keyframes slam { from { transform: scale(2.2) rotate(-6deg); opacity: 0; } 60% { transform: scale(.94) rotate(1deg); opacity: 1; } }
+@keyframes beastIn { from { transform: translateY(-40px) scale(.4); opacity: 0; } }
+@keyframes breathe { 50% { transform: scale(1.06); } }
+@keyframes callIn { from { transform: translateY(12px); opacity: 0; } }
+@keyframes snap { to { transform: translateY(0); } }
+@keyframes clunk { 30% { transform: translateY(3px) rotate(-6deg); } 60% { transform: rotate(4deg); } }
+@keyframes ring { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
+/* the charge */
+.fx.charge { align-items: flex-start; padding-top: calc(120px + env(safe-area-inset-top)); flex-direction: column; animation: fxOut .5s ease-in 2.3s forwards; }
+.ch-lane { position: relative; width: 100%; height: 110px; overflow: hidden; }
+.ch-runner { position: absolute; top: 10px; left: 0; width: 96px; height: 96px; }
+.fx.bull .ch-runner { animation: runRight 2.2s cubic-bezier(.45, .05, .55, .95) both; }
+.fx.bear .ch-runner { animation: runLeft 2.2s cubic-bezier(.45, .05, .55, .95) both; }
+.ch-runner img { width: 96px; height: 96px; animation: gallop .28s ease-in-out infinite; }
+.fx.bull .ch-runner img { filter: drop-shadow(0 0 16px #2ee6a6); } .fx.bear .ch-runner img { filter: drop-shadow(0 0 16px #ff4d6d); transform-origin: center; }
+.dust { position: absolute; bottom: 4px; width: 16px; height: 16px; border-radius: 50%; background: #8b95a766; animation: puff .5s ease-out infinite; }
+.fx.bull .dust { left: -6px; } .fx.bear .dust { right: -6px; }
+.dust.d2 { animation-delay: .17s; bottom: 12px; } .dust.d3 { animation-delay: .34s; bottom: 0; }
+.ch-text { align-self: center; margin: 0 12px; padding: 10px 16px; border-radius: 14px; background: #05070de0; backdrop-filter: blur(4px); text-align: center; font: 900 24px var(--sans); letter-spacing: 3px; animation: callIn .4s ease-out .3s both; }
+.fx.bull .ch-text { border: 1px solid #2ee6a666; } .fx.bear .ch-text { border: 1px solid #ff4d6d66; }
+.fx.bull .ch-text { color: var(--yes); text-shadow: 0 0 24px #2ee6a6aa; } .fx.bear .ch-text { color: var(--no); text-shadow: 0 0 24px #ff4d6daa; }
+.ch-text small { display: block; font: 500 11px var(--mono); letter-spacing: 0; color: var(--muted); text-shadow: none; margin-top: 4px; }
+@keyframes runRight { from { transform: translateX(-120px); } to { transform: translateX(calc(100vw + 20px)); } }
+@keyframes runLeft { from { transform: translateX(calc(100vw + 20px)) scaleX(-1); } to { transform: translateX(-120px) scaleX(-1); } }
+@keyframes gallop { 50% { transform: translateY(-9px) rotate(-5deg); } }
+@keyframes puff { from { transform: scale(.4); opacity: .9; } to { transform: scale(1.8) translateX(-14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .lk-card, .lk-beast, .lk-call, .lk-row, .lk-sub, .lock, .lock .shackle, .lk-ring, .ch-runner, .ch-runner img, .dust, .ch-text { animation: none !important; }
+  .lock .shackle { transform: none; } .ch-runner { left: calc(50% - 48px); } .dust { display: none; }
+}

@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="fx" class="fx" hidden aria-live="polite"></div>
   <div id="banner" class="banner" hidden><b id="bannerTitle"></b><span id="bannerText"></span></div>
   <header>
     <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <span class="tag">BTC · 15m</span></h1>
@@ -152,6 +153,8 @@
         <h3>Alert center</h3>
         <p class="push-status">Pick what beeps and what shows a banner. One banner at a time; everything also goes to the history below. Push notifications (Settings) still bring buy and sell calls when the app is closed.</p>
         <div class="sw-row"><label><input type="checkbox" id="alSounds"> Sounds</label><label><input type="checkbox" id="alVisuals"> Banners</label><label><input type="checkbox" id="alQuiet"> Quiet mode</label></div>
+        <div class="sw-row"><label><input type="checkbox" id="alLockAnim"> Call lock-in animation</label><label><input type="checkbox" id="alTrendAnim"> Bull / bear charge</label></div>
+        <div class="pos-btns"><button id="fxTryLock" class="ghost">Preview lock-in</button><button id="fxTryBull" class="ghost">Preview bull run</button></div>
         <button id="alUnlock" class="ghost">Tap to enable sound on this phone</button>
         <div class="num-grid">
           <label>Volume %<input id="alVolume" inputmode="numeric"></label>
@@ -262,7 +265,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v6.2 · calls only (no auto-trading)</p>
+      <p class="fine" id="version">Shot Caller v6.3 · calls only (no auto-trading)</p>
     </section>
   </main>
 

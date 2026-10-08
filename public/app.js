@@ -7,6 +7,8 @@ import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
 import { sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
+import { createFx, trendTurn } from './fx.js';
+import { ema } from './indicators.js';
 import { confTier } from './analysis.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -353,6 +355,10 @@ function oddsRows(ev, minEdge) {
 // ---------- v6 deck: status tiles, hold meter, price boxes, tug of war, live notes, market events ----------
 const alerts = createAlertCenter({ $, store, esc, clock, onNote: (key, title, text) => addNote(key, `${title}${text ? ` · ${text}` : ''}`) });
 const flow = newFlow();
+const fx = createFx($);
+const trendState = {};
+$('fxTryLock').addEventListener('click', () => fx.lockIn({ side: 'YES', conf: 91, hold: 0.87, price: 0.72 }));
+$('fxTryBull').addEventListener('click', () => { alerts.play('trendBull'); fx.charge('bull'); });
 const watch = {}; // sustained conditions for alerts (alerts.js)
 state.notes = [];
 function addNote(key, text, t = Date.now()) {
@@ -536,6 +542,16 @@ function renderDeck(snap, live, sig, now) {
 
   renderTape();
 
+  // The chart's trend (EMA 9 vs 21 on 1-minute closes): when it turns and holds 15s, the bull or bear charges in
+  const cl = snap.bars.map((b) => b.c), f9 = ema(cl, 9), f21 = ema(cl, 21);
+  const tNow = f9.at(-1) != null && f21.at(-1) != null ? (f9.at(-1) >= f21.at(-1) ? 'bull' : 'bear') : null;
+  const turn = trendTurn(trendState, tNow, now);
+  if (turn) {
+    const p = alerts.prefs();
+    if (p.trendAnim && !p.quiet) fx.charge(turn);
+    alerts.event(turn === 'bull' ? 'trendBull' : 'trendBear', turn === 'bull' ? 'Chart turned bull' : 'Chart turned bear', `EMA 9 crossed ${turn === 'bull' ? 'above' : 'below'} EMA 21 at ${usd(cl.at(-1), 0)}`);
+  }
+
   // Live notes
   const head = live && sig?.deep ? `BTC ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
   $('notesWhen').textContent = `updated ${clock(now)}`;
@@ -685,6 +701,7 @@ function render() {
       if (!state.alerted[key]) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
+        if (alerts.prefs().lockAnim && !alerts.prefs().quiet) fx.lockIn({ side: call, conf: sig.deep?.score, hold: sig.hold, price: sig.price });
         alerts.event('call', `Call: ${call === 'YES' ? 'UP' : 'DOWN'} at ${pc(sig.price)}`, `confidence ${sig.deep?.score ?? '—'}${sig.hold != null ? ` · hold odds ${Math.round(sig.hold * 100)}%` : ''} · target ${usd(strike, 0)}`, key);
       }
     }

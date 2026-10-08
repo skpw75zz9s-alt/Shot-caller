@@ -16,6 +16,8 @@ export const ALERT_GROUPS = [
     ['fliprisk', 'High flip risk: hold odds fell below your threshold', false, true],
     ['cross', 'BTC crossed the target', false, true],
     ['pressure', 'Buy/sell pressure flipped', false, false],
+    ['trendBull', 'Chart turns bull (EMA 9 crosses above 21)', false, false],
+    ['trendBear', 'Chart turns bear (EMA 9 crosses below 21)', false, false],
   ] },
   { title: 'Whale trades', events: [
     ['whaleBuy', 'Whale buy', false, true],
@@ -40,6 +42,8 @@ export const ALERT_DEFAULTS = {
   cooldownSec: 30,
   whaleMin: 100000,  // dollars in one Coinbase trade
   flipRisk: 35,      // out of 100: flip risk (100 - hold odds) above this, held 10s, is "high"
+  lockAnim: true,    // the call lock-in animation (fx.js)
+  trendAnim: true,   // the bull / bear charge when the chart's trend turns
   events: Object.fromEntries(Object.entries(ALERT_EVENTS).map(([k, e]) => [k, { sound: e.sound, visual: e.visual }])),
 };
 
@@ -80,4 +84,5 @@ export const TONES = {
   flip: [[880, 90], [660, 90], [880, 90]], fliprisk: [[600, 120], [600, 120]], cross: [[740, 100]], pressure: [[500, 80], [700, 80]],
   whaleBuy: [[300, 70], [450, 120]], whaleSell: [[450, 70], [300, 120]], sell: [[988, 100], [988, 100], [784, 160]],
   feedDown: [[330, 250]], feedUp: [[523, 80], [659, 120]],
+  trendBull: [[392, 70], [523, 70], [659, 70], [784, 160]], trendBear: [[784, 70], [659, 70], [523, 70], [392, 160]],
 };

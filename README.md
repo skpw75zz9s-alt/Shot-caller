@@ -40,6 +40,10 @@ Six tabs along the bottom:
     - position sell signals, and live data lost or back.
   - Quiet mode, volume, banner length, repeat cooldown, whale minimum and flip-risk threshold, plus an alert history.
   - Tones are generated in the browser; no sound files are needed. Phones need one tap to allow sound.
+  - **Call lock-in animation:** when the bot makes a call, the bull (UP) or bear (DOWN) slams in, the padlock snaps shut, and "CALL LOCKED" shows with the confidence, hold odds and price. It lasts about 3 seconds; tap to dismiss.
+  - **Bull / bear charge:** when the 1-minute chart turns bullish (EMA 9 crosses above EMA 21 and holds for 15 seconds), the bull gallops across the screen with "BULLS TAKING OVER". A bearish turn sends the bear the other way.
+    - The first trend after opening the app doesn't count, and a quick wiggle across doesn't either.
+    - Both animations can be switched off and previewed in Alerts. Quiet mode silences them, and the phone's reduce-motion setting turns them into a simple fade.
 - **Record.** The bot's graded call record, your trades, and what the bot has learned.
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.

@@ -84,3 +84,15 @@ test('alerts: per-event switches, cooldown, quiet mode keeps history, sustained 
   sustained(st, 'flip', false, 21000);
   assert.equal(sustained(st, 'flip', true, 22000), false, 'starts over');
 });
+
+test('trend turns: confirmed after 15s, the first trend is not a turn, flips fire once', async () => {
+  const { trendTurn } = await import('../public/fx.js');
+  const st = {};
+  assert.equal(trendTurn(st, 'bear', 0), null);
+  assert.equal(trendTurn(st, 'bear', 20000), null, 'first confirmed trend: no animation on app open');
+  assert.equal(trendTurn(st, 'bull', 21000), null);
+  assert.equal(trendTurn(st, 'bear', 25000), null, 'a 4-second wiggle across');
+  assert.equal(trendTurn(st, 'bull', 26000), null);
+  assert.equal(trendTurn(st, 'bull', 41000), 'bull', 'held 15s: the bull charges');
+  assert.equal(trendTurn(st, 'bull', 60000), null, 'once');
+});

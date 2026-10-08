@@ -61,6 +61,7 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
 
   function render() {
     $('alSounds').checked = prefs.sounds; $('alVisuals').checked = prefs.visuals; $('alQuiet').checked = prefs.quiet;
+    $('alLockAnim').checked = prefs.lockAnim; $('alTrendAnim').checked = prefs.trendAnim;
     $('alVolume').value = prefs.volume; $('alBanner').value = prefs.bannerSec; $('alCooldown').value = prefs.cooldownSec;
     $('alWhale').value = prefs.whaleMin; $('alFlip').value = prefs.flipRisk;
     $('alUnlock').textContent = audio?.state === 'running' ? 'Sound is on for this visit ✓' : 'Tap to enable sound on this phone';
@@ -76,6 +77,8 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
   num('alVolume', 'volume', 0, 100); num('alBanner', 'bannerSec', 1, 30); num('alCooldown', 'cooldownSec', 0, 3600); num('alWhale', 'whaleMin', 1000, 1e8); num('alFlip', 'flipRisk', 1, 99);
   $('alSounds').addEventListener('change', () => { prefs.sounds = $('alSounds').checked; if (prefs.sounds) unlock(); save(); render(); });
   $('alVisuals').addEventListener('change', () => { prefs.visuals = $('alVisuals').checked; save(); });
+  $('alLockAnim').addEventListener('change', () => { prefs.lockAnim = $('alLockAnim').checked; save(); });
+  $('alTrendAnim').addEventListener('change', () => { prefs.trendAnim = $('alTrendAnim').checked; save(); });
   // Quiet mode keeps your switches as they are and only mutes; turning it off restores everything
   $('alQuiet').addEventListener('change', () => { prefs.quiet = $('alQuiet').checked; save(); });
   $('alUnlock').addEventListener('click', () => { if (unlock()) { prefs.sounds = true; save(); play('call'); } render(); });
@@ -96,5 +99,5 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
   // Any first tap unlocks audio if sounds are on (phones need a gesture)
   document.addEventListener('click', () => { if (prefs.sounds && !audio) unlock(); }, { once: true });
 
-  return { event, render, prefs: () => prefs, defaults: ALERT_DEFAULTS };
+  return { event, render, play, prefs: () => prefs, defaults: ALERT_DEFAULTS };
 }
