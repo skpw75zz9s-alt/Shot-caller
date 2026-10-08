@@ -5,7 +5,7 @@ import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.
 import { CHART_TOGGLES, chartDefaults, drawPro } from './chart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
-import { sustained } from './alerts.js';
+import { callSound, sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
 import { ema } from './indicators.js';
@@ -357,7 +357,7 @@ const alerts = createAlertCenter({ $, store, esc, clock, onNote: (key, title, te
 const flow = newFlow();
 const fx = createFx($);
 const trendState = {};
-$('fxTryLock').addEventListener('click', () => fx.lockIn({ side: 'YES', conf: 91, hold: 0.87, price: 0.72 }));
+$('fxTryLock').addEventListener('click', () => { alerts.play('call', 'bull'); fx.lockIn({ side: 'YES', conf: 91, hold: 0.87, price: 0.72 }); });
 $('fxTryBull').addEventListener('click', () => { alerts.play('trendBull'); fx.charge('bull'); });
 const watch = {}; // sustained conditions for alerts (alerts.js)
 state.notes = [];
@@ -702,7 +702,7 @@ function render() {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
         if (alerts.prefs().lockAnim && !alerts.prefs().quiet) fx.lockIn({ side: call, conf: sig.deep?.score, hold: sig.hold, price: sig.price });
-        alerts.event('call', `Call: ${call === 'YES' ? 'UP' : 'DOWN'} at ${pc(sig.price)}`, `confidence ${sig.deep?.score ?? '—'}${sig.hold != null ? ` · hold odds ${Math.round(sig.hold * 100)}%` : ''} · target ${usd(strike, 0)}`, key);
+        alerts.event('call', `Call: ${call === 'YES' ? 'UP' : 'DOWN'} at ${pc(sig.price)}`, `confidence ${sig.deep?.score ?? '—'}${sig.hold != null ? ` · hold odds ${Math.round(sig.hold * 100)}%` : ''} · target ${usd(strike, 0)}`, key, Date.now(), callSound(call));
       }
     }
     // Aggressive scale-in: tell people who hold the call that the gap grew

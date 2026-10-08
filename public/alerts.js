@@ -6,10 +6,10 @@
 
 export const ALERT_GROUPS = [
   { title: 'Calls & results', events: [
-    ['call', 'New call (locked for the round)', true, true],
-    ['win', 'Call won at settlement', true, true],
+    ['call', 'New call (bull for UP, bear roar for DOWN)', true, true],
+    ['win', 'Call won at settlement (cash register)', true, true],
     ['loss', 'Call lost at settlement', false, true],
-    ['sitout', 'Round ended with no call (sat out)', false, false],
+    ['sitout', 'Round ended with no call ("Wait.")', true, false],
   ] },
   { title: 'Market warnings', events: [
     ['flip', 'Flip warning: the bot now leans against your call', true, true],
@@ -24,7 +24,7 @@ export const ALERT_GROUPS = [
     ['whaleSell', 'Whale sell', false, true],
   ] },
   { title: 'Your positions', events: [
-    ['sell', 'Sell signal on a position', true, true],
+    ['sell', 'Sell signal on a position ("Bail!")', true, true],
   ] },
   { title: 'Feed health', events: [
     ['feedDown', 'Live data lost', true, true],
@@ -77,6 +77,11 @@ export function sustained(state, key, on, now = Date.now(), ms = 10000) {
   if (!s.fired && now - s.since >= ms) { s.fired = true; return true; }
   return false;
 }
+
+// Recorded sounds (public/sounds/*.mp3, made by scripts/make-sounds.py) for the big moments; a call picks bull or
+// bear by its side. Anything without a file plays its tone pattern below (also the fallback if a file can't load).
+export const SOUND_FILES = { win: 'register', sitout: 'wait', sell: 'bail', trendBull: 'bull', trendBear: 'bear' };
+export const callSound = (side) => (side === 'YES' ? 'bull' : 'bear');
 
 // Tone patterns per event: [frequency Hz, duration ms] notes; rising for good news, falling for bad
 export const TONES = {

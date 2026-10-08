@@ -39,7 +39,13 @@ Six tabs along the bottom:
     - BTC crossing the target, pressure flips, whale buys and sells;
     - position sell signals, and live data lost or back.
   - Quiet mode, volume, banner length, repeat cooldown, whale minimum and flip-risk threshold, plus an alert history.
-  - Tones are generated in the browser; no sound files are needed. Phones need one tap to allow sound.
+  - **Sounds:**
+    - UP calls get a bull (snort and bellow) and DOWN calls a bear roar; chart trend turns use the same two.
+    - Sitting out a round says "Wait." and a sell signal shouts "Bail!".
+    - A win rings a cash register.
+    - Everything else has its own tone.
+  - The clips are `public/sounds/*.mp3`, synthesized from scratch by `scripts/make-sounds.py`: no samples, no licenses. Rerun it to tweak them.
+  - Phones need one tap to allow sound. Push notifications with the app closed use the phone's normal notification sound, because the web can't attach custom sounds to them.
   - **Call lock-in animation:** when the bot makes a call, the bull (UP) or bear (DOWN) slams in, the padlock snaps shut, and "CALL LOCKED" shows with the confidence, hold odds and price. It lasts about 3 seconds; tap to dismiss.
   - **Bull / bear charge:** when the 1-minute chart turns bullish (EMA 9 crosses above EMA 21 and holds for 15 seconds), the bull gallops across the screen with "BULLS TAKING OVER". A bearish turn sends the bear the other way.
     - The first trend after opening the app doesn't count, and a quick wiggle across doesn't either.

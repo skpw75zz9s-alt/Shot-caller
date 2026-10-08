@@ -1,6 +1,6 @@
-// Alert center in the browser: banners (one at a time), tones (Web Audio, no sound files), the Alerts tab and
-// its history. The rules live in alerts.js.
-import { ALERT_DEFAULTS, ALERT_EVENTS, ALERT_GROUPS, TONES, alertPrefs, routeAlert } from './alerts.js';
+// Alert center in the browser: banners (one at a time), sounds (Web Audio: recorded clips for the big moments, tones
+// for the rest), the Alerts tab and its history. The rules live in alerts.js.
+import { ALERT_DEFAULTS, ALERT_EVENTS, ALERT_GROUPS, SOUND_FILES, TONES, alertPrefs, routeAlert } from './alerts.js';
 
 const KIND = { win: 'good', whaleBuy: 'good', feedUp: 'good', loss: 'bad', whaleSell: 'bad', feedDown: 'bad', flip: 'warn', fliprisk: 'warn', sell: 'warn', cross: 'warn', pressure: 'warn' };
 
@@ -9,16 +9,37 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
   const log = { last: {}, history: store.get('alertHistory', []) };
   let audio = null;
   const queue = [];
-  let showing = false;
+  let showing = false, previewFlip = false, bannerTimer = null;
 
   const save = () => store.set('alertPrefs', prefs);
+  const clips = {}; // name -> Promise<AudioBuffer | null>
+  function load(name) {
+    if (!audio) return Promise.resolve(null);
+    return (clips[name] ||= fetch(`sounds/${name}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((b) => b && new Promise((ok, fail) => audio.decodeAudioData(b, ok, fail))).catch(() => null)); // Safari wants callbacks
+  }
   function unlock() {
     try { audio ||= new (window.AudioContext || window.webkitAudioContext)(); audio.resume?.(); } catch { audio = null; }
+    if (audio) for (const n of ['bull', 'bear', 'wait', 'bail', 'register']) load(n); // decode ahead so they play instantly
     return !!audio;
   }
-  function play(key) {
+  // key: the event; clip: a sound file to use instead of the event's own (e.g. bull / bear for a call)
+  function play(key, clip = SOUND_FILES[key]) {
     if (!audio || audio.state !== 'running') return;
-    const vol = Math.max(0, Math.min(1, prefs.volume / 100)) * 0.3;
+    const vol = Math.max(0, Math.min(1, prefs.volume / 100));
+    if (clip) {
+      load(clip).then((buf) => {
+        if (!buf) return tones(key, vol);
+        const src = audio.createBufferSource(), g = audio.createGain();
+        src.buffer = buf; g.gain.value = Math.min(1, vol * 1.6);
+        src.connect(g).connect(audio.destination); src.start();
+      });
+      return;
+    }
+    tones(key, vol);
+  }
+  function tones(key, volume) {
+    const vol = volume * 0.3;
     let t = audio.currentTime + 0.02;
     for (const [f, ms] of TONES[key] || [[660, 120]]) {
       const o = audio.createOscillator(), g = audio.createGain();
@@ -39,14 +60,14 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
     $('banner').className = `banner ${KIND[b.key] || ''}`;
     $('bannerTitle').textContent = b.title; $('bannerText').textContent = b.text || '';
     $('banner').hidden = false;
-    setTimeout(next, Math.max(1, prefs.bannerSec) * 1000);
+    bannerTimer = setTimeout(next, Math.max(1, prefs.bannerSec) * 1000);
   }
 
   // Fire an event: history always, then sound and/or banner if allowed. dedupe narrows the cooldown key.
-  function event(key, title, text = '', dedupe = key, now = Date.now()) {
+  function event(key, title, text = '', dedupe = key, now = Date.now(), clip) {
     const r = routeAlert(prefs, log, key, `${title}${text ? ` · ${text}` : ''}`, now, dedupe);
     store.set('alertHistory', log.history.slice(0, 60));
-    if (r.sound) play(key);
+    if (r.sound) play(key, clip);
     if (r.visual) banner(key, title, text);
     onNote?.(key, title, text);
     renderHistory();
@@ -94,7 +115,10 @@ export function createAlertCenter({ $, store, esc, clock, onNote }) {
   $('alertGroups').addEventListener('click', (e) => {
     const k = e.target.dataset.preview;
     if (!k) return;
-    unlock(); play(k); banner(k, `Preview: ${ALERT_EVENTS[k].label}`, 'This is how it will look.');
+    unlock();
+    queue.length = 0; clearTimeout(bannerTimer); showing = false; // a preview replaces whatever banner is up
+    const clip = k === 'call' ? (previewFlip = !previewFlip) ? 'bull' : 'bear' : undefined; // UP and DOWN take turns
+    play(k, clip); banner(k, `Preview: ${ALERT_EVENTS[k].label}`, clip ? `${clip === 'bull' ? 'UP call: the bull' : 'DOWN call: the bear'}` : 'This is how it will look.');
   });
   // Any first tap unlocks audio if sounds are on (phones need a gesture)
   document.addEventListener('click', () => { if (prefs.sounds && !audio) unlock(); }, { once: true });
