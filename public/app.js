@@ -2,7 +2,7 @@ import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskL
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
-import { CHART_TOGGLES, chartDefaults, drawPro } from './chart.js';
+import { CHART_TOGGLES, chartDefaults, drawOrders, drawPro, groupOrders } from './chart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
 import { callSound, sustained } from './alerts.js';
@@ -401,7 +401,7 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 
 // ---------- live orders from all markets (public/feeds.js) ----------
 // Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
-const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [] }; // big: $2k+ trades, 6h, for the chart
+const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: $2k+ trades, 6h, for the chart (bigV bumps on each)
 function handleTrades(trades) {
   const p = alerts.prefs();
   for (const x of trades) {
@@ -414,10 +414,11 @@ function handleTrades(trades) {
     x.whale = !!w;
     tape.list.unshift(x); tape.rate.push(Date.now());
     const usdx = x.price * x.size;
-    if (usdx >= 2000) tape.big.push({ t: x.t, price: x.price, usd: usdx, side: x.side, whale: x.whale, ex: x.ex });
+    if (usdx >= 2000) { tape.big.push({ t: x.t, price: x.price, usd: usdx, side: x.side, whale: x.whale, ex: x.ex }); tape.bigV++; }
     if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
+  orderFrame(); // new trades show on the chart right away, not at the next refresh
   if (tape.big.length > 4000 || (tape.big[0] && tape.big[0].t < Date.now() - 6 * 3600000)) tape.big = tape.big.filter((x) => x.t >= Date.now() - 6 * 3600000).slice(-3000);
 }
 const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; } });
@@ -693,10 +694,34 @@ async function drawChartTab(force = false) {
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}` }));
-  drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
-    strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine, viewFrom,
-    orders: tape.big, fills: chartFills(), now,
+  // The candles, indicators and panes redraw only when something on them changed; the live orders have their own layer
+  const lb = bars[bars.length - 1];
+  const key = [tf, $('proChart').clientWidth, bars.length, lb?.t, lb?.o, lb?.h, lb?.l, lb?.c, live?.strike, close, spot && Math.round(spot), state.callLog.length, JSON.stringify(chartState.show), Math.floor(now / 15000)].join('|');
+  if (key !== chartState.key || force) {
+    chartState.key = key;
+    chartState.geo = drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
+      strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
+      cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine, viewFrom,
+    }) || null;
+    chartState.groupsKey = null; // the time axis may have moved
+  }
+  orderFrame();
+}
+// The live-orders layer: redrawn on the next animation frame after a new trade, and every frame while a ping plays
+let orderRaf = 0;
+function orderFrame() {
+  if (orderRaf || !$('view-chart').classList.contains('active') || document.hidden) return;
+  orderRaf = requestAnimationFrame((ts) => {
+    orderRaf = 0;
+    if (ts - (chartState.layerAt || 0) < 32) return orderFrame(); // 30 frames a second is plenty, and kinder to the battery
+    chartState.layerAt = ts;
+    const geo = chartState.geo, cv = $('orderLayer');
+    if (!geo || !cv) return;
+    const gk = `${tape.bigV}|${geo.t0}|${geo.t1}|${geo.barMs}`;
+    if (gk !== chartState.groupsKey) { chartState.groupsKey = gk; chartState.groups = groupOrders(tape.big, geo.t0, geo.t1, geo.barMs); }
+    const fk = `${state.positions.length}|${state.trades.length}|${autopilot?.state()?.log?.[0]?.t ?? 0}`;
+    if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
+    if (drawOrders(cv, geo, { groups: chartState.groups, fills: chartState.fills, show: chartState.show, now: Date.now() })) orderFrame();
   });
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track

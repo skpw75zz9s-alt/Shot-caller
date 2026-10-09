@@ -156,56 +156,6 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
     lastX = X(i);
     if (is) beast(ctx, 'bull', X(i), Y(bars[i].l) + 16, 16, 0.9); else beast(ctx, 'bear', X(i), Y(bars[i].h) - 14, 16, 0.9);
   }
-  // Live orders: the big trades ($2k+) from the 5 exchange feeds, one bubble per candle per side at their average price.
-  // Bubble size = dollars, green = buyers lifting the ask, red = sellers hitting the bid, gold ring = a whale in it.
-  // A bubble with a fresh print pings.
-  if (show.orders && o.orders?.length) {
-    const t0 = bars[0].t, t1 = bars[bars.length - 1].t + barMs, nowT = o.now ?? Date.now();
-    // one bubble per candle per side: all that candle's big buys (or sells) together, at their average price
-    const groups = new Map();
-    for (const x of o.orders) {
-      if (x.t < t0 || x.t >= t1) continue;
-      const slotT = t0 + Math.floor((x.t - t0) / barMs) * barMs, k = `${slotT}:${x.side}`;
-      const g = groups.get(k) || { t: slotT + barMs / 2, side: x.side, usd: 0, pv: 0, n: 0, whale: false, last: 0 };
-      g.usd += x.usd; g.pv += x.price * x.usd; g.n++; g.whale ||= !!x.whale; g.last = Math.max(g.last, x.t);
-      groups.set(k, g);
-    }
-    const vis = [...groups.values()];
-    const big = Math.max(...vis.map((g) => g.usd), 1);
-    for (const g of vis) {
-      const price = g.pv / g.usd;
-      const cx = Xt(g.t) + (g.side === 'buy' ? -1 : 1) * Math.min(3, slot * 0.15), cy = Math.min(bot - 2, Math.max(top + 2, Y(price)));
-      const r = Math.max(2.5, Math.min(Math.max(4, slot * 0.9), 2 + 9 * Math.sqrt(g.usd / big)));
-      const col = g.side === 'buy' ? C.up : C.dn;
-      ctx.globalAlpha = 0.3; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
-      ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
-      if (g.whale) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, 7); ctx.stroke(); }
-      const age = nowT - g.last; // a fresh print pings
-      if (age < 6000) { ctx.globalAlpha = Math.max(0, 1 - age / 6000) * 0.8; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(cx, cy, r + 3 + age / 500, 0, 7); ctx.stroke(); }
-      ctx.globalAlpha = 1;
-    }
-    if (vis.length) {
-      ctx.font = '600 9px ui-monospace, monospace'; ctx.textAlign = 'right';
-      ctx.fillStyle = C.up; ctx.fillText('● buys', plotW - 46, top + 10); ctx.fillStyle = C.dn; ctx.fillText('● sells', plotW - 4, top + 10);
-      ctx.textAlign = 'start';
-    }
-  }
-  // Your trades and the Auto-trader's: a flag at the moment, on the BTC price then. B = bought, S = sold, ✕ = bailed
-  if (show.fills && o.fills?.length) {
-    const t0 = bars[0].t, t1 = bars[bars.length - 1].t + barMs;
-    for (const f of o.fills.filter((x) => x.t >= t0 && x.t < t1)) {
-      const i = Math.max(0, bars.findIndex((b) => b.t + barMs > f.t));
-      const cx = Xt(f.t), cy = Y(bars[i].c);
-      const col = f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24';
-      ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bot); ctx.stroke(); ctx.setLineDash([]);
-      const up = f.kind === 'buy', fy = up ? Math.min(bot - 10, cy + 16) : Math.max(top + 10, cy - 16);
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, fy, 8, 0, 7); ctx.fill();
-      ctx.fillStyle = '#05070d'; ctx.font = '800 9px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText(f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S', cx, fy + 3);
-      if (show.labels && f.label) { ctx.fillStyle = col; ctx.font = '600 9px ui-monospace, monospace'; ctx.fillText(f.label, cx, up ? fy + 18 : fy - 12); }
-      ctx.textAlign = 'start';
-    }
-  }
   if (show.beasts && trend) { ctx.font = '800 10px system-ui'; ctx.fillStyle = trend === 'bull' ? C.up : C.dn; ctx.fillText(trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', 6, bot - 6); }
   if (show.labels) tag(ctx, plotW, Y(closes[closes.length - 1]), fmt(o.spot ?? closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true);
   ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = C.text;
@@ -242,6 +192,73 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
       line(r.ctx, m.map((x) => x.signal), X, Ym, '#fbbf24');
     }
   }
+  // Where everything sits, for the live-orders layer drawn on top (drawOrders)
+  return { t0: bars[0].t, t1: bars[bars.length - 1].t + barMs, barMs, slot, plotW, top, bot, w, h: H, Xt, Y, closeAt: (t) => bars[Math.max(0, bars.findIndex((b) => b.t + barMs > t))].c };
+}
+
+// ---------- the live-orders layer ----------
+// Its own transparent canvas over the chart, so a new trade (or a ping animating) redraws only this, not the candles,
+// indicators, RSI and MACD underneath.
+// Big trades ($2k+, 5 exchange feeds), one bubble per candle per side at their average price. Size = dollars,
+// green = buyers lifting the ask, red = sellers hitting the bid, gold ring = a whale in it; a fresh print pings.
+export function groupOrders(orders, t0, t1, barMs) {
+  const groups = new Map();
+  for (const x of orders) {
+    if (x.t < t0 || x.t >= t1) continue;
+    const slotT = t0 + Math.floor((x.t - t0) / barMs) * barMs, k = `${slotT}:${x.side}`;
+    const g = groups.get(k) || { t: slotT + barMs / 2, side: x.side, usd: 0, pv: 0, n: 0, whale: false, last: 0 };
+    g.usd += x.usd; g.pv += x.price * x.usd; g.n++; g.whale ||= !!x.whale; g.last = Math.max(g.last, x.t);
+    groups.set(k, g);
+  }
+  return [...groups.values()];
+}
+// Returns true while something on it is still animating (a ping), so the caller keeps asking for frames
+export function drawOrders(cv, geo, { groups = [], fills = [], show, now = Date.now() }) {
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(geo.w * dpr) || cv.height !== Math.round(geo.h * dpr)) { cv.width = Math.round(geo.w * dpr); cv.height = Math.round(geo.h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, geo.w, geo.h);
+  const { Xt, Y, top, bot, slot, plotW } = geo;
+  let animating = false;
+  if (show.orders && groups.length) {
+    const big = Math.max(...groups.map((g) => g.usd), 1);
+    for (const g of groups) {
+      const cx = Xt(g.t) + (g.side === 'buy' ? -1 : 1) * Math.min(3, slot * 0.15), cy = Math.min(bot - 2, Math.max(top + 2, Y(g.pv / g.usd)));
+      const r = Math.max(2.5, Math.min(Math.max(4, slot * 0.9), 2 + 9 * Math.sqrt(g.usd / big)));
+      const col = g.side === 'buy' ? C.up : C.dn;
+      ctx.globalAlpha = 0.3; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
+      if (g.whale) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, 7); ctx.stroke(); }
+      const age = now - g.last;
+      if (age >= 0 && age < 1500) { // a new print: the bubble swells in
+        const k = age / 1500;
+        ctx.globalAlpha = 1 - k; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 0.6 * (1 - k)), 0, 7); ctx.fill();
+      }
+      if (age >= 0 && age < 2400) { // ...and sends out a ring
+        const k = age / 2400;
+        ctx.globalAlpha = (1 - k) * 0.85; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2 + k * 18, 0, 7); ctx.stroke();
+        animating = true;
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.font = '600 9px ui-monospace, monospace'; ctx.textAlign = 'right';
+    ctx.fillStyle = C.up; ctx.fillText('● buys', plotW - 46, top + 10); ctx.fillStyle = C.dn; ctx.fillText('● sells', plotW - 4, top + 10);
+    ctx.textAlign = 'start';
+  }
+  // Your trades and the Auto-trader's: a flag at the moment, on the BTC price then. B = bought, S = sold, ✕ = bailed
+  if (show.fills) for (const f of fills.filter((x) => x.t >= geo.t0 && x.t < geo.t1)) {
+    const cx = Xt(f.t), cy = Y(geo.closeAt(f.t));
+    const col = f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24';
+    ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bot); ctx.stroke(); ctx.setLineDash([]);
+    const up = f.kind === 'buy', fy = up ? Math.min(bot - 10, cy + 16) : Math.max(top + 10, cy - 16);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, fy, 8, 0, 7); ctx.fill();
+    ctx.fillStyle = '#05070d'; ctx.font = '800 9px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S', cx, fy + 3);
+    if (show.labels && f.label) { ctx.fillStyle = col; ctx.font = '600 9px ui-monospace, monospace'; ctx.fillText(f.label, cx, up ? fy + 18 : fy - 12); }
+    ctx.textAlign = 'start';
+  }
+  return animating;
 }
 
 function line(ctx, ys, X, Y, col, dash = []) {

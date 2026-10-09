@@ -168,7 +168,7 @@
       <div class="card chart-pro">
         <div class="tf-btns" id="tfBtns"></div>
         <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
-        <canvas id="proChart" height="300"></canvas>
+        <div class="pro-wrap"><canvas id="proChart" height="300"></canvas><canvas id="orderLayer" class="order-layer" height="300" aria-hidden="true"></canvas></div>
         <canvas id="rsiChart" height="90"></canvas>
         <canvas id="macdChart" height="90"></canvas>
         <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: each candle's big trades ($2k+ on 5 exchanges) as a green bubble (buyers) and a red one (sellers) at their average price, sized by dollars; a gold ring means a whale was in it, and a fresh print pings. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
@@ -338,7 +338,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v8.1 · live orders on the chart</p>
+      <p class="fine" id="version">Shot Caller v8.2 · smooth live orders</p>
     </section>
   </main>
 

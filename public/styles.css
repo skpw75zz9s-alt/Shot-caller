@@ -595,3 +595,8 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .call.bail { color: var(--no); text-shadow: 0 0 24px #ff4d6d88; font-size: clamp(40px, 13vw, 64px); }
 .call-card.bail { border-color: #ff4d6d99; background: linear-gradient(180deg, #ff4d6d14, var(--panel) 60%); animation: alarm 1s ease-in-out 6; }
 .adm-row select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 9px 10px; font: 600 14px var(--sans); }
+
+/* the live-orders layer sits exactly on top of the chart and redraws on its own */
+.pro-wrap { position: relative; }
+.pro-wrap canvas#proChart { display: block; }
+.order-layer { position: absolute; left: 0; top: 0; width: 100%; height: 300px; pointer-events: none; }
