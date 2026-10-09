@@ -16,6 +16,7 @@ export const CHART_TOGGLES = [
   ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone to the close', true],
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
   ['beasts', 'Bull / bear trend + EMA crosses', true],
+  ['orders', 'Live orders (big trades, all exchanges)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
 ];
 export const chartDefaults = () => Object.fromEntries(CHART_TOGGLES.map(([k, , on]) => [k, on]));
 
@@ -154,6 +155,56 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
     if (X(i) - lastX < 30) continue; // crosses packed together: one marker, not a pile of them
     lastX = X(i);
     if (is) beast(ctx, 'bull', X(i), Y(bars[i].l) + 16, 16, 0.9); else beast(ctx, 'bear', X(i), Y(bars[i].h) - 14, 16, 0.9);
+  }
+  // Live orders: the big trades ($2k+) from the 5 exchange feeds, one bubble per candle per side at their average price.
+  // Bubble size = dollars, green = buyers lifting the ask, red = sellers hitting the bid, gold ring = a whale in it.
+  // A bubble with a fresh print pings.
+  if (show.orders && o.orders?.length) {
+    const t0 = bars[0].t, t1 = bars[bars.length - 1].t + barMs, nowT = o.now ?? Date.now();
+    // one bubble per candle per side: all that candle's big buys (or sells) together, at their average price
+    const groups = new Map();
+    for (const x of o.orders) {
+      if (x.t < t0 || x.t >= t1) continue;
+      const slotT = t0 + Math.floor((x.t - t0) / barMs) * barMs, k = `${slotT}:${x.side}`;
+      const g = groups.get(k) || { t: slotT + barMs / 2, side: x.side, usd: 0, pv: 0, n: 0, whale: false, last: 0 };
+      g.usd += x.usd; g.pv += x.price * x.usd; g.n++; g.whale ||= !!x.whale; g.last = Math.max(g.last, x.t);
+      groups.set(k, g);
+    }
+    const vis = [...groups.values()];
+    const big = Math.max(...vis.map((g) => g.usd), 1);
+    for (const g of vis) {
+      const price = g.pv / g.usd;
+      const cx = Xt(g.t) + (g.side === 'buy' ? -1 : 1) * Math.min(3, slot * 0.15), cy = Math.min(bot - 2, Math.max(top + 2, Y(price)));
+      const r = Math.max(2.5, Math.min(Math.max(4, slot * 0.9), 2 + 9 * Math.sqrt(g.usd / big)));
+      const col = g.side === 'buy' ? C.up : C.dn;
+      ctx.globalAlpha = 0.3; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
+      if (g.whale) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, 7); ctx.stroke(); }
+      const age = nowT - g.last; // a fresh print pings
+      if (age < 6000) { ctx.globalAlpha = Math.max(0, 1 - age / 6000) * 0.8; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(cx, cy, r + 3 + age / 500, 0, 7); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
+    if (vis.length) {
+      ctx.font = '600 9px ui-monospace, monospace'; ctx.textAlign = 'right';
+      ctx.fillStyle = C.up; ctx.fillText('● buys', plotW - 46, top + 10); ctx.fillStyle = C.dn; ctx.fillText('● sells', plotW - 4, top + 10);
+      ctx.textAlign = 'start';
+    }
+  }
+  // Your trades and the Auto-trader's: a flag at the moment, on the BTC price then. B = bought, S = sold, ✕ = bailed
+  if (show.fills && o.fills?.length) {
+    const t0 = bars[0].t, t1 = bars[bars.length - 1].t + barMs;
+    for (const f of o.fills.filter((x) => x.t >= t0 && x.t < t1)) {
+      const i = Math.max(0, bars.findIndex((b) => b.t + barMs > f.t));
+      const cx = Xt(f.t), cy = Y(bars[i].c);
+      const col = f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24';
+      ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bot); ctx.stroke(); ctx.setLineDash([]);
+      const up = f.kind === 'buy', fy = up ? Math.min(bot - 10, cy + 16) : Math.max(top + 10, cy - 16);
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, fy, 8, 0, 7); ctx.fill();
+      ctx.fillStyle = '#05070d'; ctx.font = '800 9px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S', cx, fy + 3);
+      if (show.labels && f.label) { ctx.fillStyle = col; ctx.font = '600 9px ui-monospace, monospace'; ctx.fillText(f.label, cx, up ? fy + 18 : fy - 12); }
+      ctx.textAlign = 'start';
+    }
   }
   if (show.beasts && trend) { ctx.font = '800 10px system-ui'; ctx.fillStyle = trend === 'bull' ? C.up : C.dn; ctx.fillText(trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', 6, bot - 6); }
   if (show.labels) tag(ctx, plotW, Y(closes[closes.length - 1]), fmt(o.spot ?? closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true);

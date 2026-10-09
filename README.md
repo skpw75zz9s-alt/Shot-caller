@@ -269,6 +269,15 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Live orders on the chart (v8.1)
+
+The Chart tab draws the live trades onto the candles:
+- **Order bubbles**: each candle's big trades ($2k+, all 5 exchange feeds) become a green bubble for buyers and a red bubble for sellers. Each bubble sits at that candle's average trade price, and its size shows the dollar amount.
+  - A gold ring means a whale was in it, and a bubble with a fresh print pings.
+  - The app keeps the last 6 hours while it's open, so the 1h and 4h views show them too.
+- **Trade flags**: **B** (bought), **S** (sold) and **✕** (bailed out) mark your tracked trades and the server Auto-trader's fills (🤖), at the BTC price at that moment.
+- Both can be turned off in Chart tools & indicators.
+
 ### Market pulse: stability and pressure (v7.2)
 
 The Chart tab opens with **Market pulse**:

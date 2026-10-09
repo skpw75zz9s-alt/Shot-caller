@@ -401,7 +401,7 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 
 // ---------- live orders from all markets (public/feeds.js) ----------
 // Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
-const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [] };
+const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [] }; // big: $2k+ trades, 6h, for the chart
 function handleTrades(trades) {
   const p = alerts.prefs();
   for (const x of trades) {
@@ -413,9 +413,12 @@ function handleTrades(trades) {
     const w = addTrade(flow, x, { round, whaleMin: p.whaleMin });
     x.whale = !!w;
     tape.list.unshift(x); tape.rate.push(Date.now());
+    const usdx = x.price * x.size;
+    if (usdx >= 2000) tape.big.push({ t: x.t, price: x.price, usd: usdx, side: x.side, whale: x.whale, ex: x.ex });
     if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
+  if (tape.big.length > 4000 || (tape.big[0] && tape.big[0].t < Date.now() - 6 * 3600000)) tape.big = tape.big.filter((x) => x.t >= Date.now() - 6 * 3600000).slice(-3000);
 }
 const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; } });
 function feedsOn() { if (settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); }
@@ -693,7 +696,23 @@ async function drawChartTab(force = false) {
   drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
     strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
     cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine, viewFrom,
+    orders: tape.big, fills: chartFills(), now,
   });
+}
+// Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track
+function chartFills() {
+  const out = [];
+  for (const x of autopilot?.state()?.log || []) {
+    if (x.kind !== 'fill') continue;
+    const m = /^(BUY|SELL HIGH|BAIL) (UP|DOWN) (\d+)/.exec(x.text) || /the (UP|DOWN) (buy|sell) went through \((\d+)/.exec(x.text);
+    if (!m) continue;
+    const kind = m[1] === 'BUY' || m[2] === 'buy' ? 'buy' : m[1] === 'BAIL' ? 'bail' : 'sell';
+    const side = m[1] === 'UP' || m[1] === 'DOWN' ? m[1] : m[2];
+    out.push({ t: x.t, kind, label: `🤖 ${side} ${m[3]}` });
+  }
+  for (const p of state.positions) out.push({ t: p.at, kind: 'buy', label: `${p.side === 'YES' ? 'UP' : 'DN'} ${+p.contracts.toFixed(0)}` });
+  for (const tr of state.trades.slice(0, 50)) if (tr.how === 'sold' && tr.closedAt) out.push({ t: tr.closedAt, kind: 'sell', label: `${tr.side === 'YES' ? 'UP' : 'DN'} ${+tr.contracts.toFixed(0)}` });
+  return out;
 }
 // 1-minute candles with the live price folded into the current minute
 function withLive(bars, now) {
