@@ -15,7 +15,8 @@ export function deviceKind({ ua = '', platform = '', maxTouchPoints = 0, mobile 
   return 'unknown';
 }
 export const isComputer = (nav) => deviceKind(nav) === 'computer';
-const DESIGN_WIDTH = 380; // the width the screens are laid out for: narrower panes shrink their contents to match
+const DESIGN_WIDTH = 380;
+const MIN_PANE = 380; // px: the shortest a pane gets (more than this and the page scrolls between rows) // the width the screens are laid out for: narrower panes shrink their contents to match
 
 // Which screens n panes show: keep the ones already chosen (no repeats), fill the rest from the defaults
 export function panesFor(n, current = []) {
@@ -49,7 +50,13 @@ export function createSplit({ main, store, onShow, button, menu }) {
 
   function save() { store.set('split', cfg); }
   function fit() { // the panes fill the screen below the header and ticker; each one's contents shrink to fit its width
-    if (count() > 1) document.documentElement.style.setProperty('--split-top', `${Math.round(main.offsetTop)}px`);
+    if (count() > 1) {
+      // fill the screen between the top bar and the bottom bar, but never squash a pane below MIN_PANE: on a short
+      // screen the rows keep their height and the page scrolls between them instead
+      const nav = document.querySelector('nav'), avail = innerHeight - main.offsetTop - (nav?.offsetHeight || 0) - 4;
+      const rows = (getComputedStyle(main).gridTemplateRows || '').split(' ').filter(Boolean).length || 1;
+      main.style.height = `${Math.max(avail, rows * MIN_PANE + (rows - 1) * 6 + 6)}px`;
+    } else main.style.height = '';
     for (const pane of main.querySelectorAll('.pane')) {
       const body = pane.querySelector('.pane-body'), w = pane.clientWidth;
       if (!body || !w) continue;
@@ -73,7 +80,7 @@ export function createSplit({ main, store, onShow, button, menu }) {
       return;
     }
     if (cfg.focus >= n) cfg.focus = 0;
-    window.scrollTo(0, 0); // the panes scroll, not the page
+    window.scrollTo(0, 0);
     const shown = cfg.panes.slice(0, n);
     shown.forEach((v, i) => {
       const pane = document.createElement('div');
@@ -85,7 +92,7 @@ export function createSplit({ main, store, onShow, button, menu }) {
       main.appendChild(pane);
       ro?.observe(pane);
     });
-    fit();
+    fit(); requestAnimationFrame(fit);
     onShow(shown, shown[cfg.focus]);
   }
   function focus(i) {

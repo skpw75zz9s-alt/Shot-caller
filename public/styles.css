@@ -718,7 +718,7 @@ header { position: relative; }
 /* the panes */
 body.split { padding-bottom: 0; }
 body.split header, body.split .ticker { max-width: none; }
-body.split main { max-width: none; padding: 6px 6px 0; display: grid; gap: 6px; height: calc(100dvh - var(--split-top, 150px) - 70px - env(safe-area-inset-bottom)); }
+body.split main { max-width: none; padding: 6px 6px 0; display: grid; gap: 6px; height: calc(100dvh - var(--split-top, 150px) - 70px - env(safe-area-inset-bottom)); } /* split.js sets the real height */
 body.split-2 main { grid-template: 1fr 1fr / 1fr; }
 body.split-3 main { grid-template: 1fr 1fr / 1fr 1fr; } body.split-3 .pane:first-child { grid-row: span 2; }
 body.split-4 main { grid-template: 1fr 1fr / 1fr 1fr; }
@@ -732,3 +732,14 @@ body.split-4 main { grid-template: 1fr 1fr / 1fr 1fr; }
 .pane-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 6px 8px 10px; -webkit-overflow-scrolling: touch; }
 .pane-body > .view { animation: none; }
 nav button.shown { color: #8ee8f5; border-color: #22d3ee22; }
+/* v10.0 bigger split panes: a compact top bar and bottom bar give the panes the room */
+body.split { padding-bottom: calc(46px + env(safe-area-inset-bottom)); }
+body.split header { padding: 4px 10px 2px; }
+body.split .ticker { flex-direction: row; align-items: center; justify-content: space-between; margin: 0 6px; padding: 4px 12px; position: static; }
+body.split .tk-price { font-size: 18px; }
+body.split .tk-right { max-height: none; opacity: 1; gap: 14px; }
+body.split nav { padding: 3px 6px calc(3px + env(safe-area-inset-bottom)); }
+body.split nav button { flex-direction: row; justify-content: center; gap: 6px; padding: 5px 0; font-size: 10px; }
+body.split nav button svg { width: 16px; height: 16px; }
+body.split .pane-bar { padding: 3px 5px; }
+body.split .pane-body { padding: 4px 6px 8px; }
