@@ -181,9 +181,10 @@
         <div class="chart-size" id="chartSize" aria-label="Chart size"></div>
         <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
         <div class="pro-wrap"><canvas id="proChart" height="300"></canvas><canvas id="orderLayer" class="order-layer" height="300" aria-hidden="true"></canvas><button type="button" id="chartLive" class="chart-live" hidden>⟲ LIVE</button><small class="chart-hint">drag · pinch · hold</small></div>
+        <p class="pred-record" id="predRecord"></p>
         <canvas id="rsiChart" height="90"></canvas>
         <canvas id="macdChart" height="90"></canvas>
-        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: every big trade ($2k+ on 5 exchanges) pops up as a bubble at its price, green for a buyer and red for a seller, sized by dollars (gold with a 🐋 for a whale), then bursts and disappears after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
+        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). <b>Prediction lines</b> in the cone: where each market says BTC closes. <b style="color:#22d3ee">Bot</b> = the bot's model, <b style="color:#a78bfa">Kalshi</b> = the close Kalshi's price implies, <b style="color:#fbbf24">5 exch</b> = the five exchanges' trend over the last 5 minutes (half strength). Each is graded every round. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: every big trade ($2k+ on 5 exchanges) pops up as a bubble at its price, green for a buyer and red for a seller, sized by dollars (gold with a 🐋 for a whale), then bursts and disappears after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
       </div>
     </section>
 
@@ -350,7 +351,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v8.5 · live, adjustable charts</p>
+      <p class="fine" id="version">Shot Caller v8.6 · prediction lines</p>
     </section>
   </main>
 

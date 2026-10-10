@@ -16,6 +16,7 @@ export const CHART_TOGGLES = [
   ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone to the close', true],
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
   ['beasts', 'Bull / bear trend + EMA crosses', true],
+  ['predict', 'Prediction lines in the cone (Bot, Kalshi, 5 exchanges)', true],
   ['orders', 'Live orders (big trades, all exchanges)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
 ];
 export const chartDefaults = () => Object.fromEntries(CHART_TOGGLES.map(([k, , on]) => [k, on]));
@@ -116,6 +117,23 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
       o.cone.forEach((c, i) => (i ? ctx.lineTo(Xt(c.t), Y(c[hiK])) : ctx.moveTo(Xt(c.t), Y(c[hiK]))));
       for (let i = o.cone.length - 1; i >= 0; i--) ctx.lineTo(Xt(o.cone[i].t), Y(o.cone[i][loK]));
       ctx.fill();
+    }
+    // Prediction lines: where each market says BTC closes (predict.js), with its number at the end
+    if (show.predict && o.predictions?.length) {
+      const ends = [];
+      for (const l of o.predictions) {
+        ctx.strokeStyle = l.color; ctx.lineWidth = 1.6; ctx.setLineDash(l.key === 'bot' ? [] : [5, 3]);
+        ctx.beginPath(); l.pts.forEach((p, i) => (i ? ctx.lineTo(Xt(p.t), Y(p.v)) : ctx.moveTo(Xt(p.t), Y(p.v)))); ctx.stroke(); ctx.setLineDash([]);
+        const e = l.pts[l.pts.length - 1];
+        ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(Xt(e.t), Y(e.v), 3, 0, 7); ctx.fill();
+        ends.push({ y: Y(e.v), x: Xt(e.t), text: `${l.name} ${fmt(e.v)}`, color: l.color });
+      }
+      // labels just left of the close, spread apart so they never overlap
+      ends.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 12);
+      ctx.font = '700 9px ui-monospace, monospace'; ctx.textAlign = 'right';
+      for (const e of ends) { ctx.fillStyle = '#05070dcc'; const tw = ctx.measureText(e.text).width; ctx.fillRect(e.x - 6 - tw - 3, e.y - 8, tw + 6, 12); ctx.fillStyle = e.color; ctx.fillText(e.text, e.x - 6, e.y + 1); }
+      ctx.textAlign = 'start';
     }
   }
   // Volume

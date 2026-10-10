@@ -642,3 +642,6 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .chart-size { display: flex; gap: 4px; justify-content: flex-end; margin: -2px 0 6px; }
 .chart-size button { width: auto; margin: 0; padding: 4px 10px; font-size: 10px; background: var(--bg); color: var(--muted); border: 1px solid var(--line-2); text-transform: none; letter-spacing: 0; }
 .chart-size button.on { color: var(--accent); border-color: var(--accent); }
+
+.pred-record { margin: 6px 0 2px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.pred-record b { color: var(--text); }

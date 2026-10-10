@@ -269,6 +269,16 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Prediction lines in the forecast cone (v8.6)
+
+The cone on the Chart tab (Round and 1m views) now holds three predictions of where BTC closes, each from a different market, with its number at the end (`public/predict.js`):
+- **Bot** (cyan, solid): the bot's own model. It doesn't carry momentum forward (testing showed BTC drift doesn't persist), so it runs flat from today's price, plus the learned index basis.
+- **Kalshi** (violet): the close Kalshi's price implies, i.e. the level where "above the target" is exactly as likely as Kalshi's YES price says, using the bot's volatility. A 50¢ YES puts it on the target.
+- **5 exch** (gold): the five exchanges' trend. It's a straight-line fit through their median price over the last 5 minutes, carried to the close at half strength.
+- All three are kept inside the 90% cone.
+
+**Graded every round.** With 5 minutes left, each line's close prediction is saved. After the close it's compared with where BTC really closed (Coinbase's last 1-minute candle of the round), next to "no change" as the baseline any prediction has to beat. The line under the chart shows each one's average miss in dollars and which has been closest. Turn the lines off in Chart tools & indicators.
+
 ### Live, adjustable charts (v8.5)
 
 The Chart tab:

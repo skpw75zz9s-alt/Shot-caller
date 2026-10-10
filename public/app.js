@@ -13,6 +13,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { SCAN_EXCHANGES, fmtK, scanRecord, scanRound } from './roundscan.js';
+import { predictionLines, predictionRecord } from './predict.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -144,6 +145,7 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   calls: store.get('calls', {}),
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
   callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
+  predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
   scanLog: store.get('scanLog', []), // each round's 5-exchange scan at its close, graded at settlement (public/roundscan.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
@@ -622,6 +624,7 @@ function renderDeck(snap, live, sig, now) {
   $('pulseBull').classList.toggle('dom', buy != null && buy >= 0.55);
   $('pulseBear').classList.toggle('dom', buy != null && buy <= 0.45);
   renderScan(live, now);
+  trackPredictions(snap, live, now);
   renderStability(sig?.stability ?? stability({ bars: snap.bars, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, now }), now);
   setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
   setText($('tugRound'), fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—');
@@ -826,7 +829,7 @@ async function drawChartTab(force = false) {
     $('orderLayer').style.height = `${chartState.height}px`;
     chartState.geo = drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
       strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
-      cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs, viewFrom, viewTo, height: chartState.height, liveLast,
+      cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: showCone ? predictionsNow(live, snap, now) : [], markers, show: chartState.show, barMs, viewFrom, viewTo, height: chartState.height, liveLast,
     }) || null;
   }
   orderFrame();
@@ -858,6 +861,40 @@ function orderFrame() {
     const anim = drawOrders(cv, geo, { bubbles: liveBubbles(tape.big, now), fills: chartState.fills, show: chartState.show, now, live: { price: chartState.livePx, moving }, cross: chartState.cross });
     if (anim || moving) orderFrame();
   });
+}
+// ---------- prediction lines (public/predict.js): Bot, Kalshi-implied, 5-exchange trend ----------
+function predictionsNow(live, snap, now) {
+  if (!live) return [];
+  const q = live.ev.quote, mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
+  return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, driftMin: (snap.driftMin || 0) * (settings.momentumWeight ?? 0), now, close: Date.parse(live.m.close_time),
+    strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex });
+}
+// With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed
+// (the close of Coinbase's last 1-minute candle of the round), next to "no change" as the baseline
+function trackPredictions(snap, live, now) {
+  if (live && live.ev.minutesLeft <= 5 && live.ev.minutesLeft > 4 && !state.predLog.some((e) => e.ticker === live.m.ticker)) {
+    const lines = predictionsNow(live, snap, now);
+    if (lines.length) {
+      const e = { ticker: live.m.ticker, closeTime: live.m.close_time, at: now, spot: modelSpot(), actual: null };
+      for (const l of lines) e[l.key] = l.end;
+      state.predLog.unshift(e); if (state.predLog.length > 300) state.predLog.length = 300;
+      store.set('predLog', state.predLog);
+    }
+  }
+  let changed = false;
+  for (const e of state.predLog) {
+    if (e.actual != null) continue;
+    const close = Date.parse(e.closeTime);
+    if (now < close + 70000) continue;
+    const bar = snap.bars.find((b) => b.t === close - 60000);
+    if (bar) { e.actual = bar.c; changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
+  }
+  if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set('predLog', state.predLog); }
+  const r = predictionRecord(state.predLog);
+  const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);
+  const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];
+  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${[cell('Bot', r.bot), cell('Kalshi', r.kalshi), cell('5 exch', r.exch), cell('no change', r.still)].filter(Boolean).join(' · ')}${best ? ` · closest so far: <b>${best[0]}</b>` : ''}`
+    : 'Prediction lines are graded each round: what each one said with 5 minutes left vs where BTC closed (keep the app open through a few rounds).');
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track
 function chartFills() {
