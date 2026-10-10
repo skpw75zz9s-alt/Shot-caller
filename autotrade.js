@@ -77,6 +77,16 @@ function kalshiExchange(k, cred, validateOrder, onFee = () => {}) {
       const b = await k.req('GET', '/portfolio/positions', { cred: cred(), query: { count_filter: 'position', limit: '200', ...(ticker ? { ticker } : {}) } });
       return (b.market_positions || []).map(parsePosition).map((p) => ({ ticker: p.ticker, side: p.side, count: p.contracts }));
     },
+    // cancel a resting maker buy (V2: DELETE /portfolio/events/orders/{id}); without Kalshi's id, find it by ours
+    async cancel(orderId, clientId, ticker) {
+      let id = orderId;
+      if (!id && clientId) {
+        const b = await k.req('GET', '/portfolio/orders', { cred: cred(), query: { ticker, status: 'resting', limit: '100' } });
+        id = (b.orders || []).find((x) => x.client_order_id === clientId)?.order_id ?? null;
+        if (!id) throw { status: 404, message: 'resting order not found' }; // filled or gone already
+      }
+      return k.req('DELETE', `/portfolio/events/orders/${encodeURIComponent(id)}`, { cred: cred() });
+    },
     async place(o) {
       const bad = validateOrder(o);
       if (bad) throw { status: 422, code: 'refused_by_shot_caller', message: `order refused: ${bad}` };
@@ -89,7 +99,7 @@ function kalshiExchange(k, cred, validateOrder, onFee = () => {}) {
       const fee = n(x.taker_fees_dollars) ?? cents(x.taker_fees), cost = n(x.taker_fill_cost_dollars) ?? cents(x.taker_fill_cost);
       const avgPrice = filled > 0 && cost != null && cost > 0 ? cost / filled : null;
       if (filled > 0 && fee != null) { try { onFee({ id: x.order_id ? `ord-${x.order_id}` : undefined, count: filled, price: avgPrice ?? Number(o.price), fee, taker: true }); } catch { /* learning only */ } }
-      return { filled, avgPrice, fees: fee };
+      return { filled, avgPrice, fees: fee, orderId: x.order_id ?? null };
     },
   };
 }

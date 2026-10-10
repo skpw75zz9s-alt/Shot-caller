@@ -22,6 +22,7 @@ export const TRADER_DEFAULTS = {
   tries: 3,          // buy attempts per call (price moved above the max, nothing to buy, a refused order)
   slipCents: 1,      // sells accept up to this much under the bid, so they fill
   testCash: 100,     // the simulator's starting balance ($)
+  makerSec: 0,       // maker buys: rest a post-only buy this many seconds a cent above the best bid, then cancel (0 = off)
 };
 export const MODES = { off: 'Off', test: 'Test', demo: 'Demo', live: 'Live' };
 // Limits the user can edit: [key, label, min, max]
@@ -31,6 +32,7 @@ export const LIMITS = [
   ['maxTrades', 'Max buys a day', 1, 200],
   ['maxOpen', 'Max open at once ($)', 1, 1000],
   ['testCash', 'Test balance ($)', 5, 100000],
+  ['makerSec', 'Maker buys: rest up to (sec, 0 = off)', 0, 120],
 ];
 // Live unlocks once Test has settled LIVE_UNLOCK trades without a serious error (one that means the trader itself
 // is wrong: a cash refusal, a bad request, a refused key; not Kalshi having a hiccup)
@@ -62,6 +64,17 @@ const uid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID(
 const px = (p) => (Math.round(Math.min(0.99, Math.max(0.01, p)) * 100) / 100).toFixed(4);
 const qty = (n) => `${Math.floor(n)}.00`;
 const v2 = ({ ticker, book, price, count, reduce, id }) => ({ ticker, client_order_id: id || uid(), side: book, count: qty(count), price: px(price), time_in_force: 'immediate_or_cancel', reduce_only: !!reduce, self_trade_prevention_type: 'taker_at_cross' });
+// A resting MAKER buy (good till canceled, post-only: Kalshi refuses it rather than let it take): cheaper fees, may not fill
+const v2maker = (o) => ({ ...v2(o), time_in_force: 'good_till_canceled', post_only: true });
+export const makerBuyOrder = ({ ticker, side, count, price, id }) => (side === 'NO' ? v2maker({ ticker, book: 'ask', price: 1 - price, count, id }) : v2maker({ ticker, book: 'bid', price, count, id }));
+// The maker price: a cent above the best bid for the side, never at or over its ask or over the call's max price
+export function makerPrice(book, side, limit) {
+  const bids = side === 'YES' ? book.yes : book.no, d = buyDepth(book, side, 1);
+  const bid = bids.length ? Math.max(...bids.map((l) => l[0])) : null;
+  if (bid == null || d.best == null) return null;
+  const p = Math.round(Math.min(limit, bid + 0.01, d.best - 0.01) * 100) / 100;
+  return p >= 0.01 && p < d.best - 1e-9 ? p : null;
+}
 export const buyOrder = ({ ticker, side, count, limit, id }) => (side === 'NO' ? v2({ ticker, book: 'ask', price: 1 - limit, count, id }) : v2({ ticker, book: 'bid', price: limit, count, id }));
 export const sellOrder = ({ ticker, side, count, floor, id }) => (side === 'NO' ? v2({ ticker, book: 'bid', price: 1 - floor, count, reduce: true, id }) : v2({ ticker, book: 'ask', price: floor, count, reduce: true, id }));
 
@@ -119,7 +132,7 @@ export function classify(err) {
 // GAP_MS of the last.
 export function createTrader({ exchange, settings, store = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   const S = () => ({ ...TRADER_DEFAULTS, ...settings() });
-  const st = { ledger: [], log: [], calls: {}, errors: 0, pausedUntil: 0, stopped: null, pending: null, ...(store?.load() || {}) };
+  const st = { ledger: [], log: [], calls: {}, errors: 0, pausedUntil: 0, stopped: null, pending: null, maker: null, ...(store?.load() || {}) };
   const save = () => store?.save(st);
   let busy = false, lastReq = 0;
   const word = (side) => (side === 'YES' ? 'UP' : 'DOWN');
@@ -221,6 +234,8 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
     busy = true;
     try {
       if (st.pending) await reconcile();
+      // 0) a resting maker buy: book what filled; cancel it at its deadline or when the call is gone
+      if (st.maker) { const r = await tendMaker({ live, sig }); if (r) return r; }
       // 1) sells: any open position whose sell signal is confirmed
       for (const e of st.ledger.filter((x) => !x.closed && Date.parse(x.closeTime) > now())) {
         const c = checks[e.ticker];
@@ -288,6 +303,20 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
       return { why: balance - held - CUSHION < one ? `Not enough cash: $${Math.max(0, balance - held).toFixed(2)} free, one contract costs $${one.toFixed(2)}` : `Limits leave no room for one contract ($${one.toFixed(2)})` };
     }
     const before = await holding(ticker, side);
+    // Maker buys (makerSec > 0): rest a post-only buy a cent above the best bid first; if it doesn't fill in time, the
+    // next try is a normal buy that crosses the spread (so a missed maker fill never costs the call)
+    const mp = s.makerSec > 0 && !rec.makerTried && live.ev.minutesLeft > 1 + s.makerSec / 60 ? makerPrice(book, side, sig.limit) : null;
+    if (mp != null) {
+      rec.makerTried = true; rec.tries++;
+      const id = uid(), order = makerBuyOrder({ ticker, side, count: n, price: mp, id });
+      st.maker = { id, orderId: null, ticker, side, count: n, price: mp, before, at: now(), deadline: now() + s.makerSec * 1000, closeTime: live.m.close_time, conf: sig.deep?.score ?? null };
+      save(); // saved before sending: if the server restarts, the next step cancels it and books what filled
+      const r = await send(order, `MAKER BUY ${word(side)} ${n} resting at ${Math.round(mp * 100)}¢ for up to ${s.makerSec}s (ask ${Math.round(d.best * 100)}¢)`, { cash: balance, held });
+      if (r.orderId) st.maker.orderId = r.orderId;
+      if (!r.unsure && r.filled == null && r.why) { st.maker = null; save(); return { why: r.why }; } // refused: the next try is a normal buy
+      save();
+      return { why: `Maker buy resting at ${Math.round(mp * 100)}¢` };
+    }
     const order = buyOrder({ ticker, side, count: n, limit: sig.limit });
     rec.tries++;
     st.pending = { ticker, side, count: n, before, limit: sig.limit, closeTime: live.m.close_time, conf: sig.deep?.score ?? null };
@@ -306,6 +335,27 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
     return { why: r.why || 'Order didn\'t fill' };
   }
 
+  // The resting maker buy: how much has filled (by the position), and whether to cancel the rest now
+  async function tendMaker({ live, sig }) {
+    const m = st.maker;
+    const have = await holding(m.ticker, m.side), got = Math.max(0, Math.min(m.count, have - m.before));
+    const callGone = !sig?.callSide || sig.callSide !== m.side || live?.m?.ticker !== m.ticker;
+    const late = !(Date.parse(m.closeTime) - now() > 60000);
+    if (got < m.count && !callGone && !late && now() < m.deadline) return { why: `Maker buy resting at ${Math.round(m.price * 100)}¢: ${got}/${m.count} filled, ${Math.ceil((m.deadline - now()) / 1000)}s left` };
+    let final = got;
+    if (got < m.count) { // cancel what's left, then read the position once more (a fill can land as it's cancelled)
+      try { if (exchange.cancel) await call(() => exchange.cancel(m.orderId, m.id, m.ticker)); } catch (err) { if (classify(err) !== 'bad' && err?.status !== 404) { fail(err, 'Cancelling the maker buy'); return { why: 'Couldn\'t cancel the maker buy yet: trying again' }; } }
+      final = Math.max(0, Math.min(m.count, (await holding(m.ticker, m.side)) - m.before));
+    }
+    st.maker = null;
+    if (final > 0) {
+      record({ ticker: m.ticker, side: m.side, count: final, price: m.price, fees: feeFor(final, m.price, true), closeTime: m.closeTime, conf: m.conf });
+      note('fill', `Maker buy ${word(m.side)}: ${final} of ${m.count} filled at ${Math.round(m.price * 100)}¢ (maker fee)${final < m.count ? ', the rest cancelled' : ''}`);
+    } else note('nofill', `Maker buy ${word(m.side)} at ${Math.round(m.price * 100)}¢ didn't fill${callGone ? ' (the call is gone)' : ''}: cancelled${callGone || late ? '' : '; next try is a normal buy'}`);
+    save();
+    return final > 0 ? { did: 'buy', filled: final } : null;
+  }
+
   // Send one order; handle every outcome. Returns { filled, avgPrice, fees } or { why, kind, unsure }.
   // unsure: it may have gone through (a timeout, or Kalshi says the order id already exists), so check the position.
   async function send(order, label, ctx = {}) {
@@ -315,9 +365,12 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
         const r = await call(() => exchange.place(order));
         st.errors = 0;
         const filled = Math.max(0, Math.floor(r?.filled ?? 0));
-        note(filled > 0 ? 'fill' : 'nofill', `${label}: ${filled > 0 ? `filled ${filled}${r.avgPrice != null ? ` at ${Math.round(r.avgPrice * 100)}¢` : ''}` : 'no fill (price moved)'}`, { order: { side: order.side, count: order.count, price: order.price } });
+        if (order.post_only) note('info', `${label}: ${filled > 0 ? `${filled} filled at once` : 'resting on the book'}`, { order: { side: order.side, count: order.count, price: order.price } });
+        else note(filled > 0 ? 'fill' : 'nofill', `${label}: ${filled > 0 ? `filled ${filled}${r.avgPrice != null ? ` at ${Math.round(r.avgPrice * 100)}¢` : ''}` : 'no fill (price moved)'}`, { order: { side: order.side, count: order.count, price: order.price } });
         return { ...r, filled };
       } catch (err) {
+        // a post-only buy Kalshi refused because the price moved onto it: not an error, the next try is a normal buy
+        if (order.post_only && /post.?only|cross|would (match|take)|taker/i.test(`${err?.code || ''} ${err?.message || ''}`)) { note('info', `${label}: the price moved onto it (post-only refused): the next try is a normal buy`); return { why: 'Maker buy would have crossed: trying a normal buy next' }; }
         const kind = classify(err);
         if (kind === 'dup') { note('info', `${label}: Kalshi already has this order: checking what it did`); return { unsure: true }; }
         if (kind === 'unknown') unsure = true;
@@ -331,7 +384,7 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
   return {
     step, today, state: () => st,
     resume() { st.stopped = null; st.pausedUntil = 0; st.errors = 0; save(); },
-    reset() { Object.assign(st, { ledger: [], log: [], calls: {}, stopped: null, pausedUntil: 0, errors: 0, pending: null }); save(); },
+    reset() { Object.assign(st, { ledger: [], log: [], calls: {}, stopped: null, pausedUntil: 0, errors: 0, pending: null, maker: null }); save(); },
     stats() {
       const closed = st.ledger.filter((e) => e.closed);
       return { trades: st.ledger.length, closed: closed.length, wins: closed.filter((e) => e.pnl > 0).length, pnl: r2(closed.reduce((a, e) => a + e.pnl, 0)),
@@ -343,19 +396,50 @@ export function createTrader({ exchange, settings, store = null, now = () => Dat
 // ---------- the Test exchange: simulates Kalshi on live prices; nothing is sent ----------
 // getBook(ticker) gives the real live order book (or null); fills are the same IOC walk Kalshi does, at the prices
 // on the book, with Kalshi's fee. Cash starts at testCash and moves with every fill and settlement.
+// Resting maker buys (post-only) fill when the live book's ask for the side comes down to their price, at their price
+// with the maker fee; the cash is held while they rest, as Kalshi does.
 export function createTestExchange({ getBook, startCash = 100, store = null }) {
   const st = store?.load() || { cash: startCash, pos: {} };
+  st.resting ||= [];
   const save = () => store?.save(st);
+  async function fillResting() {
+    for (const o of [...st.resting]) {
+      const book = await getBook(o.ticker);
+      const ask = book ? buyDepth(book, o.side, 1).best : null;
+      if (ask == null || ask > o.price + 1e-9) continue;
+      const fee = feeFor(o.count, o.price, true);
+      st.cash = r2(st.cash + o.held - (o.count * o.price + fee));
+      const p = (st.pos[o.ticker] ||= { side: o.side, count: 0 });
+      p.side = o.side; p.count += o.count;
+      st.resting = st.resting.filter((x) => x !== o);
+    }
+    save();
+  }
   return {
-    async cash() { return { balance: r2(st.cash), held: 0 }; },
+    async cash() { await fillResting(); return { balance: r2(st.cash), held: 0 }; },
     async book(ticker) { return getBook(ticker); },
-    async positions() { return Object.entries(st.pos).filter(([, p]) => p.count > 0).map(([ticker, p]) => ({ ticker, side: p.side, count: p.count })); },
+    async positions() { await fillResting(); return Object.entries(st.pos).filter(([, p]) => p.count > 0).map(([ticker, p]) => ({ ticker, side: p.side, count: p.count })); },
+    async cancel(orderId) { // the rest of a resting order comes off the book; its held cash comes back
+      const o = st.resting.find((x) => x.id === orderId);
+      if (!o) throw { status: 404, message: 'order not found (test)' };
+      st.cash = r2(st.cash + o.held); st.resting = st.resting.filter((x) => x !== o); save();
+      return { cancelled: o.count };
+    },
     async place(o) {
       const book = await getBook(o.ticker);
       if (!book) throw { status: 503, message: 'no live book (test)' };
       const count = Number(o.count), price = Number(o.price);
       const buying = !o.reduce_only, side = o.side === 'bid' ? (buying ? 'YES' : 'NO') : (buying ? 'NO' : 'YES');
       const limit = buying ? (side === 'YES' ? price : 1 - price) : (side === 'YES' ? price : 1 - price);
+      if (o.post_only) { // a resting maker buy: refused if it would take, else it rests holding its cash
+        const ask = buyDepth(book, side, 1).best;
+        if (ask != null && ask <= limit + 1e-9) throw { status: 400, code: 'post_only_cross', message: 'post-only order would cross (test)' };
+        const held = r2(count * limit + feeFor(count, limit, true));
+        if (held > st.cash + 1e-9) throw { status: 400, code: 'insufficient_balance', message: 'insufficient balance (test)' };
+        const id = `test-${o.client_order_id}`;
+        st.cash = r2(st.cash - held); st.resting.push({ id, ticker: o.ticker, side, count, price: limit, held }); save();
+        return { filled: 0, orderId: id };
+      }
       let filled = 0, spend = 0;
       if (buying) {
         if (count * limit + feeFor(count, limit) > st.cash + 1e-9) throw { status: 400, code: 'insufficient_balance', message: 'insufficient balance (test)' };
@@ -388,6 +472,6 @@ export function createTestExchange({ getBook, startCash = 100, store = null }) {
       p.count = 0; save();
     },
     balance: () => r2(st.cash),
-    reset(cash) { st.cash = cash; st.pos = {}; save(); },
+    reset(cash) { st.cash = cash; st.pos = {}; st.resting = []; save(); },
   };
 }

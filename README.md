@@ -269,6 +269,22 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Maker buys for the Auto-trader (v11.0, opt-in)
+
+Research on Kalshi finds **makers** (resting orders) earn more than takers (orders that cross the spread), and makers can pay lower fees.
+- **Turning it on:** the Auto-trader's new limit **Maker buys: rest up to (sec, 0 = off)**. It's off by default; 20 is a sensible start.
+- **How it buys:** when the bot makes a call, instead of crossing the spread the Auto-trader rests a **post-only** buy a cent above the best bid. Post-only means Kalshi refuses it rather than let it take. It never pays at or over the current ask and never over the call's max price.
+- **Watching the order:** it checks every second.
+  - A fill is booked at the order's price with the maker fee (measured from real fills once there are enough, v10.7).
+  - What's left is cancelled at the deadline, at once if the call goes away, or a minute before the close.
+  - If nothing filled, the next try is a normal buy, so a missed maker fill never costs the call.
+  - If the price moves onto it before it rests (Kalshi refuses the post-only order), that's not counted as an error; the next try is a normal buy.
+- **Safety:**
+  - The server allows a resting order only from its own Auto-trader, only as a post-only buy that opens a position (never a resting sell), still in whole cents, under the $100 cap and on BTC 15-minute markets. The phone's direct order route still allows fill-now-or-cancel only.
+  - If the server restarts while an order rests, the next step cancels it and books what filled.
+  - Cancelling uses Kalshi's V2 `DELETE /portfolio/events/orders/{id}`.
+- **Test it first:** the Test simulator rests maker buys too, filling them when the live book's ask comes down to their price and holding the cash meanwhile, so maker buys can be proven in Test before Demo or Live.
+
 ### Futures as a leading signal (v10.9)
 
 Research finds BTC futures often move before spot, though the lead has weakened since the spot ETFs launched. So the bot reads Hyperliquid's BTC perpetual (`futures.js`; public data, no key; Binance and Bybit block US servers): every trade over its websocket, plus funding, open interest, mark and oracle price every 15 s.

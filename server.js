@@ -119,18 +119,22 @@ const AUTH_READS = new Set(['fills', 'positions', 'balance', 'settlements']);
 const AUTH_QUERY = new Set(['ticker', 'event_ticker', 'min_ts', 'max_ts', 'limit', 'cursor', 'status', 'count_filter', 'settlement_status']);
 const ORDER_SERIES = (process.env.AUTO_SERIES || 'KXBTC15M').split(',').filter(Boolean);
 const ORDER_MAX_USD = Number(process.env.AUTO_MAX_ORDER_USD || 100);
-const ORDER_KEYS = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type']);
+const ORDER_KEYS = new Set(['ticker', 'client_order_id', 'side', 'count', 'price', 'time_in_force', 'reduce_only', 'self_trade_prevention_type', 'post_only']);
 
 // Every order is checked here before it reaches Kalshi (V2 shape: one YES book, bid/ask, dollar strings): only the
 // BTC 15-minute series, only fill-now-or-cancel (nothing ever rests on Kalshi holding cash), whole contracts at
 // whole cents, a hard dollar cap on anything that opens a position, no extra fields. Returns the problem, or null.
-export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD } = {}) {
+// allowMaker (the server's own Auto-trader only): also a resting buy, if it's post-only (it can only ever add to the book,
+// never take) and opens a position (no resting sells); the Auto-trader cancels it within its maker window.
+export function validateOrder(o, { series = ORDER_SERIES, maxUsd = ORDER_MAX_USD, allowMaker = false } = {}) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return 'order must be an object';
   for (const k of Object.keys(o)) if (!ORDER_KEYS.has(k)) return `field not allowed: ${k}`;
   if (typeof o.ticker !== 'string' || !/^[A-Z0-9]+-[A-Z0-9-]{1,60}$/.test(o.ticker) || !series.some((s) => o.ticker.startsWith(`${s}-`))) return 'only the BTC 15-minute markets can be traded';
   if (typeof o.client_order_id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(o.client_order_id)) return 'client_order_id required';
   if (!['bid', 'ask'].includes(o.side)) return 'side must be bid or ask';
-  if (o.time_in_force !== 'immediate_or_cancel') return 'only fill-now-or-cancel orders (nothing left resting)';
+  const maker = allowMaker && o.time_in_force === 'good_till_canceled' && o.post_only === true && o.reduce_only === false;
+  if (o.time_in_force !== 'immediate_or_cancel' && !maker) return 'only fill-now-or-cancel orders (nothing left resting)';
+  if (o.post_only !== undefined && !(o.post_only === true && maker)) return 'post_only only on a resting maker buy';
   if (typeof o.count !== 'string' || !/^\d{1,4}\.00$/.test(o.count) || Number(o.count) < 1 || Number(o.count) > 1000) return 'count must be "1.00"-"1000.00" contracts';
   if (typeof o.price !== 'string' || !/^0\.\d\d00$/.test(o.price) || Number(o.price) < 0.01 || Number(o.price) > 0.99) return 'price must be whole cents, "0.0100"-"0.9900"';
   if (typeof o.reduce_only !== 'boolean') return 'reduce_only must be true or false';
@@ -180,7 +184,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
   }
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
-autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder, onFee: (x) => feeBook.add([x]) });
+autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
 const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
