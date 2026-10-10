@@ -269,6 +269,26 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Market watch: the sharp eye (v10.8)
+
+Every second, on the server (`marketwatch.js`, detectors in `public/watch.js`), the bot checks every detail it can see and logs anything unusual:
+
+| Event | What it spots | Effect |
+|---|---|---|
+| **Jump** | BTC moved 3×+ its normal 5-second move | logged; at 5×+, new calls wait 30 s |
+| **Burst** | 5× the usual 10 seconds of exchange volume | logged |
+| **Breakaway** | one exchange 0.03%+ (or $25+) away from the others for 5+ s | logged |
+| **Silent** | an exchange's feed quiet 30 s+ while others trade; or no fresh price at all | logged; no price at all holds new calls |
+| **Spread** | Kalshi's spread on the live round blew out (8¢+, or 3× its usual) | new calls wait until it tightens |
+| **Pulled** | contracts near Kalshi's price fell under 30% of the last minute's | logged |
+| **Wall** | one Kalshi level 5× the typical size (1,000+ contracts) | logged |
+| **Flurry** | Kalshi trades on the round at 4× the usual pace (and which way) | logged |
+| **Reprice** | Kalshi's price moved 8¢+ in 10 s while BTC barely moved | logged |
+
+- The server reads Kalshi's public order book for the live round every 2 s and its trades every 3 s.
+- The Deck's **Market watch** card shows the live state ("All calm", or a hold and why) and the latest events. The phone's own calls respect the server's holds too.
+- Each official call now also records Kalshi's spread and Market watch's notable events in the minute before. The **call filter** learns from these, so if calls made in a busy or thin market lose, it will learn to skip them (once proven, as always).
+
 ### Real fees and a closer copy of the settlement index (v10.7)
 
 From the research round (pros' tips checked against the bot):

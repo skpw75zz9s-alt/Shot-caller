@@ -21,10 +21,11 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // learn: watch the market around the clock (even with no phones subscribed), backfill a few weeks of BTC history
 // on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
 // indexSources: exchanges for the BTC index estimate (index.js); INDEX=off uses Coinbase alone.
+// watch: () => Market watch's status (marketwatch.js): its holds pause new calls; its event count goes into the call record
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -32,7 +33,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const market = { spot: null, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
   const learnFile = dataFile.replace(/[^/\\]+$/, 'learned.json');
   let learned = newLearned(), learnDirty = false, learnSavedAt = 0, backfilling = false, backfillStop = false;
-  let learnedShifts = null, gateDirty = false; // this tick's proven nudges (shifts())
+  let learnedShifts = null, gateDirty = false, watchNow = null; // this tick's proven nudges (shifts())
   const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
   const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
   const LEARN_SERIES = 'KXBTC15M';
@@ -269,6 +270,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       }
       if (now - market.gradedAt >= 5000) { market.gradedAt = now; await gradeClosedWindows(now); } // first, so the 15-minute update can include the result
       learnedShifts = shifts();
+      watchNow = watch();
       observe(now);
       const sends = [];
       for (const d of devices.values()) {
@@ -276,6 +278,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned, now, shifts: learnedShifts });
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -345,6 +348,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   function observe(now) {
     if (!backfilling && learnCandles(learned, market.candles.filter((c) => c.t + 60000 <= now))) learnDirty = true;
     const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: market.spot, settings: DEVICE_DEFAULTS, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned, now, shifts: learnedShifts });
+    snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
     for (const row of snap.rows) {
       const close = Date.parse(row.m.close_time);
       if (!(close > now)) continue;
@@ -371,7 +375,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     try { onObserve?.({ snap, sig, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
     if (snap.live) {
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
-      const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null };
+      const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
+      const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
       if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat }, 20000)) { recordDirty = true; saveRecord(); }
     }
     for (const [k, c] of Object.entries(officialMem)) if (!(c.at > now - 2 * 3600000)) delete officialMem[k];

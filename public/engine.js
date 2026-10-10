@@ -177,10 +177,13 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     return log.filter((e) => e.t >= since).every((e) => e.p != null && (side === 'YES' ? e.p : 1 - e.p) * 100 >= s.minConfidence);
   };
   const holds = (a) => !(s.minHold > 0) || (a.hold != null && a.hold >= s.minHold - 1e-9);
+  // Market watch (public/watch.js) holds new calls after bad data, an untradeable Kalshi book or a violent jump
+  const watchOk = () => !(snap.watchHold?.until > now);
   // The learned call filter: skip the kinds of calls that have lost money (only once it has proven itself)
   let gated = null;
   const gateOk = (a) => {
-    const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1 }, a.price);
+    const q = ev.quote, spread = q.yesAsk != null && q.yesBid != null ? q.yesAsk - q.yesBid : null;
+    const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1, spread, ev60: snap.watchEvents60 ?? 0 }, a.price);
     if (g?.skip) { gated = { side: a.side, ...g }; return false; }
     return true;
   };
@@ -213,12 +216,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean) && gateOk(b)) { pick = b; stance = 'switching'; }
+      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean) && watchOk() && gateOk(b)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean) && gateOk(shown)) pick = shown;
+    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean) && watchOk() && gateOk(shown)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
@@ -250,7 +253,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    stability: stab, steadyNeed, bail: mem.bail ?? null, gated,
+    stability: stab, steadyNeed, bail: mem.bail ?? null, gated, watchHold: snap.watchHold?.until > now ? snap.watchHold : null,
     hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,

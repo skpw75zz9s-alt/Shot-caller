@@ -37,6 +37,7 @@
   <link rel="modulepreload" href="suggest.js">
   <link rel="modulepreload" href="trader.js">
   <link rel="modulepreload" href="autopilot.js">
+  <link rel="modulepreload" href="watch.js">
   <link rel="modulepreload" href="fees.js">
   <link rel="modulepreload" href="callgate.js">
   <link rel="modulepreload" href="flip.js">
@@ -137,6 +138,12 @@
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
       </div>
 
+      <div class="card watch" id="watchCard">
+        <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
+        <div class="watch-now" id="watchNow">Watching…</div>
+        <ul class="watch-list" id="watchList"></ul>
+        <small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small>
+      </div>
       <div class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
         <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
@@ -406,7 +413,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v10.7 · real fees + closer index</p>
+      <p class="fine" id="version">Shot Caller v10.8 · market watch</p>
     </section>
   </main>
 

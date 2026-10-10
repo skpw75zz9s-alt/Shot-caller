@@ -349,6 +349,9 @@ const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.
 const compute = () => {
   const shifts = state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null; // the server's proven Round scan nudges
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
+  // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
+  const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0;
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -825,6 +828,22 @@ async function drawChartTab(force = false) {
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
     cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
+// ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
+async function refreshWatch() {
+  if (document.hidden) return;
+  try { state.watch = await getJSON('watch'); state.watchAt = Date.now(); renderWatch(); } catch { /* next time */ }
+}
+setInterval(refreshWatch, 5000);
+function renderWatch() {
+  const w = state.watch;
+  if (!w) return;
+  const st = w.status, ico = { severe: '⛔', warn: '⚠️', info: '•' };
+  setText($('watchWhen'), clock(state.watchAt));
+  setHTML($('watchNow'), st.hold ? `<b class="neg">⛔ New calls on hold</b> until ${esc(clock(st.hold.until))}: ${esc(st.hold.why)}`
+    : st.calm ? '<b class="pos">✓ All calm</b>: nothing unusual in the last minute' : `<b>${st.events60} notable thing${st.events60 === 1 ? '' : 's'}</b> in the last minute`);
+  setHTML($('watchList'), (w.events || []).slice(0, 12).map((e) => `<li class="w-${e.sev}"><span>${esc(clock(e.t))}</span><i>${ico[e.sev] || '•'}</i><em>${esc(e.text)}</em></li>`).join('') || '<li class="calm">Nothing unusual yet.</li>');
+}
+
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
 function runWhy() {
@@ -1027,6 +1046,7 @@ function render() {
       : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
       : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
       : ev.side && settings.doubleRejRule !== false && live.rej?.double && live.rej.double.dir !== (ev.side === 'YES' ? 1 : -1) ? `${sideName(ev.side)} looks cheap, but not calling it: ${live.rej.double.label}`
+      : sig.watchHold ? `Market watch has new calls on hold until ${clock(sig.watchHold.until)}: ${sig.watchHold.why}`
       : sig.gated ? `Confidence ${sig.deep?.score ?? '—'}, but the call filter skipped it: calls like this have won ${Math.round(sig.gated.pWin * 100)}% in the bot's record, and at ${Math.round((sig.gated.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) * 100)}¢ it needs ${Math.round(sig.gated.need * 100)}% to pay.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.holdOk ? `Confidence ${sig.deep.score}, but it stays above ${Math.round(settings.holdFloor * 100)} to the end in only ${sig.hold == null ? '—' : Math.round(sig.hold * 100)}% of simulated paths (Steady needs ${Math.round(settings.minHold * 100)}%). Waiting for a call that holds.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.steadyOk ? `Confidence ${sig.deep.score}: making sure it holds for ${sig.steadyNeed ?? settings.steadySec}s before calling (one good tick isn't enough${sig.stability?.level === 'stable' ? '; market 👍 so the wait is shorter' : sig.stability?.level === 'unstable' ? '; market unstable so the wait is longer' : ''}).`

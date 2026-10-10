@@ -95,7 +95,7 @@ test('proven learners reach the odds: the scan nudge, the learned Kalshi blend a
   assert.ok(Math.abs(blended.ev.pYes - (base.ev.pYes + 0.5 * (0.69 - base.ev.pYes))) < 0.01, `${blended.ev.pYes}`);
   assert.equal(blended.learnedAdj.blend, 0.5);
   // the call filter: an active gate that rejects everything is attached to the snapshot and blocks new calls
-  const gate = { active: true, w: [-5, 0, 0, 0, 0, 0, 0, 0], n: 200 };
+  const gate = { active: true, w: [-5, 0, 0, 0, 0, 0, 0, 0, 0, 0], n: 200 };
   const snap = snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: { ...L, callGate: gate }, now });
   assert.equal(snap.callGate, gate);
   assert.equal(snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: { ...L, callGate: { ...gate, active: false } }, now }).callGate, null, 'not until proven');
@@ -108,4 +108,10 @@ test('proven learners reach the odds: the scan nudge, the learned Kalshi blend a
   const sig = buySignal(held.rows[0], held, loose, now, {});
   assert.equal(sig.callSide, null, 'the filter blocked it');
   assert.ok(sig.gated && sig.gated.skip && sig.gated.pWin < sig.gated.need);
+  // Market watch's hold pauses new calls the same way
+  free.watchHold = { until: now + 30000, why: 'test hold' };
+  const held2 = buySignal(free.rows[0], free, loose, now, {});
+  assert.equal(held2.callSide, null); assert.equal(held2.watchHold.why, 'test hold');
+  free.watchHold = { until: now - 1, why: 'over' };
+  assert.equal(buySignal(free.rows[0], free, loose, now, {}).callSide, 'YES', 'an expired hold changes nothing');
 });

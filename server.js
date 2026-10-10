@@ -10,6 +10,7 @@ import { createAccess } from './access.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
+import { createMarketWatch } from './marketwatch.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -40,16 +41,20 @@ export let autotrade = null; // made below, once validateOrder exists
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json') });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
+// Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
+export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
   onObserve: (o) => {
     try { scanFeed.observe(o); } catch (e) { console.error('round scan step failed', e.message); }
+    try { marketWatch.observe(o); } catch (e) { console.error('market watch step failed', e.message); }
     autotrade?.step(o);
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
   shifts: () => scanFeed.shifts(),
+  watch: () => marketWatch.status(),
 });
 setInterval(() => access.prune(), 3600000).unref();
 
@@ -303,6 +308,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/record') return send(res, 200, bot.record());
     // The Round scan: live read, learned weights and the graded record
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
+    if (path === '/api/watch') return send(res, 200, marketWatch.api());
     if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }

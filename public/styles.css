@@ -751,3 +751,9 @@ body.split .pane-body { padding: 4px 6px 8px; }
 .mu-r b { color: var(--muted); } .mu-r.on b { color: var(--yes); } .mu-r.on span { color: var(--text); }
 .mu-r small { grid-column: 2; font-size: 11px; line-height: 1.35; }
 .mem-using > small { display: block; margin-top: 5px; font-size: 10.5px; }
+/* v10.8 Market watch */
+.watch-now { font-size: 13px; margin: 4px 0 6px; color: var(--muted); } .watch-now b { color: var(--text); } .watch-now b.pos { color: var(--yes); } .watch-now b.neg { color: var(--no); }
+.watch-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 260px; overflow: auto; }
+.watch-list li { display: grid; grid-template-columns: auto 18px 1fr; gap: 0 6px; padding: 4px 0; border-top: 1px solid var(--line-2); font-size: 12px; color: var(--muted); }
+.watch-list li span { font-variant-numeric: tabular-nums; } .watch-list li em { font-style: normal; color: var(--text); }
+.watch-list li.w-severe em { color: var(--no); } .watch-list li.w-warn em { color: #fbbf24; } .watch-list li.calm { display: block; }

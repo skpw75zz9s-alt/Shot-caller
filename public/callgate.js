@@ -1,6 +1,7 @@
 // The call filter: learns from the bot's own graded calls which KINDS of calls lose money, and skips them.
 // Every official call is saved with what the bot saw when it made it: its confidence, the price, minutes left, how
-// settled the market was (stability) and how jumpy (volatility vs its 2-hour norm). After each settle, a
+// settled the market was (stability), how jumpy (volatility vs its 2-hour norm), Kalshi's spread, and how many
+// notable things Market watch saw in the minute before (public/watch.js). After each settle, a
 // logistic regression (heavily regularised) learns each call's chance of winning from those.
 // It only filters calls once it has PROVEN it would have helped: the past calls are replayed in order, each one
 // judged by a model fitted only on the calls before it (so it never peeks at the answer); the filter switches on
@@ -15,11 +16,13 @@ const logit = (p) => { const q = clamp(p, 0.01, 0.99); return Math.log(q / (1 - 
 const sigm = (z) => 1 / (1 + Math.exp(-z));
 
 // What the bot saw at the call, as numbers around typical values (so the weights start meaningful at 0)
-export function callFeatures({ conf, price, mins, stab, vr }) {
+// (spread: Kalshi's spread at the call; ev60: Market watch's notable events in the minute before it, public/watch.js)
+export function callFeatures({ conf, price, mins, stab, vr, spread, ev60 }) {
   if (conf == null || price == null) return null;
   const m = mins ?? 7, v = clamp((vr ?? 1) - 1, -1, 2);
   // plus the combinations that matter: late in the round AND jumpy, and late with low confidence
-  return [conf / 100 - 0.85, price - 0.8, m / 15 - 0.5, (stab ?? 60) / 100 - 0.6, v, Math.max(0, 5 - m) / 5 * Math.max(0, v), Math.max(0, 5 - m) / 5 * (0.9 - conf / 100)];
+  return [conf / 100 - 0.85, price - 0.8, m / 15 - 0.5, (stab ?? 60) / 100 - 0.6, v, Math.max(0, 5 - m) / 5 * Math.max(0, v), Math.max(0, 5 - m) / 5 * (0.9 - conf / 100),
+    clamp((spread ?? 0.02) - 0.02, -0.02, 0.2) * 10, Math.min(ev60 ?? 0, 5) / 5];
 }
 // Logistic regression with an intercept starting at the calls' overall win rate (Newton's method, L2 on the weights)
 export function fitGate(rows, { l2 = GATE.l2 } = {}) {
