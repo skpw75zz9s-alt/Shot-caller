@@ -269,6 +269,30 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Stronger Round scan (v9.1)
+
+The Round scan (`public/roundscan.js`) now reads more, runs on the server around the clock, and grades itself honestly:
+- **New reads:**
+  - **Flow, recent first:** buyers' share of the dollars with a 3-minute half-life, so the last few minutes count most instead of the whole round equally.
+  - **Absorption:** heavy selling (or buying) over the last 3 minutes that hasn't moved the price. Someone big is soaking it up on the other side, which tends to win.
+  - **Leader's move:** the exchange that moves first (⚡) has just pulled away from the pack. The rest usually follow.
+  - **Coinbase premium:** Coinbase's price vs the other four (keen or heavy US spot demand).
+- **Scan chance.** Flow alone can't call a round, because what matters is whether BTC closes above the target. Scan chance starts from the bot's odds, which know the distance to the target, the volatility and the time left. It then nudges them by the scan's reads, using weights *learned* from graded rounds (a regularised logistic regression with the bot's odds as the base). Until a checkpoint has 150 graded rounds the weights stay at zero, and the card says it's still learning. A read that proves useless stays at zero, and one that turns out backwards is shown as backwards.
+- **On the server, every round** (`scanfeed.js`).
+  - The server streams the five exchanges' public trade feeds itself.
+  - It scans the live round and takes a sample at 10, 6 and 3 minutes left. Samples are only taken while at least 3 exchanges are streaming.
+  - It grades each sample once Kalshi settles, and refits the weights. Data is kept in `DATA_DIR/scan.json`.
+  - The phone shows the server's scan whenever its own feeds aren't streaming. `/api/scan` serves the live scan, the weights and the record. `SCAN_FEEDS=off` turns the server's feeds off.
+- **The honest record.** The old record graded the scan at the close, when flow since the open already mirrors the result, so it flattered itself. Now each checkpoint shows:
+  - how often the lean matched the result
+  - Brier scores for the bot alone, the scan chance and Kalshi's own price (lower is better, 0.25 is a coin flip)
+  - whether the scan improved the bot's odds
+
+  Each sample is scored with the weights the scan had *before* that round's result was known, so it's out of sample.
+- The phone now keeps every trade of the round (it used to drop the oldest in busy rounds, which skewed the scan).
+
+It's still context: the bot's calls and the Auto-trader don't use it. If the record shows the scan improving the bot's odds over a few hundred rounds, that's the evidence for wiring it in.
+
 ### TradingView charts (v9.0)
 
 The Chart tab is now built on **TradingView Lightweight Charts™** (`public/vendor/lightweight-charts.js`, v4.2.3, Apache License 2.0, copied in unmodified, still no npm dependencies). `public/tvchart.js` sets it up:

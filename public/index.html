@@ -134,11 +134,12 @@
         <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
         <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
         <div class="scan-meter"><i id="scanFill"></i><em></em></div>
+        <div class="scan-chance" id="scanChance"></div>
         <ul class="scan-parts" id="scanParts"></ul>
         <div class="scan-table" id="scanTable"></div>
         <div class="scan-facts" id="scanFacts"></div>
         <div class="scan-record" id="scanRecord"></div>
-        <small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Graded against Kalshi's result each round: context only, the bot's calls don't use it.</small>
+        <small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Absorption = heavy flow one way that doesn't move the price. Scan chance = the bot's odds nudged by the reads the server has learned to trust from graded rounds. The server scans and grades every round, app open or not. Context only: the bot's calls don't use it.</small>
       </div>
 
       <div class="card tape-card">
@@ -392,7 +393,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v9.0 · TradingView charts</p>
+      <p class="fine" id="version">Shot Caller v9.1 · stronger Round scan</p>
     </section>
   </main>
 

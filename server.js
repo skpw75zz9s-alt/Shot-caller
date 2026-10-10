@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createBot } from './bot.js';
 import { createAccess } from './access.js';
 import { createAutoTrade } from './autotrade.js';
+import { createScanFeed } from './scanfeed.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -34,10 +35,15 @@ export const access = createAccess({
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
+// The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
+export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json') });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
-  onObserve: (o) => autotrade?.step(o),
+  onObserve: (o) => {
+    try { scanFeed.observe(o); } catch (e) { console.error('round scan step failed', e.message); }
+    autotrade?.step(o);
+  },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
 });
 setInterval(() => access.prune(), 3600000).unref();
@@ -162,7 +168,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder });
-const ready = Promise.all([bot.load(), access.load(), autotrade.load()]);
+const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -288,6 +294,8 @@ export const server = http.createServer(async (req, res) => {
     // What the server has learned about the market (the phone prices with it too)
     // The official bot record (every call the server's bot made, graded against Kalshi's result)
     if (path === '/api/record') return send(res, 200, bot.record());
+    // The Round scan: live read, learned weights and the graded record
+    if (path === '/api/scan') return send(res, 200, scanFeed.api());
     if (path === '/api/learn') return send(res, 200, { learned: bot.learned(), status: bot.learnStatus() });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
@@ -303,5 +311,7 @@ export const server = http.createServer(async (req, res) => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
+  // SCAN_FEEDS=off: don't stream the exchanges from the server
+  if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
 }

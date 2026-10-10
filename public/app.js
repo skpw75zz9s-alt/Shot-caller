@@ -13,7 +13,7 @@ import { suggestEntry, suggestExit } from './suggest.js';
 import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
-import { SCAN_EXCHANGES, fmtK, scanRecord, scanRound } from './roundscan.js';
+import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { predictionLines, predictionRecord } from './predict.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -147,7 +147,6 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
   callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
   predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
-  scanLog: store.get('scanLog', []), // each round's 5-exchange scan at its close, graded at settlement (public/roundscan.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
@@ -155,6 +154,7 @@ try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'lear
 try { for (const k of ['traderCfg', 'trader:test', 'trader:demo', 'trader:live', 'traderTestEx']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
+try { localStorage.removeItem('scanLog'); } catch { /* the scan is graded on the server since v9.1 */ }
 
 // Access lapsed (paywall): reload so the server shows the paywall page.
 function paywalled(r) {
@@ -426,7 +426,7 @@ function handleTrades(trades) {
     const round = live ? Date.parse(live.open_time) : null;
     if (round !== tape.round) { tape.round = round; tape.ex = []; }
     tape.ex.push(x);
-    if (tape.ex.length > 20000) tape.ex.splice(0, 5000);
+    if (tape.ex.length > 150000) tape.ex.splice(0, 20000); // the whole round (busy rounds run to tens of thousands)
     const w = addTrade(flow, x, { round, whaleMin: p.whaleMin });
     x.whale = !!w;
     tape.list.unshift(x); tape.rate.push(Date.now());
@@ -537,15 +537,20 @@ function renderStability(st, now) {
   setText($('pulseWhen'), clock(now));
 }
 // ---------- round scan: the 5 exchanges, every trade this round (public/roundscan.js) ----------
-function renderScan(live, now) {
-  if (!live || now - (state.scanAt || 0) < 2000) return;
+// The phone scans its own live feeds; when they're not streaming it shows the server's scan (scanfeed.js). The learned
+// weights and the graded record always come from the server, which scans and grades every round.
+function renderScan(live, snap, now) {
+  if (!live || now - (state.scanAt || 0) < 3000) return;
   state.scanAt = now;
-  const open = Date.parse(live.m.open_time), tk = live.m.ticker;
-  const sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin });
-  setText($('scanWhen'), `${int(sc.trades)} trades · ${clock(now)}`);
+  if (now - (state.scanFetchAt || 0) > 10000) { state.scanFetchAt = now; getJSON('scan').then((d) => { state.scanSrv = d; }).catch(() => {}); }
+  const srv = state.scanSrv, open = Date.parse(live.m.open_time), tk = live.m.ticker;
+  let sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin, sigmaMin: snap.sigmaMin }), fromServer = false;
+  if (!sc.ready && srv?.live?.ticker === tk && srv.live.sc?.ready) { sc = srv.live.sc; fromServer = true; }
+  setText($('scanWhen'), `${int(sc.trades)} trades · ${fromServer ? 'server feeds' : clock(now)}`);
   if (!sc.ready) {
-    setText($('scanLabel'), 'Reading the round…'); setText($('scanScore'), 'needs the live exchange feeds (open the app in front)');
-    setClass($('scanVerdict'), 'scan-verdict'); setStyle($('scanFill'), 'width', '0%'); setHTML($('scanParts'), ''); setHTML($('scanTable'), ''); setHTML($('scanFacts'), '');
+    setText($('scanLabel'), 'Reading the round…'); setText($('scanScore'), 'waiting for the exchange feeds');
+    setClass($('scanVerdict'), 'scan-verdict'); setStyle($('scanFill'), 'width', '0%');
+    for (const id of ['scanParts', 'scanTable', 'scanFacts', 'scanChance']) setHTML($(id), '');
   } else {
     const cls = sc.score >= 15 ? 'up' : sc.score <= -15 ? 'down' : 'mixed';
     if (setText($('scanLabel'), sc.verdict)) pop($('scanLabel'));
@@ -554,6 +559,15 @@ function renderScan(live, now) {
     // meter: centre is 0, left half sellers, right half buyers
     setStyle($('scanFill'), 'cssText', sc.score >= 0 ? `left:50%;width:${sc.score / 2}%;background:var(--yes)` : `left:${50 + sc.score / 2}%;width:${-sc.score / 2}%;background:var(--no)`);
     setHTML($('scanParts'), sc.parts.map((p) => `<li><b class="${p.pts > 0 ? 'pos' : p.pts < 0 ? 'neg' : ''}">${p.pts > 0 ? '+' : ''}${p.pts}</b><span>${esc(p.name)}</span><small>${esc(p.why)}</small></li>`).join(''));
+    // the scan chance: the bot's odds (distance to the target, volatility, time left) nudged by what the scan has learned
+    const ch = scanChance(live.ev.pYes, featureVector(sc, live.m.strike_type), srv?.models, live.ev.minutesLeft);
+    const cp = srv?.models?.[checkpointFor(live.ev.minutesLeft)];
+    if (ch) {
+      const pct = (p) => `${Math.round(p * 100)}%`, side = ch.p >= 0.5 ? 'UP' : 'DOWN', pS = Math.max(ch.p, 1 - ch.p);
+      const shift = ch.active ? Math.round((ch.p - ch.pModel) * 100) : 0;
+      setHTML($('scanChance'), `<div class="sc-ch ${ch.p >= 0.5 ? 'up' : 'down'}"><label>Scan chance</label><b>${side} ${pct(pS)}</b>`
+        + `<small>${ch.active ? `bot alone ${pct(ch.p >= 0.5 ? ch.pModel : 1 - ch.pModel)} · scan ${shift >= 0 ? '+' : '−'}${Math.abs(shift)} pts on UP` : `= the bot's odds: still learning (${int(cp?.n ?? 0)}/${MIN_SAMPLES} graded rounds at this point)`}</small></div>`);
+    } else setHTML($('scanChance'), '');
     const rows = SCAN_EXCHANGES.map((ex) => sc.rows.find((r) => r.ex === ex));
     setHTML($('scanTable'), `<div class="sc-h"><span>Exchange</span><span>Buy / sell</span><span>Net</span><span>Since open</span></div>` + rows.map((r) => {
       if (!r || !r.n) return `<div class="sc-r off"><span>${esc(r?.ex ?? '')}</span><span class="muted">no trades yet</span><span></span><span></span></div>`;
@@ -566,20 +580,32 @@ function renderScan(live, now) {
     const facts = [
       sc.leader ? `⚡ <b>${esc(sc.leader.ex)}</b> moves first: the others follow about ${sc.leader.lag}s later` : 'No clear leader yet: the exchanges move together',
       sc.dispersion != null ? `Prices <b>$${sc.dispersion.toFixed(0)}</b> apart across exchanges${sc.dispersion > 40 ? ' (wide: a fragmented, jumpy market)' : ''}` : null,
+      sc.cbPremium != null && Math.abs(sc.cbPremium) >= 5 ? `Coinbase is <b class="${sc.cbPremium > 0 ? 'pos' : 'neg'}">$${Math.abs(sc.cbPremium).toFixed(0)} ${sc.cbPremium > 0 ? 'above' : 'below'}</b> the other exchanges (${sc.cbPremium > 0 ? 'US buyers keen' : 'US sellers heavier'})` : null,
       `Flow is <b>${esc(sc.momentum.state)}</b>`,
       sc.bigBuy + sc.bigSell > 0 ? `Big prints ($25k+): <b class="pos">$${fmtK(sc.bigBuy)}</b> buy · <b class="neg">$${fmtK(sc.bigSell)}</b> sell` : null,
     ].filter(Boolean);
     setHTML($('scanFacts'), facts.map((f) => `<div>${f}</div>`).join(''));
-    // keep this round's latest scan; the one standing at the close is what gets graded
-    let e = state.scanLog.find((x) => x.ticker === tk);
-    if (!e) { e = { ticker: tk, closeTime: live.m.close_time }; state.scanLog.unshift(e); if (state.scanLog.length > 300) state.scanLog.length = 300; }
-    if (now < Date.parse(live.m.close_time)) Object.assign(e, { score: sc.score, lean: sc.lean, verdict: sc.verdict, at: now });
-    if (now - (state.scanSavedAt || 0) > 10000) { state.scanSavedAt = now; store.set('scanLog', state.scanLog); }
   }
-  const rec = scanRecord(state.scanLog);
-  setHTML($('scanRecord'), rec.graded ? `Record: its lean matched Kalshi's result <b>${rec.right} of ${rec.graded}</b> rounds (${Math.round(rec.right / rec.graded * 100)}%)${rec.strong ? ` · strong reads <b>${rec.strongRight} of ${rec.strong}</b>` : ''}${rec.mixed ? ` · ${rec.mixed} mixed` : ''}`
-    + `<div class="scan-past">${state.scanLog.filter((x) => x.result).slice(0, 10).map((x) => `<span class="${!x.lean ? '' : x.lean.toLowerCase() === x.result ? 'ok' : 'bad'}" title="${esc(x.ticker)}: ${esc(x.verdict || '')} → ${x.result.toUpperCase()}">${!x.lean ? '·' : x.lean.toLowerCase() === x.result ? '✓' : '✕'}</span>`).join('')}</div>`
-    : 'Record: graded after each round settles (keep the app open through a few rounds).');
+  setHTML($('scanRecord'), scanRecordHtml(srv));
+}
+// The server's honest record: each checkpoint's Brier score for the bot alone, the scan chance and Kalshi's price
+// (lower is better), how often the lean matched, and what the scan has learned to trust
+function scanRecordHtml(srv) {
+  if (!srv?.record) return 'Record: the server grades the scan after every round.';
+  const r6 = srv.record[6], br = (v) => (v == null ? '—' : v.toFixed(3));
+  if (!r6?.n) return 'Record: the server grades the scan at 10, 6 and 3 minutes left in every round. The first results show after a round settles.';
+  const lines = CHECKPOINTS.map((cp) => {
+    const r = srv.record[cp];
+    if (!r?.n) return '';
+    const better = r.skill == null ? '' : r.skill > 0.005 ? ` <b class="pos">scan improves the bot ${Math.round(r.skill * 100)}%</b>` : r.skill < -0.005 ? ` <b class="neg">scan worse than the bot alone</b>` : ' no difference yet';
+    return `<tr><td>${cp} min left</td><td>${int(r.n)}</td><td>${r.leaned ? `${Math.round(r.right / r.leaned * 100)}%` : '—'}</td><td>${br(r.bot)}</td><td>${br(r.scan)}</td><td>${br(r.kalshi)}</td></tr>${better ? `<tr class="sc-skill"><td colspan="6">${better}</td></tr>` : ''}`;
+  }).join('');
+  const m = srv.models?.[6];
+  const learned = m?.active ? FEATURES.map((k, i) => ({ k, w: m.w[i] })).filter((f) => Math.abs(f.w) >= 0.05).sort((a, b) => Math.abs(b.w) - Math.abs(a.w))
+    .map((f) => `${esc(FEATURE_NAMES[f.k])} ${f.w > 0 ? '✓' : '✕ (backwards)'}`).join(' · ') : '';
+  return `<table class="sc-rec"><tr><th>Graded at</th><th>Rounds</th><th>Lean right</th><th>Bot</th><th>Scan</th><th>Kalshi</th></tr>${lines}</table>`
+    + `<small>Brier score: lower is better (0.25 = a coin flip). Scan is scored with the weights it had before each result.${learned ? ` Trusts: ${learned}.` : m?.active ? ' Nothing in the scan has proven useful yet, so it leaves the bot\'s odds alone.' : ''}</small>`
+    + `<div class="scan-past">${(srv.rounds || []).slice(0, 10).map((x) => `<span class="${!x.lean ? '' : (x.lean === 'YES') === (x.y === 1) ? 'ok' : 'bad'}" title="${esc(x.ticker)}: lean ${esc(x.lean || 'none')} at 6 min left → ${x.y ? 'YES' : 'NO'}">${!x.lean ? '·' : (x.lean === 'YES') === (x.y === 1) ? '✓' : '✕'}</span>`).join('')}</div>`;
 }
 function renderDeck(snap, live, sig, now) {
   // Status tiles
@@ -637,7 +663,7 @@ function renderDeck(snap, live, sig, now) {
   setText($('pulseNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}` : 'Buy vs sell pressure: needs the live feeds (open the app in front)');
   $('pulseBull').classList.toggle('dom', buy != null && buy >= 0.55);
   $('pulseBear').classList.toggle('dom', buy != null && buy <= 0.45);
-  renderScan(live, now);
+  renderScan(live, snap, now);
   trackPredictions(snap, live, now);
   renderStability(sig?.stability ?? stability({ bars: snap.bars, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, now }), now);
   setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
@@ -1794,7 +1820,6 @@ async function settleLogs() {
   const tickers = new Map();
   for (const e of state.ruleLog) if (!e.result && Date.parse(e.closeTime) < now - 90000) tickers.set(e.ticker, e.closeTime);
   for (const e of unsettledCalls(state.callLog, now)) tickers.set(e.ticker, e.closeTime);
-  for (const e of state.scanLog) if (!e.result && e.closeTime && Date.parse(e.closeTime) < now - 90000) tickers.set(e.ticker, e.closeTime);
   for (const [ticker, closeTime] of [...tickers].slice(0, 3)) {
     try {
       const { market } = await getJSON(`kalshi/markets/${encodeURIComponent(ticker)}`);
@@ -1802,14 +1827,13 @@ async function settleLogs() {
       if (!result && Date.parse(closeTime) < now - 6 * 3600000) result = 'unknown'; // voided or never reported
       if (!result) continue;
       for (const e of state.ruleLog) if (e.ticker === ticker && !e.result) e.result = result;
-      for (const e of state.scanLog) if (e.ticker === ticker && !e.result) e.result = result;
       const graded = state.callLog.filter((e) => e.ticker === ticker && !e.result);
       settleCalls(state.callLog, ticker, result);
       for (const e of graded) if (result === 'yes' || result === 'no') {
         const won = e.side.toLowerCase() === result;
         alerts.event(won ? 'win' : 'loss', `Call ${won ? 'WON' : 'lost'}: ${e.side === 'YES' ? 'UP' : 'DOWN'}`, `${ticker} settled ${result.toUpperCase()} · bot said ${e.conf ?? '—'}`, `${won ? 'win' : 'loss'}:${ticker}`);
       }
-      store.set('ruleLog', state.ruleLog); store.set('callLog', state.callLog); store.set('scanLog', state.scanLog);
+      store.set('ruleLog', state.ruleLog); store.set('callLog', state.callLog);
     } catch { /* next time */ }
   }
 }
