@@ -3,6 +3,7 @@ import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
 import { CHART_TOGGLES, chartDefaults, createImpact } from './chart.js';
+import { explainMove } from './why.js';
 import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
@@ -342,6 +343,7 @@ const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.
 const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
+  state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
 };
 
@@ -425,13 +427,14 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 // Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
 const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
 const impact = createImpact(); // which trades moved the price (public/chart.js)
+tape.recent = []; // every exchange trade in the last ~10 minutes, for "why it moved" (public/why.js)
 function handleTrades(trades) {
   const p = alerts.prefs();
   for (const x of trades) {
     const live = state.markets.find((m) => Date.parse(m.close_time) > x.t);
     const round = live ? Date.parse(live.open_time) : null;
     if (round !== tape.round) { tape.round = round; tape.ex = []; }
-    tape.ex.push(x);
+    tape.ex.push(x); tape.recent.push(x);
     if (tape.ex.length > 150000) tape.ex.splice(0, 20000); // the whole round (busy rounds run to tens of thousands)
     const w = addTrade(flow, x, { round, whaleMin: p.whaleMin });
     x.whale = !!w;
@@ -441,6 +444,7 @@ function handleTrades(trades) {
     if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
+  if (tape.recent[0] && tape.recent[0].t < Date.now() - 11 * 60000) tape.recent = tape.recent.filter((x) => x.t >= Date.now() - 10 * 60000);
   orderFrame(); // new trades show on the chart right away, not at the next refresh
   if (tape.big.length > 4000 || (tape.big[0] && tape.big[0].t < Date.now() - 6 * 3600000)) tape.big = tape.big.filter((x) => x.t >= Date.now() - 6 * 3600000).slice(-3000);
 }
@@ -805,13 +809,38 @@ async function drawChartTab(force = false) {
   if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
   // Redraw the layers when something on them changed (or every 5s for the indicators); trades move the live candle in between
   const lb = bars[bars.length - 1];
-  const key = [tf, chartState.height, bars.length, lb.t, live?.strike, close, state.callLog.length, fk, JSON.stringify(chartState.show), Math.floor(now / 5000)].join('|');
+  const key = [tf, chartState.height, bars.length, lb.t, live?.strike, close, state.callLog.length, fk, state.whyLog[0]?.t, JSON.stringify(chartState.show), Math.floor(now / 5000)].join('|');
   if (key === chartState.key && !force) return;
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: showCone ? predictionsNow(live, snap, now) : [], markers, fills: chartState.fills, orders: tape.big, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: showCone ? predictionsNow(live, snap, now) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
+// ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
+state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
+function runWhy() {
+  if (document.hidden) return;
+  const now = Date.now(), live = state.markets.find((m) => Date.parse(m.close_time) > now);
+  const note = explainMove({ trades: tape.recent, impacts: tape.big, now, sigmaMin: state.sigmaNow || undefined, strike: live && state.strikeNow?.ticker === live.ticker ? state.strikeNow.strike : null, strikeType: live?.strike_type, last: state.whyLog[0] });
+  if (note) {
+    state.whyLog.unshift(note);
+    if (state.whyLog.length > 40) state.whyLog.length = 40;
+    store.set('whyLog', state.whyLog);
+    drawChartTab(true);
+  }
+  renderWhy(now);
+}
+setInterval(runWhy, 2000);
+function renderWhy(now = Date.now()) {
+  const n = state.whyLog[0], on = chartState.show?.why !== false;
+  const fresh = on && n && now - n.t < 30000 && !state.whyHidden?.[n.t];
+  setHidden($('whyBox'), !fresh);
+  if (fresh) setHTML($('whyBox'), `<div class="why-h ${n.dir}"><span>Why it moved · ${esc(clock(n.t))}</span><b>${esc(n.headline)}</b></div><ul>${n.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`);
+  setHTML($('whyList'), state.whyLog.length ? state.whyLog.slice(0, 8).map((x) => `<li class="${x.dir}"><span>${esc(clock(x.t))}</span><b>${esc(x.headline)}</b><small>${x.reasons.map(esc).join(' · ')}</small></li>`).join('')
+    : '<li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li>');
+}
+$('whyBox').addEventListener('click', () => { const n = state.whyLog[0]; if (n) { (state.whyHidden ||= {})[n.t] = true; renderWhy(); } }); // tap to dismiss
+
 // Trades: the live candle follows the latest Coinbase trade (the candles are Coinbase's), and new big trades pop as bubbles
 let orderRaf = 0;
 function orderFrame() {

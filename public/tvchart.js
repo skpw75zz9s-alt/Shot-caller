@@ -114,6 +114,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     const barOf = (ms) => sec(bars[Math.max(0, bars.findIndex((b) => b.t + barMs > ms))].t);
     if (show.markers) for (const m of d.markers || []) if (inView(m.t)) marks.push({ time: barOf(m.t), position: m.side === 'YES' ? 'belowBar' : 'aboveBar', color: m.side === 'YES' ? C.up : C.dn, shape: m.side === 'YES' ? 'arrowUp' : 'arrowDown', text: m.label });
     if (show.fills) for (const f of d.fills || []) if (inView(f.t)) marks.push({ time: barOf(f.t), position: f.kind === 'buy' ? 'belowBar' : 'aboveBar', color: f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24', shape: 'circle', text: `${f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S'} ${f.label || ''}`.trim() });
+    // why it moved: a marker naming the cause on each candle that made a real move (public/why.js)
+    if (show.why !== false) for (const n of d.notes || []) if (inView(n.t)) marks.push({ time: barOf(n.t), position: n.dir === 'up' ? 'aboveBar' : 'belowBar', color: '#c4b5fd', shape: 'circle', size: 0.6, text: n.tag });
     const e9 = ema(closes, 9), e21 = ema(closes, 21);
     trend = e9.at(-1) != null && e21.at(-1) != null ? (e9.at(-1) >= e21.at(-1) ? 'bull' : 'bear') : null;
     if (show.beasts) for (let i = 1, lastI = -9; i < bars.length; i++) {

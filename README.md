@@ -269,6 +269,23 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Why it moved (v9.5)
+
+Whenever BTC makes a real move on the Chart tab, the chart explains it (`public/why.js`). A real move is well beyond its usual 30-second wiggle: 1.3× the typical 30-second move at the bot's volatility, and at least $15.
+- **On the candle:** a marker names the cause: *buyers*, *sellers*, *sweep*, *whale*, *thin book*, *Kraken led*, *volume surge*, *light volume*, *crossed target* or *drift*.
+- **Over the chart:** a **Why it moved** note with the move ("▲ +$135 in 30s") and its reasons. It stays for 30 seconds; tap it to dismiss.
+- **Under the chart:** the last 8 explanations.
+
+The reasons come from every trade on the five exchanges:
+- **Who drove it:** aggressive buyers vs sellers in those 30 seconds.
+- **Thin book:** the price moved *against* the heavier side, so the other side had pulled its orders.
+- **Sweep:** a big market order pushed through the book (the same orders the chart's bubbles show).
+- **Leader:** which exchange got there first, and by how many seconds.
+- **Volume:** a surge (2× the usual pace or more) or a move on light trading.
+- **Target:** it crossed the round's target, so the winning side flipped.
+
+A move is explained once. A new note comes after 30 seconds, or sooner if the move goes a whole threshold further. Turn it off in Chart tools & indicators (**Why it moved**).
+
 ### Learns every second (v9.3)
 
 The server's bot now runs **every second** instead of every 5 seconds. Calls, sells, bail-outs and the Auto-trader react 5× faster. The exchanges' REST tickers are still read every 5 seconds (their rate limits). In between, the price moves with the live trades the server streams from the five exchanges, kept on the index's level.

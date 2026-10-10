@@ -7,6 +7,7 @@ export const CHART_TOGGLES = [
   ['beasts', 'Bull / bear trend + EMA crosses', true],
   ['predict', 'Prediction lines in the cone (Bot, Kalshi, 5 exchanges)', true],
   ['orders', 'Live orders (only ones that move the price)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
+  ['why', 'Why it moved (explains each real move)', true],
 ];
 export const chartDefaults = () => Object.fromEntries(CHART_TOGGLES.map(([k, , on]) => [k, on]));
 
