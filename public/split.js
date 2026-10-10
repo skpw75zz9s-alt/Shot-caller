@@ -1,11 +1,19 @@
-// Split screen (computers only: a mouse or trackpad and a window at least 1024px wide; phones and tablets always get
-// one screen and don't see the button): show up to four of the app's screens at once (Deck, Chart, Alerts, Record, Learn, Settings).
+// Split screen (computers only: Windows, Mac, Linux or ChromeOS with a mouse or trackpad and a window at least 900px
+// wide, touchscreen laptops included; phones and tablets, iPads with a trackpad too, always get one screen and don't see
+// the button): show up to four of the app's screens at once (Deck, Chart, Alerts, Record, Learn, Settings).
 // Each pane has its own picker and scrolls on its own; tapping a pane focuses it, and the bottom bar then changes what
 // the focused pane shows. Picking a screen another pane already shows swaps the two. On a narrow screen the panes'
 // contents shrink to fit (CSS zoom), so every card still lays out as it does full screen. The layout is remembered.
 export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['alerts', 'Alerts'], ['history', 'Record'], ['learn', 'Learn'], ['settings', 'Settings']];
 const DEFAULT_PANES = ['live', 'chart', 'alerts', 'history'];
-export const PC_QUERY = '(hover: hover) and (pointer: fine) and (min-width: 1024px)';
+export const PC_WIDTH = 900; // CSS px: a 1366x768 laptop at 150% display scaling is 911
+// A computer: a desktop OS (not a phone or tablet; iPads say "Macintosh" but have touch points) with a mouse or trackpad
+// somewhere (any pointer, so a touchscreen laptop still counts), in a wide enough window
+export function isComputer({ ua = '', platform = '', maxTouchPoints = 0, mobile = null, finePointer = false, width = 0 } = {}) {
+  if (mobile === true || /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua)) return false;
+  if (/Mac/.test(platform || ua) && maxTouchPoints > 1) return false; // iPadOS in desktop mode
+  return finePointer && width >= PC_WIDTH;
+}
 const DESIGN_WIDTH = 380; // the width the screens are laid out for: narrower panes shrink their contents to match
 
 // Which screens n panes show: keep the ones already chosen (no repeats), fill the rest from the defaults
@@ -29,7 +37,10 @@ export function createSplit({ main, store, onShow, button, menu }) {
   const sections = Object.fromEntries(SPLIT_VIEWS.map(([k]) => [k, document.getElementById(`view-${k}`)]));
   const order = SPLIT_VIEWS.map(([k]) => sections[k]); // where they go back to in single mode
   let single = 'live';
-  const pc = typeof matchMedia === 'function' ? matchMedia(PC_QUERY) : { matches: false };
+  const fine = typeof matchMedia === 'function' ? matchMedia('(any-pointer: fine)') : null;
+  const onComputer = () => typeof navigator !== 'undefined' && isComputer({ ua: navigator.userAgent, platform: navigator.userAgentData?.platform || navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints, mobile: navigator.userAgentData?.mobile ?? null, finePointer: !!fine?.matches, width: innerWidth });
+  const pc = { matches: onComputer() };
   const count = () => (pc.matches ? cfg.n : 1); // what's on screen: the saved layout on a computer, one screen elsewhere
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fit()) : null;
 
@@ -108,8 +119,10 @@ export function createSplit({ main, store, onShow, button, menu }) {
   menu.addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (b) { setCount(Number(b.dataset.n)); menu.hidden = true; } });
   document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== button) menu.hidden = true; });
 
-  addEventListener('resize', () => fit());
-  pc.addEventListener?.('change', () => layout()); // a window resized past 1024px, or a mouse plugged in or out
+  // a window resized past 900px, or a mouse plugged in or out: switch between split and one screen
+  const recheck = () => { const now = onComputer(); if (now !== pc.matches) { pc.matches = now; layout(); } else fit(); };
+  addEventListener('resize', recheck);
+  fine?.addEventListener?.('change', recheck);
   renderMenu();
   return { start: layout, show, setCount, state: () => ({ ...cfg, single }) };
 }
