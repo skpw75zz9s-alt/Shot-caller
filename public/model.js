@@ -60,9 +60,20 @@ export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1, sett
   return normCdf(mu / Math.sqrt(variance));
 }
 
-// Kalshi taker fee per contract (in dollars) at price p in dollars: 0.07·p·(1−p), rounded up to the cent.
-export function kalshiFee(p, contracts = 1) {
-  return Math.ceil(0.07 * contracts * p * (1 - p) * 100 - 1e-9) / 100;
+// Kalshi's fee (in dollars) at price p: rate·contracts·p·(1−p), rounded up to the cent. The rates start at Kalshi's
+// published 7% (taker) and a quarter of that (maker), and switch to the ones measured from real fills once there are
+// enough (public/fees.js, applied with setFeeRates).
+const FEE_RATES = { taker: 0.07, maker: 0.0175, measured: { taker: false, maker: false } };
+export function setFeeRates(learned) {
+  for (const kind of ['taker', 'maker']) {
+    const x = learned?.[kind];
+    if (x?.k != null && x.n >= 8) { FEE_RATES[kind] = x.k; FEE_RATES.measured[kind] = true; }
+  }
+  return feeRates();
+}
+export const feeRates = () => ({ taker: FEE_RATES.taker, maker: FEE_RATES.maker, measured: { ...FEE_RATES.measured } });
+export function kalshiFee(p, contracts = 1, maker = false) {
+  return Math.ceil((maker ? FEE_RATES.maker : FEE_RATES.taker) * contracts * p * (1 - p) * 100 - 1e-9) / 100;
 }
 
 const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));

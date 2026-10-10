@@ -269,6 +269,21 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Real fees and a closer copy of the settlement index (v10.7)
+
+From the research round (pros' tips checked against the bot):
+- **Kalshi's real fee, measured.**
+  - Fees decide whether these markets pay at all: one study of 6,298 rounds found a ~0.67¢ gross edge against a ~1.55¢ average fee.
+  - Sources disagree on the crypto rate, and Kalshi has changed it. So the bot measures it (`public/fees.js`, `feebook.js`).
+  - Every fill your linked Kalshi account makes is reported with Kalshi's exact fee (numbers only). So is every Auto-trader order where Kalshi returns its fee.
+  - Once there are 8+ fills, the rate that reproduces them best replaces the published 7% in every fee the bot figures: edges, sizing and the Auto-trader. Takers and makers are measured apart.
+  - Record → What the bot has learned shows it.
+- **A closer copy of the settlement index.** Kalshi settles on CF Benchmarks' BRTI, built every second from the constituent exchanges' consolidated order books.
+  - The bot's index now reads each exchange's **order book**, not just its ticker. It weighs venues by the dollars resting within 0.1% of the mid (a depth-weighted median), so deep venues count for more, as in the real index.
+  - It adds **itBit (Paxos)**, one of the venues CF Benchmarks has drawn from.
+  - Books are read at most every 15 seconds, with tickers in between. A venue whose book can't be read falls back to its ticker.
+- **Backup target:** if a market ever arrives without Kalshi's strike, its target is the 60-second average before the open (Kalshi's rule), not the first candle's open.
+
 ### Everything it learns feeds the calls, once proven (v10.6)
 
 Three learners that used to be context only now shape the bot's calls (official, push alerts, Auto-trader and the phone alike). Each switches on only when its own graded record proves it helps; until then it keeps learning and changes nothing.

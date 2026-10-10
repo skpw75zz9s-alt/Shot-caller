@@ -1,4 +1,4 @@
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, feeRates, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
@@ -196,6 +196,7 @@ async function refreshMarkets() {
 // What the server has learned (volatility by time of week, calibration, basis). Small; refreshed every 10 minutes.
 async function refreshMemory() {
   state.memory = { ...(await getJSON('learn')), at: Date.now() };
+  setFeeRates(state.memory.learned?.fees); // Kalshi's real fee rates, measured from fills
   store.set('marketMemory', state.memory);
   renderMemory();
 }
@@ -1225,6 +1226,9 @@ function renderMemory() {
   if (settings.learn === false) lines.push('Off in Settings: the bot isn\'t using any of this right now.');
   setText($('memSummary'), lines.join(' '));
   setHTML($('memPulse'), pulseHtml(st.pulse));
+  const fz = st.fees, ft = fz?.taker, fm = fz?.maker;
+  const feeRow = { name: 'Kalshi\'s real fee', on: ft?.k != null, detail: ft?.k != null ? `${(ft.k * 100).toFixed(2)}% measured on ${ft.n} fills (Kalshi publishes 7%)${fm?.k != null ? ` · makers ${(fm.k * 100).toFixed(2)}% on ${fm.n}` : ''}` : `${ft?.n ?? 0}/8 fills from your linked Kalshi account or the Auto-trader` };
+  if (st.using && !st.using.some((u) => u.name === feeRow.name)) st.using = [...st.using, feeRow];
   setHTML($('memUsing'), (st.using || []).length ? `<div class="mu-h">Used in the bot's calls</div>${st.using.map((u) => `<div class="mu-r ${u.on ? 'on' : ''}"><b>${u.on ? '✓' : '…'}</b><span>${esc(u.name)}</span><small>${esc(u.detail)}</small></div>`).join('')}<small class="muted">Each learner only shapes calls once its own graded record proves it helps; until then it keeps learning and changes nothing.</small>` : '');
   // Weekday volatility by half hour (New York time)
   const prof = st.profile;
@@ -1768,6 +1772,9 @@ async function syncKalshi() {
     } while (cursor && ++pages < 50);
     const complete = !cursor;
     const mine = fills.filter((f) => f.ticker.startsWith(`${settings.series}-`) && !seen.has(f.id) && f.at);
+    // the real fee on each new fill (any market) teaches the bot Kalshi's actual rate (public/fees.js, feebook.js)
+    const feeFills = fills.filter((f) => !seen.has(f.id) && f.fee != null && f.price != null && f.count > 0).map((f) => ({ id: `f-${f.id}`, count: f.count, price: f.price, fee: f.fee, taker: f.taker !== false }));
+    if (feeFills.length) postJSON('fees', { samples: feeFills.slice(0, 300) }).catch(() => {});
     if (mine.length) {
       const linked = state.positions.filter((p) => p.source === 'kalshi');
       const holdings = Object.fromEntries(linked.map((p) => [p.ticker, { side: p.side, contracts: p.contracts, price: p.price, at: p.at, fees: p.fees ?? null }]));

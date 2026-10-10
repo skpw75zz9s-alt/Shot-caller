@@ -40,8 +40,9 @@ test('PKCS#1 keys are wrapped to PKCS#8 byte-for-byte like OpenSSL does', () => 
 
 test('parses fills in cents and in dollars', () => {
   const a = parseFill({ trade_id: 't1', ticker: 'KXBTC15M-X', side: 'yes', action: 'buy', count: 10, yes_price: 42, no_price: 58, created_time: '2026-10-04T17:01:02Z' });
-  assert.deepEqual(a, { id: 't1', ticker: 'KXBTC15M-X', side: 'YES', action: 'buy', count: 10, price: 0.42, fee: null, orderId: null, at: Date.parse('2026-10-04T17:01:02Z') });
+  assert.deepEqual(a, { id: 't1', ticker: 'KXBTC15M-X', side: 'YES', action: 'buy', count: 10, price: 0.42, fee: null, taker: null, orderId: null, at: Date.parse('2026-10-04T17:01:02Z') });
   const b = parseFill({ trade_id: 't2', ticker: 'KXBTC15M-X', side: 'no', action: 'sell', count_fp: '3.00', yes_price_dollars: '0.3100', no_price_dollars: '0.6900', created_time: '2026-10-04T17:05:00Z' });
+  assert.equal(parseFill({ trade_id: 't3', ticker: 'X', side: 'yes', action: 'buy', count: 1, yes_price: 50, is_taker: false, created_time: '2026-10-04T17:05:00Z' }).taker, false, 'maker fills are told apart (their fee rate differs)');
   assert.equal(b.side, 'NO'); assert.equal(b.action, 'sell'); assert.equal(b.count, 3); assert.equal(b.price, 0.69);
   assert.equal(balanceDollars({ balance: 12345 }), 123.45);
   assert.equal(balanceDollars({ balance_dollars: '50.10' }), 50.1);

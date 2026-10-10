@@ -259,6 +259,14 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     try {
       await refresh(now);
       market.lastTick = now; market.lastError = null;
+      // the price every second (5 minutes kept): if a market ever comes without Kalshi's strike, its target is the
+      // 60-second average before the open, the way Kalshi settles (instead of the first candle's open)
+      if (market.spot) { (market.spotRing ||= []).push({ t: now, p: market.spot }); while (market.spotRing[0].t < now - 300000) market.spotRing.shift(); }
+      for (const ms of Object.values(market.markets)) for (const m of ms) {
+        if (m.floor_strike != null || m.cap_strike != null || market.strikes[m.ticker]) continue;
+        const open = Date.parse(m.open_time), xs = (market.spotRing || []).filter((x) => x.t >= open - 60000 && x.t < open);
+        if (now >= open && xs.length >= 30) market.strikes[m.ticker] = xs.reduce((a, x) => a + x.p, 0) / xs.length;
+      }
       if (now - market.gradedAt >= 5000) { market.gradedAt = now; await gradeClosedWindows(now); } // first, so the 15-minute update can include the result
       learnedShifts = shifts();
       observe(now);

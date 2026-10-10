@@ -81,7 +81,7 @@ export function parseFill(f) {
   const at = Date.parse(f.created_time) || (num(f.ts) ? num(f.ts) * 1000 : null);
   const action = String(f.action || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
   const fee = num(f.fee_cost_dollars) ?? num(f.fee_cost); // the exact fee Kalshi charged (a dollars string)
-  return { id: String(f.fill_id ?? f.trade_id ?? `${f.order_id}-${at}-${count}`), ticker: String(f.ticker || f.market_ticker || ''), side, action, count, price: price == null ? null : Math.round(price * 10000) / 10000, fee: fee == null || Number.isNaN(fee) ? null : fee, orderId: f.order_id ?? null, at };
+  return { id: String(f.fill_id ?? f.trade_id ?? `${f.order_id}-${at}-${count}`), ticker: String(f.ticker || f.market_ticker || ''), side, action, count, price: price == null ? null : Math.round(price * 10000) / 10000, fee: fee == null || Number.isNaN(fee) ? null : fee, taker: f.is_taker == null ? null : !!f.is_taker, orderId: f.order_id ?? null, at };
 }
 
 // Apply fills (oldest first) to holdings { [ticker]: { side, contracts, price, at } }.

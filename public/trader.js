@@ -12,6 +12,7 @@
 //   - if an order's outcome is unknown (a timeout), it reads the position back before doing anything else, so a
 //     fill it didn't hear about is still counted and never bought again
 //   - 3 errors in a row pause it; anything that looks like a bug (a bad request, a refused key) stops it outright
+import { kalshiFee } from './model.js';
 export const TRADER_DEFAULTS = {
   mode: 'off',       // off | test | demo | live
   perTrade: 10,      // most one buy may cost, fees included ($)
@@ -49,7 +50,7 @@ export function cleanLimits(body, cur = TRADER_DEFAULTS) {
 const CUSHION = 0.05;             // dollars kept back from the cash: rounding and fees on Kalshi's side
 const GAP_MS = 350;               // at least this long between two requests to Kalshi
 const r2 = (x) => Math.round(x * 100) / 100;
-export const feeFor = (count, price) => (count > 0 ? Math.ceil(0.07 * count * price * (1 - price) * 100 - 1e-9) / 100 : 0);
+export const feeFor = (count, price, maker = false) => (count > 0 ? kalshiFee(price, count, maker) : 0); // the rate measured from real fills (model.js)
 export const costFor = (count, price) => r2(count * price + feeFor(count, price));
 const dayKey = (t) => new Date(t).toDateString();
 const uid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `sc-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);

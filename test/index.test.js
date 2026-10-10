@@ -25,3 +25,26 @@ test('parses each exchange and survives dead ones', async () => {
   assert.equal(r.index, 100005);
   assert.equal(r.coinbase, 100001);
 });
+
+import { bookQuote } from '../index.js';
+test('order books: each venue\'s mid and depth; the index weighs deeper venues more (like the real one)', async () => {
+  const q = bookQuote({ bids: [[100000, 2], [99950, 5], [99000, 50]], asks: [[100010, 1], [100090, 3], [101000, 50]] });
+  assert.equal(q.price, 100005);
+  assert.ok(Math.abs(q.depth - (100000 * 2 + 99950 * 5 + 100010 + 100090 * 3)) < 1, 'only what sits within 0.1% of the mid');
+  assert.equal(bookQuote({ bids: [[10, 1]], asks: [[9, 1]] }), null, 'crossed book');
+  const now = 1e12, at = now - 1000;
+  const c = composite([{ name: 'Deep', price: 100000, depth: 9e6, at }, { name: 'Thin1', price: 100020, depth: 1e6, at }, { name: 'Thin2', price: 100030, depth: 1e6, at }], now);
+  assert.equal(c.price, 100000, 'the deep venue outweighs two thin ones'); assert.equal(c.weighted, true);
+  assert.equal(composite([{ name: 'A', price: 100000, at }, { name: 'B', price: 100020, depth: 5, at }, { name: 'C', price: 100030, at }], now).price, 100020, 'plain median when not every venue has a book');
+  // books first, tickers when a book can't be read; itBit is one of the venues
+  const sources = defaultSources('X');
+  assert.ok(sources.some((s) => s.name === 'itBit'));
+  const ix = createIndex({ sources: sources.slice(0, 2), fetchJSON: async (u) => {
+    if (u.includes('/book')) return { bids: [['100000', '3']], asks: [['100002', '3']] };
+    if (u.includes('Depth')) throw new Error('down');
+    return { result: { XXBTZUSD: { b: ['100004.0', '1'], a: ['100006.0', '1'] } } };
+  } });
+  const r = await ix.poll(now);
+  assert.deepEqual(r.sources.map((x) => [x.name, x.depth != null]), [['Coinbase', true], ['Kraken', false]]);
+  assert.equal(r.weighted, false, 'Kraken fell back to its ticker');
+});

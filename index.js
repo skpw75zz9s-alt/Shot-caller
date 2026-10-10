@@ -5,14 +5,36 @@
 // is learned as the basis (public/learner.js).
 const mid = (b, a) => { b = Number(b); a = Number(a); return b > 0 && a > 0 && a >= b ? (a + b) / 2 : null; };
 
+// Order books, the way the real index reads them: [[price, size], ...] best first
+const lvl = (rows, pick) => (Array.isArray(rows) ? rows.map(pick).filter(([p, q]) => p > 0 && q > 0) : []);
+const arr = (r) => [Number(r[0]), Number(r[1])], obj = (r) => [Number(r.price), Number(r.amount ?? r.size ?? r.quantity)];
+
 export const defaultSources = (coinbase) => [
-  { name: 'Coinbase', url: `${coinbase}/products/BTC-USD/ticker`, parse: (j) => mid(j.bid, j.ask) ?? (Number(j.price) || null) },
-  { name: 'Kraken', url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD', parse: (j) => { const r = Object.values(j.result || {})[0]; return mid(r?.b?.[0], r?.a?.[0]); } },
-  { name: 'Bitstamp', url: 'https://www.bitstamp.net/api/v2/ticker/btcusd/', parse: (j) => mid(j.bid, j.ask) },
-  { name: 'Gemini', url: 'https://api.gemini.com/v1/pubticker/btcusd', parse: (j) => mid(j.bid, j.ask) },
+  { name: 'Coinbase', url: `${coinbase}/products/BTC-USD/ticker`, parse: (j) => mid(j.bid, j.ask) ?? (Number(j.price) || null),
+    book: `${coinbase}/products/BTC-USD/book?level=2`, parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
+  { name: 'Kraken', url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD', parse: (j) => { const r = Object.values(j.result || {})[0]; return mid(r?.b?.[0], r?.a?.[0]); },
+    book: 'https://api.kraken.com/0/public/Depth?pair=XBTUSD&count=100', parseBook: (j) => { const r = Object.values(j.result || {})[0] || {}; return { bids: lvl(r.bids, arr), asks: lvl(r.asks, arr) }; } },
+  { name: 'Bitstamp', url: 'https://www.bitstamp.net/api/v2/ticker/btcusd/', parse: (j) => mid(j.bid, j.ask),
+    book: 'https://www.bitstamp.net/api/v2/order_book/btcusd/', parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
+  { name: 'Gemini', url: 'https://api.gemini.com/v1/pubticker/btcusd', parse: (j) => mid(j.bid, j.ask),
+    book: 'https://api.gemini.com/v1/book/btcusd?limit_bids=100&limit_asks=100', parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
+  // itBit (Paxos), one of the venues the CF Benchmarks indexes have drawn from
+  { name: 'itBit', url: 'https://api.paxos.com/v2/markets/BTCUSD/ticker', parse: (j) => mid(j.best_bid?.price, j.best_ask?.price),
+    book: 'https://api.paxos.com/v2/markets/BTCUSD/order-book', parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
 ];
 
-// quotes: [{ name, price, at }]. Median of fresh quotes within 0.3% of the first-pass median; needs 2 or more.
+// One exchange's mid and depth: the dollars resting within 0.1% of its mid on both sides (how much it can move the
+// consolidated book, the way the index weighs venues by their order books)
+export function bookQuote({ bids, asks }) {
+  if (!bids?.length || !asks?.length || !(asks[0][0] >= bids[0][0])) return null;
+  const m = (bids[0][0] + asks[0][0]) / 2, band = m * 0.001;
+  const usd = (rows, ok) => rows.reduce((a, [p, q]) => a + (ok(p) ? p * q : 0), 0);
+  return { price: m, depth: usd(bids, (p) => p >= m - band) + usd(asks, (p) => p <= m + band) };
+}
+
+// quotes: [{ name, price, at, depth? }]. Of the fresh quotes within 0.3% of the first-pass median (needs 2 or more):
+// the depth-weighted median when every one has a book depth (deeper venues count for more, as in the index),
+// otherwise the plain median.
 export function composite(quotes, now = Date.now(), maxAge = 15000) {
   const fresh = quotes.filter((q) => q.price > 0 && now - q.at <= maxAge);
   if (fresh.length < 2) return null;
@@ -20,16 +42,29 @@ export function composite(quotes, now = Date.now(), maxAge = 15000) {
   const m0 = med(fresh.map((q) => q.price));
   const used = fresh.filter((q) => Math.abs(q.price - m0) <= m0 * 0.003);
   if (used.length < 2) return null;
-  return { price: med(used.map((q) => q.price)), used: used.map((q) => q.name), dropped: fresh.filter((q) => !used.includes(q)).map((q) => q.name) };
+  let price = med(used.map((q) => q.price)), weighted = false;
+  if (used.every((q) => q.depth > 0)) {
+    const s = [...used].sort((a, b) => a.price - b.price), total = s.reduce((a, q) => a + q.depth, 0);
+    let acc = 0;
+    for (const q of s) { acc += q.depth; if (acc >= total / 2) { price = q.price; break; } }
+    weighted = true;
+  }
+  return { price, weighted, used: used.map((q) => q.name), dropped: fresh.filter((q) => !used.includes(q)).map((q) => q.name) };
 }
 
 // Keeps the latest quote per exchange. poll() never throws: a dead exchange just drops out.
 export function createIndex({ sources, fetchJSON }) {
-  const quotes = new Map();
+  const quotes = new Map(), bookAt = new Map();
   async function poll(now = Date.now()) {
     await Promise.allSettled(sources.map(async (s) => {
+      // the order book (mid + depth) every 15 seconds at most (some are large); the ticker in between keeps the price
+      // fresh and the last depth carries over. The ticker alone if the book can't be read.
+      if (s.book && !(now - (bookAt.get(s.name) || 0) < 15000)) {
+        try { const q = bookQuote(s.parseBook(await fetchJSON(s.book))); if (q) { bookAt.set(s.name, now); quotes.set(s.name, { name: s.name, ...q, at: now }); return; } } catch { /* fall back */ }
+      }
       const p = s.parse(await fetchJSON(s.url));
-      if (p > 0) quotes.set(s.name, { name: s.name, price: p, at: now });
+      const prev = quotes.get(s.name);
+      if (p > 0) quotes.set(s.name, { name: s.name, price: p, at: now, ...(prev?.depth && now - (bookAt.get(s.name) || 0) < 60000 ? { depth: prev.depth } : {}) });
     }));
     return read(now);
   }
@@ -37,8 +72,8 @@ export function createIndex({ sources, fetchJSON }) {
     const all = [...quotes.values()];
     const c = composite(all, now);
     const cb = quotes.get('Coinbase');
-    return { index: c?.price ?? null, used: c?.used ?? [], dropped: c?.dropped ?? [], coinbase: cb && now - cb.at <= 15000 ? cb.price : null,
-      sources: all.map((q) => ({ name: q.name, price: q.price, age: now - q.at })), at: now };
+    return { index: c?.price ?? null, weighted: !!c?.weighted, used: c?.used ?? [], dropped: c?.dropped ?? [], coinbase: cb && now - cb.at <= 15000 ? cb.price : null,
+      sources: all.map((q) => ({ name: q.name, price: q.price, depth: q.depth ?? null, age: now - q.at })), at: now };
   }
   return { poll, read };
 }

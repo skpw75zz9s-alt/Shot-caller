@@ -9,6 +9,7 @@ import { createBot } from './bot.js';
 import { createAccess } from './access.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
+import { createFeeBook } from './feebook.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -37,6 +38,8 @@ export const access = createAccess({
 export let autotrade = null; // made below, once validateOrder exists
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json') });
+// Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
+export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
@@ -169,8 +172,8 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
   }
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
-autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder });
-const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load()]);
+autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder, onFee: (x) => feeBook.add([x]) });
+const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -291,6 +294,8 @@ export const server = http.createServer(async (req, res) => {
     if (auto) return await autoApi(req, res, auto[1], token);
     const ka = path.match(/^\/api\/kalshi-auth\/(\w+)$/);
     if (ka) return await kalshiAuth(req, res, ka[1], url);
+    // the phone reports real fees from your Kalshi fills (numbers only: count, price, fee, taker)
+    if (path === '/api/fees' && req.method === 'POST') { const b = await readBody(req); return send(res, 200, { added: feeBook.add(b?.samples) }); }
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
     // What the server has learned about the market (the phone prices with it too)
@@ -298,7 +303,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/record') return send(res, 200, bot.record());
     // The Round scan: live read, learned weights and the graded record
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
-    if (path === '/api/learn') return send(res, 200, { learned: bot.learned(), status: bot.learnStatus() });
+    if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
     const route = ROUTES.find((r) => path.startsWith(r.prefix));

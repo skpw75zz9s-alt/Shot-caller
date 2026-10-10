@@ -68,7 +68,8 @@ function kalshiClient(base, fetchImpl) {
 }
 
 // The trader's exchange for one user and one environment
-function kalshiExchange(k, cred, validateOrder) {
+// onFee(sample): each order's real fee as Kalshi reports it (feebook.js learns the rate from these)
+function kalshiExchange(k, cred, validateOrder, onFee = () => {}) {
   return {
     async cash() { return { balance: balanceDollars(await k.req('GET', '/portfolio/balance', { cred: cred() })) ?? 0, held: 0 }; }, // net of open orders already
     async book(t) { return parseBook(await k.req('GET', `/markets/${encodeURIComponent(t)}/orderbook`)); },
@@ -83,13 +84,18 @@ function kalshiExchange(k, cred, validateOrder) {
       const x = out.order || out;
       const filled = n(x.fill_count_fp) ?? n(x.fill_count) ?? n(x.taker_fill_count);
       if (filled == null || Number.isNaN(filled)) throw { status: 0, message: 'Kalshi answered without a fill count' }; // checked by position
-      return { filled, avgPrice: null, fees: null }; // booked at the max price (the worst case)
+      // Kalshi's own numbers when it gives them: the real fee and average price (else booked at the max price, the worst case)
+      const cents = (v) => (n(v) == null ? null : n(v) / 100);
+      const fee = n(x.taker_fees_dollars) ?? cents(x.taker_fees), cost = n(x.taker_fill_cost_dollars) ?? cents(x.taker_fill_cost);
+      const avgPrice = filled > 0 && cost != null && cost > 0 ? cost / filled : null;
+      if (filled > 0 && fee != null) { try { onFee({ id: x.order_id ? `ord-${x.order_id}` : undefined, count: filled, price: avgPrice ?? Number(o.price), fee, taker: true }); } catch { /* learning only */ } }
+      return { filled, avgPrice, fees: fee };
     },
   };
 }
 
 // ---------- the service ----------
-export function createAutoTrade({ file, secret, kalshi, kalshiDemo, validateOrder, settings: botSettings = {}, fetchImpl = fetch, log = console, now = () => Date.now() }) {
+export function createAutoTrade({ file, secret, kalshi, kalshiDemo, validateOrder, settings: botSettings = {}, fetchImpl = fetch, log = console, now = () => Date.now(), onFee = () => {} }) {
   const vault = createVault(secret);
   const api = { live: kalshiClient(kalshi, fetchImpl), demo: kalshiClient(kalshiDemo, fetchImpl) };
   let db = { users: {} }, saveTimer = null;
@@ -126,7 +132,7 @@ export function createAutoTrade({ file, secret, kalshi, kalshiDemo, validateOrde
       startCash: u.cfg.testCash,
       store: { load: () => u.testEx, save: (x) => { u.testEx = x; soon(); } },
     });
-    const exchanges = { test: testEx, demo: kalshiExchange(api.demo, cred('demo'), validateOrder), live: kalshiExchange(api.live, cred('live'), validateOrder) };
+    const exchanges = { test: testEx, demo: kalshiExchange(api.demo, cred('demo'), validateOrder, onFee), live: kalshiExchange(api.live, cred('live'), validateOrder, onFee) };
     const traders = Object.fromEntries(['test', 'demo', 'live'].map((m) => [m, createTrader({
       exchange: exchanges[m],
       settings: () => ({ ...u.cfg, mode: u.cfg.mode === m ? m : 'off' }),
