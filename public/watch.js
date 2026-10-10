@@ -8,6 +8,9 @@
 //   wall        a single huge order resting on Kalshi's book
 //   flurry      a burst of Kalshi trades on the live round (and which way they lean)
 //   reprice     Kalshi's price jumped while BTC barely moved (someone may know something)
+//   flush       futures open interest fell sharply while the price moved: positions forced out (liquidations)
+//   funding     futures funding is extreme (one side crowded, squeeze risk)
+//   premium     futures trading well above or below spot
 // Severe events hold NEW calls for a short while (bad data or an untradeable book); everything else is logged, shown
 // on the Deck, and counted into each call's record so the call filter can learn whether it matters.
 const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
@@ -37,7 +40,8 @@ export function createDetector({ clock = () => Date.now() } = {}) {
   //   flowUsd                    dollars traded on the exchanges in the last second
   //   kalshi { ticker, yesBid, yesAsk, near, levels: [[side, price, qty]] }  the live round's book
   //   kTrades [{ t, count, side }] Kalshi trades on the live round since the last step
-  function step({ now = clock(), price = null, sigmaMin = null, venues = {}, feeds = {}, flowUsd = 0, kalshi = null, kTrades: newK = [] } = {}) {
+  //   futures { funding, premium, oiChange5, priceChange5 }  Hyperliquid's BTC perpetual (futures.js)
+  function step({ now = clock(), price = null, sigmaMin = null, venues = {}, feeds = {}, flowUsd = 0, kalshi = null, kTrades: newK = [], futures = null } = {}) {
     const out = [];
     const add = (e) => { if (e) out.push(e); };
     // BTC: jumps
@@ -108,6 +112,13 @@ export function createDetector({ clock = () => Date.now() } = {}) {
           add(emit(now, 'flurry', 'info', `Kalshi flurry: ${Math.round(c30).toLocaleString()} contracts in 30s (${(c30 / usual).toFixed(1)}× usual), ${Math.round(Math.max(up, 1 - up) * 100)}% buying ${up >= 0.5 ? 'UP' : 'DOWN'}`));
         }
       }
+    }
+    // futures: forced position closes, crowded funding, a stretched premium
+    if (futures) {
+      const { oiChange5: oi, priceChange5: pc, funding, premium } = futures;
+      if (oi != null && pc != null && oi <= -0.015 && Math.abs(pc) >= 0.002) add(emit(now, 'flush', 'warn', `Futures open interest fell ${(Math.abs(oi) * 100).toFixed(1)}% in 5 min while price ${pc < 0 ? 'fell' : 'rose'} ${(Math.abs(pc) * 100).toFixed(2)}%: ${pc < 0 ? 'longs' : 'shorts'} being forced out (liquidations)`));
+      if (funding != null && Math.abs(funding) >= 0.0001) add(emit(now, 'funding', 'info', `Futures funding ${funding > 0 ? '+' : '−'}${(Math.abs(funding) * 100).toFixed(3)}%/hour: ${funding > 0 ? 'longs' : 'shorts'} crowded (squeeze risk ${funding > 0 ? 'down' : 'up'})`, 'funding', 0));
+      if (premium != null && Math.abs(premium) >= 0.001) add(emit(now, 'premium', 'info', `Futures trading ${(Math.abs(premium) * 100).toFixed(2)}% ${premium > 0 ? 'above' : 'below'} spot`));
     }
     return out;
   }

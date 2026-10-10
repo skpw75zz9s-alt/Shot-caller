@@ -603,6 +603,7 @@ function renderScan(live, snap, now) {
       sc.cbPremium != null && Math.abs(sc.cbPremium) >= 5 ? `Coinbase is <b class="${sc.cbPremium > 0 ? 'pos' : 'neg'}">$${Math.abs(sc.cbPremium).toFixed(0)} ${sc.cbPremium > 0 ? 'above' : 'below'}</b> the other exchanges (${sc.cbPremium > 0 ? 'US buyers keen' : 'US sellers heavier'})` : null,
       `Flow is <b>${esc(sc.momentum.state)}</b>`,
       sc.bigBuy + sc.bigSell > 0 ? `Big prints ($25k+): <b class="pos">$${fmtK(sc.bigBuy)}</b> buy · <b class="neg">$${fmtK(sc.bigSell)}</b> sell` : null,
+      sc.futures ? `Futures (Hyperliquid): flow leans <b class="${sc.features.fFlow >= 0 ? 'pos' : 'neg'}">${sc.features.fFlow >= 0 ? 'buy' : 'sell'} ${Math.round(Math.abs(sc.features.fFlow) * 50 + 50)}%</b>${sc.futures.funding != null ? ` · funding ${(sc.futures.funding * 100).toFixed(4)}%/h` : ''}${sc.futures.oiChange != null ? ` · open interest ${sc.futures.oiChange >= 0 ? '+' : '−'}${Math.abs(sc.futures.oiChange * 100).toFixed(2)}% in 5 min` : ''}${Math.abs(sc.features.fLead) >= 0.15 ? ` · futures ${sc.features.fLead > 0 ? 'ahead up' : 'ahead down'}` : ''}` : null,
     ].filter(Boolean);
     setHTML($('scanFacts'), facts.map((f) => `<div>${f}</div>`).join(''));
   }

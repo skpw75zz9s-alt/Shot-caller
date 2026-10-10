@@ -13,7 +13,8 @@ const COINBASE = { name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com',
 const MAX_TRADES = 200000;
 const MAX_SAMPLES = 6000;
 
-export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now() } = {}) {
+// futures: futures.js (Hyperliquid's BTC perpetual), its reads become extra scan inputs
+export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null } = {}) {
   let data = { samples: [], models: {} };
   let trades = [], roundOpen = null, last = null, lastScanAt = 0, saveTimer = null;
   const socks = {}, status = {}, retry = {};
@@ -80,6 +81,13 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     for (let i = trades.length - 1; i >= 0; i--) { const x = trades[i]; if (x.t < now - 10000) break; if (!(x.ex in out)) out[x.ex] = x.price; }
     return out;
   }
+  // the spot price at time t: the median of each exchange's last trade at or before t (within 30 s)
+  function spotAt(t) {
+    const last = {};
+    for (let i = trades.length - 1; i >= 0; i--) { const x = trades[i]; if (x.t > t) continue; if (x.t < t - 30000) break; if (!(x.ex in last)) last[x.ex] = x.price; }
+    const ps = Object.values(last).sort((a, b) => a - b);
+    return ps.length ? (ps.length % 2 ? ps[(ps.length - 1) / 2] : (ps[ps.length / 2 - 1] + ps[ps.length / 2]) / 2) : null;
+  }
   const feedTimes = () => Object.fromEntries(Object.entries(status).filter(([, v]) => v.lastAt).map(([k, v]) => [k, v.lastAt]));
   function flowSince(t) { let usd = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > t; i--) usd += trades[i].price * trades[i].size; return usd; }
   const liveFeeds = (now) => Object.values(status).filter((s) => s.lastAt > now - 60000).length;
@@ -95,7 +103,9 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     if (openT !== roundOpen) { roundOpen = openT; trades = trades.filter((x) => x.t >= openT); }
     if (now - lastScanAt < 4000 && last?.ticker === live.m.ticker) return;
     lastScanAt = now;
-    const sc = scanRound(trades, { openTime: openT, now, sigmaMin: snap.sigmaMin });
+    const f = futures?.features({ now, spotAt, sigmaMin: snap.sigmaMin || undefined });
+    const extra = f?.live ? { fLead: f.lead, fFlow: f.flow, fOi: f.oi, fPremium: f.premium, live: true, funding: f.funding, oiChange: f.oiChange } : null;
+    const sc = scanRound(trades, { openTime: openT, now, sigmaMin: snap.sigmaMin, extra });
     const q = quote(live.m), kalshi = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
     const mLeft = live.ev.minutesLeft, pModel = live.pPre ?? live.ev.pYes; // the odds before the scan's own nudge
     const x = sc.ready ? featureVector(sc, live.m.strike_type) : null;

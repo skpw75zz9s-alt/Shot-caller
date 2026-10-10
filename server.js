@@ -11,6 +11,7 @@ import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
 import { createMarketWatch } from './marketwatch.js';
+import { createFutures } from './futures.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -38,11 +39,13 @@ export const access = createAccess({
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
-export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json') });
+// BTC futures as a leading signal (futures.js): extra Round scan inputs and Market watch events
+export const futures = createFutures();
+export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
-export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed });
+export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
@@ -278,7 +281,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() } });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);
@@ -326,5 +329,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
+  if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
 }

@@ -19,8 +19,9 @@
 // sample at 10, 6 and 3 minutes left in every round, grades it after Kalshi settles, and scores it against the bot
 // alone and Kalshi's own price, out of sample (each sample is scored with the weights from before its result was known).
 export const SCAN_EXCHANGES = ['Coinbase', 'Kraken', 'Bitstamp', 'Gemini', 'Binance.US'];
-export const FEATURES = ['flow', 'agree', 'momentum', 'big', 'absorb', 'leader'];
-export const FEATURE_NAMES = { flow: 'Flow', agree: 'Agreement', momentum: 'Momentum', big: 'Big prints', absorb: 'Absorption', leader: 'Leader' };
+export const FEATURES = ['flow', 'agree', 'momentum', 'big', 'absorb', 'leader', 'fLead', 'fFlow', 'fOi', 'fPremium'];
+export const FEATURE_NAMES = { flow: 'Flow', agree: 'Agreement', momentum: 'Momentum', big: 'Big prints', absorb: 'Absorption', leader: 'Leader',
+  fLead: 'Futures lead', fFlow: 'Futures flow', fOi: 'Futures open interest', fPremium: 'Futures premium' };
 export const CHECKPOINTS = [10, 6, 3]; // minutes left when a sample is taken
 export const MIN_SAMPLES = 150; // per checkpoint, before learned weights are used
 const BIG = 25000;
@@ -30,7 +31,8 @@ const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.lengt
 
 // trades: [{ t, ex, side ('buy' = taker bought), price, size }] since the round opened (any order)
 // sigmaMin: BTC's volatility per minute (log), from the bot; estimated from the trades if missing
-export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 100000, sigmaMin = null } = {}) {
+// extra: { fLead, fFlow, fOi, fPremium } the futures reads (futures.js, server only), learned like the rest
+export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 100000, sigmaMin = null, extra = null } = {}) {
   const ts = trades.filter((x) => x.t >= openTime && x.t <= now && x.price > 0 && x.size > 0 && (x.side === 'buy' || x.side === 'sell')).sort((a, b) => a.t - b.t);
   const per = Object.fromEntries(SCAN_EXCHANGES.map((ex) => [ex, { ex, n: 0, buyUsd: 0, sellUsd: 0, pv: 0, vol: 0, first: null, last: null, whales: 0, big: 0, lastMinNet: 0 }]));
   let bigBuy = 0, bigSell = 0, wBuy = 0, wAll = 0, net3 = 0, usd3 = 0;
@@ -113,6 +115,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
     big: bigTot > 0 ? (bigBuy - bigSell) / bigTot : 0,
     absorb,
     leader: leaderZ,
+    fLead: extra?.fLead ?? 0, fFlow: extra?.fFlow ?? 0, fOi: extra?.fOi ?? 0, fPremium: extra?.fPremium ?? 0,
   };
   const parts = [
     ['Flow', features.flow * 40, `${Math.round(recentShare * 100)}% buyers lately (${Math.round(buyShare * 100)}% of $${fmtK(totalUsd)} all round)`],
@@ -128,7 +131,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
   const verdict = score >= 40 ? 'Strong buyers' : score >= 15 ? 'Leans up' : score <= -40 ? 'Strong sellers' : score <= -15 ? 'Leans down' : 'Mixed';
   return {
     ready: true, rows, exchanges: live.length, trades: ts.length, totalUsd, buyUsd, net, buyShare, recentShare, flowAgree,
-    upPrice, downPrice, dispersion, mid, cbPremium, momentum, leader, absorption, bigBuy, bigSell, parts, score, verdict, features,
+    upPrice, downPrice, dispersion, mid, cbPremium, momentum, leader, absorption, bigBuy, bigSell, parts, score, verdict, features, futures: extra?.live ? extra : null,
     lean: score >= 15 ? 'YES' : score <= -15 ? 'NO' : null,
   };
 }

@@ -269,6 +269,20 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Futures as a leading signal (v10.9)
+
+Research finds BTC futures often move before spot, though the lead has weakened since the spot ETFs launched. So the bot reads Hyperliquid's BTC perpetual (`futures.js`; public data, no key; Binance and Bybit block US servers): every trade over its websocket, plus funding, open interest, mark and oracle price every 15 s.
+- **Four new Round scan inputs**, learned like the rest and only shaping the odds once the scan's graded record proves them:
+  - **Futures lead:** futures' last-30-second move beyond spot's, in typical moves.
+  - **Futures flow:** takers' buy share of the last 2 minutes.
+  - **Open interest:** its 5-minute change × the price direction. New money pushing the move reads +, positions being closed reads −.
+  - **Premium:** futures vs the oracle (spot) price.
+- **Market watch events:**
+  - **flush:** open interest down 1.5%+ in 5 min while the price moves 0.2%+, so positions are being forced out (liquidations; the public feed doesn't flag them, this is the standard proxy).
+  - **funding:** 0.01%+/hour, one side crowded.
+  - **premium:** futures 0.1%+ off spot.
+- The Round scan card shows a futures line; `/healthz` shows whether the futures feed is live. `FUTURES=off` turns it off.
+
 ### Market watch: the sharp eye (v10.8)
 
 Every second, on the server (`marketwatch.js`, detectors in `public/watch.js`), the bot checks every detail it can see and logs anything unusual:
