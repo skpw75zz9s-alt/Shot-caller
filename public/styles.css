@@ -703,6 +703,7 @@ header { position: relative; }
 .hdr-r { display: flex; align-items: center; gap: 12px; }
 .split-btn { display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: none; border: 1px solid var(--line-2); color: var(--muted); }
 .split-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.split-btn[hidden] { display: none; }
 .split-btn.on { color: var(--accent); border-color: #22d3ee66; box-shadow: 0 0 10px #22d3ee33; }
 .split-menu { position: absolute; right: 12px; top: 46px; z-index: 30; width: 250px; padding: 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 10px 30px #000a; }
 .split-menu[hidden] { display: none; }

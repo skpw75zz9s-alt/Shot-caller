@@ -1541,7 +1541,6 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
   adminPolling(views.includes('settings'));
 } });
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => split.show(b.dataset.view)));
-split.start();
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
 $('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
 $('pushOff').addEventListener('click', () => pushDisable());
@@ -1987,3 +1986,6 @@ refreshBotRecord();
 pushInit();
 tick();
 schedule();
+
+// Last: the saved split-screen layout (its screens' refreshes need everything above set up first)
+split.start();

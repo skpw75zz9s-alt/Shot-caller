@@ -269,15 +269,13 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
-### Split screen (v9.6)
+### Split screen (v9.6, computers only since v9.7)
 
-Tap the **⊞** button in the header to show **1, 2, 3 or 4 screens at once**: any of Deck, Chart, Alerts, Record, Learn and Settings (`public/split.js`).
-- **Layouts:**
-  - Phone: 2 screens stack top and bottom, 3 screens put one tall pane beside two, and 4 is a 2×2 grid.
-  - Tablet or landscape: 2 or 3 screens sit side by side.
+On a computer, tap the **⊞** button in the header to show **1, 2, 3 or 4 screens at once**: any of Deck, Chart, Alerts, Record, Learn and Settings (`public/split.js`). It's for computers only: it needs a mouse or trackpad and a window at least 1024px wide. Phones and tablets don't show the button and always get one screen. If a window shrinks below 1024px, it goes back to one screen until it's widened again.
+- **Layouts:** 2 or 3 screens sit side by side, and 4 is a 2×2 grid.
 - **Each pane has its own menu** to pick its screen. Picking one another pane already shows swaps them. **⤢** shows that pane full screen.
-- **Tap a pane to focus it** (it glows). The bottom bar then changes what the focused pane shows.
-- **Narrow panes shrink their contents to fit,** so every card lays out exactly as it does full screen. Each pane scrolls on its own, and charts and live updates keep running in every pane.
+- **Click a pane to focus it** (it glows). The bottom bar then changes what the focused pane shows.
+- **Narrow panes shrink their contents to fit,** so every card lays out as it does full screen. Each pane scrolls on its own, and charts and live updates keep running in every pane.
 - The layout is remembered.
 
 ### Why it moved (v9.5)

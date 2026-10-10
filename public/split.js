@@ -1,9 +1,11 @@
-// Split screen: show up to four of the app's screens at once (Deck, Chart, Alerts, Record, Learn, Settings).
+// Split screen (computers only: a mouse or trackpad and a window at least 1024px wide; phones and tablets always get
+// one screen and don't see the button): show up to four of the app's screens at once (Deck, Chart, Alerts, Record, Learn, Settings).
 // Each pane has its own picker and scrolls on its own; tapping a pane focuses it, and the bottom bar then changes what
 // the focused pane shows. Picking a screen another pane already shows swaps the two. On a narrow screen the panes'
 // contents shrink to fit (CSS zoom), so every card still lays out as it does full screen. The layout is remembered.
 export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['alerts', 'Alerts'], ['history', 'Record'], ['learn', 'Learn'], ['settings', 'Settings']];
 const DEFAULT_PANES = ['live', 'chart', 'alerts', 'history'];
+export const PC_QUERY = '(hover: hover) and (pointer: fine) and (min-width: 1024px)';
 const DESIGN_WIDTH = 380; // the width the screens are laid out for: narrower panes shrink their contents to match
 
 // Which screens n panes show: keep the ones already chosen (no repeats), fill the rest from the defaults
@@ -27,11 +29,13 @@ export function createSplit({ main, store, onShow, button, menu }) {
   const sections = Object.fromEntries(SPLIT_VIEWS.map(([k]) => [k, document.getElementById(`view-${k}`)]));
   const order = SPLIT_VIEWS.map(([k]) => sections[k]); // where they go back to in single mode
   let single = 'live';
+  const pc = typeof matchMedia === 'function' ? matchMedia(PC_QUERY) : { matches: false };
+  const count = () => (pc.matches ? cfg.n : 1); // what's on screen: the saved layout on a computer, one screen elsewhere
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fit()) : null;
 
   function save() { store.set('split', cfg); }
   function fit() { // the panes fill the screen below the header and ticker; each one's contents shrink to fit its width
-    if (cfg.n > 1) document.documentElement.style.setProperty('--split-top', `${Math.round(main.offsetTop)}px`);
+    if (count() > 1) document.documentElement.style.setProperty('--split-top', `${Math.round(main.offsetTop)}px`);
     for (const pane of main.querySelectorAll('.pane')) {
       const body = pane.querySelector('.pane-body'), w = pane.clientWidth;
       if (!body || !w) continue;
@@ -40,7 +44,8 @@ export function createSplit({ main, store, onShow, button, menu }) {
     }
   }
   function layout() {
-    const n = cfg.n;
+    const n = count();
+    button.hidden = !pc.matches; menu.hidden ||= !pc.matches;
     document.body.classList.toggle('split', n > 1);
     for (let k = 1; k <= 4; k++) document.body.classList.toggle(`split-${k}`, n === k);
     // take the sections out of any panes first
@@ -73,9 +78,9 @@ export function createSplit({ main, store, onShow, button, menu }) {
     if (i === cfg.focus) return;
     cfg.focus = i; save();
     for (const p of main.querySelectorAll('.pane')) p.classList.toggle('focus', Number(p.dataset.i) === i);
-    onShow(cfg.panes.slice(0, cfg.n), cfg.panes[i]);
+    onShow(cfg.panes.slice(0, count()), cfg.panes[i]);
   }
-  main.addEventListener('pointerdown', (e) => { const p = e.target.closest?.('.pane'); if (p && cfg.n > 1) focus(Number(p.dataset.i)); });
+  main.addEventListener('pointerdown', (e) => { const p = e.target.closest?.('.pane'); if (p && count() > 1) focus(Number(p.dataset.i)); });
   main.addEventListener('change', (e) => {
     const sel = e.target.closest?.('.pane-bar select');
     if (!sel) return;
@@ -92,7 +97,7 @@ export function createSplit({ main, store, onShow, button, menu }) {
   function setCount(n) { cfg.n = n; save(); layout(); renderMenu(); }
   // The bottom bar: in split mode it changes the focused pane's screen
   function show(view) {
-    if (cfg.n === 1) { single = view; layout(); return; }
+    if (count() === 1) { single = view; layout(); return; }
     cfg.panes = assignView(cfg.panes, cfg.focus, view); save(); layout();
   }
   function renderMenu() {
@@ -104,6 +109,7 @@ export function createSplit({ main, store, onShow, button, menu }) {
   document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== button) menu.hidden = true; });
 
   addEventListener('resize', () => fit());
+  pc.addEventListener?.('change', () => layout()); // a window resized past 1024px, or a mouse plugged in or out
   renderMenu();
   return { start: layout, show, setCount, state: () => ({ ...cfg, single }) };
 }
