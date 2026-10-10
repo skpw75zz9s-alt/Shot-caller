@@ -269,6 +269,12 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Rolling 15-minute horizon (v10.4)
+
+The cone, the prediction lines and the prediction candles used to stop at the round's close, so they shrank as the round ran out: 12 minutes ahead early in a round, 2 minutes near its end. Now they always look **at least 15 minutes ahead**, running past the close into the next round. A **⏱ round closes** marker shows where the current round ends.
+- **Past the close:** Bot stays flat, the 5-exchange trend keeps its pace, and Kalshi holds its close level (its price only speaks for this round).
+- **Unchanged:** each line's close prediction (what gets graded at 5 minutes left).
+
 ### Flip watch: catching the turns (v10.3)
 
 The prediction candles now try to catch the drops and the bounces (`public/flip.js`):

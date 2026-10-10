@@ -82,3 +82,20 @@ test('prediction candle record: direction and miss vs no change', () => {
   assert.equal(r.miss, (5 + 30) / 2); assert.equal(r.still, (5 + 20) / 2);
   assert.deepEqual(candleRecord([]), { n: 0 });
 });
+
+test('the lines run past the close on a rolling horizon; the close prediction is unchanged', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 13, 0), close = Date.UTC(2026, 0, 1, 12, 15), until = now + 15 * 60000;
+  const trades = [];
+  for (let s = 0; s < 300; s++) for (const ex of ['Coinbase', 'Kraken']) trades.push({ t: now - 300000 + s * 1000, ex, price: 100000 + s * 0.2, size: 1 });
+  const base = { spot: 100060, sigmaMin: 0.0008, now, close, strike: 100000, yesMid: 0.7, strikeType: 'greater', trades };
+  const short = predictionLines(base), long = predictionLines({ ...base, until });
+  for (const k of ['bot', 'kalshi', 'exch']) {
+    const a = short.find((l) => l.key === k), b = long.find((l) => l.key === k);
+    assert.equal(a.end, b.end, `${k}: same close prediction`);
+    assert.equal(a.pts.at(-1).t, close); assert.equal(b.pts.at(-1).t, until, `${k}: runs 15 minutes ahead`);
+  }
+  const k = long.find((l) => l.key === 'kalshi');
+  assert.equal(k.pts.at(-1).v, k.end, 'Kalshi holds its close level after the close');
+  const e = long.find((l) => l.key === 'exch');
+  assert.ok(e.pts.at(-1).v > e.end, "the exchanges' trend keeps going");
+});

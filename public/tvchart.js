@@ -114,8 +114,12 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     ghosts.applyOptions({ visible: pc.length > 0 });
     ghosts.setData(pc.map((c) => ({ time: sec(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
     // predicted flips on them: ↺ where the expected path turns (public/flip.js)
-    ghosts.setMarkers(pc.length && show.flips !== false ? (d.turns || []).filter((x) => pc.some((c) => c.t === x.t)).map((x) => ({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar',
-      color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir}` })) : []);
+    const gm = pc.length && show.flips !== false ? (d.turns || []).filter((x) => pc.some((c) => c.t === x.t)).map((x) => ({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar',
+      color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir}` })) : [];
+    // where this round closes, when the predictions run past it into the next one
+    const closeBar = d.closeTime ? pc.find((c) => c.t === d.closeTime) : null;
+    if (closeBar) gm.push({ time: sec(closeBar.t), position: 'aboveBar', color: '#e8ecf3', shape: 'square', size: 0.4, text: '⏱ round closes' });
+    ghosts.setMarkers(gm.sort((a, b) => a.time - b.time));
     // levels: the target and the round's floor / ceiling
     for (const l of Object.values(lines)) candles.removePriceLine(l);
     lines = {};

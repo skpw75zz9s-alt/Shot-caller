@@ -820,7 +820,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
@@ -860,11 +860,15 @@ function orderFrame() {
 }
 
 // ---------- prediction lines (public/predict.js): Bot, Kalshi-implied, 5-exchange trend ----------
+// The chart looks at least 15 minutes ahead, past the round's close if need be, so the cone and the predictions don't
+// shrink away as the round runs out (they used to stop at the close)
+const HORIZON = 15 * 60000;
+const horizonOf = (live, now) => Math.max(Date.parse(live.m.close_time), Math.ceil((now + HORIZON) / 60000) * 60000);
 function predictionsNow(live, snap, now) {
   if (!live) return [];
   const q = live.ev.quote, mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
   return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, driftMin: (snap.driftMin || 0) * (settings.momentumWeight ?? 0), now, close: Date.parse(live.m.close_time),
-    strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex });
+    until: horizonOf(live, now), strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex });
 }
 // The prediction candles and the flip forecast behind them (public/predict.js, public/flip.js), for the chart and grading
 function flipNow(live, snap, now) {
@@ -878,7 +882,7 @@ function flipNow(live, snap, now) {
 function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { candles: [], turns: [], flip: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
-  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: Date.parse(live.m.close_time), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip });
+  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip });
   return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip };
 }
 // With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed
@@ -905,7 +909,7 @@ function trackPredictions(snap, live, now) {
   // prediction candles: keep the next minute's candle as it stands just before that minute begins; grade it at its close
   if (live) {
     const next = Math.floor(now / 60000) * 60000 + 60000;
-    if (next < Date.parse(live.m.close_time) && next - now <= 15000) {
+    if (next < horizonOf(live, now) && next - now <= 15000) {
       const c = candlesNow(live, snap, now).candles[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);

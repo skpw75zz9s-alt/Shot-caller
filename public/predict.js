@@ -24,10 +24,13 @@ export function normInv(p) {
 }
 
 const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
-const path = (from, to, now, close, step = 60000) => { // log-linear from today's price to the close prediction
-  const pts = [];
-  for (let t = now; t < close; t += step) pts.push({ t, v: from * Math.exp(Math.log(to / from) * ((t - now) / (close - now))) });
+// log-linear from today's price to the close prediction; past the close (out to `until`) it keeps the same rate per
+// minute, or holds the close level when `hold` (Kalshi's price only speaks for this round's close)
+const path = (from, to, now, close, until = close, hold = false, step = 60000) => {
+  const pts = [], rate = Math.log(to / from) / (close - now);
+  for (let t = now; t < close; t += step) pts.push({ t, v: from * Math.exp(rate * (t - now)) });
   pts.push({ t: close, v: to });
+  for (let t = close + step; t <= until; t += step) pts.push({ t, v: hold ? to : from * Math.exp(rate * (t - now)) });
   return pts;
 };
 
@@ -61,7 +64,8 @@ export function exchangeTrend(trades, now, close, { lookback = 5 * 60000, damp =
 }
 
 // All three lines, clipped to the 90% cone so a runaway trend can't fly off the chart
-export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, strike, yesMid, strikeType, trades = [] }) {
+// until: how far ahead the lines run (at least the close; the chart uses a rolling 15 minutes). `end` stays the close prediction.
+export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, until = close, strike, yesMid, strikeType, trades = [] }) {
   if (!spot || !(close > now) || !(sigmaMin > 0)) return [];
   const mins = (close - now) / 60000, sd = spot * sigmaMin * Math.sqrt(mins);
   const clip = (v) => Math.min(spot + 1.645 * sd, Math.max(spot - 1.645 * sd, v));
@@ -71,7 +75,7 @@ export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, stri
   if (k) lines.push({ key: 'kalshi', name: 'Kalshi', color: '#a78bfa', end: clip(k), from: spot });
   const tr = exchangeTrend(trades, now, close);
   if (tr) lines.push({ key: 'exch', name: '5 exch', color: '#fbbf24', end: clip(tr.end), from: tr.start });
-  for (const l of lines) l.pts = path(l.from, l.end, now, close);
+  for (const l of lines) l.pts = path(l.from, l.end, now, close, Math.max(close, until), l.key === 'kalshi');
   return lines;
 }
 
