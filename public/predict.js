@@ -7,6 +7,7 @@
 // Every round, each line's close prediction with 5 minutes left is graded against where BTC really closed, next to
 // "no change" (the price at that moment) as the baseline any prediction has to beat.
 import { normCdf } from './model.js';
+import { flipOffset, turnPoints } from './flip.js';
 
 // Inverse of the standard normal CDF (Acklam's approximation, plenty for a chart)
 export function normInv(p) {
@@ -121,10 +122,12 @@ export function candleSigma(bars, sigmaMin, now) {
   const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / 1.6;
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
-export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null }) {
+// flip (public/flip.js flipForecast): bends the expected path to carry today's momentum and turn where a flip looks ripe
+export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null, flip = null }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
   const w = weights || blendWeights(null);
-  const path = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
+  const blend = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
+  const path = (t) => blend(t) + flipOffset(flip, (t - now) / 60000);
   // per 5-second step, log price; x RANGE_FIX because twelve 5-second points per minute catch only part of a minute's
   // real high and low (measured: their average range is ~0.8 of a continuous walk's)
   const sig = candleSigma(bars, sigmaMin, now) / Math.sqrt(60000 / STEP) * RANGE_FIX;
@@ -158,4 +161,14 @@ export function candleRecord(log) {
   const right = moved.filter((e) => Math.sign(e.c - e.o) === Math.sign(e.actual - e.open)).length;
   const avg = (f) => done.reduce((a, e) => a + Math.abs(f(e) - e.actual), 0) / done.length;
   return { n: done.length, called: moved.length, right, miss: avg((e) => e.c), still: avg((e) => e.open) };
+}
+
+// The turns on the prediction candles' expected path (where it bottoms or tops out by at least a fifth of a typical
+// minute), with the last 3 minutes in front so a turn happening right now (the live candle) shows too: the chart marks
+// them ↺. v0: the flip forecast's momentum ($/min), giving the price 3 minutes ago.
+export function candleTurns(candles, spot, now, sd1, v0 = 0) {
+  if (!candles?.length) return [];
+  const live = Math.floor(now / 60000) * 60000;
+  const pts = [{ t: live - 180000, v: spot - 3 * v0 }, { t: live, v: spot }, ...candles.map((c) => ({ t: c.t, v: c.ec }))];
+  return turnPoints(pts, 0.2 * sd1).filter((x) => x.t >= live).map((x) => ({ ...x, now: x.t === live }));
 }

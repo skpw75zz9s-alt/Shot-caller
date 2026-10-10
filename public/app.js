@@ -16,7 +16,8 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { blendWeights, candleRecord, predictionCandles, predictionLines, predictionRecord } from './predict.js';
+import { blendWeights, candleRecord, candleTurns, predictionCandles, predictionLines, predictionRecord } from './predict.js';
+import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -149,6 +150,7 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   calls: store.get('calls', {}),
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
   callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
+  flipLog: store.get('flipLog', []), // predicted turns (frozen a minute before), graded on whether a V really formed
   pcLog: store.get('pcLog', []), // each minute's prediction candle as it stood when the minute began, graded at its close
   predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
@@ -807,6 +809,7 @@ async function drawChartTab(force = false) {
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
   const preds = showCone ? predictionsNow(live, snap, now) : [];
+  const pcs = showCone ? candlesNow(live, snap, now, preds) : { candles: [], turns: [] };
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}`.trim() }));
   const fk = `${state.positions.length}|${state.trades.length}|${autopilot?.state()?.log?.[0]?.t ?? 0}`;
   if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
@@ -817,7 +820,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: showCone ? predictionCandles({ lines: preds, spot, sigmaMin: sigma, now, close, weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars }) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
@@ -863,6 +866,21 @@ function predictionsNow(live, snap, now) {
   return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, driftMin: (snap.driftMin || 0) * (settings.momentumWeight ?? 0), now, close: Date.parse(live.m.close_time),
     strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex });
 }
+// The prediction candles and the flip forecast behind them (public/predict.js, public/flip.js), for the chart and grading
+function flipNow(live, snap, now) {
+  if (chartState.show?.flips === false || !live) return null;
+  const since = now - 60000, last = tape.ex.filter((x) => x.t >= since);
+  const usdOf = (side) => last.reduce((a, x) => a + (x.side === side ? x.price * x.size : 0), 0), b = usdOf('buy'), tot = b + usdOf('sell');
+  state.flipBase = turnBaseRate(snap.bars.slice(-150, -1), 0.5 * modelSpot() * (live.sigma ?? snap.sigmaMin));
+  return flipForecast({ bars: snap.bars, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, openTime: Date.parse(live.m.open_time), flowBuyShare: tot > 0 ? b / tot : null,
+    amp: flipRecord(state.flipLog, state.flipBase).amp });
+}
+function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
+  if (!live) return { candles: [], turns: [], flip: null };
+  const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
+  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: Date.parse(live.m.close_time), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip });
+  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip };
+}
 // With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed
 // (the close of Coinbase's last 1-minute candle of the round), next to "no change" as the baseline
 function trackPredictions(snap, live, now) {
@@ -888,7 +906,7 @@ function trackPredictions(snap, live, now) {
   if (live) {
     const next = Math.floor(now / 60000) * 60000 + 60000;
     if (next < Date.parse(live.m.close_time) && next - now <= 15000) {
-      const c = predictionCandles({ lines: predictionsNow(live, snap, now), spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: Date.parse(live.m.close_time), weights: blendWeights(predictionRecord(state.predLog)) })[0];
+      const c = candlesNow(live, snap, now).candles[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);
         // graded on the expected path (eo/ec), not the random scenario the ghost candle draws
@@ -903,6 +921,24 @@ function trackPredictions(snap, live, now) {
     if (bar) { e.open = bar.o; e.actual = bar.c; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
   }
   if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
+  // flips: keep each predicted turn until a minute before it (then it's frozen); grade it two minutes after
+  if (live && now - (state.flipAt || 0) > 5000) {
+    state.flipAt = now;
+    const { turns, flip } = candlesNow(live, snap, now);
+    state.flipNow = flip;
+    let changed = false;
+    for (const e of state.flipLog) if (!e.frozen && now >= e.t - 60000) { e.frozen = true; changed = true; }
+    const before = state.flipLog.length;
+    state.flipLog = state.flipLog.filter((e) => e.frozen || turns.some((x) => x.t === e.t && x.dir === e.dir));
+    if (state.flipLog.length !== before) changed = true;
+    for (const x of turns) if (x.t - now >= 60000 && !state.flipLog.some((e) => e.t === x.t && e.dir === x.dir)) { state.flipLog.unshift({ t: x.t, dir: x.dir, at: now, need: 0.5 * flip.sd1, score: flip.score, frozen: false, hit: null }); changed = true; }
+    for (const e of state.flipLog) if (e.frozen && e.hit == null && now > e.t + 190000) { const h = turnHappened(snap.bars, e.t, e.dir, e.need); if (h != null) { e.hit = h; changed = true; } else if (now > e.t + 3600000) { e.hit = 'gone'; changed = true; } }
+    if (changed) { state.flipLog = state.flipLog.filter((e) => e.hit !== 'gone').slice(0, 400); store.set('flipLog', state.flipLog); }
+  }
+  const fr = flipRecord(state.flipLog, state.flipBase), f = state.flipNow;
+  setHTML($('flipInfo'), (f ? `<b>Flip watch:</b> ${f.v0 >= 0 ? 'rising' : 'falling'} ${Math.abs(f.v0) < 1 ? '(barely)' : `$${Math.abs(f.v0).toFixed(0)}/min`} · ${f.dir === 'up' ? 'bounce' : 'pullback'} odds <b>${Math.round(f.score * 100)}%</b>${f.parts.length ? `: ${f.parts.map((p) => esc(p.why)).join(' · ')}` : ': no turn signs'}. ` : '')
+    + (fr.n ? `Turns called: caught <b>${fr.hits} of ${fr.n}</b> (${Math.round(fr.rate * 100)}%)${fr.base != null ? ` vs <b>${Math.round(fr.base * 100)}%</b> for a random minute` : ''}${fr.n >= 20 ? ` · strength ×${fr.amp.toFixed(2)}` : ''}`
+      : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.'));
   const pr = candleRecord(state.pcLog);
   setHTML($('pcRecord'), pr.n ? `Prediction candles, graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change"`
     : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');

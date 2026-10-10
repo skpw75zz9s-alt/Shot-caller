@@ -113,6 +113,9 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     const pc = show.pcandles && barMs === 60000 && d.predCandles?.length ? d.predCandles.filter((c) => c.t > last.t) : [];
     ghosts.applyOptions({ visible: pc.length > 0 });
     ghosts.setData(pc.map((c) => ({ time: sec(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
+    // predicted flips on them: ↺ where the expected path turns (public/flip.js)
+    ghosts.setMarkers(pc.length && show.flips !== false ? (d.turns || []).filter((x) => pc.some((c) => c.t === x.t)).map((x) => ({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar',
+      color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir}` })) : []);
     // levels: the target and the round's floor / ceiling
     for (const l of Object.values(lines)) candles.removePriceLine(l);
     lines = {};
@@ -127,6 +130,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     const marks = [];
     const inView = (ms) => ms >= bars[0].t && ms < last.t + barMs;
     const barOf = (ms) => sec(bars[Math.max(0, bars.findIndex((b) => b.t + barMs > ms))].t);
+    // a flip predicted right now sits on the live candle (later ones go on the prediction candles)
+    if (show.pcandles && show.flips !== false && barMs === 60000) for (const x of d.turns || []) if (x.now && x.t === last.t) marks.push({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar', color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir} now` });
     if (show.markers) for (const m of d.markers || []) if (inView(m.t)) marks.push({ time: barOf(m.t), position: m.side === 'YES' ? 'belowBar' : 'aboveBar', color: m.side === 'YES' ? C.up : C.dn, shape: m.side === 'YES' ? 'arrowUp' : 'arrowDown', text: m.label });
     if (show.fills) for (const f of d.fills || []) if (inView(f.t)) marks.push({ time: barOf(f.t), position: f.kind === 'buy' ? 'belowBar' : 'aboveBar', color: f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24', shape: 'circle', text: `${f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S'} ${f.label || ''}`.trim() });
     // why it moved: a marker naming the cause on each candle that made a real move (public/why.js)

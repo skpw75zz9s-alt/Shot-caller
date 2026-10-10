@@ -269,6 +269,23 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Flip watch: catching the turns (v10.3)
+
+The prediction candles now try to catch the drops and the bounces (`public/flip.js`):
+- **Flip score (0–100%)**, how ripe the current move is to turn, from:
+  - **Stretched:** the last 5 minutes moved much more than BTC's usual 5 minutes.
+  - **RSI:** 1-minute RSI past 75 or under 25.
+  - **Level:** pinned at the round's floor after a fall, or its ceiling after a rise.
+  - **Wick:** the last candle has a long wick against the move (rejection).
+  - **Flow:** the live trades lean against the move (absorption).
+- **The shape.** The expected path carries today's momentum, then bends like a damped spring around the blended prediction. It also wins back part of the move: flip score × 40% of the last 5 minutes. A ripe move turns sooner and swings back. A weak one just fades.
+- **↺ markers.** Turns on the path are marked on the chart: **↺ flip up now** on the live candle when the bounce starts right away, and **↺ flip up / flip down** on the prediction candles where it bottoms or tops out.
+- **Graded.**
+  - Every turn predicted at least a minute ahead is frozen a minute before it. Two minutes after, it's checked: did price really make a V (or an upside-down V) there, deep enough to count (half a typical minute on each side)?
+  - The line under the chart shows the hit rate next to how often a random minute passes the same test.
+  - After 20 graded calls, the flip shape's strength follows the record: hit rate ÷ random rate, between 0.3× and 1.3×. So it fades if it isn't beating chance.
+- Turn it off in Chart tools & indicators (**Flip watch**).
+
 ### Prediction candles (v10.1, realistic since v10.2)
 
 In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`):
