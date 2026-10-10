@@ -269,6 +269,18 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Round scan: all five exchanges, every round (v8.4)
+
+The Deck's **Round scan** reads every trade since the round opened on all five exchanges the app streams: Coinbase, Kraken, Bitstamp, Gemini and Binance.US (`public/roundscan.js`).
+- **Per exchange:** buyer vs seller share of the dollars, net dollars, the move since the open, and whales.
+- **⚡ Leader:** the exchange whose price moves first. It's found by cross-correlating each exchange's 1-second moves with the others, at 1-5 second lags.
+- **Spread:** how far apart the exchanges' prices are. Wide means a fragmented, jumpy market.
+- **Momentum:** the last minute's flow vs the round's pace: speeding up, steady, fading or flipping.
+- **Big prints:** which side the $25k+ trades are on.
+- **Verdict:** all of it rolls into one score, from −100 (sellers) to +100 (buyers): Strong buyers / Leans up / Mixed / Leans down / Strong sellers. Each part's points are listed.
+
+**Graded every round.** The scan standing at the close is checked against Kalshi's result, and the card keeps the record (lean right X of Y, strong reads separately, last 10 rounds ✓/✕). That's the honest test of whether it's worth anything. Until the record says so, it's context: the bot's calls don't use it. It needs the app open, because the trade feeds run on the phone.
+
 ### Live orders on the chart (v8.1)
 
 The Chart tab draws the live trades onto the candles:

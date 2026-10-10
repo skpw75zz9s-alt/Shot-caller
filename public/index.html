@@ -92,6 +92,17 @@
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
       </div>
 
+      <div class="card scan" id="scanCard">
+        <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
+        <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
+        <div class="scan-meter"><i id="scanFill"></i><em></em></div>
+        <ul class="scan-parts" id="scanParts"></ul>
+        <div class="scan-table" id="scanTable"></div>
+        <div class="scan-facts" id="scanFacts"></div>
+        <div class="scan-record" id="scanRecord"></div>
+        <small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Graded against Kalshi's result each round: context only, the bot's calls don't use it.</small>
+      </div>
+
       <div class="card tape-card">
         <div class="deep-head"><span>Live orders · all markets</span><b id="tapeRate"></b></div>
         <div class="feed-chips" id="feedChips"></div>
@@ -338,7 +349,7 @@
       </div>
       <form id="settingsForm" class="card settings"></form>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v8.3 · popping live orders</p>
+      <p class="fine" id="version">Shot Caller v8.4 · round scan</p>
     </section>
   </main>
 
