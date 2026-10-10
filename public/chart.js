@@ -34,13 +34,18 @@ function setup(cv, h) {
 const fmt = (v) => Math.round(v).toLocaleString('en-US');
 
 // all: candles with volume (more history than shown, so slow indicators are warmed up); o.viewFrom: first time shown.
-// o: { strike, openTime, closeTime, spot, cone: [{ t, lo50, hi50, lo90, hi90 }], markers: [{ t, side, label }], show, barMs, round, viewFrom }
+// o: { strike, openTime, closeTime, spot, cone: [{ t, lo50, hi50, lo90, hi90 }], markers: [{ t, side, label }], show, barMs, round,
+//      viewFrom, viewTo (the window shown, for zooming and scrolling back), height, liveLast (the live layer draws the
+//      current candle and price, so they move with every trade) }
 export function drawPro(main, rsiCv, macdCv, all, o) {
   const start = Math.max(0, o.viewFrom ? all.findIndex((b) => b.t >= o.viewFrom) : 0);
-  const bars = all.slice(start);
-  const cut = (xs) => xs.slice(start);
+  let endIdx = all.length - 1;
+  if (o.viewTo != null) while (endIdx > start && all[endIdx].t > o.viewTo) endIdx--;
+  const bars = all.slice(start, endIdx + 1);
+  const cut = (xs) => xs.slice(start, endIdx + 1);
   const show = o.show;
-  const H = 300, axis = 60;
+  const H = o.height || 300, axis = 60;
+  const liveLast = !!o.liveLast && endIdx === all.length - 1;
   const { ctx, w, h } = setup(main, H);
   if (bars.length < 2) { ctx.fillStyle = C.text; ctx.font = '12px system-ui'; ctx.fillText('Loading candles…', 12, 24); return; }
   const allCloses = all.map((b) => b.c), closes = cut(allCloses);
@@ -132,6 +137,7 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
   if (show.vwap) line(ctx, vw, X, Y, C.vwap, [5, 3]);
   // Candles
   bars.forEach((b, i) => {
+    if (liveLast && i === bars.length - 1) return; // the live layer draws this one, moving with each trade
     const up = b.c >= b.o, x = X(i);
     ctx.strokeStyle = ctx.fillStyle = up ? C.up : C.dn;
     ctx.beginPath(); ctx.moveTo(x, Y(b.h)); ctx.lineTo(x, Y(b.l)); ctx.stroke();
@@ -157,7 +163,7 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
     if (is) beast(ctx, 'bull', X(i), Y(bars[i].l) + 16, 16, 0.9); else beast(ctx, 'bear', X(i), Y(bars[i].h) - 14, 16, 0.9);
   }
   if (show.beasts && trend) { ctx.font = '800 10px system-ui'; ctx.fillStyle = trend === 'bull' ? C.up : C.dn; ctx.fillText(trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', 6, bot - 6); }
-  if (show.labels) tag(ctx, plotW, Y(closes[closes.length - 1]), fmt(o.spot ?? closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true);
+  if (show.labels) { const ly = Y(closes[closes.length - 1]); if (liveLast) tagYs.push(ly); else tag(ctx, plotW, ly, fmt(endIdx === all.length - 1 ? o.spot ?? closes[closes.length - 1] : closes[closes.length - 1]), closes[closes.length - 1] >= bars[bars.length - 1].o ? C.up : C.dn, true); }
   ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = C.text;
   for (const [text, y] of axisLabels) if (!tagYs.some((t) => Math.abs(t - y) < 14)) ctx.fillText(text, plotW + 6, y + 3);
   // legend
@@ -193,7 +199,9 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
     }
   }
   // Where everything sits, for the live-orders layer drawn on top (drawOrders)
-  return { t0: bars[0].t, t1: bars[bars.length - 1].t + barMs, barMs, slot, plotW, top, bot, w, h: H, Xt, Y, closeAt: (t) => bars[Math.max(0, bars.findIndex((b) => b.t + barMs > t))].c };
+  const last = bars[bars.length - 1];
+  return { t0: bars[0].t, t1: last.t + barMs, barMs, slot, bw, plotW, top, bot, w, h: H, Xt, Y, vmin: lo - pad, vmax: hi + pad, bars, liveLast, last, labels: show.labels,
+    closeAt: (t) => bars[Math.max(0, bars.findIndex((b) => b.t + barMs > t))].c };
 }
 
 // ---------- the live-orders layer ----------
@@ -213,8 +221,9 @@ export function liveBubbles(orders, now = Date.now(), max = 80) {
   }
   return out;
 }
-// Returns true while something on it is still animating, so the caller keeps asking for frames
-export function drawOrders(cv, geo, { bubbles = [], fills = [], show, now = Date.now() }) {
+// Returns true while something on it is still animating, so the caller keeps asking for frames.
+// live: { price } the current candle's price right now (eased by the caller); cross: { x, y } a crosshair to show.
+export function drawOrders(cv, geo, { bubbles = [], fills = [], show, now = Date.now(), live = null, cross = null }) {
   const dpr = window.devicePixelRatio || 1;
   if (cv.width !== Math.round(geo.w * dpr) || cv.height !== Math.round(geo.h * dpr)) { cv.width = Math.round(geo.w * dpr); cv.height = Math.round(geo.h * dpr); }
   const ctx = cv.getContext('2d');
@@ -222,6 +231,37 @@ export function drawOrders(cv, geo, { bubbles = [], fills = [], show, now = Date
   ctx.clearRect(0, 0, geo.w, geo.h);
   const { Xt, Y, top, bot, plotW } = geo;
   let animating = false;
+  // The live candle: its body and wick follow the price with every trade, with a price line and tag on the axis
+  if (geo.liveLast && live?.price) {
+    const b = geo.last, p = live.price, x = Xt(b.t), up = p >= b.o, col = up ? C.up : C.dn;
+    const hi = Math.max(b.h, p), lo = Math.min(b.l, p);
+    ctx.strokeStyle = ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(hi)); ctx.lineTo(x, Y(lo)); ctx.stroke();
+    ctx.fillRect(x - geo.bw / 2, Y(Math.max(b.o, p)), geo.bw, Math.max(1, Math.abs(Y(b.o) - Y(p))));
+    const y = Y(p);
+    ctx.globalAlpha = 0.6; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    const pulse = live.moving ? 0.5 + 0.5 * Math.sin(now / 90) : 0; // a glow while it's moving
+    ctx.globalAlpha = 0.35 * pulse; ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
+    if (geo.labels) tag(ctx, plotW, y, fmt(p), col, true);
+  }
+  // Crosshair (press and hold, or a mouse): the candle under it and the price at the line
+  if (cross) {
+    const i = Math.max(0, Math.min(geo.bars.length - 1, geo.bars.findIndex((b) => Xt(b.t) + geo.slot / 2 >= cross.x)));
+    const b = geo.bars[i] ?? geo.last, x = Xt(b.t), y = Math.min(bot, Math.max(top, cross.y));
+    const price = geo.vmax - ((y - top) / (bot - top)) * (geo.vmax - geo.vmin);
+    ctx.strokeStyle = '#e8ecf3aa'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); ctx.setLineDash([]);
+    tag(ctx, plotW, y, fmt(price), '#e8ecf3', true);
+    const c = i === geo.bars.length - 1 && geo.liveLast && live?.price ? live.price : b.c;
+    const lines = [new Date(b.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), `O ${fmt(b.o)}  H ${fmt(Math.max(b.h, c))}`, `L ${fmt(Math.min(b.l, c))}  C ${fmt(c)}`, `${c >= b.o ? '+' : '−'}$${Math.abs(c - b.o).toFixed(0)} this candle`];
+    ctx.font = '600 10px ui-monospace, monospace';
+    const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14, bh = lines.length * 13 + 8;
+    const bx = x + 10 + bw > plotW ? x - 10 - bw : x + 10, by = top + 4;
+    ctx.fillStyle = '#05070de8'; ctx.strokeStyle = '#22d3ee66'; ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
+    ctx.fillStyle = '#e8ecf3';
+    lines.forEach((l, k) => { ctx.fillStyle = k === 3 ? (c >= b.o ? C.up : C.dn) : '#e8ecf3'; ctx.fillText(l, bx + 7, by + 15 + k * 13); });
+  }
   if (show.orders) for (const x of bubbles) {
     const age = now - (x.at ?? x.t);
     if (age < 0 || age > BUBBLE_LIFE) continue;

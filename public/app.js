@@ -705,12 +705,75 @@ function renderSuggestions(snap, live, sig, now) {
 }
 
 // ---------- Chart tab ----------
-const chartState = { tf: store.get('chartTf', 'round'), show: { ...chartDefaults(), ...store.get('chartShow', {}) }, cache: {}, drawnAt: 0 };
+const chartState = { tf: store.get('chartTf', 'round'), show: { ...chartDefaults(), ...store.get('chartShow', {}) }, cache: {}, drawnAt: 0,
+  height: store.get('chartH', 300), // S / M / L
+  view: {},                         // per timeframe: { count: bars shown, endT: last bar shown (null = live) }, set by drag / pinch
+  livePx: null, cross: null };
+const CHART_SIZES = { S: 240, M: 300, L: 420 };
 function buildChartControls() {
   setHTML($('tfBtns'), Object.entries(TIMEFRAMES).map(([k, t]) => `<button data-tf="${k}" class="${chartState.tf === k ? 'on' : ''}">${t.label}</button>`).join(''));
+  setHTML($('chartSize'), Object.entries(CHART_SIZES).map(([k, h]) => `<button type="button" data-h="${h}" class="${chartState.height === h ? 'on' : ''}">${k}</button>`).join(''));
   setHTML($('chartToggles'), CHART_TOGGLES.map(([k, label]) => `<label><input type="checkbox" data-show="${k}" ${chartState.show[k] ? 'checked' : ''}>${esc(label)}</label>`).join(''));
 }
 $('tfBtns').addEventListener('click', (e) => { const k = e.target.dataset.tf; if (!k) return; chartState.tf = k; store.set('chartTf', k); buildChartControls(); drawChartTab(true); });
+$('chartSize').addEventListener('click', (e) => { const h = Number(e.target.dataset.h); if (!h) return; chartState.height = h; store.set('chartH', h); buildChartControls(); drawChartTab(true); });
+// ---------- adjusting the chart: drag to scroll back, pinch or wheel to zoom, hold for a crosshair, double-tap for live ----------
+{
+  const wrap = document.querySelector('.pro-wrap');
+  const pts = new Map(); let g = null, holdTimer = null, lastTap = 0;
+  const view = () => (chartState.view[chartState.tf] ||= {});
+  const xy = (e) => { const r = wrap.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const redraw = () => { chartState.key = null; drawChartTab(true); };
+  const reset = () => { chartState.view[chartState.tf] = {}; chartState.cross = null; redraw(); };
+  function shift(bars) { // scroll by whole bars: + = back in time
+    const all = chartState.bars || [], v = view(); if (!all.length) return;
+    let end = v.endT == null ? all.length - 1 : all.findIndex((b) => b.t >= v.endT);
+    if (end < 0) end = all.length - 1;
+    end = Math.max(Math.min(all.length - 1, (v.count || chartState.defCount) - 1), Math.min(all.length - 1, end - bars));
+    v.endT = end >= all.length - 1 ? null : all[end].t;
+  }
+  function zoom(f) { const v = view(); v.count = Math.max(10, Math.min((chartState.bars || []).length || 500, (v.count || chartState.defCount) * f)); }
+  wrap.addEventListener('pointerdown', (e) => {
+    wrap.setPointerCapture?.(e.pointerId);
+    pts.set(e.pointerId, xy(e));
+    const now = Date.now();
+    if (pts.size === 1) {
+      if (now - lastTap < 300) { reset(); lastTap = 0; return; } // double-tap: back to live
+      lastTap = now;
+      const p = xy(e); g = { mode: 'pan', x: p.x, moved: 0, acc: 0 };
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => { if (g && g.moved < 6) { g.mode = 'cross'; chartState.cross = p; orderFrame(); } }, 380); // press and hold: crosshair
+    } else if (pts.size === 2) {
+      clearTimeout(holdTimer); chartState.cross = null;
+      const [a, b] = [...pts.values()]; g = { mode: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), count: view().count || chartState.defCount };
+    }
+  });
+  wrap.addEventListener('pointermove', (e) => {
+    const p = xy(e);
+    if (e.pointerType === 'mouse' && !pts.size) { chartState.cross = p; orderFrame(); return; } // mouse: crosshair follows it
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, p);
+    if (!g) return;
+    if (g.mode === 'cross') { chartState.cross = p; orderFrame(); return; }
+    if (g.mode === 'pinch' && pts.size === 2) {
+      const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 10) { view().count = Math.max(10, Math.min((chartState.bars || []).length || 500, g.count * (g.d / d))); redraw(); }
+      return;
+    }
+    if (g.mode === 'pan') {
+      const dx = p.x - g.x; g.x = p.x; g.moved += Math.abs(dx); g.acc += dx;
+      const slot = chartState.geo?.slot || 8, n = Math.trunc(g.acc / slot);
+      if (n) { g.acc -= n * slot; shift(n); redraw(); clearTimeout(holdTimer); }
+    }
+  });
+  const end = (e) => { pts.delete(e.pointerId); clearTimeout(holdTimer); if (!pts.size) { if (g?.mode === 'cross' && e.pointerType !== 'mouse') { chartState.cross = null; orderFrame(); } g = null; } };
+  wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
+  wrap.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { chartState.cross = null; orderFrame(); } });
+  wrap.addEventListener('wheel', (e) => { e.preventDefault(); if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) shift(Math.round(-e.deltaX / (chartState.geo?.slot || 8))); else zoom(1 + Math.sign(e.deltaY) * 0.12); redraw(); }, { passive: false });
+  wrap.addEventListener('dblclick', reset);
+  $('chartLive').addEventListener('click', (e) => { e.stopPropagation(); reset(); });
+  $('chartLive').addEventListener('pointerdown', (e) => e.stopPropagation());
+}
 $('chartToggles').addEventListener('change', (e) => { const k = e.target.dataset.show; if (!k) return; chartState.show[k] = e.target.checked; store.set('chartShow', chartState.show); drawChartTab(true); });
 async function chartBars(tf) {
   const T = TIMEFRAMES[tf];
@@ -737,19 +800,33 @@ async function drawChartTab(force = false) {
   let bars = await chartBars(tf);
   const open = live ? Date.parse(live.m.open_time) : null, close = live ? Date.parse(live.m.close_time) : null;
   if (T.gran === 60) bars = withLive(bars, now);
-  // Indicators warm up on all the history; the chart shows the round (plus 10 minutes before it), or the last 60 / 120 bars
-  const viewFrom = tf === 'round' && open ? open - 10 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
+  // Indicators warm up on all the history; the chart shows the round (plus 10 minutes before it), or the last 60 / 120 bars.
+  // Drag and pinch change how many bars show and how far back (chartState.view); double-tap or LIVE resets.
+  const barMs = T.gran * 1000 * T.combine;
+  const defFrom = tf === 'round' && open ? open - 10 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
+  const defCount = Math.max(10, bars.length - Math.max(0, bars.findIndex((b) => b.t >= defFrom)));
+  const v = chartState.view[tf] || {};
+  let endIdx = bars.length - 1;
+  if (v.endT != null) { while (endIdx > 0 && bars[endIdx].t > v.endT) endIdx--; if (endIdx >= bars.length - 1) v.endT = null; }
+  const count = Math.max(10, Math.min(bars.length, Math.round(v.count || defCount)));
+  const viewFrom = bars[Math.max(0, endIdx - count + 1)]?.t, viewTo = v.endT != null ? bars[endIdx]?.t : null;
+  chartState.atLive = v.endT == null; chartState.adjusted = v.endT != null || (v.count && Math.round(v.count) !== defCount);
+  chartState.bars = bars; chartState.defCount = defCount;
+  setHidden($('chartLive'), !chartState.adjusted);
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
-  const showCone = (tf === 'round' || tf === '1m') && live;
+  const showCone = (tf === 'round' || tf === '1m') && live && chartState.atLive;
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}` }));
   // The candles, indicators and panes redraw only when something on them changed; the live orders have their own layer
   const lb = bars[bars.length - 1];
-  const key = [tf, $('proChart').clientWidth, bars.length, lb?.t, lb?.o, lb?.h, lb?.l, lb?.c, live?.strike, close, spot && Math.round(spot), state.callLog.length, JSON.stringify(chartState.show), Math.floor(now / 15000)].join('|');
+  // (the live candle itself moves on the live layer, so price ticks don't redraw this; it refreshes every 5s for the indicators)
+  const liveLast = chartState.atLive && lb && lb.t + barMs > now;
+  const key = [tf, $('proChart').clientWidth, chartState.height, bars.length, lb?.t, viewFrom, viewTo, live?.strike, close, state.callLog.length, JSON.stringify(chartState.show), Math.floor(now / 5000)].join('|');
   if (key !== chartState.key || force) {
     chartState.key = key;
+    $('orderLayer').style.height = `${chartState.height}px`;
     chartState.geo = drawPro($('proChart'), $('rsiChart'), $('macdChart'), bars, {
       strike: live?.strike, openTime: open, closeTime: close, spot, round: tf === 'round' || tf === '1m',
-      cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs: T.gran * 1000 * T.combine, viewFrom,
+      cone: showCone ? forecastCone(spot, sigma, now, close) : [], markers, show: chartState.show, barMs, viewFrom, viewTo, height: chartState.height, liveLast,
     }) || null;
   }
   orderFrame();
@@ -767,7 +844,19 @@ function orderFrame() {
     const fk = `${state.positions.length}|${state.trades.length}|${autopilot?.state()?.log?.[0]?.t ?? 0}`;
     if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
     const now = Date.now();
-    if (drawOrders(cv, geo, { bubbles: liveBubbles(tape.big, now), fills: chartState.fills, show: chartState.show, now })) orderFrame();
+    // The live price: the latest Coinbase trade (the candles are Coinbase's), or the ticker; eased so it glides
+    const lastCb = tape.list.find((x) => x.ex === 'Coinbase');
+    const target = lastCb && now - lastCb.t < 5000 ? lastCb.price : state.spot;
+    let moving = false;
+    if (target) {
+      const dt = Math.min(200, ts - (chartState.liveTs || ts)); chartState.liveTs = ts;
+      if (chartState.livePx == null || Math.abs(target - chartState.livePx) > 500) chartState.livePx = target;
+      else chartState.livePx += (target - chartState.livePx) * (1 - Math.exp(-dt / 110));
+      moving = Math.abs(target - chartState.livePx) > 0.02;
+      if (geo.liveLast && (chartState.livePx > geo.vmax || chartState.livePx < geo.vmin) && now - (chartState.rescaleAt || 0) > 700) { chartState.rescaleAt = now; chartState.key = null; drawChartTab(true); } // off the scale: redraw it
+    }
+    const anim = drawOrders(cv, geo, { bubbles: liveBubbles(tape.big, now), fills: chartState.fills, show: chartState.show, now, live: { price: chartState.livePx, moving }, cross: chartState.cross });
+    if (anim || moving) orderFrame();
   });
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track

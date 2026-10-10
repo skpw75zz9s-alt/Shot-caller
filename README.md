@@ -269,6 +269,17 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Live, adjustable charts (v8.5)
+
+The Chart tab:
+- **Moves with every trade.** The current candle, a dashed price line and the price tag follow each Coinbase trade, gliding to the new price (they glow while moving).
+  - They draw on the fast layer with the order bubbles, so the indicators underneath only redraw every 5 seconds or when the scale has to change.
+- **Drag** sideways to scroll back in time.
+- **Pinch** (or the mouse wheel) to zoom from 10 bars up to everything loaded.
+- **Press and hold** (or hover a mouse) for a crosshair. It shows the time, open/high/low/close and the move for the candle under your finger, plus the price at the line.
+- **Double-tap** or tap **⟲ LIVE** to snap back to now. LIVE only shows once you've moved the chart.
+- **S / M / L** changes the chart's height (remembered).
+
 ### Round scan: all five exchanges, every round (v8.4)
 
 The Deck's **Round scan** reads every trade since the round opened on all five exchanges the app streams: Coinbase, Kraken, Bitstamp, Gemini and Binance.US (`public/roundscan.js`).
