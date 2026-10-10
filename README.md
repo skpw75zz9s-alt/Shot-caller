@@ -272,9 +272,9 @@ Security:
 ### Live orders on the chart (v8.1)
 
 The Chart tab draws the live trades onto the candles:
-- **Order bubbles**: each candle's big trades ($2k+, all 5 exchange feeds) become a green bubble for buyers and a red bubble for sellers. Each bubble sits at that candle's average trade price, and its size shows the dollar amount.
-  - A gold ring means a whale was in it, and a bubble with a fresh print pings.
-  - The app keeps the last 6 hours while it's open, so the 1h and 4h views show them too.
+- **Order bubbles**: every big trade ($2k+, all 5 exchange feeds) pops up at its price and moment: green for a buyer, red for a seller, gold with a 🐋 for a whale, sized by dollars.
+  - It floats up a little, then bursts (a ring and droplets) and disappears after about 3 seconds, so the chart shows what's trading right now.
+  - The bubbles draw on their own layer over the chart, so they animate without redrawing the candles.
 - **Trade flags**: **B** (bought), **S** (sold) and **✕** (bailed out) mark your tracked trades and the server Auto-trader's fills (🤖), at the BTC price at that moment.
 - Both can be turned off in Chart tools & indicators.
 

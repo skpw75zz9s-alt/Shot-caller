@@ -197,51 +197,61 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
 }
 
 // ---------- the live-orders layer ----------
-// Its own transparent canvas over the chart, so a new trade (or a ping animating) redraws only this, not the candles,
+// Its own transparent canvas over the chart, so a trade (and its animation) redraws only this, not the candles,
 // indicators, RSI and MACD underneath.
-// Big trades ($2k+, 5 exchange feeds), one bubble per candle per side at their average price. Size = dollars,
-// green = buyers lifting the ask, red = sellers hitting the bid, gold ring = a whale in it; a fresh print pings.
-export function groupOrders(orders, t0, t1, barMs) {
-  const groups = new Map();
-  for (const x of orders) {
-    if (x.t < t0 || x.t >= t1) continue;
-    const slotT = t0 + Math.floor((x.t - t0) / barMs) * barMs, k = `${slotT}:${x.side}`;
-    const g = groups.get(k) || { t: slotT + barMs / 2, side: x.side, usd: 0, pv: 0, n: 0, whale: false, last: 0 };
-    g.usd += x.usd; g.pv += x.price * x.usd; g.n++; g.whale ||= !!x.whale; g.last = Math.max(g.last, x.t);
-    groups.set(k, g);
+// Every big trade ($2k+, 5 exchange feeds) is a bubble that pops in at its price and moment, drifts up a little, then
+// bursts and disappears (about 3s). Size = dollars, green = a buyer lifted the ask, red = a seller hit the bid,
+// gold = a whale.
+export const BUBBLE_LIFE = 3000; // ms from appearing to gone
+const POP_AT = 2500;             // ...the last half second is the burst
+export function liveBubbles(orders, now = Date.now(), max = 80) {
+  const out = [];
+  for (let i = orders.length - 1; i >= 0 && out.length < max; i--) {
+    const x = orders[i], age = now - (x.at ?? x.t);
+    if (age > BUBBLE_LIFE) break; // oldest-first list: everything before this is gone too
+    if (age >= 0) out.push(x);
   }
-  return [...groups.values()];
+  return out;
 }
-// Returns true while something on it is still animating (a ping), so the caller keeps asking for frames
-export function drawOrders(cv, geo, { groups = [], fills = [], show, now = Date.now() }) {
+// Returns true while something on it is still animating, so the caller keeps asking for frames
+export function drawOrders(cv, geo, { bubbles = [], fills = [], show, now = Date.now() }) {
   const dpr = window.devicePixelRatio || 1;
   if (cv.width !== Math.round(geo.w * dpr) || cv.height !== Math.round(geo.h * dpr)) { cv.width = Math.round(geo.w * dpr); cv.height = Math.round(geo.h * dpr); }
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, geo.w, geo.h);
-  const { Xt, Y, top, bot, slot, plotW } = geo;
+  const { Xt, Y, top, bot, plotW } = geo;
   let animating = false;
-  if (show.orders && groups.length) {
-    const big = Math.max(...groups.map((g) => g.usd), 1);
-    for (const g of groups) {
-      const cx = Xt(g.t) + (g.side === 'buy' ? -1 : 1) * Math.min(3, slot * 0.15), cy = Math.min(bot - 2, Math.max(top + 2, Y(g.pv / g.usd)));
-      const r = Math.max(2.5, Math.min(Math.max(4, slot * 0.9), 2 + 9 * Math.sqrt(g.usd / big)));
-      const col = g.side === 'buy' ? C.up : C.dn;
-      ctx.globalAlpha = 0.3; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
-      ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
-      if (g.whale) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, 7); ctx.stroke(); }
-      const age = now - g.last;
-      if (age >= 0 && age < 1500) { // a new print: the bubble swells in
-        const k = age / 1500;
-        ctx.globalAlpha = 1 - k; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 0.6 * (1 - k)), 0, 7); ctx.fill();
+  if (show.orders) for (const x of bubbles) {
+    const age = now - (x.at ?? x.t);
+    if (age < 0 || age > BUBBLE_LIFE) continue;
+    animating = true;
+    const col = x.whale ? '#fbbf24' : x.side === 'buy' ? C.up : C.dn;
+    const r0 = Math.min(x.whale ? 22 : 15, 3 + Math.sqrt(x.usd / 2000) * 1.4);
+    const cx = Math.min(plotW - 4, Math.max(4, Xt(x.t))), cy0 = Math.min(bot - 4, Math.max(top + 4, Y(x.price)));
+    const cy = cy0 - (Math.min(age, POP_AT) / POP_AT) * 10; // drifts up as it lives
+    if (age < POP_AT) {
+      // pops in with a little overshoot, then floats
+      const k = Math.min(1, age / 220), grow = k < 1 ? 1.18 * k - 0.18 * k * k * k : 1;
+      const r = r0 * Math.max(0.05, grow) * (1 + 0.04 * Math.sin(age / 120));
+      ctx.globalAlpha = 0.35; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.globalAlpha = 0.55; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.35, Math.max(1, r * 0.22), 0, 7); ctx.fill(); // shine
+      if (x.whale && r > 8) { ctx.globalAlpha = 1; ctx.font = `${Math.round(r)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('🐋', cx, cy + r * 0.35); ctx.textAlign = 'start'; }
+    } else {
+      // the pop: a ring bursts outward and a few droplets fly off, fading to nothing
+      const k = (age - POP_AT) / (BUBBLE_LIFE - POP_AT), fade = 1 - k;
+      ctx.globalAlpha = fade * 0.9; ctx.strokeStyle = col; ctx.lineWidth = 2 * fade + 0.5;
+      ctx.beginPath(); ctx.arc(cx, cy, r0 * (1 + 0.9 * k), 0, 7); ctx.stroke();
+      ctx.fillStyle = col;
+      for (let j = 0; j < 6; j++) {
+        const a = (j / 6) * Math.PI * 2 + (x.t % 7), d = r0 * (1 + 1.8 * k);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, Math.max(0.6, 2.2 * fade), 0, 7); ctx.fill();
       }
-      if (age >= 0 && age < 2400) { // ...and sends out a ring
-        const k = age / 2400;
-        ctx.globalAlpha = (1 - k) * 0.85; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r + 2 + k * 18, 0, 7); ctx.stroke();
-        animating = true;
-      }
-      ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = 1;
+  }
+  if (show.orders) {
     ctx.font = '600 9px ui-monospace, monospace'; ctx.textAlign = 'right';
     ctx.fillStyle = C.up; ctx.fillText('● buys', plotW - 46, top + 10); ctx.fillStyle = C.dn; ctx.fillText('● sells', plotW - 4, top + 10);
     ctx.textAlign = 'start';
