@@ -2,7 +2,7 @@ import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskL
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
-import { CHART_TOGGLES, chartDefaults } from './chart.js';
+import { CHART_TOGGLES, chartDefaults, createImpact } from './chart.js';
 import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
@@ -339,7 +339,11 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 // when that's fresh and sane. Kalshi settles on an index of several exchanges, not Coinbase alone.
 const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
-const compute = () => snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
+const compute = () => {
+  const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null });
+  state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
+  return snap;
+};
 
 // Deep dive (confidence and its reasons) and the window's rejection trends.
 function renderDeep(row, sig) {
@@ -419,7 +423,8 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 
 // ---------- live orders from all markets (public/feeds.js) ----------
 // Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
-const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: $2k+ trades, 6h, for the chart (bigV bumps on each)
+const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
+const impact = createImpact(); // which trades moved the price (public/chart.js)
 function handleTrades(trades) {
   const p = alerts.prefs();
   for (const x of trades) {
@@ -431,8 +436,8 @@ function handleTrades(trades) {
     const w = addTrade(flow, x, { round, whaleMin: p.whaleMin });
     x.whale = !!w;
     tape.list.unshift(x); tape.rate.push(Date.now());
-    const usdx = x.price * x.size;
-    if (usdx >= 2000) { tape.big.push({ t: x.t, at: Date.now(), price: x.price, usd: usdx, side: x.side, whale: x.whale, ex: x.ex }); tape.bigV++; }
+    const moved = impact(x, { sigmaMin: state.sigmaNow || undefined }); // only orders that move the price bubble on the chart
+    if (moved) { tape.big.push(moved); tape.bigV++; }
     if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;

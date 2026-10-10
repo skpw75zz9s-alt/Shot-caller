@@ -189,6 +189,12 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
         ctx.globalAlpha = 0.35; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
         ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke();
         ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.35, Math.max(1, r * 0.22), 0, 7); ctx.fill();
+        if (x.move != null && k >= 1) { // how far this order moved the price
+          ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace"; ctx.textAlign = 'center';
+          const label = `${x.side === 'buy' ? '+' : '−'}$${Math.round(x.move)}`;
+          ctx.lineWidth = 3; ctx.strokeStyle = C.bg; ctx.strokeText(label, cx, cy - r - 3); // readable over the lines behind it
+          ctx.fillText(label, cx, cy - r - 3);
+        }
       } else {
         const k = (age - 2500) / 500, fade = 1 - k;
         ctx.globalAlpha = fade * 0.9; ctx.strokeStyle = col; ctx.lineWidth = 2 * fade + 0.5; ctx.beginPath(); ctx.arc(cx, cy, r0 * (1 + 0.9 * k), 0, 7); ctx.stroke();

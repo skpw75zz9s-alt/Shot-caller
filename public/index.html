@@ -224,7 +224,7 @@
         <div id="tvRsi" class="tv-sub"></div>
         <div id="tvMacd" class="tv-sub"></div>
         <p class="pred-record" id="predRecord"></p>
-        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). <b>Prediction lines</b> in the cone: where each market says BTC closes. <b style="color:#22d3ee">Bot</b> = the bot's model, <b style="color:#a78bfa">Kalshi</b> = the close Kalshi's price implies, <b style="color:#fbbf24">5 exch</b> = the five exchanges' trend over the last 5 minutes (half strength). Each is graded every round. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: every big trade ($2k+ on 5 exchanges) pops up as a bubble at its price, green for a buyer and red for a seller, sized by dollars (gold with a 🐋 for a whale), then bursts and disappears after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
+        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). <b>Prediction lines</b> in the cone: where each market says BTC closes. <b style="color:#22d3ee">Bot</b> = the bot's model, <b style="color:#a78bfa">Kalshi</b> = the close Kalshi's price implies, <b style="color:#fbbf24">5 exch</b> = the five exchanges' trend over the last 5 minutes (half strength). Each is graded every round. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: only orders that move the market bubble. An order (its fills on one exchange within a second) has to push the price its way by at least $5 and 30% of a typical 10-second move; trades the book soaks up don't show, even whales. It pops up at its price, green when buyers pushed it up and red when sellers pushed it down, sized by dollars (gold for a whale), with how far it moved the price above it, then bursts after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
       </div>
     </section>
 
@@ -395,7 +395,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v9.3 · learns every second</p>
+      <p class="fine" id="version">Shot Caller v9.4 · bubbles only for market-moving orders</p>
     </section>
   </main>
 

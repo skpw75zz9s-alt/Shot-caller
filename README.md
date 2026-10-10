@@ -383,7 +383,7 @@ The Deck's **Round scan** reads every trade since the round opened on all five e
 ### Live orders on the chart (v8.1)
 
 The Chart tab draws the live trades onto the candles:
-- **Order bubbles**: every big trade ($2k+, all 5 exchange feeds) pops up at its price and moment: green for a buyer, red for a seller, gold with a 🐋 for a whale, sized by dollars.
+- **Order bubbles** (since v9.4: only orders that move the market): an order's fills on one exchange, on one side, less than a second apart, count as one order (a market order sweeping the book). It bubbles only if it pushed that exchange's price its way by at least $5 and 30% of BTC's typical 10-second move right now (about $10 on a normal day), with $2k+ traded. Trades the book soaks up don't bubble, even whales. The bubble shows how far the order moved the price (+$25), grows if the same order keeps pushing, and is green for buyers, red for sellers, gold for a whale. Bubbles are sized by dollars.
   - It floats up a little, then bursts (a ring and droplets) and disappears after about 3 seconds, so the chart shows what's trading right now.
   - The bubbles draw on their own layer over the chart, so they animate without redrawing the candles.
 - **Trade flags**: **B** (bought), **S** (sold) and **✕** (bailed out) mark your tracked trades and the server Auto-trader's fills (🤖), at the BTC price at that moment.
