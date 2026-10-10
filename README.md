@@ -269,6 +269,25 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Learns every second (v9.3)
+
+The server's bot now runs **every second** instead of every 5 seconds. Calls, sells, bail-outs and the Auto-trader react 5× faster. The exchanges' REST tickers are still read every 5 seconds (their rate limits). In between, the price moves with the live trades the server streams from the five exchanges, kept on the index's level.
+
+Every second it also learns (`public/pulse.js`, kept with the rest of its memory in `learned.json`):
+- **Volatility check.** Each second, the move over the last 60 seconds is graded against the volatility the bot expected a minute earlier. Recent misses, weighted by a 30-minute half-life, give a live correction: if BTC has been moving 1.2× what the bot expected, its odds widen to match.
+  - The correction only applies after an hour of grading, and only while it's helping. Each second it's scored, out of sample, on whether it would have predicted the move better than no correction (log-likelihood over the last ~6 hours).
+  - It switches itself off when it stops helping. It's capped at 0.8–1.25×.
+  - The phone prices with the same correction (it now refreshes the bot's memory every 2 minutes).
+- **Kalshi's price.** Every second of a round, the bot's own odds and Kalshi's price are saved. When the round settles, every blend from 0% to 100% Kalshi is scored on those seconds, with each round counting once. This learns how much Kalshi's price is worth next to the bot's.
+  - It's shown, not applied: blending changes which calls the bot makes, so it's your choice.
+  - The new **Respect the market** setting sets the blend (0 = the bot alone, the default).
+
+**Record → What the bot has learned** shows:
+- the seconds watched and graded
+- how BTC has been moving vs what the bot expected
+- whether the correction is on
+- the best Kalshi blend so far
+
 ### Stronger Round scan (v9.1)
 
 The Round scan (`public/roundscan.js`) now reads more, runs on the server around the clock, and grades itself honestly:

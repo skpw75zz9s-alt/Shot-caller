@@ -67,6 +67,7 @@ const SETTINGS_META = [
   ['waitMinutes', 'Wait before calling (min)', 'Minutes into each 15-minute window before the bot makes any call', 'num'],
   ['volMultiplier', 'Vol multiplier', '1 = measured volatility. Above 1 expects bigger swings (odds closer to 50/50)', 'num'],
   ['momentumWeight', 'Momentum weight', 'How much of the 10-min drift to carry forward (0 to 1)', 'num'],
+  ['marketWeight', 'Respect the market', 'Blend Kalshi\'s own price into the bot\'s odds (0 = the bot alone, 1 = Kalshi alone). History → What the bot has learned shows which blend has scored best, graded every second', 'num'],
   ['minProfit', 'Min profit (pts)', 'Profit per contract (after fees) for a sell to count as taking profit', 'cents'],
   ['trail', 'Trailing drop (pts)', 'Flag a flip sign if the sell % falls this far from its peak (a warning, not a sell)', 'cents'],
   ['oddsDrop', 'Odds drop (pts)', 'Flag a flip sign if the bot\'s odds fall this far from their peak (a warning, not a sell)', 'cents'],
@@ -1121,6 +1122,7 @@ function renderMemory() {
   lines.push(st.basisN >= 10 ? `Kalshi's settlement index vs Coinbase: ${st.basis >= 0 ? '+' : '−'}$${Math.abs(st.basis).toFixed(2)} (middle of the last ${st.basisN} settlements), included in the odds.` : `Learning the gap between Coinbase and Kalshi's settlement index: ${st.basisN} of 10 settlements.`);
   if (settings.learn === false) lines.push('Off in Settings: the bot isn\'t using any of this right now.');
   setText($('memSummary'), lines.join(' '));
+  setHTML($('memPulse'), pulseHtml(st.pulse));
   // Weekday volatility by half hour (New York time)
   const prof = st.profile;
   if (prof) {
@@ -1131,6 +1133,26 @@ function renderMemory() {
   }
   const rows = (st.calibration || []).filter((b) => b.n >= 20);
   setHTML($('memCal'), rows.map((b) => `<li><span><b>Said ${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</b><small>${b.n} window${b.n === 1 ? '' : 's'} · won ${Math.round(b.won * 100)}%${b.shift ? ` · corrected ${b.shift > 0 ? '+' : '−'}${(Math.abs(b.shift) * 100).toFixed(1)} pts` : ' · no correction needed'}</small></span></li>`).join(''));
+}
+
+// Learning every second (public/pulse.js): what the server's per-second grading has found
+function pulseHtml(p) {
+  if (!p) return '';
+  const n = (v) => Math.round(v).toLocaleString();
+  const out = [`<b>Learning every second:</b> ${n(p.seconds)} seconds watched${p.since ? ` since ${new Date(p.since).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}, ${n(p.graded)} graded.`];
+  const x = p.expected;
+  if (p.graded >= 60) {
+    const how = Math.abs(x - 1) < 0.05 ? 'right in line with' : `${x.toFixed(2)}× ${x > 1 ? 'more than' : 'of'}`;
+    out.push(`Over the last half hour BTC has moved ${how} what the bot expected a minute earlier.`);
+    out.push(p.helping == null ? `The live correction switches on after an hour of grading (${n(p.needed)} seconds to go).`
+      : p.helping ? (Math.abs(p.fix - 1) >= 0.01 ? `<b class="pos">Correction on:</b> the odds use ×${p.fix.toFixed(2)} volatility, because it's been predicting moves better than no correction.` : 'Correction on, but nothing to correct right now.')
+      : '<b>Correction off:</b> lately it hasn\'t predicted moves better than leaving the volatility alone, so the bot ignores it.');
+  }
+  if (p.blendRounds) {
+    const cur = Math.round((settings.marketWeight || 0) * 100), best = Math.round(p.blendBest * 100);
+    out.push(`<b>Kalshi's price:</b> scored every second of ${n(p.blendRounds)} round${p.blendRounds === 1 ? '' : 's'}, the most accurate odds came from ${best === 0 ? 'the bot alone' : best === 100 ? 'Kalshi alone' : `${best}% Kalshi, ${100 - best}% bot`}${p.blendRounds < 100 ? ' (early: under 100 rounds)' : ''}. The bot uses ${cur}% (Settings → Respect the market).`);
+  } else out.push('Kalshi\'s price: each round, every second of the bot\'s odds and Kalshi\'s price is scored after the result to learn how much Kalshi\'s price is worth. First result after a round settles.');
+  return out.map((l) => `<p>${l}</p>`).join('');
 }
 
 // ---------- the official bot record (server: every call it made, around the clock) ----------
@@ -1449,7 +1471,7 @@ async function tick() {
   try {
     const jobs = isLive() ? [] : [refreshSpot()];
     if (Date.now() - state.candlesAt > 20000) jobs.push(refreshCandles());
-    if (!(Date.now() - (state.memory?.at || 0) < 10 * 60000) && !state.memoryBusy) { state.memoryBusy = true; refreshMemory().catch(() => {}).finally(() => { state.memoryBusy = false; }); }
+    if (!(Date.now() - (state.memory?.at || 0) < 2 * 60000) && !state.memoryBusy) { state.memoryBusy = true; refreshMemory().catch(() => {}).finally(() => { state.memoryBusy = false; }); }
     const closed = state.markets.length && Date.parse(state.markets[0].close_time) < Date.now();
     if (Date.now() - state.marketsAt > settings.refreshSec * 1000 || closed) jobs.push(refreshMarkets());
     refreshIndex().catch(() => { state.index = null; }); // optional: without it the bot uses Coinbase alone

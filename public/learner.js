@@ -7,6 +7,8 @@
 //   2) calibration: when the bot said 85%, how often did that side really win? Small corrections, only once there's
 //      enough evidence, capped at ±5 pts.
 //   3) basis: the gap between Coinbase (the app's price) and the index Kalshi actually settles on.
+import { newPulse, publicPulse } from './pulse.js';
+
 export const SLOTS = 336; // half hours in a week
 const HALF_LIFE = 8 * 30; // samples per slot: ~8 weeks (30 one-minute samples per slot per week)
 const DECAY = 0.5 ** (1 / HALF_LIFE);
@@ -21,6 +23,7 @@ export const newLearned = () => ({
   vol: { s2: Array(SLOTS).fill(0), n: Array(SLOTS).fill(0), lastT: 0, minutes: 0, firstT: null },
   cal: CAL_BINS.slice(0, -1).map(() => ({ n: 0, wins: 0, sumQ: 0 })),
   basis: [], windows: 0,
+  pulse: newPulse(), // learning every second (public/pulse.js)
 });
 
 // Half hour of the week in New York time (Sun 00:00 = 0). The UTC offset is cached per hour.
@@ -141,4 +144,4 @@ export function basisOf(L) {
 }
 
 // What the phone downloads: everything the model uses, without the raw sums
-export const publicLearned = (L) => ({ v: L.v, vol: L.vol, cal: L.cal, basis: L.basis, windows: L.windows });
+export const publicLearned = (L) => ({ v: L.v, vol: L.vol, cal: L.cal, basis: L.basis, windows: L.windows, pulse: publicPulse(L.pulse) });

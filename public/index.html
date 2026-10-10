@@ -37,6 +37,7 @@
   <link rel="modulepreload" href="suggest.js">
   <link rel="modulepreload" href="trader.js">
   <link rel="modulepreload" href="autopilot.js">
+  <link rel="modulepreload" href="pulse.js">
   <link rel="modulepreload" href="roundscan.js">
   <link rel="modulepreload" href="predict.js">
   <link rel="modulepreload" href="tvchart.js">
@@ -313,6 +314,7 @@
       <ul id="tradeList" class="history"></ul>
       <h2 class="sec">What the bot has learned</h2>
       <p class="push-status" id="memSummary"></p>
+      <div class="mem-pulse" id="memPulse"></div>
       <div id="memBarsWrap" class="mem-wrap" hidden><div class="mem-bars" id="memBars"></div><div class="mem-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>12a</span></div><small class="muted">Usual volatility by half hour on weekdays, New York time</small></div>
       <ul id="memCal" class="history"></ul>
     </section>
@@ -393,7 +395,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v9.2 · Live orders open again</p>
+      <p class="fine" id="version">Shot Caller v9.3 · learns every second</p>
     </section>
   </main>
 

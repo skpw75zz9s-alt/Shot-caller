@@ -2,7 +2,7 @@
 // to subscribed phones, so alerts arrive even when the app is closed.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { DEFAULTS, EXIT_DEFAULTS, riskSettings } from './public/model.js';
+import { DEFAULTS, EXIT_DEFAULTS, quote, riskSettings } from './public/model.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
@@ -10,6 +10,7 @@ import { createIndex, defaultSources } from './index.js';
 import { allowAlert, hourlyWindow } from './public/notify.js';
 import { callStats, logCall, settleCalls, streaks, unsettledCalls } from './public/record.js';
 import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
+import { newPulse, prunePulse, pulseRound, pulseSecond, pulseSettle, pulseStatus } from './public/pulse.js';
 
 const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, updateMinutes: 60, ...DEFAULTS, ...EXIT_DEFAULTS };
 const MAX_DEVICES = 100;
@@ -19,12 +20,14 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // learn: watch the market around the clock (even with no phones subscribed), backfill a few weeks of BTC history
 // on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
 // indexSources: exchanges for the BTC index estimate (index.js); INDEX=off uses Coinbase alone.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false }) {
+// liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
+// every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
   const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
-  const market = { spot: null, candles: [], candlesAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
+  const market = { spot: null, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
   const learnFile = dataFile.replace(/[^/\\]+$/, 'learned.json');
   let learned = newLearned(), learnDirty = false, learnSavedAt = 0, backfilling = false, backfillStop = false;
   const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
@@ -67,7 +70,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     vapid.subject = env.VAPID_SUBJECT || 'https://github.com/skpw75zz9s-alt/Shot-caller';
     try { const r = JSON.parse(await readFile(recordFile, 'utf8')); if (Array.isArray(r)) record = r; } catch { /* no record yet */ }
-    try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L }; } catch { /* first run: learns from scratch */ }
+    try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L, pulse: L.pulse?.v === 1 ? { ...newPulse(), ...L.pulse } : newPulse() }; } catch { /* first run: learns from scratch */ }
     await save();
     if (learn) startLearning();
   }
@@ -222,12 +225,20 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   async function refresh(now) {
     const series = [...new Set([LEARN_SERIES, ...[...devices.values()].map((d) => d.settings.series)])];
-    // BTC: the multi-exchange index estimate, or Coinbase alone if the other exchanges don't answer
-    const jobs = [index.poll(now).then((ix) => {
-      const p = ix.index ?? ix.coinbase;
-      if (!p) throw new Error('no BTC price from any exchange');
-      market.spot = p; market.index = ix;
-    })];
+    // BTC: the multi-exchange index estimate, or Coinbase alone if the other exchanges don't answer. Polled every 5
+    // seconds (the exchanges' rate limits); every second in between, the live trade feeds move it (kept on the
+    // index's level by the offset measured at the last poll).
+    const jobs = [];
+    const feed = liveSpot();
+    if (now - market.indexAt >= 5000 || !market.spot || !feed) {
+      market.indexAt = now;
+      jobs.push(index.poll(now).then((ix) => {
+        const p = ix.index ?? ix.coinbase;
+        if (!p) throw new Error('no BTC price from any exchange');
+        market.spot = p; market.index = ix;
+        market.feedOffset = feed ? p - feed : 0;
+      }));
+    } else market.spot = feed + market.feedOffset;
     if (now - market.candlesAt > 20000) {
       jobs.push(getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`).then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
     }
@@ -245,7 +256,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     try {
       await refresh(now);
       market.lastTick = now; market.lastError = null;
-      await gradeClosedWindows(now); // first, so the 15-minute update can include the result
+      if (now - market.gradedAt >= 5000) { market.gradedAt = now; await gradeClosedWindows(now); } // first, so the 15-minute update can include the result
       observe(now);
       const sends = [];
       for (const d of devices.values()) {
@@ -332,6 +343,15 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (close - now <= 60000 && market.spot) w.spots.push(market.spot);
     }
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 2 * 3600000) delete lw[t];
+    // Learning every second (public/pulse.js): grade the bot's volatility from a minute ago against the move, and keep
+    // this second's bot odds and Kalshi price for the round's blend test
+    const lv = snap.live;
+    const baseSigma = snap.sigmaMin && lv ? snap.sigmaMin * volFactor(learned, now, Date.parse(lv.m.close_time)) : snap.sigmaMin;
+    if (pulseSecond(learned.pulse, { t: now, price: market.spot, sigmaMin: baseSigma })) learnDirty = true;
+    if (lv && lv.ev.minutesLeft > 0 && lv.pBot != null) {
+      const q = quote(lv.m);
+      if (q.yesBid != null && q.yesAsk != null) pulseRound(learned.pulse, { ticker: lv.m.ticker, closeTime: Date.parse(lv.m.close_time), pBot: lv.pBot, mid: (q.yesBid + q.yesAsk) / 2 });
+    }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as the phones on Steady)
     const sig = snap.live ? buySignal(snap.live, snap, OFFICIAL, now, officialMem) : null;
@@ -369,6 +389,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       busiest: p?.busiest ?? null, quietest: p?.quietest ?? null, profile: p?.rel ?? null,
       nowFactor: live ? volFactor(learned, now, Date.parse(live.close_time)) : null,
       calibration: calTable(learned), basis: basisOf(learned), basisN: learned.basis.length,
+      pulse: pulseStatus(learned.pulse),
     };
   }
 
@@ -377,6 +398,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const pending = new Set();
     for (const d of devices.values()) if (d.tracker) for (const w of pendingWindows(d.tracker, now)) pending.add(w.ticker);
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 60000) pending.add(t);
+    for (const [t, r] of Object.entries(learned.pulse.live)) if (r.closeTime < now - 60000) pending.add(t);
     for (const e of unsettledCalls(record, now)) pending.add(e.ticker);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
@@ -389,6 +411,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       } catch { /* retry next tick */ }
     }
     for (const t of Object.keys(lw)) learnFrom(t);
+    for (const t of Object.keys(learned.pulse.live)) if (results.has(t) && pulseSettle(learned.pulse, t, results.get(t))) learnDirty = true;
+    prunePulse(learned.pulse, now);
     for (const e of unsettledCalls(record, now)) {
       if (results.has(e.ticker)) { settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; }
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
@@ -403,7 +427,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     if (results.size > 500) results.delete(results.keys().next().value);
   }
 
-  function start(intervalMs = Number(env.BOT_INTERVAL_MS || 5000)) {
+  function start(intervalMs = Number(env.BOT_INTERVAL_MS || 1000)) { // every second
     if (!timer) { timer = setInterval(() => tick(), intervalMs); timer.unref?.(); }
   }
   function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); backfillStop = true; }

@@ -4,6 +4,7 @@ import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effecti
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
+import { pulseFix } from './pulse.js';
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
 export const parseCandles = (rows) =>
@@ -63,12 +64,14 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     const log = (quoteLog[m.ticker] ||= []);
     const settleAvg = settlementSoFar(log, Date.parse(m.close_time), spot, now, basis);
     // The coming minutes are usually busier (or calmer) than the last half hour at this time of the week
-    const vf = useLearned ? volFactor(learned, now, Date.parse(m.close_time)) : 1;
+    // and the live correction learned every second (public/pulse.js): only while it's proving itself
+    const vf = useLearned ? volFactor(learned, now, Date.parse(m.close_time)) * pulseFix(learned.pulse) : 1;
     const sig = sigmaMin ? sigmaMin * vf : sigmaMin;
     const raw = useLearned && mSpot && sig ? probYes(m, strike, mSpot, sig * s.volMultiplier, (Date.parse(m.close_time) - now) / 60000, driftMin * s.momentumWeight, settleAvg) : null;
     const cal = useLearned ? calShift(learned, raw) : 0; // what graded windows say about odds like these
     pShift += cal;
     let ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift, settleAvg, now, settings: s });
+    const pBot = ev.pYes; // the bot's own odds, before any Kalshi blend (the per-second learner grades blends of the two)
     // Respect the market: pull the bot's odds part of the way toward Kalshi's mid
     if (s.marketWeight > 0 && ev.pYes != null && q.yesBid != null && q.yesAsk != null) {
       const mid = (q.yesBid + q.yesAsk) / 2;
@@ -76,7 +79,7 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     }
     if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes, s: spot });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
-    return { m, strike, rej, ev, settleAvg, sigma: sig, learnedAdj: { volFactor: vf, cal, basis }, pRaw: raw ?? ev.pBase };
+    return { m, strike, rej, ev, settleAvg, sigma: sig, learnedAdj: { volFactor: vf, cal, basis }, pRaw: raw ?? ev.pBase, pBot };
   });
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };

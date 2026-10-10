@@ -65,6 +65,14 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
   }
   function start() { stopped = false; [COINBASE, ...EXCHANGES].forEach(open); }
   function stop() { stopped = true; clearTimeout(saveTimer); for (const [n, ws] of Object.entries(socks)) { ws.onclose = null; try { ws.close(); } catch { /* */ } delete socks[n]; } }
+  // The latest BTC price from the trade feeds: the median of each exchange's last trade in the past 10 seconds (null
+  // with fewer than 2 exchanges streaming). The bot moves its price with this every second (bot.js liveSpot).
+  function spot(now = clock()) {
+    const last = {};
+    for (let i = trades.length - 1; i >= 0 && Object.keys(last).length < 5; i--) { const x = trades[i]; if (x.t < now - 10000) break; if (!(x.ex in last)) last[x.ex] = x.price; }
+    const ps = Object.values(last).sort((a, b) => a - b);
+    return ps.length >= 2 ? (ps.length % 2 ? ps[(ps.length - 1) / 2] : (ps[ps.length / 2 - 1] + ps[ps.length / 2]) / 2) : null;
+  }
   const liveFeeds = (now) => Object.values(status).filter((s) => s.lastAt > now - 60000).length;
 
   // Every bot tick (bot.js onObserve): scan the live round, take checkpoint samples, grade settled ones
@@ -106,7 +114,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     return { live: last && now - last.at < 60000 ? last : null, models: data.models, record: scanStats(data.samples), rounds,
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
-  return { load, start, stop, observe, add, api, data: () => data };
+  return { load, start, stop, observe, add, api, spot, data: () => data };
 }
 const round3 = (v) => Math.round(v * 1000) / 1000;
 // The scan without what the phone doesn't need

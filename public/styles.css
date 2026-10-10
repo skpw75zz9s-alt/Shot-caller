@@ -677,3 +677,8 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .sc-rec th:first-child, .sc-rec td:first-child { text-align: left; }
 .sc-rec tr.sc-skill td { text-align: left; color: var(--muted); padding-bottom: 5px; }
 .scan-record small { display: block; line-height: 1.4; }
+/* v9.3 learning every second */
+.mem-pulse:empty { display: none; }
+.mem-pulse { margin: 6px 0 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-2); font-size: 12px; color: var(--muted); }
+.mem-pulse p { margin: 0 0 5px; line-height: 1.45; } .mem-pulse p:last-child { margin: 0; }
+.mem-pulse b { color: var(--text); } .mem-pulse b.pos { color: var(--yes); }
