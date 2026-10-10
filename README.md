@@ -269,6 +269,14 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Opens faster (v8.8)
+
+Measured cold start on a phone-like connection (150 ms latency, 4x slower CPU): price on screen **4.2 s → 1.7 s**, call 4.4 s → 1.8 s, first paint 1.5 s → 0.8 s. How:
+- **Modules preloaded.** `index.html` preloads every module, so all 22 download in parallel instead of the browser finding them one import at a time (the last now starts at 0.3 s instead of 2.1 s). A test keeps the list in sync.
+- **Data fetched early.** The page's first lines start the startup data requests (price, candles, Kalshi markets, learned data, index) while the code loads, and `getJSON` uses those responses instead of asking again.
+- **Fonts don't block.** Google Fonts load in the background, so the first paint isn't held up by a trip to Google.
+- **Last price shown instantly.** The price from your last visit shows right away, marked as not live yet. The bot never makes a call or alert until a fresh price arrives.
+
 ### Cleaner and smoother (v8.7)
 
 - **Fold any card** by tapping its title; the app remembers which. The busy Live orders tape and Live notes start folded, and the long settings list sits behind **All settings**.

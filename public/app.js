@@ -161,7 +161,10 @@ function paywalled(r) {
 }
 
 async function getJSON(path) {
-  const r = await fetch(`${API}/${path}`);
+  // The page's first lines already started the startup requests (index.html): use those once, if they're fresh
+  const pre = window.__pre && window.__pre[path];
+  if (pre) delete window.__pre[path];
+  const r = (pre && Date.now() - window.__pre.at < 15000 && await pre) || await fetch(`${API}/${path}`);
   paywalled(r);
   const srv = Date.parse(r.headers.get('date') || ''); // server clock, for the health check's phone-clock test
   if (srv) state.skewMs = Date.now() - srv - 500; // the Date header drops milliseconds: half a second on average
@@ -197,6 +200,7 @@ async function refreshIndex() {
 async function refreshSpot() {
   const t = await getJSON('coinbase/products/BTC-USD/ticker');
   state.spot = Number(t.price); state.spotAt = Date.now();
+  if (Date.now() - (state.spotSavedAt || 0) > 10000) { state.spotSavedAt = Date.now(); store.set('lastSpot', { p: state.spot, t: Date.now() }); }
 }
 
 // ---------- settlement ----------
@@ -935,7 +939,7 @@ function render() {
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
-  const sig = live ? buySignal(live, snap, settings, now, state.calls) : null;
+  const sig = live && state.spotAt ? buySignal(live, snap, settings, now, state.calls) : null; // never call off the cached price from last visit
   if (sig?.fire) store.set('calls', state.calls);
   trackRule(snap, live, now);
   renderDeep(live, sig);
@@ -1966,6 +1970,8 @@ $('healthRun').addEventListener('click', () => runHealth(true));
 buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk buttons were blank)
 renderRisk();
 if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }
+// Show the last price from the previous visit right away (marked DELAYED until a fresh one lands a moment later)
+{ const last = store.get('lastSpot', null); if (last && Date.now() - last.t < 15 * 60000 && !state.spot) { state.spot = last.p; renderTicker(null); } }
 loadKalshi();
 autopilot = createAutopilot({ $, esc, API, toast, paywalled });
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }

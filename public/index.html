@@ -12,8 +12,44 @@
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <!-- fonts load in the background: the app paints right away in system fonts and switches when they arrive -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
   <link rel="stylesheet" href="styles.css">
+  <!-- every module up front, fetched in parallel (otherwise the browser finds them one import at a time) -->
+  <link rel="modulepreload" href="app.js">
+  <link rel="modulepreload" href="model.js">
+  <link rel="modulepreload" href="candles.js">
+  <link rel="modulepreload" href="engine.js">
+  <link rel="modulepreload" href="analysis.js">
+  <link rel="modulepreload" href="tracker.js">
+  <link rel="modulepreload" href="kalshi.js">
+  <link rel="modulepreload" href="notify.js">
+  <link rel="modulepreload" href="health.js">
+  <link rel="modulepreload" href="record.js">
+  <link rel="modulepreload" href="learner.js">
+  <link rel="modulepreload" href="indicators.js">
+  <link rel="modulepreload" href="chart.js">
+  <link rel="modulepreload" href="flow.js">
+  <link rel="modulepreload" href="alerts.js">
+  <link rel="modulepreload" href="alertui.js">
+  <link rel="modulepreload" href="feeds.js">
+  <link rel="modulepreload" href="fx.js">
+  <link rel="modulepreload" href="suggest.js">
+  <link rel="modulepreload" href="trader.js">
+  <link rel="modulepreload" href="autopilot.js">
+  <link rel="modulepreload" href="roundscan.js">
+  <link rel="modulepreload" href="predict.js">
+  <script>
+    // Start the first data requests now, while the code above is still loading; app.js picks these up instead of
+    // asking again (getJSON). Saves a round trip or two on a phone connection.
+    (function () {
+      var series = 'KXBTC15M';
+      try { series = (JSON.parse(localStorage.getItem('settings')) || {}).series || series; } catch (e) {}
+      var paths = ['coinbase/products/BTC-USD/ticker', 'coinbase/products/BTC-USD/candles?granularity=60', 'kalshi/markets?series_ticker=' + encodeURIComponent(series) + '&status=open&limit=50', 'learn', 'index'];
+      window.__pre = { at: Date.now() };
+      paths.forEach(function (p) { window.__pre[p] = fetch('./api/' + p).catch(function () { return null; }); });
+    })();
+  </script>
 </head>
 <body>
   <div id="fx" class="fx" hidden aria-live="polite"></div>
@@ -353,7 +389,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v8.7 · cleaner, smoother</p>
+      <p class="fine" id="version">Shot Caller v8.8 · opens faster</p>
     </section>
   </main>
 
