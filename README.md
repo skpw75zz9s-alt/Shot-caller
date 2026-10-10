@@ -269,6 +269,20 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Everything it learns feeds the calls, once proven (v10.6)
+
+Three learners that used to be context only now shape the bot's calls (official, push alerts, Auto-trader and the phone alike). Each switches on only when its own graded record proves it helps; until then it keeps learning and changes nothing.
+- **Round scan → odds.** Once the scan's out-of-sample record shows it makes the odds more accurate at that point of the round (100+ graded samples where it was used, and a lower Brier score than the bot alone), its nudge goes into the bot's odds, capped at ±8 points (`scanfeed.js` shifts → `engine.js` snapshot). The scan still grades itself against the odds before its own nudge, so it can't fool itself.
+- **Kalshi's price → odds.** Once 150+ rounds of per-second scoring show some blend of the bot's odds and Kalshi's price beats the bot alone (by 1%+ in log loss), that blend is used (`pulse.js` pulseBlend). Settings → **Learn how much to trust Kalshi** turns it off and hands control back to Respect the market.
+- **Call filter (new, `public/callgate.js`).**
+  - Every official call is saved with what the bot saw: confidence, price, minutes left, stability and volatility vs its 2-hour norm.
+  - After each settle, a regularised logistic regression learns each call's chance of winning, including combinations like "late in the round and jumpy".
+  - It skips a new call when that chance is below the price + Kalshi's fee + 2¢.
+  - It switches on only when an honest replay passes. Each past call is judged by a model fitted only on the calls before it. The calls it would have skipped must have **lost money overall** and won **clearly** less often than the kept ones (a significance test, z ≥ 2, so a lucky losing streak can't switch it on).
+  - In simulation: on pure noise it switched on 1 time in 30. With a real losing pattern it switched on 13 times in 30 at 400 calls, saving about $4/contract each time, and it catches more as calls build up.
+  - The Deck says when it skipped a call and why.
+- **Record → What the bot has learned → Used in the bot's calls** lists every learner with ✓ (shaping calls) or … (still learning) and why: volatility by time of week, calibration, the Coinbase–Kalshi gap, the live volatility check, Kalshi's price, the Round scan and the call filter.
+
 ### Rolling 15-minute horizon (v10.4)
 
 The cone, the prediction lines and the prediction candles used to stop at the round's close, so they shrank as the round ran out: 12 minutes ahead early in a round, 2 minutes near its end. Now they always look **at least 15 minutes ahead**, running past the close into the next round. A **⏱ round closes** marker shows where the current round ends.

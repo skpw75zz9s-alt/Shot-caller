@@ -7,7 +7,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { EXCHANGES, parseCoinbase } from './public/feeds.js';
 import { quote } from './public/model.js';
-import { CHECKPOINTS, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
+import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
 
 const COINBASE = { name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['matches'] }], parse: parseCoinbase };
 const MAX_TRADES = 200000;
@@ -88,7 +88,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     lastScanAt = now;
     const sc = scanRound(trades, { openTime: openT, now, sigmaMin: snap.sigmaMin });
     const q = quote(live.m), kalshi = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
-    const mLeft = live.ev.minutesLeft, pModel = live.ev.pYes;
+    const mLeft = live.ev.minutesLeft, pModel = live.pPre ?? live.ev.pYes; // the odds before the scan's own nudge
     const x = sc.ready ? featureVector(sc, live.m.strike_type) : null;
     const chance = scanChance(pModel, x, data.models, mLeft);
     last = { ticker: live.m.ticker, at: now, minutesLeft: mLeft, sc: slim(sc), chance, kalshi, feeds: liveFeeds(now) };
@@ -103,6 +103,16 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
   }
 
   // What the phone gets: the live scan, the scan chance, the learned weights and the graded record
+  // Is the scan proven at this point of the round? (graded out of sample: 100+ samples where it was used, and it made
+  // the bot's odds measurably more accurate). Then its nudge goes into the bot's odds for calls (bot.js shifts).
+  function proven(mLeft) {
+    const r = scanStats(data.samples)[checkpointFor(mLeft)];
+    return !!r && r.activeN >= 100 && r.skill != null && r.skill > 0.01;
+  }
+  function shifts(now = clock()) {
+    if (!last || now - last.at > 20000 || !last.chance?.active || !proven(last.minutesLeft)) return null;
+    return { [last.ticker]: Math.max(-0.08, Math.min(0.08, last.chance.p - last.chance.pModel)) }; // capped at ±8 pts
+  }
   function api() {
     const now = clock();
     const rounds = [];
@@ -111,10 +121,10 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
       rounds.push({ ticker: s.ticker, lean: s.lean, score: s.score, y: s.y, pModel: s.pModel, pScan: s.pScan });
       if (rounds.length >= 12) break;
     }
-    return { live: last && now - last.at < 60000 ? last : null, models: data.models, record: scanStats(data.samples), rounds,
+    return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds,
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
-  return { load, start, stop, observe, add, api, spot, data: () => data };
+  return { load, start, stop, observe, add, api, spot, shifts, proven, data: () => data };
 }
 const round3 = (v) => Math.round(v * 1000) / 1000;
 // The scan without what the phone doesn't need

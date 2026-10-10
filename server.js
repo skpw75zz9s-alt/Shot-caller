@@ -46,6 +46,7 @@ export const bot = createBot({
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
+  shifts: () => scanFeed.shifts(),
 });
 setInterval(() => access.prune(), 3600000).unref();
 

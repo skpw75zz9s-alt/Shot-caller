@@ -743,3 +743,11 @@ body.split nav button { flex-direction: row; justify-content: center; gap: 6px; 
 body.split nav button svg { width: 16px; height: 16px; }
 body.split .pane-bar { padding: 3px 5px; }
 body.split .pane-body { padding: 4px 6px 8px; }
+/* v10.6 what the bot uses in its calls */
+.mem-using:empty { display: none; }
+.mem-using { margin: 6px 0 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-2); font-size: 12px; }
+.mu-h { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.mu-r { display: grid; grid-template-columns: 18px 1fr; gap: 0 6px; padding: 4px 0; border-top: 1px solid var(--line-2); color: var(--muted); }
+.mu-r b { color: var(--muted); } .mu-r.on b { color: var(--yes); } .mu-r.on span { color: var(--text); }
+.mu-r small { grid-column: 2; font-size: 11px; line-height: 1.35; }
+.mem-using > small { display: block; margin-top: 5px; font-size: 10.5px; }

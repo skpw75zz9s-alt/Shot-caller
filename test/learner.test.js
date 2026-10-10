@@ -77,3 +77,35 @@ test('the engine uses what was learned (and can be told not to)', () => {
   assert.equal(b.rows[0].learnedAdj.basis, 30);
   assert.equal(c.rows[0].ev.pYes, a.rows[0].ev.pYes);
 });
+
+test('proven learners reach the odds: the scan nudge, the learned Kalshi blend and the call filter (and learn:false turns them off)', async () => {
+  const { buySignal } = await import('../public/engine.js');
+  const now = Date.parse('2026-10-06T15:10:00Z');
+  const m = { ticker: 'T', open_time: '2026-10-06T15:00:00Z', close_time: '2026-10-06T15:15:00Z', floor_strike: 85010, strike_type: 'greater', yes_ask_dollars: '0.7', yes_bid_dollars: '0.68' };
+  const candles = Array.from({ length: 120 }, (_, i) => ({ t: now - (120 - i) * 60000, o: 85000, h: 85020, l: 84980, c: 85000 + (i % 2 ? 8 : -8) }));
+  const L = newLearned();
+  const base = snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: L, now }).rows[0];
+  // the scan nudge goes in last, and pPre keeps the odds before it
+  const nudged = snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: L, now, shifts: { T: 0.05 } }).rows[0];
+  assert.ok(Math.abs(nudged.ev.pYes - base.ev.pYes - 0.05) < 0.005, `${base.ev.pYes} -> ${nudged.ev.pYes}`);
+  assert.equal(nudged.pPre, base.ev.pYes);
+  assert.equal(snapshot({ markets: [m], candles, spot: 85000, settings: { ...DEFAULTS, learn: false }, learned: L, now, shifts: { T: 0.05 } }).rows[0].ev.pYes, snapshot({ markets: [m], candles, spot: 85000, settings: { ...DEFAULTS, learn: false }, now }).rows[0].ev.pYes);
+  // a proven Kalshi blend pulls the odds toward Kalshi's 69¢ mid
+  const blended = snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: { ...L, pulse: { blend: { use: true, w: 0.5 } } }, now }).rows[0];
+  assert.ok(Math.abs(blended.ev.pYes - (base.ev.pYes + 0.5 * (0.69 - base.ev.pYes))) < 0.01, `${blended.ev.pYes}`);
+  assert.equal(blended.learnedAdj.blend, 0.5);
+  // the call filter: an active gate that rejects everything is attached to the snapshot and blocks new calls
+  const gate = { active: true, w: [-5, 0, 0, 0, 0, 0, 0, 0], n: 200 };
+  const snap = snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: { ...L, callGate: gate }, now });
+  assert.equal(snap.callGate, gate);
+  assert.equal(snapshot({ markets: [m], candles, spot: 85000, settings: DEFAULTS, learned: { ...L, callGate: { ...gate, active: false } }, now }).callGate, null, 'not until proven');
+  // a setup that makes a call without the filter, and is blocked by it (with the reason)
+  const loose = { ...DEFAULTS, minEdge: -1, minConfidence: 0, steadySec: 0, persistSec: 0, minHold: 0, maxEdge: 9, waitMinutes: 0 };
+  const m2 = { ...m, no_ask_dollars: '0.32', no_bid_dollars: '0.3' };
+  const free = snapshot({ markets: [m2], candles, spot: 85100, settings: loose, learned: L, now });
+  assert.equal(buySignal(free.rows[0], free, loose, now, {}).callSide, 'YES');
+  const held = snapshot({ markets: [m2], candles, spot: 85100, settings: loose, learned: { ...L, callGate: gate }, now });
+  const sig = buySignal(held.rows[0], held, loose, now, {});
+  assert.equal(sig.callSide, null, 'the filter blocked it');
+  assert.ok(sig.gated && sig.gated.skip && sig.gated.pWin < sig.gated.need);
+});

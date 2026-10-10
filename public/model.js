@@ -126,6 +126,7 @@ export const DEFAULTS = {
   persistSec: 0,        // a new call needs its gap to have held this long (edges that last survive your reaction time)
   limitEdgeFrac: 0.5,   // max price on a call: still clears this share of minEdge even with vol 20% off
   marketWeight: 0,      // blend Kalshi's own mid into the bot's odds (0 = bot only)
+  learnBlend: true,     // once proven, use the Kalshi blend the bot has learned scores best instead (public/pulse.js)
   maxEdge: 1,           // a gap bigger than this is too good to be true (usually a lag that's gone before you can buy)
   scaleIn: false,       // add to a call as its gap grows past minEdge +2, +4 and +8 pts (Aggressive)
   scaleStep: 0.02,      // spacing of the scale-in tiers: minEdge +1, +2 and +4 steps

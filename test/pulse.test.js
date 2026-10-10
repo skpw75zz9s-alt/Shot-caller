@@ -63,6 +63,6 @@ test('the phone gets the correction (not the per-second buffers) with the rest o
   const L = newLearned();
   assert.ok(L.pulse && L.pulse.v === 1);
   const pub = publicLearned(L);
-  assert.deepEqual(Object.keys(pub.pulse).sort(), ['gain', 'n', 'v', 'z2']);
+  assert.deepEqual(Object.keys(pub.pulse).sort(), ['blend', 'gain', 'n', 'v', 'z2']);
   assert.equal(pulseFix(publicPulse(L.pulse)), 1);
 });

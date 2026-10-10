@@ -144,4 +144,5 @@ export function basisOf(L) {
 }
 
 // What the phone downloads: everything the model uses, without the raw sums
-export const publicLearned = (L) => ({ v: L.v, vol: L.vol, cal: L.cal, basis: L.basis, windows: L.windows, pulse: publicPulse(L.pulse) });
+export const publicLearned = (L) => ({ v: L.v, vol: L.vol, cal: L.cal, basis: L.basis, windows: L.windows, pulse: publicPulse(L.pulse),
+  callGate: L.callGate ? { active: L.callGate.active, w: L.callGate.w, n: L.callGate.n } : null });

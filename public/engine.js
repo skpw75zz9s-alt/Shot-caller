@@ -5,6 +5,7 @@ import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
 import { pulseFix } from './pulse.js';
+import { gateCheck } from './callgate.js';
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
 export const parseCandles = (rows) =>
@@ -46,7 +47,9 @@ function settlementSoFar(log, close, spot, now, basis = 0) {
 // and a call per market. `quoteLog` (ticker -> [{ t, yesAsk, noAsk }]) collects Kalshi prices over time.
 // `learned` (public/learner.js) is what the server has learned about the market over days and weeks: usual
 // volatility by time of week, calibration from graded windows, and the Coinbase-vs-index basis.
-export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, learned = null, now = Date.now() }) {
+// shifts: { ticker: points } learned nudges to the bot's odds that have proven themselves (the Round scan, scanfeed.js);
+// they're added last. Each row keeps pPre, its odds before them (what the scan itself grades against).
+export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, learned = null, now = Date.now(), shifts = null }) {
   const s = { ...DEFAULTS, ...settings };
   const bars = withLiveBar(candles, spot, now);
   const closes = bars.map((c) => c.c);
@@ -72,17 +75,24 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     pShift += cal;
     let ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift, settleAvg, now, settings: s });
     const pBot = ev.pYes; // the bot's own odds, before any Kalshi blend (the per-second learner grades blends of the two)
-    // Respect the market: pull the bot's odds part of the way toward Kalshi's mid
-    if (s.marketWeight > 0 && ev.pYes != null && q.yesBid != null && q.yesAsk != null) {
+    // Respect the market: pull the bot's odds part of the way toward Kalshi's mid (your setting, or the blend the bot has
+    // learned scores best once it's proven: public/pulse.js pulseBlend)
+    const mw = useLearned && s.learnBlend !== false && learned?.pulse?.blend?.use ? learned.pulse.blend.w : s.marketWeight;
+    if (mw > 0 && ev.pYes != null && q.yesBid != null && q.yesAsk != null) {
       const mid = (q.yesBid + q.yesAsk) / 2;
-      ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift: pShift + s.marketWeight * (mid - ev.pYes), settleAvg, now, settings: s });
+      pShift += mw * (mid - ev.pYes);
+      ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift, settleAvg, now, settings: s });
     }
+    const pPre = ev.pYes, extra = useLearned ? shifts?.[m.ticker] || 0 : 0;
+    if (extra && ev.pYes != null) ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift: pShift + extra, settleAvg, now, settings: s });
     if (!log.length || now - log[log.length - 1].t >= 2000) log.push({ t: now, yesAsk: q.yesAsk, noAsk: q.noAsk, p: ev.pYes, s: spot });
     while (log.length && log[0].t < now - 15 * 60000) log.shift();
-    return { m, strike, rej, ev, settleAvg, sigma: sig, learnedAdj: { volFactor: vf, cal, basis }, pRaw: raw ?? ev.pBase, pBot };
+    return { m, strike, rej, ev, settleAvg, sigma: sig, learnedAdj: { volFactor: vf, cal, basis, blend: mw, scan: extra }, pRaw: raw ?? ev.pBase, pBot, pPre };
   });
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
-  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
+  // the call filter the server has learned (public/callgate.js), when it has proven itself
+  const callGate = useLearned && learned?.callGate?.active ? learned.callGate : null;
+  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
@@ -167,6 +177,13 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     return log.filter((e) => e.t >= since).every((e) => e.p != null && (side === 'YES' ? e.p : 1 - e.p) * 100 >= s.minConfidence);
   };
   const holds = (a) => !(s.minHold > 0) || (a.hold != null && a.hold >= s.minHold - 1e-9);
+  // The learned call filter: skip the kinds of calls that have lost money (only once it has proven itself)
+  let gated = null;
+  const gateOk = (a) => {
+    const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1 }, a.price);
+    if (g?.skip) { gated = { side: a.side, ...g }; return false; }
+    return true;
+  };
   const entryOk = (side) => {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
@@ -196,12 +213,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean)) { pick = b; stance = 'switching'; }
+      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean) && gateOk(b)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean)) pick = shown;
+    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean) && gateOk(shown)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
@@ -233,7 +250,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
   }
   return {
-    stability: stab, steadyNeed, bail: mem.bail ?? null,
+    stability: stab, steadyNeed, bail: mem.bail ?? null, gated,
     hold: a?.hold ?? null, holdOk: !!a && holds(a), steadyOk: !!a && steady(a.side), locked: !!s.lockCall && !!called,
     add, tier: mem.tier ?? null, callN: mem.n ?? 0, bigGap: !!pick && pick.score < s.minConfidence && bigGap(pick), // under the full bar but a huge gap (holding a call too)
     cooldown: !called && mem.cooldownUntil > now ? Math.ceil((mem.cooldownUntil - now) / 1000) : 0,

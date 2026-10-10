@@ -74,6 +74,16 @@ export function pulseSettle(P, ticker, result) {
 }
 export function prunePulse(P, now) { for (const [k, r] of Object.entries(P.live)) if (r.closeTime < now - 6 * 3600000) delete P.live[k]; }
 
+// Should the bot's odds lean on Kalshi's price? Only once 150 rounds show a blend clearly beats the bot alone (by 1%+
+// in log loss); then the best-scoring blend is used (Settings → Learn how much to trust Kalshi's price)
+export const BLEND_MIN_ROUNDS = 150;
+export function pulseBlend(P) {
+  const b = P?.blend;
+  if (!b?.rounds) return { use: false, w: 0, rounds: 0 };
+  const i = b.loss.indexOf(Math.min(...b.loss)), gain = 1 - b.loss[i] / b.loss[0];
+  return { use: b.rounds >= BLEND_MIN_ROUNDS && BLEND_WEIGHTS[i] > 0 && gain >= 0.01, w: BLEND_WEIGHTS[i], gain, rounds: b.rounds };
+}
+
 // What the phone shows
 export function pulseStatus(P) {
   if (!P) return null;
@@ -87,4 +97,4 @@ export function pulseStatus(P) {
   };
 }
 // The part the phone prices with (no per-second ring, no round buffers)
-export const publicPulse = (P) => (P ? { v: P.v, n: P.n, z2: P.z2, gain: P.gain } : null);
+export const publicPulse = (P) => (P ? { v: P.v, n: P.n, z2: P.z2, gain: P.gain, blend: pulseBlend(P) } : null);
