@@ -4,6 +4,7 @@ import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionChec
 import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
 import { CHART_TOGGLES, chartDefaults, createImpact } from './chart.js';
 import { explainMove } from './why.js';
+import { createSplit } from './split.js';
 import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
@@ -1525,16 +1526,22 @@ function schedule() {
   timer = setInterval(tick, Math.max(2, settings.refreshSec) * 1000);
 }
 
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('nav button, .view').forEach((el) => el.classList.remove('active'));
-  b.classList.add('active');
-  $(`view-${b.dataset.view}`).classList.add('active');
-  if (b.dataset.view === 'settings') loadAccess();
-  if (b.dataset.view === 'chart') drawChartTab(true);
-  if (b.dataset.view === 'alerts') alerts.render();
-  if (b.dataset.view === 'history') refreshBotRecord();
-  adminPolling(b.dataset.view === 'settings');
-}));
+// Screens: one at a time, or up to four side by side (public/split.js). The bottom bar changes the focused pane.
+const shownViews = new Set();
+const split = createSplit({ main: document.querySelector('main'), store, button: $('splitBtn'), menu: $('splitMenu'), onShow: (views, focused) => {
+  for (const b of document.querySelectorAll('nav button')) { b.classList.toggle('active', b.dataset.view === focused); b.classList.toggle('shown', views.includes(b.dataset.view) && b.dataset.view !== focused); }
+  for (const v of views) {
+    if (shownViews.has(v)) continue; // only what just came into view needs a refresh
+    if (v === 'settings') loadAccess();
+    if (v === 'chart') requestAnimationFrame(() => drawChartTab(true)); // after the layout, so it has its width
+    if (v === 'alerts') alerts.render();
+    if (v === 'history') refreshBotRecord();
+  }
+  shownViews.clear(); for (const v of views) shownViews.add(v);
+  adminPolling(views.includes('settings'));
+} });
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => split.show(b.dataset.view)));
+split.start();
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
 $('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
 $('pushOff').addEventListener('click', () => pushDisable());

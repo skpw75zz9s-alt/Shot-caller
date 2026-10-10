@@ -698,3 +698,36 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .why-log li span { color: var(--muted); font-variant-numeric: tabular-nums; } .why-log li.up b { color: var(--yes); } .why-log li.down b { color: var(--no); }
 .why-log li small { grid-column: 1 / -1; color: var(--muted); line-height: 1.4; }
 .why-log li.calm { display: block; color: var(--muted); }
+/* v9.6 split screen: up to four screens at once (public/split.js) */
+header { position: relative; }
+.hdr-r { display: flex; align-items: center; gap: 12px; }
+.split-btn { display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: none; border: 1px solid var(--line-2); color: var(--muted); }
+.split-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.split-btn.on { color: var(--accent); border-color: #22d3ee66; box-shadow: 0 0 10px #22d3ee33; }
+.split-menu { position: absolute; right: 12px; top: 46px; z-index: 30; width: 250px; padding: 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 10px 30px #000a; }
+.split-menu[hidden] { display: none; }
+.split-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.split-opts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.split-opts button { width: auto; text-transform: none; letter-spacing: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; margin: 0; padding: 7px 2px; font-size: 10px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line-2); color: var(--text); }
+.split-opts button.on { border-color: var(--accent); color: var(--accent); }
+.split-menu small { color: var(--muted); font-size: 10.5px; line-height: 1.4; display: block; }
+.sl { display: grid; gap: 2px; width: 26px; height: 20px; }
+.sl b { background: currentColor; opacity: .55; border-radius: 2px; }
+.sl-1 { grid-template: 1fr / 1fr; } .sl-2 { grid-template: 1fr / 1fr 1fr; } .sl-3 { grid-template: 1fr 1fr / 1fr 1fr; } .sl-3 b:first-child { grid-row: span 2; } .sl-4 { grid-template: 1fr 1fr / 1fr 1fr; }
+/* the panes */
+body.split { padding-bottom: 0; }
+body.split header, body.split .ticker { max-width: none; }
+body.split main { max-width: none; padding: 6px 6px 0; display: grid; gap: 6px; height: calc(100dvh - var(--split-top, 150px) - 70px - env(safe-area-inset-bottom)); }
+body.split-2 main { grid-template: 1fr 1fr / 1fr; }
+body.split-3 main { grid-template: 1fr 1fr / 1fr 1fr; } body.split-3 .pane:first-child { grid-row: span 2; }
+body.split-4 main { grid-template: 1fr 1fr / 1fr 1fr; }
+@media (min-width: 760px) and (orientation: landscape) { body.split-2 main { grid-template: 1fr / 1fr 1fr; } body.split-3 main { grid-template: 1fr / 1fr 1fr 1fr; } body.split-3 .pane:first-child { grid-row: auto; } }
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 12px; background: #070a12; overflow: hidden; transition: border-color .2s, box-shadow .2s; }
+.pane.focus { border-color: #22d3ee88; box-shadow: 0 0 0 1px #22d3ee33, 0 0 16px #22d3ee22; }
+.pane-bar { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--line-2); background: #0b1020; }
+.pane-bar select { flex: 1 1 auto; width: auto; min-width: 0; margin: 0; padding: 3px 6px; font-size: 12px; font-weight: 700; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 7px; }
+.pane.focus .pane-bar select { color: var(--accent); }
+.pane-full { flex: 0 0 auto; width: auto; margin: 0; padding: 2px 8px; font-size: 13px; background: none; border: 1px solid var(--line-2); border-radius: 7px; color: var(--muted); }
+.pane-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 6px 8px 10px; -webkit-overflow-scrolling: touch; }
+.pane-body > .view { animation: none; }
+nav button.shown { color: #8ee8f5; border-color: #22d3ee22; }

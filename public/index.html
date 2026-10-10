@@ -37,6 +37,7 @@
   <link rel="modulepreload" href="suggest.js">
   <link rel="modulepreload" href="trader.js">
   <link rel="modulepreload" href="autopilot.js">
+  <link rel="modulepreload" href="split.js">
   <link rel="modulepreload" href="why.js">
   <link rel="modulepreload" href="pulse.js">
   <link rel="modulepreload" href="roundscan.js">
@@ -60,7 +61,8 @@
   <div id="banner" class="banner" hidden><b id="bannerTitle"></b><span id="bannerText"></span></div>
   <header>
     <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <span class="tag">BTC · 15m</span></h1>
-    <span id="status" class="dot" title="connection"></span>
+    <div class="hdr-r"><button type="button" id="splitBtn" class="split-btn" aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
+    <div id="splitMenu" class="split-menu" hidden></div>
   </header>
   <div class="ticker" id="ticker">
     <div class="tk-left">
@@ -397,7 +399,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v9.5 · why it moved</p>
+      <p class="fine" id="version">Shot Caller v9.6 · split screen</p>
     </section>
   </main>
 
