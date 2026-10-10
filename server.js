@@ -12,6 +12,7 @@ import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
 import { createMarketWatch } from './marketwatch.js';
 import { createFutures } from './futures.js';
+import { createSmartMoney } from './smartmoney.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -46,6 +47,8 @@ export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futu
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
 export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures });
+// Copy the sharps: wallets that keep winning Polymarket's 15-minute BTC rounds (smartmoney.js, public/sharps.js)
+export const smartMoney = createSmartMoney({ file: join(DATA_DIR, 'sharps.json') });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
@@ -185,7 +188,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load()]);
+const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load(), smartMoney.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -316,6 +319,7 @@ export const server = http.createServer(async (req, res) => {
     // The Round scan: live read, learned weights and the graded record
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
     if (path === '/api/watch') return send(res, 200, marketWatch.api());
+    if (path === '/api/sharps') return send(res, 200, smartMoney.api());
     if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
@@ -334,5 +338,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
   if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
+  if (process.env.SHARPS !== 'off') ready.then(() => smartMoney.start()); // SHARPS=off: don't follow Polymarket's traders
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
 }

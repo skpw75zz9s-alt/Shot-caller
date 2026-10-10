@@ -269,6 +269,20 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Copy the sharps (v11.1, a separate panel)
+
+Real insiders (people trading on non-public information) are barred from trading Kalshi, and Kalshi's trades are anonymous. So this follows the next best thing in public data: **traders with proven records**. Polymarket runs the same 15-minute BTC Up/Down rounds, and every trade there is public and tied to a wallet (`smartmoney.js`, `public/sharps.js`; read-only, no keys).
+- **Every 10 s** the server reads the current round's market (Gamma API, slug `btc-updown-15m-<window start>`) and its trades (Data API), keeping every wallet's position.
+- **After each round settles,** every wallet that put in $20+ is graded on its profit/loss.
+- **Sharps:** 15+ graded rounds, a win rate that stays at 58%+ even pulled toward 50% (so a short lucky run can't qualify), and up money overall.
+- **The panel** (Deck → **Copy the sharps**) shows:
+  - which way the sharps' money leans in the current round, and how strongly
+  - who's in and with how much
+  - a leaderboard (rounds, win rate, P&L, ROI)
+- **The honest record.** With thousands of wallets, some look brilliant by chance. So the sharps' lean at 5 minutes left is saved **before** each result, with sharps picked from past rounds only, then graded. The panel shows how often copying them was right (and when 75%+ of their money agreed).
+- Polymarket settles on Chainlink's BTC price, Kalshi on CF Benchmarks', so a very close round can settle differently.
+- It's separate from the bot's calls. `SHARPS=off` turns it off.
+
 ### Maker buys for the Auto-trader (v11.0, opt-in)
 
 Research on Kalshi finds **makers** (resting orders) earn more than takers (orders that cross the spread), and makers can pay lower fees.

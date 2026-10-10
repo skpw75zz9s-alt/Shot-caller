@@ -835,6 +835,7 @@ async function refreshWatch() {
   try { state.watch = await getJSON('watch'); state.watchAt = Date.now(); renderWatch(); } catch { /* next time */ }
 }
 setInterval(refreshWatch, 5000);
+setTimeout(refreshWatch, 1500);
 function renderWatch() {
   const w = state.watch;
   if (!w) return;
@@ -843,6 +844,31 @@ function renderWatch() {
   setHTML($('watchNow'), st.hold ? `<b class="neg">⛔ New calls on hold</b> until ${esc(clock(st.hold.until))}: ${esc(st.hold.why)}`
     : st.calm ? '<b class="pos">✓ All calm</b>: nothing unusual in the last minute' : `<b>${st.events60} notable thing${st.events60 === 1 ? '' : 's'}</b> in the last minute`);
   setHTML($('watchList'), (w.events || []).slice(0, 12).map((e) => `<li class="w-${e.sev}"><span>${esc(clock(e.t))}</span><i>${ico[e.sev] || '•'}</i><em>${esc(e.text)}</em></li>`).join('') || '<li class="calm">Nothing unusual yet.</li>');
+}
+
+// ---------- Copy the sharps (server: smartmoney.js, public/sharps.js): Polymarket's proven traders ----------
+async function refreshSharps() {
+  if (document.hidden) return;
+  try { state.sharps = await getJSON('sharps'); state.sharpsAt = Date.now(); renderSharps(); } catch { /* next time */ }
+}
+setInterval(refreshSharps, 10000);
+setTimeout(refreshSharps, 1500); // first look soon after opening
+function renderSharps() {
+  const d = state.sharps;
+  if (!d) return;
+  const L = d.live, short = (w) => `${w.slice(0, 6)}…${w.slice(-4)}`, who = (x) => esc(x.name || short(x.wallet));
+  setText($('sharpsWhen'), `${int(d.wallets)} wallets graded`);
+  if (!d.status?.ok && !(d.status?.lastOk > Date.now() - 120000)) { setHTML($('sharpsNow'), `The server can't reach Polymarket right now${d.status?.error ? ` (${esc(d.status.error)})` : ''}: retrying every 10 seconds.`); setHTML($('sharpsWho'), ''); return; }
+  setHTML($('sharpsNow'), !d.sharps.length ? `Grading wallets: no one has 15+ graded rounds with a clear winning record yet (watching ${int(L?.traders ?? 0)} traders this round).`
+    : L?.lean ? `<b class="${L.lean === 'Up' ? 'pos' : 'neg'}">Sharps lean ${L.lean.toUpperCase()}</b>: ${Math.round(Math.max(L.upShare, 1 - L.upShare) * 100)}% of their money, ${L.n} sharp${L.n === 1 ? '' : 's'} in this round`
+    : `${L?.n ? `${L.n} sharp in this round so far` : 'No sharps in this round yet'} (${int(L?.traders ?? 0)} traders).`);
+  setStyle($('sharpsFill'), 'cssText', L?.upShare == null ? 'width:0' : L.upShare >= 0.5 ? `left:50%;width:${(L.upShare - 0.5) * 100}%;background:var(--yes)` : `left:${L.upShare * 100}%;width:${(0.5 - L.upShare) * 100}%;background:var(--no)`);
+  setHTML($('sharpsWho'), (L?.who || []).map((x) => `<li><span>${who(x)}</span><b class="${x.side === 'Up' ? 'pos' : 'neg'}">${x.side.toUpperCase()}</b><em>${int(x.shares)} sh · $${int(x.usd)}</em></li>`).join(''));
+  const r = d.record;
+  setHTML($('sharpsRec'), r.graded ? `Copying them at 5 min left: right <b>${r.right} of ${r.graded}</b> rounds (${Math.round(r.rate * 100)}%)${r.strong ? ` · when 75%+ of their money agrees: <b>${r.strongRight} of ${r.strong}</b>` : ''}`
+      + `<div class="scan-past">${(d.recent || []).slice(0, 10).map((e) => `<span class="${e.lean === e.result ? 'ok' : 'bad'}" title="${new Date(e.window).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}: lean ${e.lean} → ${e.result}">${e.lean === e.result ? '✓' : '✕'}</span>`).join('')}</div>`
+    : 'Record: each round, the sharps\' lean at 5 minutes left is saved and checked against the result.');
+  setHTML($('sharpsBoard'), d.sharps.length ? `<table class="sc-rec"><tr><th>Trader</th><th>Rounds</th><th>Won</th><th>P&amp;L</th><th>ROI</th></tr>${d.sharps.map((x) => `<tr><td>${who(x)}</td><td>${x.rounds}</td><td>${Math.round(x.win * 100)}%</td><td class="${x.pnl >= 0 ? 'pos' : 'neg'}">${x.pnl >= 0 ? '+' : '−'}$${int(Math.abs(x.pnl))}</td><td>${Math.round(x.roi * 100)}%</td></tr>`).join('')}</table>` : '<small class="muted">No sharps yet.</small>');
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
