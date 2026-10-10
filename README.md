@@ -269,12 +269,16 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
-### Prediction candles (v10.1)
+### Prediction candles (v10.1, realistic since v10.2)
 
 In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`):
-- **Their path** blends the three prediction lines (Bot, Kalshi, 5 exch), weighted toward whichever has missed least at past closes (1 / miss²). Lines without 5 graded rounds yet count as average.
-- **Each candle** opens where the last one closed and closes on the path. Its wicks reach BTC's typical one-minute range at today's volatility, so they read like real minutes.
-- **Graded every minute:** the candle for each minute, as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". Expect the direction to sit near 50%: one-minute moves are mostly noise, and the record shows that honestly.
+- **The expected path** blends the three prediction lines (Bot, Kalshi, 5 exch), weighted toward whichever has missed least at past closes (1 / miss²). Lines without 5 graded rounds yet count as average.
+- **Realistic minutes (v10.2):** the candles draw one plausible path, not a smooth line.
+  - BTC wanders randomly in 5-second steps around the expected path and is pinned to it at the close (a Brownian bridge). So the ghosts mix up and down minutes, dojis, long and short wicks, like real candles.
+  - The randomness is sized to the last 30 real one-minute candles. Their average high-low range is matched (tested: $118 simulated vs $120 real, half up and half down).
+  - It's drawn from the clock: each 5-second slot always gets the same random step, so the candles hold still between refreshes and only shift as the price and the prediction move.
+  - The first ghost opens on the expected path next to the live price.
+- **Graded every minute:** the expected path for each minute (not the random scenario), as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". Expect the direction to sit near 50%: one-minute moves are mostly noise, and the record shows that honestly.
 - Turn them off in Chart tools & indicators (**Prediction candles**).
 - **⟲ LIVE** now shows only when the live candle itself has scrolled off screen. Tapping it brings the live candle back with the minutes to the close in view, keeping your zoom.
 

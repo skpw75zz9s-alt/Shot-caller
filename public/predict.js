@@ -83,10 +83,8 @@ export function predictionRecord(log) {
 export { normCdf };
 
 // ---------- prediction candles: the minutes from now to the close, drawn as ghost candles ----------
-// The path is a blend of the prediction lines, each weighted by how close it has come at past closes (1 / miss², from
-// predictionRecord; equal weights until each has 5 graded rounds). Each minute's candle opens where the last one
-// closed and closes on the path; its wicks reach BTC's typical one-minute range (about 0.8σ either side of the body's
-// middle, so the candles look like real minutes at today's volatility, not a straight line).
+// The expected path is a blend of the prediction lines, each weighted by how close it has come at past closes
+// (1 / miss², from predictionRecord; equal weights until each has 5 graded rounds).
 export function blendWeights(record) {
   const w = {};
   for (const k of ['bot', 'kalshi', 'exch']) { const x = record?.[k]; w[k] = x && x.n >= 5 && x.miss > 0 ? 1 / (x.miss * x.miss) : null; }
@@ -101,16 +99,53 @@ const valueAt = (pts, t) => { // the line's value at time t (straight between it
   for (let i = 1; i < pts.length; i++) if (t <= pts[i].t) { const a = pts[i - 1], b = pts[i]; return a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t || 1)); }
   return pts[pts.length - 1].v;
 };
-export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null }) {
+// Realistic candles: one plausible path for the minutes to the close, not a smooth line. BTC wanders randomly (5-second
+// steps) around the blended prediction and is pinned to it at the close (a Brownian bridge in log price), so the
+// candles mix up and down minutes, long and short wicks, the way real ones do. The randomness is sized to the last
+// 30 real one-minute candles (their average high-low range), so the ghosts look like today's market. It's drawn from
+// the clock (each 5-second slot always gets the same random step), so the candles hold still between refreshes and
+// only shift as the price and the prediction move. Each candle also carries the EXPECTED open/close (eo/ec, the
+// blended path itself): that's what gets graded, not the random scenario.
+const STEP = 5000;
+export const RANGE_FIX = 1.25;
+const slotNormal = (k) => { // a fixed standard normal per 5-second slot (two hashed uniforms, Box-Muller)
+  const h = (x) => { let v = (x ^ 0x9e3779b9) >>> 0; v = Math.imul(v ^ (v >>> 16), 0x85ebca6b) >>> 0; v = Math.imul(v ^ (v >>> 13), 0xc2b2ae35) >>> 0; return ((v ^ (v >>> 16)) >>> 0) / 4294967296; };
+  const u1 = Math.max(1e-12, h(k * 2 + 1)), u2 = h(k * 2 + 2);
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+};
+// The volatility the ghosts are drawn with: from the last 30 complete one-minute candles' average range
+// (for a random walk, average range = 1.6 x sigma per minute), kept within half to double the model's
+export function candleSigma(bars, sigmaMin, now) {
+  const done = (bars || []).filter((b) => b.t + 60000 <= now && b.h > 0 && b.l > 0).slice(-30);
+  if (done.length < 10) return sigmaMin;
+  const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / 1.6;
+  return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
+}
+export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
   const w = weights || blendWeights(null);
   const path = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
+  // per 5-second step, log price; x RANGE_FIX because twelve 5-second points per minute catch only part of a minute's
+  // real high and low (measured: their average range is ~0.8 of a continuous walk's)
+  const sig = candleSigma(bars, sigmaMin, now) / Math.sqrt(60000 / STEP) * RANGE_FIX;
+  // the random walk from the first ghost's open (on the expected path, next to the live price) to the close, then
+  // pinned: bridge(t) = W(t) - (t/T) W(T)
+  const t0 = Math.floor(now / 60000) * 60000 + 60000;
+  if (t0 >= close) return [];
+  const k0 = t0 / STEP + 1, kN = Math.ceil(close / STEP);
+  const W = [0];
+  for (let k = k0; k <= kN; k++) W.push(W[W.length - 1] + slotNormal(k));
+  const T = W.length - 1;
+  const at = (t) => { // the scenario's price at time t (on the 5-second grid)
+    const j = Math.max(0, Math.min(T, Math.round((t - t0) / STEP)));
+    return path(t) * Math.exp(sig * (W[j] - (j / T) * W[T]));
+  };
   const out = [];
-  let o = path(Math.floor(now / 60000) * 60000 + 60000);
   for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) {
-    const c = path(Math.min(close, t + 60000)), mid = (o + c) / 2, half = 0.8 * sigmaMin * mid;
-    out.push({ t, o, c, h: Math.max(o, c, mid + half), l: Math.min(o, c, mid - half) });
-    o = c;
+    const end = Math.min(close, t + 60000);
+    let o = at(t), h = o, l = o, c = o;
+    for (let u = t + STEP; u <= end; u += STEP) { c = at(u); if (c > h) h = c; if (c < l) l = c; }
+    out.push({ t, o, h, l, c, eo: path(t), ec: path(end) });
   }
   return out;
 }

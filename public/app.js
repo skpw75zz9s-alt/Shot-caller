@@ -817,7 +817,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: showCone ? predictionCandles({ lines: preds, spot, sigmaMin: sigma, now, close, weights: blendWeights(predictionRecord(state.predLog)) }) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: showCone ? predictionCandles({ lines: preds, spot, sigmaMin: sigma, now, close, weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars }) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
@@ -891,7 +891,8 @@ function trackPredictions(snap, live, now) {
       const c = predictionCandles({ lines: predictionsNow(live, snap, now), spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: Date.parse(live.m.close_time), weights: blendWeights(predictionRecord(state.predLog)) })[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);
-        if (e) Object.assign(e, { o: c.o, c: c.c }); else { state.pcLog.unshift({ t: next, o: c.o, c: c.c, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
+        // graded on the expected path (eo/ec), not the random scenario the ghost candle draws
+        if (e) Object.assign(e, { o: c.eo, c: c.ec }); else { state.pcLog.unshift({ t: next, o: c.eo, c: c.ec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }
   }
