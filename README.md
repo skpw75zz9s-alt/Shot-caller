@@ -269,6 +269,15 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Cleaner and smoother (v8.7)
+
+- **Fold any card** by tapping its title; the app remembers which. The busy Live orders tape and Live notes start folded, and the long settings list sits behind **All settings**.
+- **Faster formatting.** Times and dollar amounts use formatters made once. Building a new one per call (the old way) was a real share of the phone's time with the tape streaming. Deck slow frames under a flood of trades: 10 → 6, the worst 202 → 89 ms; Chart tab: 39 → about 10.
+- **Lighter chart painting.** Charts paint at up to 2x pixel density (sharp on any phone; 3x painted 2.25x the pixels).
+  - The fast layer runs at 30 fps while bubbles pop, 20 fps when only the price glides, and stops when nothing moves.
+  - At most 40 bubbles are on screen at once.
+- **Old data cleared.** What the old phone-side Auto-trader left in storage is removed (it runs on the server now).
+
 ### Prediction lines in the forecast cone (v8.6)
 
 The cone on the Chart tab (Round and 1m views) now holds three predictions of where BTC closes, each from a different market, with its number at the end (`public/predict.js`):

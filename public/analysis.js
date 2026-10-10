@@ -5,7 +5,8 @@ import { atr } from './candles.js';
 import { kalshiFee } from './model.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const usd0 = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const usd0 = (v) => `$${NUM.format(Math.round(v))}`;
 
 // Rejection trends within the window that opened at `openTime`.
 //   strike-cap   – wicked up to the target and closed back below it (sellers defending it: bearish)

@@ -645,3 +645,14 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 
 .pred-record { margin: 6px 0 2px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .pred-record b { color: var(--text); }
+
+/* ---------- fold any card by its title ---------- */
+.card.foldable > :first-child { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.card.foldable > :first-child > span:first-child::before, .card.foldable > h3:first-child::before { content: '▾ '; color: var(--accent); display: inline-block; transition: transform .2s ease; }
+.card.foldable.folded > :first-child > span:first-child::before, .card.foldable.folded > h3:first-child::before { transform: rotate(-90deg); }
+.card.foldable.folded > :not(:first-child) { display: none !important; }
+.card.foldable.folded > :first-child { margin-bottom: 0; }
+.card.foldable:not(.folded) > :not(:first-child) { animation: slideDown .25s ease-out; }
+.settings-fold > form.settings { margin-top: 8px; }
+.card.foldable > :first-child > span:first-child::before, .card.foldable > h3:first-child::before { margin-right: 6px; }
+.scan-parts:empty, .scan-table:empty, .scan-facts:empty, .pred-record:empty { display: none; }

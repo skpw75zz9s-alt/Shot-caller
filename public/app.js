@@ -150,6 +150,8 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
+// v8.0: the Auto-trader moved to the server: drop what the phone-side one stored
+try { for (const k of ['traderCfg', 'trader:test', 'trader:demo', 'trader:live', 'traderTestEx']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 for (const [k, c] of Object.entries(state.calls)) if (!(c.at > Date.now() - 2 * 3600000)) delete state.calls[k];
 try { localStorage.removeItem('tracker'); } catch { /* report cards were removed in v2.9 */ }
 
@@ -288,7 +290,13 @@ function renderPositions(snap) {
 // ---------- one-tap tracking ----------
 // "I bought it" / "I sold" are single taps: side, Kalshi's live price and the time are locked in
 // automatically, and the amount is the bot's suggestion (or the fixed amount from Settings).
-const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+// Formatters made once: toLocaleString / toLocaleTimeString build a new formatter on every call, which added up to a
+// noticeable share of the phone's time with the live tape streaming
+const TIME_FMT = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+const INT_FMT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+const USD_FMT = {};
+const clock = (t) => TIME_FMT.format(t);
+const int = (v) => INT_FMT.format(Math.round(v));
 let undoTimer = null;
 let autopilot = null; // the Auto-trader (public/autopilot.js), made once the key store is ready
 function toast(text, undo) {
@@ -312,7 +320,7 @@ async function alert({ tag, title, body }, kind = 'buy', extra = {}) {
 }
 
 // ---------- render helpers ----------
-const usd = (v, d = 2) => v == null ? '—' : `$${v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })}`;
+const usd = (v, d = 2) => v == null ? '—' : `$${(USD_FMT[d] ||= new Intl.NumberFormat(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })).format(v)}`;
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
 const pc = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
 const dollars = (v) => `$${v.toFixed(2)}`;
@@ -452,7 +460,8 @@ $('tapeTabs').addEventListener('click', (e) => {
   for (const b of $('tapeTabs').children) b.classList.toggle('on', b.dataset.tape === k);
   renderTape(true);
 });
-const hms = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }).replace(/\s?[AP]M/, '');
+const hmsCache = new Map(); // one tape row per trade, many in the same second
+const hms = (t) => { const k = Math.floor(t / 1000); let v = hmsCache.get(k); if (!v) { v = clock(t).replace(/\s?[AP]M/, ''); hmsCache.set(k, v); if (hmsCache.size > 400) hmsCache.delete(hmsCache.keys().next().value); } return v; };
 function renderTape(force = false) {
   const now = Date.now();
   if (!force && now - (state.tapeAt || 0) < 500) return;
@@ -477,7 +486,7 @@ function renderTape(force = false) {
     }).join('') || '<span class="muted">No BTC exchange trades yet this round</span>');
   } else {
     const kf = kalshiFlow(tape.kalshi);
-    setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${Math.round(kf.YES.count).toLocaleString()}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${Math.round(kf.NO.count).toLocaleString()}</b>${usd(kf.NO.usd, 0)}</div>`);
+    setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${int(kf.YES.count)}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${int(kf.NO.count)}</b>${usd(kf.NO.usd, 0)}</div>`);
   }
   tape.list.sort((a, b) => b.t - a.t); // feeds arrive a little out of order; the tape reads newest first
   const rows = tape.list.filter((x) => (tab === 'all' ? true : tab === 'kalshi' ? x.kalshi : !x.kalshi)).slice(0, 40);
@@ -485,8 +494,8 @@ function renderTape(force = false) {
   state.tapeTop = rows[0];
   setHTML($('tape'), rows.map((x, i) => {
     const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
-    if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${Math.round(x.count).toLocaleString()} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
-    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${Math.round(x.price).toLocaleString()}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
+    if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${int(x.count)} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
+    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${int(x.price)}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
   }).join('') || `<li><span class="muted">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</span></li>`);
 }
 
@@ -528,7 +537,7 @@ function renderScan(live, now) {
   state.scanAt = now;
   const open = Date.parse(live.m.open_time), tk = live.m.ticker;
   const sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin });
-  setText($('scanWhen'), `${sc.trades.toLocaleString()} trades · ${clock(now)}`);
+  setText($('scanWhen'), `${int(sc.trades)} trades · ${clock(now)}`);
   if (!sc.ready) {
     setText($('scanLabel'), 'Reading the round…'); setText($('scanScore'), 'needs the live exchange feeds (open the app in front)');
     setClass($('scanVerdict'), 'scan-verdict'); setStyle($('scanFill'), 'width', '0%'); setHTML($('scanParts'), ''); setHTML($('scanTable'), ''); setHTML($('scanFacts'), '');
@@ -573,7 +582,7 @@ function renderDeck(snap, live, sig, now) {
   const ix = indexFresh() && state.index.used.length > 1 ? `index of ${state.index.used.length} exchanges` : 'Coinbase price';
   const feedsLive = ALL_FEEDS.filter((n) => (n === 'Coinbase' ? isLive() : state.feedStatus?.[n]?.state === 'live' && now - (state.feedStatus[n].lastAt || 0) < 120000)).length;
   setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS.length} trade feeds · ${ix}`);
-  setTile('stClock', new Date(now - (state.skewMs || 0)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }), '',
+  setTile('stClock', clock(now - (state.skewMs || 0)), '',
     state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
   setTile('stContract', live ? live.m.ticker.replace(/^KXBTC15M-/, '') : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
   const br = state.botRecord, st = br?.graded ? br : callStats(state.callLog);
@@ -840,7 +849,7 @@ function orderFrame() {
   if (orderRaf || !$('view-chart').classList.contains('active') || document.hidden) return;
   orderRaf = requestAnimationFrame((ts) => {
     orderRaf = 0;
-    if (ts - (chartState.layerAt || 0) < 32) return orderFrame(); // 30 frames a second is plenty, and kinder to the battery
+    if (ts - (chartState.layerAt || 0) < (chartState.bubbling ? 32 : 48)) return orderFrame(); // 30 fps while bubbles pop, 20 when only the price glides: kinder to the battery
     chartState.layerAt = ts;
     const geo = chartState.geo, cv = $('orderLayer');
     if (!geo || !cv) return;
@@ -855,10 +864,11 @@ function orderFrame() {
       const dt = Math.min(200, ts - (chartState.liveTs || ts)); chartState.liveTs = ts;
       if (chartState.livePx == null || Math.abs(target - chartState.livePx) > 500) chartState.livePx = target;
       else chartState.livePx += (target - chartState.livePx) * (1 - Math.exp(-dt / 110));
-      moving = Math.abs(target - chartState.livePx) > 0.02;
+      moving = Math.abs(target - chartState.livePx) > 0.05;
       if (geo.liveLast && (chartState.livePx > geo.vmax || chartState.livePx < geo.vmin) && now - (chartState.rescaleAt || 0) > 700) { chartState.rescaleAt = now; chartState.key = null; drawChartTab(true); } // off the scale: redraw it
     }
-    const anim = drawOrders(cv, geo, { bubbles: liveBubbles(tape.big, now), fills: chartState.fills, show: chartState.show, now, live: { price: chartState.livePx, moving }, cross: chartState.cross });
+    const bubbles = liveBubbles(tape.big, now); chartState.bubbling = bubbles.length > 0;
+    const anim = drawOrders(cv, geo, { bubbles, fills: chartState.fills, show: chartState.show, now, live: { price: chartState.livePx, moving }, cross: chartState.cross });
     if (anim || moving) orderFrame();
   });
 }
@@ -1051,7 +1061,7 @@ function render() {
   const r = timing?.rsi;
   setText($('rsi'), r == null ? '—' : r.toFixed(0));
   setClass($('rsi'), r == null ? '' : r < 35 ? 'pos' : r > 65 ? 'neg' : '');
-  setHTML($('levels'), timing?.support ? `<span class="neg">▲ ${Math.round(timing.resistance).toLocaleString()}</span><span class="pos">▼ ${Math.round(timing.support).toLocaleString()}</span>` : '—');
+  setHTML($('levels'), timing?.support ? `<span class="neg">▲ ${int(timing.resistance)}</span><span class="pos">▼ ${int(timing.support)}</span>` : '—');
 
   setHTML($('others'), rows.filter((x) => x !== live && x.ev.minutesLeft > 0).slice(0, 6).map(({ m, ev }) =>
     `<div class="card mini"><span>${esc(m.yes_sub_title || m.ticker)}<br><small>${mmss(ev.minutesLeft)} · bot ${pct(ev.pYes)} YES</small></span>` +
@@ -1071,7 +1081,7 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
   if (key === chartKey) return;
   chartKey = key;
   const ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
@@ -1132,7 +1142,7 @@ function drawChart(allBars, strike, openTime, timing, limit, rej) {
 
   // Last price tag, then every label, nudged apart
   const last = bars[bars.length - 1].c;
-  labels.push({ y: Y(last) + 3, text: Math.round(last).toLocaleString(), color: '#e6edf3', font: 'bold 10px system-ui', first: true });
+  labels.push({ y: Y(last) + 3, text: int(last), color: '#e6edf3', font: 'bold 10px system-ui', first: true });
   labels.sort((a, b) => a.y - b.y);
   for (let i = 0; i < labels.length; i++) labels[i].y = Math.max(10, labels[i].y, i ? labels[i - 1].y + 12 : 0);
   for (let i = labels.length - 1; i >= 0; i--) labels[i].y = Math.min(h - 4 - (labels.length - 1 - i) * 12, labels[i].y);
@@ -1933,6 +1943,26 @@ function renderHealth() {
   renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));
+// Fold any card by tapping its title (remembered per card). Long, busy cards start folded so the Deck stays short.
+{
+  const folded = store.get('folded', { 'Live orders · all markets': true, 'Live notes': true });
+  for (const card of document.querySelectorAll('.card')) {
+    if (card.tagName === 'DETAILS') continue; // already folds
+    const head = card.firstElementChild;
+    if (!head || !head.matches('.deep-head, .chart-head, h3')) continue;
+    const key = (head.querySelector('span') || head).textContent.trim();
+    if (!key) continue;
+    card.classList.add('foldable');
+    card.classList.toggle('folded', !!folded[key]);
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('button, a, input, select, label')) return;
+      const now = !card.classList.contains('folded');
+      card.classList.toggle('folded', now);
+      folded[key] = now; store.set('folded', folded);
+      if (!now) { chartState.key = null; render(); } // canvases inside need a redraw at their real size
+    });
+  }
+}
 buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk buttons were blank)
 renderRisk();
 if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }

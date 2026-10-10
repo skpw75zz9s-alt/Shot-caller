@@ -25,14 +25,15 @@ const C = { up: '#2ee6a6', dn: '#ff4d6d', grid: '#ffffff0d', text: '#8b95a7', st
   boll: '#7dd3fc', vwap: '#fbbf24', floor: '#2ee6a6', ceil: '#ff4d6d', cone50: '#22d3ee33', cone90: '#22d3ee14', vol: '#ffffff22' };
 
 function setup(cv, h) {
-  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth;
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth; // 2x is sharp on any phone; 3x paints 2.25x the pixels
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   return { ctx, w, h };
 }
-const fmt = (v) => Math.round(v).toLocaleString('en-US');
+const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const fmt = (v) => NUM.format(Math.round(v));
 
 // all: candles with volume (more history than shown, so slow indicators are warmed up); o.viewFrom: first time shown.
 // o: { strike, openTime, closeTime, spot, cone: [{ t, lo50, hi50, lo90, hi90 }], markers: [{ t, side, label }], show, barMs, round,
@@ -230,7 +231,7 @@ export function drawPro(main, rsiCv, macdCv, all, o) {
 // gold = a whale.
 export const BUBBLE_LIFE = 3000; // ms from appearing to gone
 const POP_AT = 2500;             // ...the last half second is the burst
-export function liveBubbles(orders, now = Date.now(), max = 80) {
+export function liveBubbles(orders, now = Date.now(), max = 40) {
   const out = [];
   for (let i = orders.length - 1; i >= 0 && out.length < max; i--) {
     const x = orders[i], age = now - (x.at ?? x.t);
@@ -242,7 +243,7 @@ export function liveBubbles(orders, now = Date.now(), max = 80) {
 // Returns true while something on it is still animating, so the caller keeps asking for frames.
 // live: { price } the current candle's price right now (eased by the caller); cross: { x, y } a crosshair to show.
 export function drawOrders(cv, geo, { bubbles = [], fills = [], show, now = Date.now(), live = null, cross = null }) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   if (cv.width !== Math.round(geo.w * dpr) || cv.height !== Math.round(geo.h * dpr)) { cv.width = Math.round(geo.w * dpr); cv.height = Math.round(geo.h * dpr); }
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -348,5 +349,5 @@ function pane(ctx, plotW, Y, levels, title, w) {
   ctx.strokeStyle = C.grid; ctx.fillStyle = C.text; ctx.font = '10px ui-monospace, monospace';
   for (const l of levels) { ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, Y(l)); ctx.lineTo(plotW, Y(l)); ctx.stroke(); ctx.setLineDash([]); ctx.fillText(String(l), plotW + 6, Y(l) + 3); }
   ctx.fillText(title, 6, 12);
-  ctx.strokeStyle = '#ffffff14'; ctx.strokeRect(0.5, 0.5, w - 1, ctx.canvas.height / (window.devicePixelRatio || 1) - 1);
+  ctx.strokeStyle = '#ffffff14'; ctx.strokeRect(0.5, 0.5, w - 1, ctx.canvas.height / Math.min(2, window.devicePixelRatio || 1) - 1);
 }
