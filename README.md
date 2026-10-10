@@ -321,7 +321,7 @@ Measured cold start on a phone-like connection (150 ms latency, 4x slower CPU): 
 
 ### Cleaner and smoother (v8.7)
 
-- **Fold any card** by tapping its title; the app remembers which. The busy Live orders tape and Live notes start folded, and the long settings list sits behind **All settings**.
+- **Fold any card** by tapping its title; the app remembers which. Live notes start folded, and the long settings list sits behind **All settings**. (The Live orders tape started folded too until v9.2, which made it look gone; it starts open again.)
 - **Faster formatting.** Times and dollar amounts use formatters made once. Building a new one per call (the old way) was a real share of the phone's time with the tape streaming. Deck slow frames under a flood of trades: 10 → 6, the worst 202 → 89 ms; Chart tab: 39 → about 10.
 - **Lighter chart painting.** Charts paint at up to 2x pixel density (sharp on any phone; 3x painted 2.25x the pixels).
   - The fast layer runs at 30 fps while bubbles pop, 20 fps when only the price glides, and stops when nothing moves.

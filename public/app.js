@@ -1887,9 +1887,11 @@ function renderHealth() {
   renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));
-// Fold any card by tapping its title (remembered per card). Long, busy cards start folded so the Deck stays short.
+// Fold any card by tapping its title (remembered per card). Live notes start folded so the Deck stays short.
 {
-  const folded = store.get('folded', { 'Live orders · all markets': true, 'Live notes': true });
+  const folded = store.get('folded', { 'Live notes': true });
+  // v9.2: Live orders start open again (v8.7 folded them by default, which looked like they were gone)
+  if (!store.get('liveOrdersOpen', false)) { delete folded['Live orders · all markets']; store.set('folded', folded); store.set('liveOrdersOpen', true); }
   for (const card of document.querySelectorAll('.card')) {
     if (card.tagName === 'DETAILS') continue; // already folds
     const head = card.firstElementChild;
