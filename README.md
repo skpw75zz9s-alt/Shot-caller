@@ -269,6 +269,24 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### TradingView charts (v9.0)
+
+The Chart tab is now built on **TradingView Lightweight Charts™** (`public/vendor/lightweight-charts.js`, v4.2.3, Apache License 2.0, copied in unmodified, still no npm dependencies). `public/tvchart.js` sets it up:
+- **Neater candles and axes.** There are crisp candles, a volume histogram along the bottom, a right-hand price scale with tags for the last price, target, floor and ceiling, and a clean time axis.
+- **RSI and MACD** are their own small panes under the main chart. They scroll and zoom with it.
+- **Shot Caller's layers on top:**
+  - EMA 9/21, Bollinger, VWAP, the forecast cone and the three prediction lines (Bot / Kalshi / 5 exch) as labelled series.
+  - Calls as arrows, your fills as B / S / ✕ circles, and trend turns as 🐂/🐻 markers.
+  - The trend shows as a faint watermark.
+  - The popping order bubbles stay on their own fast layer, pinned to the candles as you scroll.
+- **Gestures come from TradingView:**
+  - drag to scroll, with momentum
+  - pinch or the mouse wheel to zoom
+  - drag the price scale to stretch it
+  - press and hold for a crosshair
+- **⟲ LIVE** snaps back to now, and **S / M / L** sets the height.
+- **Credit:** the small TradingView logo on the chart links to TradingView, and the credit line is in Learn. The license and notice are in `public/vendor/`.
+
 ### Opens faster (v8.8)
 
 Measured cold start on a phone-like connection (150 ms latency, 4x slower CPU): price on screen **4.2 s → 1.7 s**, call 4.4 s → 1.8 s, first paint 1.5 s → 0.8 s. How:
@@ -304,7 +322,7 @@ The Chart tab:
 - **Drag** sideways to scroll back in time.
 - **Pinch** (or the mouse wheel) to zoom from 10 bars up to everything loaded.
 - **Press and hold** (or hover a mouse) for a crosshair. It shows the time, open/high/low/close and the move for the candle under your finger, plus the price at the line.
-- **Double-tap** or tap **⟲ LIVE** to snap back to now. LIVE only shows once you've moved the chart.
+- Tap **⟲ LIVE** to snap back to now. LIVE only shows once you've moved the chart. (Since v9.0 the gestures come from TradingView Lightweight Charts.)
 - **S / M / L** changes the chart's height (remembered).
 
 ### Round scan: all five exchanges, every round (v8.4)

@@ -1,6 +1,6 @@
 // App-shell cache; API calls always go to the network.
-const CACHE = 'shot-caller-v89';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'model.js', 'candles.js', 'engine.js', 'analysis.js', 'tracker.js', 'kalshi.js', 'notify.js', 'health.js', 'record.js', 'learner.js', 'indicators.js', 'chart.js', 'flow.js', 'alerts.js', 'alertui.js', 'feeds.js', 'fx.js', 'suggest.js', 'trader.js', 'autopilot.js', 'roundscan.js', 'predict.js', 'icon-192.png', 'manifest.webmanifest', 'icon.svg', 'bull.svg', 'bear.svg', 'sounds/bull.mp3', 'sounds/bear.mp3', 'sounds/wait.mp3', 'sounds/bail.mp3', 'sounds/register.mp3'];
+const CACHE = 'shot-caller-v90';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'model.js', 'candles.js', 'engine.js', 'analysis.js', 'tracker.js', 'kalshi.js', 'notify.js', 'health.js', 'record.js', 'learner.js', 'indicators.js', 'chart.js', 'flow.js', 'alerts.js', 'alertui.js', 'feeds.js', 'fx.js', 'suggest.js', 'trader.js', 'autopilot.js', 'roundscan.js', 'predict.js', 'tvchart.js', 'vendor/lightweight-charts.js', 'icon-192.png', 'manifest.webmanifest', 'icon.svg', 'bull.svg', 'bear.svg', 'sounds/bull.mp3', 'sounds/bear.mp3', 'sounds/wait.mp3', 'sounds/bail.mp3', 'sounds/register.mp3'];
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(

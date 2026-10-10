@@ -39,6 +39,8 @@
   <link rel="modulepreload" href="autopilot.js">
   <link rel="modulepreload" href="roundscan.js">
   <link rel="modulepreload" href="predict.js">
+  <link rel="modulepreload" href="tvchart.js">
+  <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
     // Start the first data requests now, while the code above is still loading; app.js picks these up instead of
     // asking again (getJSON). Saves a round trip or two on a phone connection.
@@ -216,10 +218,10 @@
         <div class="tf-btns" id="tfBtns"></div>
         <div class="chart-size" id="chartSize" aria-label="Chart size"></div>
         <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
-        <div class="pro-wrap"><canvas id="proChart" height="300"></canvas><canvas id="orderLayer" class="order-layer" height="300" aria-hidden="true"></canvas><button type="button" id="chartLive" class="chart-live" hidden>⟲ LIVE</button><small class="chart-hint">drag · pinch · hold</small></div>
+        <div class="pro-wrap"><div id="tvMain" class="tv-main"></div><canvas id="orderLayer" class="order-layer" aria-hidden="true"></canvas><button type="button" id="chartLive" class="chart-live" hidden>⟲ LIVE</button></div>
+        <div id="tvRsi" class="tv-sub"></div>
+        <div id="tvMacd" class="tv-sub"></div>
         <p class="pred-record" id="predRecord"></p>
-        <canvas id="rsiChart" height="90"></canvas>
-        <canvas id="macdChart" height="90"></canvas>
         <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). <b>Prediction lines</b> in the cone: where each market says BTC closes. <b style="color:#22d3ee">Bot</b> = the bot's model, <b style="color:#a78bfa">Kalshi</b> = the close Kalshi's price implies, <b style="color:#fbbf24">5 exch</b> = the five exchanges' trend over the last 5 minutes (half strength). Each is graded every round. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: every big trade ($2k+ on 5 exchanges) pops up as a bubble at its price, green for a buyer and red for a seller, sized by dollars (gold with a 🐋 for a whale), then bursts and disappears after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
       </div>
     </section>
@@ -278,6 +280,7 @@
         <p>Every exchange trade has an aggressor: a buyer who lifted the ask or a seller who hit the bid. Buy pressure (the bull) and sell pressure (the bear) are each side's share of the dollar volume over the last 2 minutes, and the side that's winning steps up and pulses; round flow is the total since the open. The tug of war counts every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US, and the Live orders tape shows them as they happen, next to the trades on the Kalshi contract itself (who's buying UP and DOWN, and at what price). Whales are single trades above your minimum (Alerts). These are context only: they don't change the call.</p>
         <h3>Credits</h3>
         <p>The spoken alerts use Piper's LibriTTS voice (trained on the LibriTTS corpus, CC BY 4.0, openslr.org/60). The bull and bear are real recordings; the cash register is synthesized for this app.</p>
+        <p>Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a>: TradingView Lightweight Charts™, Copyright (c) 2024 TradingView, Inc. (https://www.tradingview.com/), used under the Apache License 2.0.</p>
         <h3>Honest limits</h3>
         <p>No call is certain. Even 98% calls lose about 1 time in 50, and calls that safe are priced high on Kalshi, so a loss costs much more than a win pays. Check the Record tab: it grades every call against Kalshi's real result.</p>
       </div>
@@ -389,7 +392,7 @@
         <form id="settingsForm" class="settings"></form>
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
-      <p class="fine" id="version">Shot Caller v8.8 · opens faster</p>
+      <p class="fine" id="version">Shot Caller v9.0 · TradingView charts</p>
     </section>
   </main>
 

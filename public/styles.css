@@ -656,3 +656,11 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .settings-fold > form.settings { margin-top: 8px; }
 .card.foldable > :first-child > span:first-child::before, .card.foldable > h3:first-child::before { margin-right: 6px; }
 .scan-parts:empty, .scan-table:empty, .scan-facts:empty, .pred-record:empty { display: none; }
+
+/* ---------- the TradingView chart ---------- */
+.tv-main { width: 100%; border-radius: 10px; overflow: hidden; }
+.tv-sub { width: 100%; margin-top: 4px; border-radius: 8px; overflow: hidden; }
+.tv-sub[hidden] { display: none; }
+.pro-wrap .order-layer { height: auto; }
+.pro-wrap .order-layer { z-index: 5; }
+.pro-wrap .chart-live { z-index: 6; }
