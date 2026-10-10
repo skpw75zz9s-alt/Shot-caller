@@ -99,3 +99,17 @@ test('the lines run past the close on a rolling horizon; the close prediction is
   const e = long.find((l) => l.key === 'exch');
   assert.ok(e.pts.at(-1).v > e.end, "the exchanges' trend keeps going");
 });
+
+import { forecastCone } from '../public/indicators.js';
+test('the cone and prediction lines sit on whole minutes, so redraws never reshuffle the chart (it used to jump back)', () => {
+  const close = Date.UTC(2026, 0, 1, 12, 15), until = Date.UTC(2026, 0, 1, 12, 23);
+  for (const now of [Date.UTC(2026, 0, 1, 12, 7, 13, 250), Date.UTC(2026, 0, 1, 12, 7, 48, 900)]) {
+    const cone = forecastCone(100000, 0.0008, now, until);
+    assert.ok(cone.every((c) => c.t % 60000 === 0), 'cone on minutes');
+    assert.equal(cone[0].t, Date.UTC(2026, 0, 1, 12, 7)); assert.equal(cone[0].hi90, 100000, 'starts on the live candle with no spread');
+    for (const l of predictionLines({ spot: 100000, sigmaMin: 0.0008, now, close, until, strike: 99950, yesMid: 0.6 })) assert.ok(l.pts.every((p) => p.t % 60000 === 0), `${l.key} on minutes`);
+  }
+  // two redraws in the same minute use exactly the same times
+  const times = (now) => forecastCone(100000, 0.0008, now, until).map((c) => c.t).join();
+  assert.equal(times(Date.UTC(2026, 0, 1, 12, 7, 5)), times(Date.UTC(2026, 0, 1, 12, 7, 55)));
+});

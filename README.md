@@ -274,6 +274,7 @@ Security:
 The cone, the prediction lines and the prediction candles used to stop at the round's close, so they shrank as the round ran out: 12 minutes ahead early in a round, 2 minutes near its end. Now they always look **at least 15 minutes ahead**, running past the close into the next round. A **⏱ round closes** marker shows where the current round ends.
 - **Past the close:** Bot stays flat, the 5-exchange trend keeps its pace, and Kalshi holds its close level (its price only speaks for this round).
 - **Unchanged:** each line's close prediction (what gets graded at 5 minutes left).
+- **Fixed in v10.5:** after v10.3/v10.4 the chart kept jumping back in time, about 16 minutes every few seconds. The cone and prediction lines put their future points at "now + n minutes". Those times changed on every redraw and fell between the candles, and the chart library slid the view back each time the timeline reshuffled. All future points now sit on whole minutes (the candles' own times), so the view stays where you put it.
 
 ### Flip watch: catching the turns (v10.3)
 

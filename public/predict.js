@@ -27,8 +27,10 @@ const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.lengt
 // log-linear from today's price to the close prediction; past the close (out to `until`) it keeps the same rate per
 // minute, or holds the close level when `hold` (Kalshi's price only speaks for this round's close)
 const path = (from, to, now, close, until = close, hold = false, step = 60000) => {
-  const pts = [], rate = Math.log(to / from) / (close - now);
-  for (let t = now; t < close; t += step) pts.push({ t, v: from * Math.exp(rate * (t - now)) });
+  // on whole minutes, like the candles (starting on the live candle), so redraws don't reshuffle the chart's timeline
+  const pts = [], rate = Math.log(to / from) / (close - now), t0 = Math.floor(now / step) * step;
+  pts.push({ t: t0, v: from });
+  for (let t = t0 + step; t < close; t += step) pts.push({ t, v: from * Math.exp(rate * (t - now)) });
   pts.push({ t: close, v: to });
   for (let t = close + step; t <= until; t += step) pts.push({ t, v: hold ? to : from * Math.exp(rate * (t - now)) });
   return pts;
