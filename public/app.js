@@ -1541,6 +1541,13 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
   adminPolling(views.includes('settings'));
 } });
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => split.show(b.dataset.view)));
+{ // Settings: what this device was detected as, so a missing ⊞ button can be explained
+  const d = split.device(), sys = d.platform || (d.ua.match(/\(([^;)]+)/)?.[1] ?? 'unknown system');
+  setText($('splitInfo'), d.forced === '1' ? 'Split screen: on (turned on with ?split=1): use the ⊞ button at the top right.'
+    : d.forced === '0' ? 'Split screen: off (turned off with ?split=0; open the app with ?split=1 to turn it back on).'
+    : d.available ? `Split screen: on. This is a computer (${sys}): use the ⊞ button at the top right.`
+    : `Split screen: computers only, and this looks like a ${d.kind === 'unknown' ? 'device it can\'t recognise' : 'phone or tablet'} (${sys}). If it's really a computer, open the app with ?split=1 at the end of the address.`);
+}
 $('status').addEventListener('click', () => window.alert($('status').title || 'connecting…'));
 $('pushOn').addEventListener('click', () => pushEnable().catch((e) => renderPush(`Couldn't turn on push: ${e.message}`)));
 $('pushOff').addEventListener('click', () => pushDisable());

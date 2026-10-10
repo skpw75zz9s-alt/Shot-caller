@@ -269,9 +269,9 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
-### Split screen (v9.6, computers only since v9.7, touchscreen laptops since v9.8)
+### Split screen (v9.6; computers only since v9.7)
 
-On a computer, tap the **⊞** button in the header to show **1, 2, 3 or 4 screens at once**: any of Deck, Chart, Alerts, Record, Learn and Settings (`public/split.js`). It's for computers only: Windows, Mac, Linux or ChromeOS with a mouse or trackpad, in a window at least 900px wide. Touchscreen laptops count (since v9.8; a 1366×768 laptop at 150% display scaling is 911px). Phones and tablets, including iPads with a trackpad, don't show the button and always get one screen. If a window shrinks below 900px, it goes back to one screen until it's widened again.
+On a computer, tap the **⊞** button in the header to show **1, 2, 3 or 4 screens at once**: any of Deck, Chart, Alerts, Record, Learn and Settings (`public/split.js`). It's for computers only: any Windows, Mac, Linux or ChromeOS machine, touchscreen laptops included, at any screen size (since v9.9). Phones and tablets, including iPads asking for the desktop site, don't show the button and always get one screen. **Settings** says what the device was detected as. If a computer is ever mistaken for something else, opening the app with `?split=1` at the end of the address turns split screen on for that browser (and `?split=0` turns it off).
 - **Layouts:** 2 or 3 screens sit side by side, and 4 is a 2×2 grid.
 - **Each pane has its own menu** to pick its screen. Picking one another pane already shows swaps them. **⤢** shows that pane full screen.
 - **Click a pane to focus it** (it glows). The bottom bar then changes what the focused pane shows.
