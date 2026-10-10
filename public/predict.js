@@ -81,3 +81,46 @@ export function predictionRecord(log) {
   return { rounds: done.length, bot: avg('bot'), kalshi: avg('kalshi'), exch: avg('exch'), still: avg('spot') };
 }
 export { normCdf };
+
+// ---------- prediction candles: the minutes from now to the close, drawn as ghost candles ----------
+// The path is a blend of the prediction lines, each weighted by how close it has come at past closes (1 / miss², from
+// predictionRecord; equal weights until each has 5 graded rounds). Each minute's candle opens where the last one
+// closed and closes on the path; its wicks reach BTC's typical one-minute range (about 0.8σ either side of the body's
+// middle, so the candles look like real minutes at today's volatility, not a straight line).
+export function blendWeights(record) {
+  const w = {};
+  for (const k of ['bot', 'kalshi', 'exch']) { const x = record?.[k]; w[k] = x && x.n >= 5 && x.miss > 0 ? 1 / (x.miss * x.miss) : null; }
+  const known = Object.values(w).filter((v) => v != null);
+  const fill = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+  for (const k of Object.keys(w)) w[k] ??= fill; // a line without a record yet counts as average
+  return w;
+}
+const valueAt = (pts, t) => { // the line's value at time t (straight between its points)
+  if (!pts?.length) return null;
+  if (t <= pts[0].t) return pts[0].v;
+  for (let i = 1; i < pts.length; i++) if (t <= pts[i].t) { const a = pts[i - 1], b = pts[i]; return a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t || 1)); }
+  return pts[pts.length - 1].v;
+};
+export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null }) {
+  if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
+  const w = weights || blendWeights(null);
+  const path = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
+  const out = [];
+  let o = path(Math.floor(now / 60000) * 60000 + 60000);
+  for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) {
+    const c = path(Math.min(close, t + 60000)), mid = (o + c) / 2, half = 0.8 * sigmaMin * mid;
+    out.push({ t, o, c, h: Math.max(o, c, mid + half), l: Math.min(o, c, mid - half) });
+    o = c;
+  }
+  return out;
+}
+// The record: how often a minute's candle (as predicted just before that minute began) got the direction right, and
+// its average miss at the minute's close vs "no change" (the minute's open)
+export function candleRecord(log) {
+  const done = log.filter((e) => e.actual != null && e.open != null);
+  if (!done.length) return { n: 0 };
+  const moved = done.filter((e) => e.actual !== e.open && e.c !== e.o);
+  const right = moved.filter((e) => Math.sign(e.c - e.o) === Math.sign(e.actual - e.open)).length;
+  const avg = (f) => done.reduce((a, e) => a + Math.abs(f(e) - e.actual), 0) / done.length;
+  return { n: done.length, called: moved.length, right, miss: avg((e) => e.c), still: avg((e) => e.open) };
+}

@@ -35,6 +35,9 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
   for (const c of [rsiChart, macdChart]) c.applyOptions({ layout: { attributionLogo: false }, crosshair: { horzLine: { visible: false }, vertLine: { visible: false } } }); // one TradingView link (on the main chart) is the credit
 
   const candles = chart.addCandlestickSeries({ upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3', priceLineStyle: LineStyle.Dashed });
+  // prediction candles: ghost minutes from now to the close (public/predict.js predictionCandles)
+  const ghosts = chart.addCandlestickSeries({ upColor: '#2ee6a659', downColor: '#ff4d6d59', borderVisible: true, borderUpColor: '#2ee6a6', borderDownColor: '#ff4d6d',
+    wickUpColor: '#2ee6a6b3', wickDownColor: '#ff4d6db3', lastValueVisible: false, priceLineVisible: false });
   const volume = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
   const line = (color, opts = {}) => chart.addLineSeries({ color, lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...opts });
@@ -59,9 +62,17 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
     if (r) for (const c of [rsiChart, macdChart]) c.timeScale().setVisibleLogicalRange(r);
     paintLayer();
-    if (liveBtn) liveBtn.hidden = chart.timeScale().scrollPosition() > -3; // scrolled back: show LIVE
+    if (liveBtn) liveBtn.hidden = liveOnScreen(r); // the live candle scrolled out of view: show LIVE
   });
-  liveBtn?.addEventListener('click', () => chart.timeScale().scrollToRealTime());
+  // the live candle is the candle series' last bar (the predictions after it don't count)
+  const liveIndex = () => (candles.data?.().length ?? 0) - 1;
+  function liveOnScreen(r = chart.timeScale().getVisibleLogicalRange()) { const i = liveIndex(); return !r || i < 0 || (i >= r.from - 0.5 && i <= r.to - 1); }
+  liveBtn?.addEventListener('click', () => { // back to now, keeping the zoom: the live candle plus the minutes to the close
+    const r = chart.timeScale().getVisibleLogicalRange(), i = liveIndex();
+    if (!r || i < 0) return chart.timeScale().scrollToRealTime();
+    const width = r.to - r.from, ahead = Math.min(16, width * 0.4);
+    chart.timeScale().setVisibleLogicalRange({ from: i + ahead - width, to: i + ahead });
+  });
   new ResizeObserver(() => { const w = main.clientWidth; if (w) for (const c of [chart, rsiChart, macdChart]) c.applyOptions({ width: w }); paintLayer(); }).observe(main);
 
   let lines = {}, last = null, key = null, barMs = 60000, show = {}, bubbles = [], orders = [], trend = null;
@@ -98,6 +109,10 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
       put(k, !!p, p ? dedupe(p.pts.map((q) => ({ time: sec(q.t), value: q.v }))) : []);
       s[k].applyOptions({ lastValueVisible: !!show.labels });
     }
+    // prediction candles: only on 1-minute bars (Round and 1m views)
+    const pc = show.pcandles && barMs === 60000 && d.predCandles?.length ? d.predCandles.filter((c) => c.t > last.t) : [];
+    ghosts.applyOptions({ visible: pc.length > 0 });
+    ghosts.setData(pc.map((c) => ({ time: sec(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
     // levels: the target and the round's floor / ceiling
     for (const l of Object.values(lines)) candles.removePriceLine(l);
     lines = {};

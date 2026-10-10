@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { predictionLines, predictionRecord } from './predict.js';
+import { blendWeights, candleRecord, predictionCandles, predictionLines, predictionRecord } from './predict.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -149,6 +149,7 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   calls: store.get('calls', {}),
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
   callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
+  pcLog: store.get('pcLog', []), // each minute's prediction candle as it stood when the minute began, graded at its close
   predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
@@ -805,6 +806,7 @@ async function drawChartTab(force = false) {
   const viewFrom = tf === 'round' && open ? open - 10 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
+  const preds = showCone ? predictionsNow(live, snap, now) : [];
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}`.trim() }));
   const fk = `${state.positions.length}|${state.trades.length}|${autopilot?.state()?.log?.[0]?.t ?? 0}`;
   if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
@@ -815,7 +817,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: showCone ? predictionsNow(live, snap, now) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, close) : [], predictions: preds, predCandles: showCone ? predictionCandles({ lines: preds, spot, sigmaMin: sigma, now, close, weights: blendWeights(predictionRecord(state.predLog)) }) : [], markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
@@ -882,6 +884,27 @@ function trackPredictions(snap, live, now) {
     if (bar) { e.actual = bar.c; changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
   }
   if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set('predLog', state.predLog); }
+  // prediction candles: keep the next minute's candle as it stands just before that minute begins; grade it at its close
+  if (live) {
+    const next = Math.floor(now / 60000) * 60000 + 60000;
+    if (next < Date.parse(live.m.close_time) && next - now <= 15000) {
+      const c = predictionCandles({ lines: predictionsNow(live, snap, now), spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: Date.parse(live.m.close_time), weights: blendWeights(predictionRecord(state.predLog)) })[0];
+      if (c && c.t === next) {
+        const e = state.pcLog.find((x) => x.t === next);
+        if (e) Object.assign(e, { o: c.o, c: c.c }); else { state.pcLog.unshift({ t: next, o: c.o, c: c.c, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
+      }
+    }
+  }
+  let pcChanged = false;
+  for (const e of state.pcLog) {
+    if (e.actual != null || now < e.t + 70000) continue;
+    const bar = snap.bars.find((b) => b.t === e.t);
+    if (bar) { e.open = bar.o; e.actual = bar.c; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
+  }
+  if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
+  const pr = candleRecord(state.pcLog);
+  setHTML($('pcRecord'), pr.n ? `Prediction candles, graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change"`
+    : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog);
   const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);
   const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];

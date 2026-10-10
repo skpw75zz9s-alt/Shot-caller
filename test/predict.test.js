@@ -37,3 +37,32 @@ test('record: average miss per line vs no change', () => {
   const r = predictionRecord([{ actual: 100, bot: 90, kalshi: 104, spot: 80 }, { actual: 200, bot: 210, kalshi: 200, spot: 200 }, { actual: null, bot: 1 }]);
   assert.equal(r.rounds, 2); assert.equal(r.bot.miss, 10); assert.equal(r.kalshi.miss, 2); assert.equal(r.still.miss, 10); assert.equal(r.exch, null);
 });
+
+// ---------- v10.1 prediction candles ----------
+import { blendWeights, candleRecord, predictionCandles } from '../public/predict.js';
+test('prediction candles: one per minute to the close, chained, along the blended lines, with one-minute wicks', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 7, 30), close = Date.UTC(2026, 0, 1, 12, 15);
+  const pts = (from, to) => [{ t: now, v: from }, { t: close, v: to }];
+  const lines = [{ key: 'bot', pts: pts(100000, 100000) }, { key: 'kalshi', pts: pts(100000, 100140) }];
+  const c = predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now, close });
+  assert.equal(c.length, 7, '12:08 … 12:14');
+  assert.equal(c[0].t, Date.UTC(2026, 0, 1, 12, 8));
+  for (let i = 1; i < c.length; i++) assert.equal(c[i].o, c[i - 1].c, 'each opens where the last closed');
+  assert.ok(Math.abs(c.at(-1).c - 100070) < 1, 'equal weights: halfway between the lines at the close');
+  for (const x of c) { assert.ok(x.h >= Math.max(x.o, x.c) + 50 && x.l <= Math.min(x.o, x.c) - 50, 'wicks reach a typical minute'); }
+  // weighted toward the line that has missed less
+  const w = blendWeights({ bot: { miss: 60, n: 10 }, kalshi: { miss: 20, n: 10 }, exch: null });
+  assert.ok(w.kalshi > w.bot * 8);
+  assert.ok(predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now, close, weights: w }).at(-1).c > 100120);
+  assert.deepEqual(predictionCandles({ lines: [], spot: 1, sigmaMin: 1, now, close }), []);
+});
+test('prediction candle record: direction and miss vs no change', () => {
+  const r = candleRecord([
+    { t: 1, o: 100, c: 110, open: 100, actual: 105 }, // right way, miss 5 (no change missed 5)
+    { t: 2, o: 100, c: 90, open: 100, actual: 120 },  // wrong way
+    { t: 3, o: 100, c: 101, open: null, actual: null }, // not graded yet
+  ]);
+  assert.deepEqual({ n: r.n, called: r.called, right: r.right }, { n: 2, called: 2, right: 1 });
+  assert.equal(r.miss, (5 + 30) / 2); assert.equal(r.still, (5 + 20) / 2);
+  assert.deepEqual(candleRecord([]), { n: 0 });
+});
