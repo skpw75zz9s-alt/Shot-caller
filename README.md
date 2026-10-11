@@ -269,6 +269,33 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Tuned indicators (v11.6)
+
+Which chart indicators, at which settings, have actually called BTC's 15-minute rounds (`public/tune.js`, `tunefeed.js`).
+- **The question:** at 10, 6 and 3 minutes before each round's close, did the indicator's signal say which way BTC would move from there to the close?
+- **The candidates** (31 settings in 7 families):
+  - EMA and RMA crosses: 5/13, 9/21, 12/26 and 20/50
+  - RSI zones: lengths 7, 14 and 21, with levels 70/30, 65/35, 60/40 and 80/20
+  - MACD: 12/26/9, 8/17/9 and 5/35/5
+  - Bollinger breaks: 20 ±2σ, 20 ±1.5σ, 10 ±2σ and 30 ±2.5σ
+  - VWAP from the round's open
+  - 3, 5, 15 and 30-minute momentum
+
+  Each signal may work with the move or against it (a fade); the direction is learned too.
+- **The data:** the playbook's 1-minute Coinbase history (up to 21 days, about 2,000 rounds). It reruns every hour. Each signal is read off the candle before the latest, so a minute-old candle on the server can't flatter it.
+- **No fooling itself:**
+  - The first 2/3 of the rounds pick each family's best setting and direction.
+  - Only that pick is tested on the last 1/3, rounds it never saw.
+  - "Proven" means the unseen rounds agree with z ≥ 2.7 on 150+ rounds. That's strict because 7 families are tested at once. Training must have agreed too (z ≥ 2).
+  - Each round counts once. Its checkpoints are summed, never averaged over only the active ones: averaging let a signal that stays on while it's wrong dilute its own losses, which made pure noise look like a working fade. Caught in simulation and fixed.
+- **Simulated:**
+  - Pure noise: nothing proven in 30 of 30 runs.
+  - A planted trend edge: found 5 of 5 times, the right way round.
+  - A weaker planted fade: found 3 of 5 times.
+- **In the bot's calls:** the proven indicators' read right now (averaged, since trend indicators overlap) shifts where BTC is expected at the close. That becomes a change in P(YES), capped at ±4 points, added to the Round scan's and the micro model's nudges. Unproven indicators add nothing.
+- **Record → Indicator tuning** shows each family's best setting, its hit rate on the tuning rounds and on the unseen rounds, its z, and whether it's in the calls. Record → **Used in the bot's calls** lists the proven ones.
+- Expect most rows to say "—". Classic indicators rarely have a lasting edge on 15-minute BTC; the point is to use one only if it really does.
+
 ### The playbook: market structure, tested instead of believed (v11.4)
 
 What "The BTC Trader's Playbook" teaches, and what the bot does with each part:

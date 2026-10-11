@@ -348,8 +348,9 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
 const compute = () => {
-  // the server's proven nudges to the odds: the Round scan and the micro model (added together per market)
-  const nudges = [state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null, state.micro?.read && Date.now() - state.micro.read.at < 20000 ? state.micro.inCalls : null];
+  // the server's proven nudges to the odds: the Round scan, the micro model and tuned indicators (added together per market)
+  const nudges = [state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null, state.micro?.read && Date.now() - state.micro.read.at < 20000 ? state.micro.inCalls : null,
+    state.tune?.inCalls && Date.now() - (state.tuneAt || 0) < 30000 ? state.tune.inCalls : null];
   let shifts = null;
   for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
@@ -883,6 +884,27 @@ function renderPlaybook() {
     : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
       + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
       + `<small class="muted">Break-even win rate before costs: 33% at 2R, 40% at 1.5R. ${(() => { const best = [r.day, r.hour].filter((x) => x?.n >= 30).sort((a, b) => b.avgR - a.avgR)[0]; return best ? (best.avgR > 0 ? 'One version is positive after fees so far; it still needs 100+ trades to mean much.' : 'After fees, it isn\'t profitable on this data yet.') : 'Too few trades to judge yet.'; })()}</small>`);
+}
+
+// ---------- indicator tuning (server: tunefeed.js, public/tune.js): which settings have really predicted the rounds ----------
+async function refreshTune() {
+  if (document.hidden) return;
+  try { state.tune = await getJSON('tune'); state.tuneAt = Date.now(); renderTune(); } catch { /* next time */ }
+}
+setInterval(refreshTune, 10000);
+setTimeout(refreshTune, 3000);
+function renderTune() {
+  const t = state.tune, r = t?.report;
+  if (!t) return;
+  if (!r || !r.families.length) { setHTML($('tuneReport'), 'Waiting for enough BTC history (about 2,000 one-minute candles) to run the test…'); return; }
+  const pctOr = (x) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
+  const rows = r.families.map((f) => `<tr class="${f.proven ? 'on' : ''}"><td><b>${esc(f.name)}</b><small>${esc(f.setting)} · ${f.dir > 0 ? 'with the signal' : 'against it (fade)'}</small></td>`
+    + `<td>${pctOr(f.train.hit)}</td><td>${pctOr(f.test.hit)}<small>${int(f.test.rounds)} rounds</small></td><td>${f.test.z.toFixed(1)}</td><td>${f.proven ? '✓ in calls' : '—'}</td></tr>`).join('');
+  const proven = r.families.filter((f) => f.proven), act = t.read?.active || [];
+  setHTML($('tuneReport'), `<small class="muted">${int(r.rounds)} rounds tested (${int(r.bars)} one-minute candles), rechecked hourly. Each indicator family's best setting and direction were picked on the first ${int(r.trainRounds)} rounds, then tested on the last ${int(r.testRounds)}, which they never saw. Hit = how often BTC moved the way the signal said, from 10, 6 and 3 minutes out to the close (50% = a coin flip).</small>`
+    + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
+    + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
+      : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.7+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------

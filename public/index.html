@@ -39,6 +39,7 @@
   <link rel="modulepreload" href="autopilot.js">
   <link rel="modulepreload" href="structure.js">
   <link rel="modulepreload" href="playbook.js">
+  <link rel="modulepreload" href="tune.js">
   <link rel="modulepreload" href="micro.js">
   <link rel="modulepreload" href="watch.js">
   <link rel="modulepreload" href="fees.js">
@@ -337,6 +338,11 @@
         <p class="fine-left">From "The BTC Trader's Playbook": its 15-minute liquidity-sweep strategy, run exactly as written and measured the way it says to (100+ examples, win rate, average reward-to-risk, max drawdown, fees). With the 1-hour trend, a 15-minute candle sweeps yesterday's high or low and closes back inside; a market structure shift on above-average volume confirms; entry on the retest; stop beyond the sweep plus a volatility allowance; target 2R. Its other secrets (sweeps, structure shifts, fair value gaps, order blocks, volume divergence, VWAP, open interest, funding) are inputs the micro model learns from: they sway the candles and calls only once proven.</p>
         <div id="pbReport" class="pb-report">Loading…</div>
       </div>
+      <h2 class="sec">Indicator tuning</h2>
+      <div class="card tune">
+        <p class="fine-left">Which chart indicators, at which settings, have actually called BTC's 15-minute rounds. EMA and RMA crosses, RSI zones, MACD, Bollinger breaks, VWAP from the round's open and momentum, each at several common settings, tested on up to three weeks of real 1-minute BTC history. Only a setting that keeps working on rounds it was never tuned on nudges the bot's calls (±4 pts max).</p>
+        <div id="tuneReport" class="pb-report">Loading…</div>
+      </div>
       <h2 class="sec">What the bot has learned</h2>
       <p class="push-status" id="memSummary"></p>
       <div class="mem-using" id="memUsing"></div>
@@ -422,7 +428,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v11.5 · the playbook</p>
+      <p class="fine" id="version">Shot Caller v11.6 · tuned indicators</p>
     </section>
   </main>
 
