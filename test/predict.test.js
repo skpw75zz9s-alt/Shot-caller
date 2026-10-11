@@ -83,7 +83,7 @@ test('prediction candle record: direction and miss vs no change', () => {
   ]);
   assert.deepEqual({ n: r.n, called: r.called, right: r.right }, { n: 2, called: 2, right: 1 });
   assert.equal(r.miss, (5 + 30) / 2); assert.equal(r.still, (5 + 20) / 2);
-  assert.deepEqual(candleRecord([]), { n: 0 });
+  assert.deepEqual(candleRecord([]), { n: 0, beta: 1 }, 'nothing graded yet: no scaling');
 });
 
 test('the lines run past the close on a rolling horizon; the close prediction is unchanged', () => {

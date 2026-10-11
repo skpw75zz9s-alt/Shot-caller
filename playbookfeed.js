@@ -12,6 +12,7 @@ import { bandStudy, flipBacktest, reversalNow, reversalShift } from './public/re
 import { guideBacktest, guideNow, guideReport, guideShift } from './public/guide.js';
 import { kalshiFee, quote as quoteOf } from './public/model.js';
 import { PRED, fit, predictNow, predictorReport, predictorShift, series, walkForward } from './public/predictor.js';
+import { cmFit, cmLive, cmReport, cmWalkForward } from './public/candlemodel.js';
 
 const KEEP = 21 * 86400000;
 export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock = () => Date.now(), log = console, sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }) }) {
@@ -19,6 +20,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
   let guideCal = null, guideCache = null, guideLive = [], guideDirty = false; // the shot-caller guide (public/guide.js)
   const liveFile = file.replace(/[^/\\]+$/, 'guide-live.json');
   let predModels = null, predS = null, predSKey = '', predCache = null, predLive = []; // the prediction engine (public/predictor.js)
+  let cmW = null, cmRep = null, cmAt = 0, cmCache = null; // the candle model (public/candlemodel.js)
   const predFile = file.replace(/[^/\\]+$/, 'predictor-live.json');
   function merge(rows) {
     const m = new Map(bars.map((b) => [b.t, b]));
@@ -52,7 +54,8 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     } finally { backfilling = false; }
     await save();
   }
-  function rerun() {
+  function rerun() { rerunMain(); rerunCandles(); }
+  function rerunMain() {
     const run = (variant, target) => { const tr = backtest(bars, { variant, target }); return { ...scorecard(tr), last: tr.slice(-8).reverse() }; };
     // the reversal guide (public/reversal.js): does its checklist predict the next round, and does its flip strategy pay?
     const flip = (o) => { const tr = flipBacktest(bars, o), card = scorecard(tr); return { ...card, needs: Math.max(0, 200 - card.n), last: tr.slice(-8).reverse(),
@@ -70,7 +73,9 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     busy = true;
     try {
       try { merge(parseCandles(await fetchJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`))); } catch { /* next time */ }
-      if (!report || clock() - report.at >= 15 * 60000) { rerun(); save(); }
+      if (!report || clock() - report.at >= 15 * 60000) { rerunMain(); save(); }
+      // the candle model on its own beat (a few minutes after the rest), so no single tick carries all the work
+      else if (clock() - cmAt >= 15 * 60000 && clock() - report.at >= 3 * 60000) rerunCandles();
     } finally { busy = false; }
   }
   function start() {
@@ -99,6 +104,23 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
       guideCache = { at: now, g };
     }
     return guideCache.g;
+  }
+  // The candle model: walk-forward over the whole history (moves per horizon, candle sizes), then fitted on all of it
+  function rerunCandles() {
+    cmAt = clock();
+    try { const wf = cmWalkForward(bars); cmRep = cmReport(wf.rows); cmW = cmFit(wf.samples); cmCache = null; } catch (e) { log.error('candle model failed', e.message); }
+  }
+  // its live read (only the parts that beat their baselines are switched on), every 5 s
+  function candleRead(now = clock()) {
+    if (!cmW || !cmRep || !bars.length) return null;
+    if (!cmCache || now - cmCache.at >= 5000) {
+      const key = `${bars.length}|${bars.at(-1)?.t}`;
+      if (key !== predSKey) { predS = series(bars); predSKey = key; }
+      let v = null;
+      try { v = cmLive(predS, cmW, cmRep, { now, price: lastLive?.spot ?? bars.at(-1).c }); } catch { v = null; }
+      cmCache = { at: now, v };
+    }
+    return cmCache.v;
   }
   // The prediction engine's read of the live round (its factor series are rebuilt when a new candle arrives)
   function predictor(now = clock()) {
@@ -192,7 +214,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     return v ? { [lastLive.ticker]: Math.max(-0.06, Math.min(0.06, v)) } : null;
   }
   return { load, start, tick, backfill, rerun, structure, merge, reversal, guide, observe, shifts, setOi: (f) => { oiFn = f; }, setFlow: (f) => { flowFn = f; },
-    api: () => ({ report, backfilling, bars: bars.length, reversal: reversal(), guide: guide(), guideLive: guideLiveStats(), predictor: predictor(), predictorLive: predLiveStats(), inCalls: shifts() }), bars: () => bars, predictor };
+    api: () => ({ report, backfilling, bars: bars.length, reversal: reversal(), guide: guide(), guideLive: guideLiveStats(), predictor: predictor(), predictorLive: predLiveStats(), candle: { live: candleRead(), report: cmRep }, inCalls: shifts() }), bars: () => bars, predictor };
 }
 async function defaultFetch(url) {
   const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });

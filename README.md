@@ -271,6 +271,20 @@ Security:
 
 ## Version notes (newest first)
 
+### The candle model (v12.5)
+
+The prediction candles, deep-dived. **100x more accurate isn't possible.** That would mean missing a minute's close by 1% of what "no change" misses, and one-minute BTC moves are mostly noise. But a candle has two parts that behave very differently, and each now gets the most the data allows (`public/candlemodel.js`, run on the server):
+- **Sizes (predictable):** how big each coming minute's candle will be.
+  - It's a regression of the log high-low range on the last 5, 30 and 120 minutes' ranges (volatility clusters) and the time of day and week (BTC is busier at some hours).
+  - It's tested walk-forward against the old method, the last 30 candles' average, with that baseline's own bias corrected so the comparison is fair.
+  - When proven (z ≥ 2.5), each ghost's total size comes from it, split into upper and lower wicks the way the market's recent wicks lean.
+- **Moves (barely predictable):** where BTC will be 1, 2, 3, 5, 8, 12 and 15 minutes out.
+  - It's one ridge regression per horizon on the prediction engine's factors, graded by out-of-sample R² against "no change".
+  - A horizon only moves the candles once it beats "no change" (z ≥ 2.5, on non-overlapping samples). In simulation, pure noise switched on nothing and a planted momentum edge was found.
+- **Bodies scaled by their own record:** every graded minute feeds beta = Σ(predicted × actual) / Σ(predicted²). That's the least-squares factor that minimises the squared miss: if the bot's minute moves have overshot, the bodies shrink to match. It's shrunk toward 1 until there are plenty of minutes, and kept within 0–1.5. The cone's centre uses the same scaled path.
+- **Grading now includes size:** each minute's predicted high-low vs the real one, next to the recent-average size. The line under the chart shows the direction hit rate, the close miss vs "no change", the size miss vs the recent average, the current beta, and which parts of the candle model are on.
+- It runs walk-forward on the server every 15 minutes, a few minutes after the other analyses, so no single tick carries all the work.
+
 ### Exact math (v12.4)
 
 A full audit of the bot's math. The predictions can't be perfect (BTC's next 15 minutes are partly random), but every formula now computes exactly what it claims:

@@ -1103,9 +1103,10 @@ function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { candles: [], turns: [], flip: null, path: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
   const micro = state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null; // the server's micro model, when fresh
-  const weights = blendWeights(predictionRecord(state.predLog));
-  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, bars: snap.bars, flip, micro });
-  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip, path: expectedPath({ lines, spot, now, weights, flip, micro }) };
+  const weights = blendWeights(predictionRecord(state.predLog)), beta = candleRecord(state.pcLog).beta;
+  const cm = state.playbook?.candle?.live && now - (state.playbookAt || 0) < 20000 ? state.playbook.candle.live : null; // the server's candle model, when fresh
+  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, bars: snap.bars, flip, micro, beta, cm });
+  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }) };
 }
 // The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
@@ -1157,7 +1158,8 @@ function trackPredictions(snap, live, now) {
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);
         // graded on the expected path (eo/ec): the same body the ghost candle draws
-        if (e) Object.assign(e, { o: c.eo, c: c.ec }); else { state.pcLog.unshift({ t: next, o: c.eo, c: c.ec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
+        const beta = candleRecord(state.pcLog).beta, rec = { o: c.eo, c: c.ec, beta, range: c.h - c.l, naive: c.naive };
+        if (e) Object.assign(e, rec); else { state.pcLog.unshift({ t: next, ...rec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }
   }
@@ -1165,7 +1167,7 @@ function trackPredictions(snap, live, now) {
   for (const e of state.pcLog) {
     if (e.actual != null || now < e.t + 70000) continue;
     const bar = snap.bars.find((b) => b.t === e.t);
-    if (bar) { e.open = bar.o; e.actual = bar.c; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
+    if (bar) { e.open = bar.o; e.actual = bar.c; e.hi = bar.h; e.lo = bar.l; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
   }
   if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
   // flips: keep each predicted turn until a minute before it (then it's frozen); grade it two minutes after
@@ -1194,7 +1196,10 @@ function trackPredictions(snap, live, now) {
     + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
       : 'The cone is graded each round: does the close land inside its 50% and 90% bands, and is its above-the-target chance better than Kalshi\'s price? It recalibrates its width from that record.'));
   const pr = candleRecord(state.pcLog);
+  const cmr = state.playbook?.report && state.playbook?.candle?.report, sizeOn = cmr && Object.values(cmr.size).filter((x) => x.proven).length, moveOn = cmr && Object.entries(cmr.move).filter(([, x]) => x.proven).map(([h]) => h);
   setHTML($('pcRecord'), pr.n ? `Prediction candles, graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change"`
+      + `${pr.sized ? ` · candle size miss <b>$${pr.sizeMiss.toFixed(0)}</b> vs $${pr.naiveMiss.toFixed(0)} for the recent average` : ''} · bodies scaled <b>×${pr.beta.toFixed(2)}</b> by their own record`
+      + `${cmr ? `. Candle model (walk-forward on ${int(cmr.rows)} past minutes): sizes ${sizeOn ? `<b>on</b> (beat the recent average by ${Math.round(Math.max(...Object.values(cmr.size).map((x) => x.gain)) * 100)}%)` : 'off (not beating the recent average)'}, moves ${moveOn.length ? `<b>on</b> at ${moveOn.join(', ')} min` : 'off (no horizon beats "no change")'}` : ''}`
     : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog);
   const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);

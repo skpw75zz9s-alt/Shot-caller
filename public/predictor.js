@@ -183,7 +183,7 @@ export function predictorShift(live, report, strikeType = 'greater') {
   return /^less/.test(strikeType || '') ? -d : d;
 }
 
-function solve(A, b) { // Gaussian elimination with partial pivoting
+export function solve(A, b) { // Gaussian elimination with partial pivoting (also used by public/candlemodel.js)
   const n = b.length, M2 = A.map((r, i) => [...r, b[i]]);
   for (let c = 0; c < n; c++) {
     let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M2[r][c]) > Math.abs(M2[p][c])) p = r;
