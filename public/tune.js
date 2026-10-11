@@ -11,6 +11,7 @@
 //                  (strict, because 8 families are tested at once) on 150+ rounds, and training agreed too.
 // Only proven indicators reach the bot's calls (indicatorShift), capped at +-4 points.
 import { bollinger, ema, macd, rma, rsiSeries } from './indicators.js';
+import { oddsShift } from './model.js';
 
 export const TUNE = { checkpoints: [10, 6, 3], train: 2 / 3, zTest: 2.7, zTrain: 2, minRounds: 150, minTrain: 100, shrink: 50, cap: 0.04 };
 const ROUND = 900000, MIN = 60000;
@@ -130,12 +131,5 @@ export function indicatorRead(report, bars) {
 // That expected move as a change in P(YES) for a market: capped at +-4 points
 export function indicatorShift(drift, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater' }) {
   if (!drift || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft >= 1) || minutesLeft > 14) return 0;
-  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), move = drift * sd, ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
-  const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);
-  return Math.min(TUNE.cap, Math.max(-TUNE.cap, /^less/.test(strikeType || '') ? -shift : shift));
-}
-function erf(x) { // Abramowitz-Stegun 7.1.26
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
+  return oddsShift(drift * spot * sigmaMin * Math.sqrt(minutesLeft), { spot, strike, sigmaMin, minutesLeft, strikeType }, TUNE.cap);
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TRADER_DEFAULTS, feeFor, costFor, sizeBuy, parseBook, buyDepth, sellDepth, classify, buyOrder, sellOrder, createTrader, createTestExchange } from '../public/trader.js';
+import { TRADER_DEFAULTS, feeFor, costFor, sizeBuy, parseBook, buyDepth, classify, buyOrder, sellOrder, createTrader, createTestExchange } from '../public/trader.js';
 
 // ---------- pieces ----------
 test('fee and cost: Kalshi rounds the fee up to the cent', () => {
@@ -52,7 +52,6 @@ test('order book: cents or dollars; what you can buy and sell', () => {
   assert.deepEqual(buyDepth(a, 'YES', 0.44), { best: 0.43, count: 3, levels: 1 });
   assert.deepEqual(buyDepth(a, 'YES', 0.45), { best: 0.43, count: 10, levels: 2 });
   assert.deepEqual(buyDepth(a, 'NO', 0.6), { best: 0.58, count: 15, levels: 2 });
-  assert.deepEqual(sellDepth(a, 'YES', 0.41), { best: 0.42, count: 5 });
   assert.deepEqual(parseBook(null), { yes: [], no: [] });
 });
 

@@ -95,7 +95,6 @@ h2.sec { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing:
 .entry > b:first-child { font-size: 12px; letter-spacing: .5px; text-transform: uppercase; }
 .entry.now { border-left-color: var(--yes); } .entry.now > b:first-child { color: var(--yes); }
 .entry.wait { border-left-color: var(--amber); } .entry.wait > b:first-child { color: var(--amber); }
-.entry.chase { border-left-color: var(--no); } .entry.chase > b:first-child { color: var(--no); }
 
 /* ---------- buttons ---------- */
 button { width: 100%; padding: 12px; border-radius: 10px; border: 0; background: var(--accent); color: #04121a; font: 700 13px var(--sans); letter-spacing: .6px; text-transform: uppercase; margin: 6px 0; cursor: pointer; }
@@ -638,7 +637,6 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 /* ---------- adjustable chart ---------- */
 .pro-wrap { touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: crosshair; }
 .chart-live { position: absolute; right: 66px; bottom: 56px; width: auto; margin: 0; padding: 5px 10px; font: 800 10px var(--sans); letter-spacing: .8px; border-radius: 999px; background: var(--accent); color: #04121a; box-shadow: 0 0 12px #22d3ee88; animation: popIn .3s cubic-bezier(.2, 1.4, .4, 1); z-index: 2; }
-.chart-hint { position: absolute; left: 8px; bottom: 24px; font: 600 9px var(--mono); color: var(--dim); pointer-events: none; opacity: .7; }
 .chart-size { display: flex; gap: 4px; justify-content: flex-end; margin: -2px 0 6px; }
 .chart-size button { width: auto; margin: 0; padding: 4px 10px; font-size: 10px; background: var(--bg); color: var(--muted); border: 1px solid var(--line-2); text-transform: none; letter-spacing: 0; }
 .chart-size button.on { color: var(--accent); border-color: var(--accent); }

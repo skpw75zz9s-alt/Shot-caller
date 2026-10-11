@@ -4,9 +4,6 @@
 
 export const newFlow = () => ({ round: null, buyUsd: 0, sellUsd: 0, buys: 0, sells: 0, recent: [], whales: [], pressure: null, pressureSince: null });
 
-// Coinbase "match" messages name the MAKER's side, so the taker (aggressor) is the opposite one
-export const takerSide = (makerSide) => (makerSide === 'sell' ? 'buy' : makerSide === 'buy' ? 'sell' : null);
-
 const RECENT_MS = 120000;
 
 // Add one trade { t, price, size, side: taker 'buy' | 'sell' }. `round` is the current window's open time:

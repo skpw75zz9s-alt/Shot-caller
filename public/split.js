@@ -14,7 +14,6 @@ export function deviceKind({ ua = '', platform = '', maxTouchPoints = 0, mobile 
   if (/Windows|Win32|Win64|Macintosh|Mac OS X|MacIntel|CrOS|Linux|X11/i.test(`${platform} ${ua}`)) return 'computer';
   return 'unknown';
 }
-export const isComputer = (nav) => deviceKind(nav) === 'computer';
 const DESIGN_WIDTH = 380;
 const MIN_PANE = 380; // px: the shortest a pane gets (more than this and the page scrolls between rows) // the width the screens are laid out for: narrower panes shrink their contents to match
 

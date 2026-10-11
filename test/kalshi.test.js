@@ -85,14 +85,12 @@ test("folding fills carries Kalshi's real fees into each close", async () => {
   assert.equal(foldFills({}, [{ ...fills[0], fee: null }, fills[1]]).closes[0].fees, null, 'unknown if any fee is missing');
 });
 
-test('Kalshi positions, settlements and orders parse from the documented fields', async () => {
-  const { parsePosition, parseSettlement, parseOrder } = await import('../public/kalshi.js');
+test('Kalshi positions and settlements parse from the documented fields', async () => {
+  const { parsePosition, parseSettlement } = await import('../public/kalshi.js');
   assert.deepEqual(parsePosition({ ticker: 'T', position_fp: '-5.00', market_exposure_dollars: '3.5000', realized_pnl_dollars: '1.2000', fees_paid_dollars: '0.1500', resting_orders_count: 1 }),
     { ticker: 'T', side: 'NO', contracts: 5, cost: 3.5, realized: 1.2, fees: 0.15, resting: 1 });
   const st = parseSettlement({ ticker: 'T', market_result: 'no', yes_count_fp: '0.00', no_count_fp: '5.00', yes_total_cost_dollars: '0.0000', no_total_cost_dollars: '3.5000', revenue: 500, fee_cost: '0.1500', settled_time: '2026-10-05T14:15:30Z' });
   assert.deepEqual([st.result, st.no, st.cost, st.revenue, st.fees], ['no', 5, 3.5, 5, 0.15]);
-  const o = parseOrder({ order_id: 'o1', client_order_id: 'c1', ticker: 'T', status: 'executed', fill_count_fp: '3.00', remaining_count_fp: '0.00', taker_fill_cost_dollars: '0.9000', maker_fill_cost_dollars: '0.3300', taker_fees_dollars: '0.0500', maker_fees_dollars: '0.0100' });
-  assert.deepEqual([o.filled, o.cost, o.fees, o.avgPrice, o.status], [3, 1.23, 0.06, 0.41, 'executed']);
 });
 
 test("reconcile: Kalshi's positions win; exact fill prices are kept when Kalshi agrees", async () => {

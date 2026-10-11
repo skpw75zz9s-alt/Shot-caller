@@ -19,7 +19,7 @@
 import { ema } from './indicators.js';
 import { prep, to15 } from './reversal.js';
 import { swings } from './structure.js';
-import { kalshiFee, maxPay } from './model.js';
+import { kalshiFee, maxPay, oddsShift } from './model.js';
 
 export const GUIDE = { minTested: 30, shrink: 10, lowVolPct: 0.2, volWindow: 672, provenCalls: 300, provenZ: 2.5, cap: 0.04 };
 const M15 = 900000;
@@ -148,12 +148,5 @@ export function guideShift(g, report, { spot, strike, sigmaMin, minutesLeft, str
   const s = g.call === 'UP' ? report.up : report.down, rel = g.atr / g.entry;
   if (!(s?.n > 0) || !(rel > 0)) return 0;
   const move = (g.call === 'UP' ? 1 : -1) * s.mean * (s.n / (s.n + 100)) * rel * spot * Math.min(1, minutesLeft / 15);
-  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
-  const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);
-  return Math.min(GUIDE.cap, Math.max(-GUIDE.cap, /^less/.test(strikeType || '') ? -shift : shift));
-}
-function erf(x) { // Abramowitz-Stegun 7.1.26
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
+  return oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType }, GUIDE.cap);
 }

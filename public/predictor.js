@@ -20,14 +20,13 @@
 //                  touch the bot's calls (by its difference from the distance odds, capped at +-4 points).
 import { ema, rsiSeries, aggregate } from './indicators.js';
 import { swings } from './structure.js';
-import { kalshiFee } from './model.js';
+import { kalshiFee, normCdf as ncdf } from './model.js';
 
 export const PRED = { checkpoints: [15, 10, 5, 2], l2: 100, minTrainDays: 3, thresholds: [0.55, 0.6, 0.7, 0.8, 0.9], slip: 0.01, provenZ: 2.5, provenRounds: 1000, cap: 0.04 };
 export const FACTORS = ['trend1h', 'ema15', 'vwap', 'rsi5', 'rsiRising', 'mom5', 'mom15', 'signedVol', 'volTrend', 'sweep', 'structure'];
 export const FACTOR_NAMES = { trend1h: '1-hour trend', ema15: '15-min EMA 20/50', vwap: 'VWAP', rsi5: '5-min RSI', rsiRising: 'RSI rising/falling', mom5: '5-min momentum', mom15: '15-min momentum', signedVol: 'buy vs sell volume', volTrend: 'volume with the move', sweep: 'liquidity sweep', structure: '5-min structure' };
 const M = 60000, R15 = 900000, DAY = 86400000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
 const logit = (p) => Math.log(p / (1 - p)), sig = (z) => 1 / (1 + Math.exp(-z));
 
 // Everything the factors need, worked out once over the whole history
@@ -193,9 +192,4 @@ function solve(A, b) { // Gaussian elimination with partial pivoting
     for (let r = 0; r < n; r++) if (r !== c) { const f = M2[r][c] / M2[c][c]; for (let k = c; k <= n; k++) M2[r][k] -= f * M2[c][k]; }
   }
   return M2.map((r, i) => r[n] / r[i]);
-}
-function erf(x) { // Abramowitz-Stegun 7.1.26
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
 }

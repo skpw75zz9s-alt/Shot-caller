@@ -138,17 +138,6 @@ test('strong confluence scores 75+; a flip-flopping, fading read scores under 60
   }
 });
 
-test('callsByConfidence groups follow-the-bot results by confidence at entry', async () => {
-  const { callsByConfidence } = await import('../public/tracker.js');
-  const out = callsByConfidence([{ trades: [{ conf: 90, pts: 0.3, entry: 0.5 }, { conf: 88, pts: -0.52, entry: 0.5 }, { conf: 72, pts: 0.1, entry: 0.4 }, { conf: null, pts: 1, entry: 0.5 }] }]);
-  assert.deepEqual(Object.keys(out).sort(), ['70–79', '80–89', '90+']);
-  assert.equal(out['90+'].calls, 1);
-  assert.equal(out['90+'].wins, 1);
-  assert.equal(out['80–89'].calls, 1);
-  assert.ok(Math.abs(out['80–89'].usd + 10.4) < 1e-9);
-  assert.equal(out['70–79'].calls, 1);
-});
-
 // ---------- v3.1: fairer confidence ----------
 test('Kalshi dipping while the bot holds is the low, not a penalty; both fading still counts against', () => {
   const ev = { pYes: 0.62, evYes: 0.18, evNo: -0.3, minutesLeft: 6, quote: { yesBid: 0.40, yesAsk: 0.42 } };

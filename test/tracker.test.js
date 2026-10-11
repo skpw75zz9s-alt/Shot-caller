@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradeWindow, mergeReports, newTracker, pendingWindows, summarize, trackWindow } from '../public/tracker.js';
+import { gradeWindow, newTracker, pendingWindows, trackWindow } from '../public/tracker.js';
 
 const OPEN = 1_700_000_040_000, CLOSE = OPEN + 15 * 60000;
 const m = { ticker: 'W1', title: 'BTC up?', open_time: new Date(OPEN).toISOString(), close_time: new Date(CLOSE).toISOString() };
@@ -72,10 +72,4 @@ test('pending, summary and merge', () => {
   assert.equal(pendingWindows(tr, CLOSE + 30000).length, 0);
   assert.equal(pendingWindows(tr, CLOSE + 61000).length, 1);
   const r = gradeWindow(tr, 'W1', 'yes');
-  const s = summarize([r, { ...r, ticker: 'W2', avgWinnerOdds: 0.4, paperUsd: -2, calls: 1 }]);
-  assert.equal(s.windows, 2);
-  assert.ok(Math.abs(s.avgWinnerOdds - (r.avgWinnerOdds + 0.4) / 2) < 1e-9);
-  assert.equal(s.grades, undefined);
-  const merged = mergeReports([{ ticker: 'A', coverage: 0.3, closeTime: 1 }], [{ ticker: 'A', coverage: 0.9, closeTime: 1 }, { ticker: 'B', coverage: 1, closeTime: 2 }]);
-  assert.deepEqual(merged.map((x) => [x.ticker, x.coverage]), [['B', 1], ['A', 0.9]]);
 });

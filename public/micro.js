@@ -6,6 +6,8 @@
 // (a strong prior), so nothing sways the lines on a hunch. Every prediction is graded once its horizon passes, against
 // "no change" (out of sample: it's made before the outcome is known), and a horizon is only used once it has beaten
 // no change by 0.5%+ over 500+ graded samples.
+import { oddsShift } from './model.js';
+
 export const MICRO_FEATURES = ['flow30', 'flow120', 'ret1', 'ret5', 'fLead', 'fFlow', 'fPremium', 'leader', 'absorb', 'cbPremium', 'kalshiTilt', 'kFlow', 'jump',
   // the playbook's market structure (public/structure.js) and futures funding
   'sweep', 'shift', 'fvgPull', 'obZone', 'volDiv', 'vwapDev', 'fFunding'];
@@ -77,13 +79,5 @@ export function microShift(read, { spot, strike, sigmaMin, minutesLeft, strikeTy
   if (!read?.horizons || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0)) return 0;
   const since = Math.max(0, (now - (read.at ?? now)) / 60000);
   const move = microOffset(read, since + Math.min(5, minutesLeft)) - microOffset(read, since);
-  if (!move) return 0;
-  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
-  const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);
-  return clamp(/^less/.test(strikeType || '') ? -shift : shift, -MICRO_CALL_CAP, MICRO_CALL_CAP);
-}
-function erf(x) { // Abramowitz-Stegun 7.1.26
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
+  return oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType }, MICRO_CALL_CAP);
 }

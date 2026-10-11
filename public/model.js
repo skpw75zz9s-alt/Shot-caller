@@ -9,6 +9,15 @@ export function normCdf(x) {
   return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
 
+// How a predicted move (dollars, by the close) changes P(YES): the chance of finishing above the target with the move
+// minus without it, at this volatility and time left. Flipped for "less than" markets, capped at +-cap. Every learned
+// nudge to the odds (micro model, tuned indicators, reversal checklist, guide forecast) goes through this.
+export function oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater' }, cap) {
+  if (!move || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0)) return 0;
+  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), d = normCdf((spot + move - strike) / sd) - normCdf((spot - strike) / sd);
+  return Math.min(cap, Math.max(-cap, /^less/.test(strikeType || '') ? -d : d));
+}
+
 // The volatility the model prices with: short-term EWMA vol, but never far below the 2-hour vol and
 // never below a floor. A few frozen minutes (thin overnight tape, stale ticks) would otherwise make
 // the bot ~100% sure of a $2 lead.
@@ -237,13 +246,6 @@ export function contractsFor(prob, price, settings = {}) {
   const cost = price + kalshiFee(price);
   const kelly = Math.max(0, (prob - cost) / (1 - cost)) * s.kellyFraction;
   return Math.max(1, Math.floor(Math.min(kelly * s.bankroll, s.maxStake) / cost));
-}
-
-// P&L per contract for a settled call.
-export function settlePnl(call, result) {
-  const fee = kalshiFee(call.price);
-  const won = call.side.toLowerCase() === String(result).toLowerCase();
-  return { won, pnl: ((won ? 1 : 0) - call.price - fee) * call.contracts };
 }
 
 // Most you can pay for a side with win probability p and still clear minEdge after fees.

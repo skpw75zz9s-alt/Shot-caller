@@ -1,4 +1,4 @@
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, feeRates, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling } from './indicators.js';
@@ -1156,7 +1156,7 @@ function trackPredictions(snap, live, now) {
       const c = candlesNow(live, snap, now).candles[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);
-        // graded on the expected path (eo/ec), not the random scenario the ghost candle draws
+        // graded on the expected path (eo/ec): the same body the ghost candle draws
         if (e) Object.assign(e, { o: c.eo, c: c.ec }); else { state.pcLog.unshift({ t: next, o: c.eo, c: c.ec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }

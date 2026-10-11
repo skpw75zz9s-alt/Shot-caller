@@ -7,7 +7,7 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 > **Signals first.** Out of the box it never places orders: you trade yourself. The optional **Auto-trader** (v7) can trade the bot's calls, starting in Test mode with pretend money; real-money Live mode stays locked until Test has run clean. Linking a Kalshi account only reads your trades unless you turn Live on.
 > No model reliably beats these markets. Watch the paper P&L in the History tab before you risk real money.
 
-## The app (v6)
+## The app
 
 Six tabs along the bottom:
 
@@ -268,6 +268,36 @@ Security:
 - **Fills** are read in full (every page) and on the right side. Newer fills give the side in `outcome_side`. Their `side` field can say "bid"/"ask", which older versions read as YES. Every trade records the exact fee Kalshi charged (`fee_cost`) instead of an estimate.
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
+
+## Version notes (newest first)
+
+### The cone: the market's most predictable outcome (v12.2)
+
+The forecast cone used to be a plain funnel around the current price, sized by volatility, and it ignored everything the bot reads. Now it scans the market for where BTC is most likely to be (`public/predict.js` `marketCone`):
+- **Centre:** the expected path, the same market read the prediction candles follow: the prediction lines (bot, Kalshi's implied close, the 5 exchanges' trend, the prediction engine), the flip forecast and the micro model.
+- **Width:** the volatility the bot prices with (learned by time of week, corrected every second), blended with how far the last 30 real candles actually moved. That's multiplied by the cone's own calibration factor.
+- **Skew:** the last hour's upside vs downside moves. When drops have been sharper than rallies, the downside of the cone is wider, and the reverse. It's kept within 0.7×–1.4×.
+- **Self-calibrating:** every round, the cone's close band with 5 minutes left is checked against where BTC really closed. The width factor is set so the 90% band holds about 90% of closes; it's taken from the actual misses and shrunk toward 1 until 20+ rounds.
+- **The most predictable outcome**, in the line under the chart:
+  - the most likely close zone (the 50% band) and the 90% band
+  - which side is wider, and why
+  - the chance of finishing above the target
+  - the cone's record: how often each band held, and whether its above-the-target chance has scored better than Kalshi's own price at the same moment (Brier)
+
+### Prediction candles (v10.1; read from the market since v12.1)
+
+In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`). Since v12.1 they draw **exactly what the bot expects, with no random noise**. From v10.2 to v12.0 each ghost was one random scenario around the forecast, so its ups and downs were dice rolls.
+- **Bodies: the expected path, minute by minute.** It blends the prediction lines, weighted toward whichever has missed least at past closes (1 / miss²; lines without 5 graded rounds count as average):
+  - **Bot:** the bot's own drift.
+  - **Kalshi:** the close Kalshi's price implies.
+  - **5 exch:** the exchanges' trend.
+  - **Engine (new):** the close the prediction engine's P(UP) implies.
+
+  The flip forecast then bends it (today's momentum carried forward, turning where the market looks ripe to flip), and so does the micro model's proven 1–5 minute read. When the read leans up, the candles go up; when it's unsure, the bodies are small. They don't invent moves.
+- **Wicks: how the market has been trading.** They're the average upper and lower wicks of the last 30 real candles. For example, long lower wicks lately (buyers absorbing dips) give the ghosts long lower wicks. They also include any turn the expected path makes inside the minute.
+- **Graded every minute:** each minute's candle, as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". The prediction lines are graded at each close, the Engine line included.
+- Turn them off in Chart tools & indicators (**Prediction candles**).
+- **⟲ LIVE** now shows only when the live candle itself has scrolled off screen. Tapping it brings the live candle back with the minutes to the close in view, keeping your zoom.
 
 ### The prediction engine and the 90% question (v12.0)
 
@@ -575,34 +605,6 @@ The prediction candles now try to catch the drops and the bounces (`public/flip.
   - The line under the chart shows the hit rate next to how often a random minute passes the same test.
   - After 20 graded calls, the flip shape's strength follows the record: hit rate ÷ random rate, between 0.3× and 1.3×. So it fades if it isn't beating chance.
 - Turn it off in Chart tools & indicators (**Flip watch**).
-
-### The cone: the market's most predictable outcome (v12.2)
-
-The forecast cone used to be a plain funnel around the current price, sized by volatility, and it ignored everything the bot reads. Now it scans the market for where BTC is most likely to be (`public/predict.js` `marketCone`):
-- **Centre:** the expected path, the same market read the prediction candles follow: the prediction lines (bot, Kalshi's implied close, the 5 exchanges' trend, the prediction engine), the flip forecast and the micro model.
-- **Width:** the volatility the bot prices with (learned by time of week, corrected every second), blended with how far the last 30 real candles actually moved. That's multiplied by the cone's own calibration factor.
-- **Skew:** the last hour's upside vs downside moves. When drops have been sharper than rallies, the downside of the cone is wider, and the reverse. It's kept within 0.7×–1.4×.
-- **Self-calibrating:** every round, the cone's close band with 5 minutes left is checked against where BTC really closed. The width factor is set so the 90% band holds about 90% of closes; it's taken from the actual misses and shrunk toward 1 until 20+ rounds.
-- **The most predictable outcome**, in the line under the chart:
-  - the most likely close zone (the 50% band) and the 90% band
-  - which side is wider, and why
-  - the chance of finishing above the target
-  - the cone's record: how often each band held, and whether its above-the-target chance has scored better than Kalshi's own price at the same moment (Brier)
-
-### Prediction candles (v10.1; read from the market since v12.1)
-
-In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`). Since v12.1 they draw **exactly what the bot expects, with no random noise**. From v10.2 to v12.0 each ghost was one random scenario around the forecast, so its ups and downs were dice rolls.
-- **Bodies: the expected path, minute by minute.** It blends the prediction lines, weighted toward whichever has missed least at past closes (1 / miss²; lines without 5 graded rounds count as average):
-  - **Bot:** the bot's own drift.
-  - **Kalshi:** the close Kalshi's price implies.
-  - **5 exch:** the exchanges' trend.
-  - **Engine (new):** the close the prediction engine's P(UP) implies.
-
-  The flip forecast then bends it (today's momentum carried forward, turning where the market looks ripe to flip), and so does the micro model's proven 1–5 minute read. When the read leans up, the candles go up; when it's unsure, the bodies are small. They don't invent moves.
-- **Wicks: how the market has been trading.** They're the average upper and lower wicks of the last 30 real candles. For example, long lower wicks lately (buyers absorbing dips) give the ghosts long lower wicks. They also include any turn the expected path makes inside the minute.
-- **Graded every minute:** each minute's candle, as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". The prediction lines are graded at each close, the Engine line included.
-- Turn them off in Chart tools & indicators (**Prediction candles**).
-- **⟲ LIVE** now shows only when the live candle itself has scrolled off screen. Tapping it brings the live candle back with the minutes to the close in view, keeping your zoom.
 
 ### Split screen (v9.6; computers only since v9.7)
 

@@ -86,19 +86,6 @@ export function floorCeiling(candles, openTime) {
   return { floor: Math.min(...w.map((c) => c.l)), ceiling: Math.max(...w.map((c) => c.h)) };
 }
 
-// Where BTC is likely to be at each minute until the close, by the bot's own volatility: the middle 50% and 90%
-// of outcomes (z = 0.674 and 1.645). The cone narrows to nothing at "now" and widens toward the close.
-// Points on whole minutes (the candles' own times), starting at the live candle with no spread: points at
-// "now + n minutes" fell between candles and changed every redraw, which made the chart jump back in time
-export function forecastCone(spot, sigmaMin, now, close, step = 60000) {
-  if (!spot || !sigmaMin || !(close > now)) return [];
-  const at = (t) => { const sd = spot * sigmaMin * Math.sqrt(Math.max(0, t - now) / 60000); return { t, lo50: spot - 0.674 * sd, hi50: spot + 0.674 * sd, lo90: spot - 1.645 * sd, hi90: spot + 1.645 * sd }; };
-  const out = [{ ...at(now), t: Math.floor(now / step) * step }];
-  for (let t = Math.floor(now / step) * step + step; t < close; t += step) out.push(at(t));
-  out.push(at(close));
-  return out;
-}
-
 // Chart timeframes: what to fetch from Coinbase (granularity in seconds) and how many to combine
 export const TIMEFRAMES = {
   round: { label: 'Round', gran: 60, combine: 1 },

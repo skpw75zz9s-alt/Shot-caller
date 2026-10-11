@@ -95,12 +95,6 @@ export function buyDepth(book, side, limit) {
   for (const [p, q] of bids) { const ask = Math.round((1 - p) * 100) / 100; if (best == null || ask < best) best = ask; if (ask <= limit + 1e-9) { count += q; levels++; } }
   return { best, count, levels };
 }
-// Best bid and contracts that would buy `side` from you at or above `floor`
-export function sellDepth(book, side, floor) {
-  let best = null, count = 0;
-  for (const [p, q] of side === 'YES' ? book.yes : book.no) { if (best == null || p > best) best = p; if (p >= floor - 1e-9) count += q; }
-  return { best, count };
-}
 
 // How many contracts to buy: within the per-trade limit, the room left under the daily stop and the open cap, what
 // the book can fill at or under the max price, and the cash (fee included, with a cushion) after open orders' holds

@@ -24,6 +24,7 @@
 // No parameter is tuned to the data, so the whole history is a fair test.
 import { macd, rsiSeries } from './indicators.js';
 import { swings } from './structure.js';
+import { oddsShift } from './model.js';
 
 export const REV = { lookback: 40, sweepWithin: 3, mssWithin: 4, retestWithin: 4, volMult: 1.5, bodyMax: 0.5, oiDrop: -0.005, buffer: 0.3, cost: 0.0007, maxHold: 24 * 60, need: 200 };
 export const POINTS = { sweep: 3, mss: 3, rsiDiv: 2, volume: 1, vwap: 1, oi: 1 };
@@ -140,14 +141,7 @@ export function reversalShift(now, study, { spot, strike, sigmaMin, minutesLeft,
   const b = now?.best, s = b ? study?.[b.band] : null;
   if (!b || b.band === 'insufficient' || !bandProven(s) || now.at !== openTime || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0) || !(now.sd15 > 0)) return 0;
   const move = (b.dir === 'up' ? 1 : -1) * s.mean15 * (s.n / (s.n + 100)) * now.sd15 * spot * Math.min(1, minutesLeft / 15);
-  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
-  const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);
-  return Math.min(0.04, Math.max(-0.04, /^less/.test(strikeType || '') ? -shift : shift));
-}
-function erf(x) { // Abramowitz-Stegun 7.1.26
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
+  return oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType }, 0.04);
 }
 
 // ---- the guide's flip strategy, backtested ----

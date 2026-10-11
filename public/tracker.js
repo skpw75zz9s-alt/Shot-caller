@@ -4,7 +4,6 @@
 // and when Kalshi settles the window it turns that into a report card.
 import { exitSignal, kalshiFee } from './model.js';
 import { flipSigns } from './candles.js';
-import { confBucket } from './analysis.js';
 
 const SAMPLE_MS = 5000;
 const STAKE = 10; // paper P&L is reported per $10 call
@@ -99,38 +98,3 @@ export function pruneWindows(tr, now = Date.now()) {
   for (const [k, w] of Object.entries(tr.windows)) if (w.closeTime < now - 2 * 3600000) delete tr.windows[k];
 }
 
-// Totals across report cards.
-export function summarize(reports) {
-  if (!reports.length) return null;
-  const n = reports.length;
-  const mean = (k) => reports.reduce((a, r) => a + (r[k] ?? 0), 0) / n;
-  return {
-    windows: n, avgWinnerOdds: mean('avgWinnerOdds'), timeRight: mean('timeRight'),
-    calls: reports.reduce((a, r) => a + r.calls, 0), paperUsd: reports.reduce((a, r) => a + r.paperUsd, 0),
-    byConfidence: callsByConfidence(reports),
-  };
-}
-
-// Follow-the-bot results grouped by the confidence each call had when it was made.
-export function callsByConfidence(reports) {
-  const out = {};
-  for (const t of reports.flatMap((r) => r.trades || [])) {
-    if (t.conf == null) continue;
-    const g = confBucket(t.conf);
-    const b = (out[g] ||= { calls: 0, wins: 0, usd: 0 });
-    b.calls++;
-    if (t.pts > 0) b.wins++;
-    b.usd += (t.pts * 10) / t.entry;
-  }
-  return out;
-}
-
-// Prefer whichever copy of a window's report watched more of it (server vs this phone).
-export function mergeReports(a, b) {
-  const by = new Map();
-  for (const r of [...a, ...b]) {
-    const cur = by.get(r.ticker);
-    if (!cur || (r.coverage ?? 0) > (cur.coverage ?? 0)) by.set(r.ticker, r);
-  }
-  return [...by.values()].sort((x, y) => y.closeTime - x.closeTime);
-}

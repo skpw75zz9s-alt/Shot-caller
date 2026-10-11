@@ -91,7 +91,6 @@ export function predictionRecord(log) {
   const avg = (k) => { const xs = done.filter((e) => e[k] != null).map((e) => Math.abs(e[k] - e.actual)); return xs.length ? { miss: xs.reduce((a, b) => a + b, 0) / xs.length, n: xs.length } : null; };
   return { rounds: done.length, bot: avg('bot'), kalshi: avg('kalshi'), exch: avg('exch'), engine: avg('engine'), still: avg('spot') };
 }
-export { normCdf };
 
 // ---------- prediction candles: the minutes from now to the close, drawn as ghost candles ----------
 // The expected path is a blend of the prediction lines, each weighted by how close it has come at past closes
@@ -122,7 +121,6 @@ const valueAt = (pts, t) => { // the line's value at time t (straight between it
 //           expected path makes inside the minute.
 // eo/ec (the body) is what gets graded every minute.
 const STEP = 5000;
-export const RANGE_FIX = 1.25; // (kept for older callers)
 // The volatility of the last 30 complete one-minute candles (average range / 1.6, the random-walk ratio), kept within
 // half to double the model's
 export function candleSigma(bars, sigmaMin, now) {

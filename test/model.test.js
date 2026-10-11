@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, kalshiFee, normCdf, probAbove, quote, realizedVol, settlePnl, settleVariance } from '../public/model.js';
+import { evaluate, kalshiFee, normCdf, probAbove, quote, realizedVol, settleVariance } from '../public/model.js';
 
 const close = (min, now = 0) => new Date(now + min * 60000).toISOString();
 
@@ -71,12 +71,6 @@ test('between strikes use both bounds', () => {
   assert.ok(ev.pYes > 0.3 && ev.pYes < 0.9);
 });
 
-test('settlePnl', () => {
-  assert.deepEqual(settlePnl({ side: 'YES', price: 0.5, contracts: 10 }, 'yes'), { won: true, pnl: 4.8 });
-  const loss = settlePnl({ side: 'NO', price: 0.5, contracts: 10 }, 'yes');
-  assert.equal(loss.won, false);
-  assert.ok(Math.abs(loss.pnl + 5.2) < 1e-9);
-});
 
 test('effectiveVol floors frozen tapes so a $2 lead is not certainty', async () => {
   const { effectiveVol } = await import('../public/model.js');

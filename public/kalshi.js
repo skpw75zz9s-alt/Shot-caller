@@ -146,19 +146,6 @@ export function parseSettlement(s) {
     fees: fee == null || Number.isNaN(fee) ? null : fee, at: Date.parse(s.settled_time) || null };
 }
 
-// GET /portfolio/orders -> { id, clientId, ticker, status, filled, remaining, cost, fees, avgPrice (dollars per contract) }
-export function parseOrder(o) {
-  const filled = num(o.fill_count_fp) ?? num(o.fill_count);
-  const remaining = num(o.remaining_count_fp) ?? num(o.remaining_count);
-  const tc = dollarsOf(o, 'taker_fill_cost'), mc = dollarsOf(o, 'maker_fill_cost');
-  const tf = dollarsOf(o, 'taker_fees'), mf = dollarsOf(o, 'maker_fees');
-  const cost0 = tc == null && mc == null ? null : (tc ?? 0) + (mc ?? 0);
-  const r4 = (v) => Math.round(v * 10000) / 10000;
-  const fees = tf == null && mf == null ? null : r4((tf ?? 0) + (mf ?? 0)), cost = cost0 == null ? null : r4(cost0);
-  return { id: o.order_id ?? null, clientId: o.client_order_id ?? null, ticker: String(o.ticker || ''), status: o.status ? String(o.status).toLowerCase() : null,
-    filled, remaining, cost, fees, avgPrice: filled > 0 && cost != null ? Math.round((cost / filled) * 10000) / 10000 : null };
-}
-
 // Compare the app's Kalshi positions with Kalshi's own list. Kalshi wins. Returns the corrections to make.
 // Positions the app added after `asOf` (newer than Kalshi's answer) are left alone.
 export function reconcilePositions(app, kalshi, { series, asOf = Date.now() } = {}) {

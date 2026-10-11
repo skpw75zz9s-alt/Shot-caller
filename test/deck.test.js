@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregate, bollinger, ema, floorCeiling, forecastCone, macd, rma, rsiSeries, vwap } from '../public/indicators.js';
-import { addTrade, flowStats, newFlow, pressureUpdate, takerSide } from '../public/flow.js';
+import { aggregate, bollinger, ema, floorCeiling, macd, rma, rsiSeries, vwap } from '../public/indicators.js';
+import { addTrade, flowStats, newFlow, pressureUpdate } from '../public/flow.js';
 import { ALERT_EVENTS, alertPrefs, routeAlert, sustained } from '../public/alerts.js';
 
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -37,15 +37,9 @@ test('timeframes, floor/ceiling and the forecast cone', () => {
   assert.equal(five.length, 2);
   assert.deepEqual(five[0], { t: 0, o: 0, h: 5, l: -1, c: 4.5, v: 5 });
   assert.deepEqual(floorCeiling(one, 5 * 60000), { floor: 4, ceiling: 10 });
-  const cone = forecastCone(100000, 0.0002, 0, 4 * 60000);
-  assert.equal(cone.length, 5);
-  assert.equal(cone[0].hi90, 100000);
-  assert.ok(near(cone[4].hi90 - 100000, 1.645 * 100000 * 0.0002 * 2), 'sd grows with sqrt(time)');
-  assert.ok(cone[4].hi50 < cone[4].hi90);
 });
 
 test('order flow: aggressor side, round totals reset, whales, sustained pressure flips', () => {
-  assert.equal(takerSide('sell'), 'buy', 'a resting sell got lifted: buyer was the aggressor');
   const f = newFlow();
   addTrade(f, { t: 1000, price: 100000, size: 0.5, side: 'buy' }, { round: 1 });
   const w = addTrade(f, { t: 2000, price: 100000, size: 2, side: 'sell' }, { round: 1, whaleMin: 100000 });
