@@ -116,3 +116,44 @@ test('the cone and prediction lines sit on whole minutes, so redraws never reshu
   const times = (now) => forecastCone(100000, 0.0008, now, until).map((c) => c.t).join();
   assert.equal(times(Date.UTC(2026, 0, 1, 12, 7, 5)), times(Date.UTC(2026, 0, 1, 12, 7, 55)));
 });
+
+// ---------- v12.2 the market cone ----------
+import { coneRecord, coneSkew, marketCone, splitAbove } from '../public/predict.js';
+import { normCdf as ncdf } from '../public/model.js';
+test('the cone centres on the market read, not the price, and keeps its points on whole minutes', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 3, 30), close = Date.UTC(2026, 0, 1, 12, 15);
+  const path = (t) => 100000 + 10 * (t - now) / 60000; // the read: +$10 a minute
+  const { pts, summary } = marketCone({ path, spot: 100000, sigmaMin: 0.0008, now, close, strike: 100000 });
+  for (const p of pts.slice(0, -1)) assert.equal(p.t % 60000, 0);
+  assert.equal(pts.at(-1).t, close);
+  const end = pts.at(-1);
+  assert.ok(Math.abs(end.mid - path(close)) < 1e-6 && end.hi90 > end.hi50 && end.hi50 > end.mid && end.mid > end.lo50 && end.lo50 > end.lo90);
+  assert.ok(summary.pAbove > 0.5, 'leaning up: more likely above the target than not');
+  assert.equal(marketCone({ path, spot: 100000, sigmaMin: 0.0008, now, close, strike: 100000, strikeType: 'less' }).summary.pYes, 1 - summary.pAbove);
+  // the calibration factor widens it
+  const wide = marketCone({ path, spot: 100000, sigmaMin: 0.0008, now, close, fix: 1.5 }).pts.at(-1);
+  assert.ok(Math.abs((wide.hi90 - wide.mid) / (end.hi90 - end.mid) - 1.5) < 1e-9);
+});
+test('the cone leans the way the market has been moving: sharper drops widen the downside', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0), bars = [];
+  let p = 1e5;
+  for (let i = 60; i > 0; i--) { const r = i % 3 === 0 ? -0.0016 : 0.0008; const o = p; p *= Math.exp(r); bars.push({ t: now - i * 60000, o, h: Math.max(o, p), l: Math.min(o, p), c: p }); }
+  const sk = coneSkew(bars, now);
+  assert.ok(sk.dn > sk.up, JSON.stringify(sk));
+  const end = marketCone({ spot: p, sigmaMin: 0.0008, now, close: now + 600000, bars }).pts.at(-1);
+  assert.ok(end.mid - end.lo90 > end.hi90 - end.mid);
+});
+test('split normal: symmetric is the normal; skew moves the odds', () => {
+  assert.ok(Math.abs(splitAbove(100, 110, 10, 10) - (1 - ncdf(-1))) < 1e-9);
+  assert.ok(Math.abs(splitAbove(120, 110, 10, 10) - (1 - ncdf(1))) < 1e-9);
+  assert.ok(splitAbove(110, 110, 20, 10) > 0.5, 'more room above: above the centre is more likely');
+});
+test('the cone\'s record: band coverage, recalibration, and its odds vs Kalshi\'s', () => {
+  // misses twice as wide as the cone said: it should widen
+  const log = Array.from({ length: 60 }, (_, i) => { const z = ((i % 20) - 9.5) / 6; return { mid: 100, a: 10, b: 10, actual: 100 + 2 * 10 * z, strike: 100, pAbove: 0.5, kAbove: 0.5 }; });
+  const r = coneRecord(log);
+  assert.equal(r.n, 60); assert.ok(r.in90 < 0.9 && r.fix > 1.2, JSON.stringify(r));
+  assert.equal(coneRecord(log.slice(0, 5)).fix, 1, 'too few rounds: no change');
+  assert.ok(Math.abs(r.brierSame - 0.25) < 1e-9 && Math.abs(r.brierKalshi - 0.25) < 1e-9);
+  assert.deepEqual(coneRecord([]), { n: 0, fix: 1 });
+});

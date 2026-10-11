@@ -140,12 +140,17 @@ export function candleWicks(bars, now, sigmaMin = 0.0008) {
 }
 // flip (public/flip.js flipForecast): bends the expected path to carry today's momentum and turn where a flip looks ripe
 // micro (public/micro.js microRead): the small details' learned push over the next 5 minutes (zero until proven)
+// The expected path (price at time t): the weighted prediction lines, bent by the flip forecast and the micro model.
+// The candles' bodies and the cone's centre both follow it.
+export function expectedPath({ lines, spot, now, weights = null, flip = null, micro = null }) {
+  const w = weights || blendWeights(null);
+  const blend = (t) => { let s = 0, ws = 0; for (const l of lines || []) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
+  const microAt = micro?.at ?? now;
+  return (t) => blend(t) + flipOffset(flip, (t - now) / 60000) + microOffset(micro, (t - microAt) / 60000) - microOffset(micro, (now - microAt) / 60000);
+}
 export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null, flip = null, micro = null }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
-  const w = weights || blendWeights(null);
-  const blend = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
-  const microAt = micro?.at ?? now;
-  const path = (t) => blend(t) + flipOffset(flip, (t - now) / 60000) + microOffset(micro, (t - microAt) / 60000) - microOffset(micro, (now - microAt) / 60000);
+  const path = expectedPath({ lines, spot, now, weights, flip, micro });
   const wk = candleWicks(bars, now, sigmaMin);
   const out = [];
   for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) {
@@ -157,6 +162,65 @@ export function predictionCandles({ lines, spot, sigmaMin, now, close, weights =
   }
   return out;
 }
+// ---------- the cone: the market's most predictable outcome, calibrated on its own record ----------
+// Not a plain funnel around the price any more (v12.2). It scans what the bot reads and asks where BTC is most likely
+// to be at each minute:
+//   Centre    the expected path (prediction lines + engine + flip forecast + micro model), not the current price
+//   Width     the volatility the bot prices with (learned by time of week, corrected every second), blended with how
+//             far the last 30 real candles actually moved (geometric mean), x the cone's own calibration factor
+//   Skew      the last hour's upside vs downside moves (semi-deviations): when drops have been sharper than rallies the
+//             downside of the cone is wider (and the reverse), kept within 0.7x-1.4x
+//   Calibration  every round the cone's close band (with 5 minutes left) is checked against where BTC really closed;
+//             its width factor is set so the 90% band holds ~90% of closes (from the actual misses, shrunk toward 1
+//             until 20+ rounds)
+// The summary is the most predictable outcome: the most likely close zone (the 50% band), the 90% band, and the
+// chance of finishing above the target, graded against Kalshi's own price at the same moment.
+export function coneSkew(bars, now) {
+  const done = (bars || []).filter((b) => b.t + 60000 <= now).slice(-61);
+  if (done.length < 30) return { up: 1, dn: 1 };
+  let su = 0, sd = 0, n = 0;
+  for (let i = 1; i < done.length; i++) { const r = Math.log(done[i].c / done[i - 1].c); if (r > 0) su += r * r; else sd += r * r; n++; }
+  const up = Math.sqrt((2 * su) / n), dn = Math.sqrt((2 * sd) / n), mean = (up + dn) / 2;
+  if (!(mean > 0)) return { up: 1, dn: 1 };
+  const k = (x) => Math.min(1.4, Math.max(0.7, x / mean));
+  return { up: k(up), dn: k(dn) };
+}
+// P(close > K) for a split normal (centre m, upside sd a, downside sd b)
+export function splitAbove(K, m, a, b) {
+  if (!(a > 0) || !(b > 0)) return K < m ? 1 : 0;
+  return K >= m ? (2 * a / (a + b)) * (1 - normCdf((K - m) / a)) : 1 - (2 * b / (a + b)) * normCdf((K - m) / b);
+}
+export function marketCone({ path, spot, sigmaMin, now, close, bars = null, strike = null, strikeType = 'greater', fix = 1, step = 60000 }) {
+  if (!spot || !(sigmaMin > 0) || !(close > now)) return { pts: [], summary: null };
+  const center = path || (() => spot), real = candleSigma(bars, sigmaMin, now), sig = Math.sqrt(sigmaMin * real) * (fix > 0 ? fix : 1), sk = coneSkew(bars, now);
+  const at = (t) => {
+    const m = center(t), sd = spot * sig * Math.sqrt(Math.max(0, t - now) / 60000), a = sd * sk.up, b = sd * sk.dn;
+    return { t, mid: m, hi50: m + 0.674 * a, lo50: m - 0.674 * b, hi90: m + 1.645 * a, lo90: m - 1.645 * b, a, b };
+  };
+  const pts = [{ ...at(now), t: Math.floor(now / step) * step }];
+  for (let t = Math.floor(now / step) * step + step; t < close; t += step) pts.push(at(t));
+  const end = at(close); pts.push(end);
+  const pUp = strike > 0 ? splitAbove(strike, end.mid, end.a, end.b) : null;
+  return { pts, summary: { t: close, mid: end.mid, lo50: end.lo50, hi50: end.hi50, lo90: end.lo90, hi90: end.hi90, a: end.a, b: end.b, skew: sk, sig, fix,
+    pAbove: pUp, pYes: pUp == null ? null : /^less/.test(strikeType || '') ? 1 - pUp : pUp } };
+}
+// The cone's record: rounds whose close band (with 5 min left) has been graded. Coverage of the 50% and 90% bands,
+// the Brier score of its "above the target" chance vs Kalshi's price then, and the width factor that would have made
+// the 90% band hold 90%
+export function coneRecord(log) {
+  const done = (log || []).filter((e) => e.actual != null && e.a > 0 && e.b > 0);
+  if (!done.length) return { n: 0, fix: 1 };
+  const z = done.map((e) => (e.actual >= e.mid ? (e.actual - e.mid) / e.a : (e.mid - e.actual) / e.b)).sort((x, y) => x - y);
+  const in50 = z.filter((x) => x <= 0.674).length / z.length, in90 = z.filter((x) => x <= 1.645).length / z.length;
+  const q90 = z[Math.min(z.length - 1, Math.floor(0.9 * z.length))], raw = Math.min(1.8, Math.max(0.6, q90 / 1.645));
+  const fix = done.length >= 10 ? 1 + (raw - 1) * done.length / (done.length + 20) : 1;
+  const gr = done.filter((e) => e.pAbove != null && e.strike > 0), y = (e) => (e.actual > e.strike ? 1 : 0);
+  const brier = gr.length ? gr.reduce((a, e) => a + (e.pAbove - y(e)) ** 2, 0) / gr.length : null;
+  const km = gr.filter((e) => e.kAbove != null), brierK = km.length ? km.reduce((a, e) => a + (e.kAbove - y(e)) ** 2, 0) / km.length : null;
+  const brierC = km.length ? km.reduce((a, e) => a + (e.pAbove - y(e)) ** 2, 0) / km.length : null;
+  return { n: done.length, in50, in90, fix, brier, brierKalshi: brierK, brierSame: brierC, nKalshi: km.length };
+}
+
 // The record: how often a minute's candle (as predicted just before that minute began) got the direction right, and
 // its average miss at the minute's close vs "no change" (the minute's open)
 export function candleRecord(log) {

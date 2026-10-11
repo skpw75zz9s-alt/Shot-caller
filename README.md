@@ -576,6 +576,19 @@ The prediction candles now try to catch the drops and the bounces (`public/flip.
   - After 20 graded calls, the flip shape's strength follows the record: hit rate ÷ random rate, between 0.3× and 1.3×. So it fades if it isn't beating chance.
 - Turn it off in Chart tools & indicators (**Flip watch**).
 
+### The cone: the market's most predictable outcome (v12.2)
+
+The forecast cone used to be a plain funnel around the current price, sized by volatility, and it ignored everything the bot reads. Now it scans the market for where BTC is most likely to be (`public/predict.js` `marketCone`):
+- **Centre:** the expected path, the same market read the prediction candles follow: the prediction lines (bot, Kalshi's implied close, the 5 exchanges' trend, the prediction engine), the flip forecast and the micro model.
+- **Width:** the volatility the bot prices with (learned by time of week, corrected every second), blended with how far the last 30 real candles actually moved. That's multiplied by the cone's own calibration factor.
+- **Skew:** the last hour's upside vs downside moves. When drops have been sharper than rallies, the downside of the cone is wider, and the reverse. It's kept within 0.7×–1.4×.
+- **Self-calibrating:** every round, the cone's close band with 5 minutes left is checked against where BTC really closed. The width factor is set so the 90% band holds about 90% of closes; it's taken from the actual misses and shrunk toward 1 until 20+ rounds.
+- **The most predictable outcome**, in the line under the chart:
+  - the most likely close zone (the 50% band) and the 90% band
+  - which side is wider, and why
+  - the chance of finishing above the target
+  - the cone's record: how often each band held, and whether its above-the-target chance has scored better than Kalshi's own price at the same moment (Brier)
+
 ### Prediction candles (v10.1; read from the market since v12.1)
 
 In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`). Since v12.1 they draw **exactly what the bot expects, with no random noise**. From v10.2 to v12.0 each ghost was one random scenario around the forecast, so its ups and downs were dice rolls.

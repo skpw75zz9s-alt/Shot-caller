@@ -2,7 +2,7 @@
 // Lightweight Charts (public/tvchart.js).
 export const CHART_TOGGLES = [
   ['strike', 'Target (price to beat)', true], ['ema', 'EMA 9 / 21', true], ['rma', 'RMA 9 / 21', false], ['boll', 'Bollinger 20 ±2σ', true],
-  ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone to the close', true],
+  ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone: the most likely outcome (centred on the market read, skewed, self-calibrating)', true],
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
   ['beasts', 'Bull / bear trend + EMA crosses', true],
   ['predict', 'Prediction lines in the cone (Bot, Kalshi, 5 exchanges, Engine)', true],

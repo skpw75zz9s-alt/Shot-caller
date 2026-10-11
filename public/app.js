@@ -1,7 +1,7 @@
 import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, feeRates, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
-import { TIMEFRAMES, aggregate, floorCeiling, forecastCone } from './indicators.js';
+import { TIMEFRAMES, aggregate, floorCeiling } from './indicators.js';
 import { CHART_TOGGLES, chartDefaults, createImpact } from './chart.js';
 import { explainMove } from './why.js';
 import { createSplit } from './split.js';
@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { blendWeights, candleRecord, candleTurns, predictionCandles, predictionLines, predictionRecord } from './predict.js';
+import { blendWeights, candleRecord, candleTurns, coneRecord, expectedPath, marketCone, predictionCandles, predictionLines, predictionRecord } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -154,6 +154,7 @@ const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0
   ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
   callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
   flipLog: store.get('flipLog', []), // predicted turns (frozen a minute before), graded on whether a V really formed
+  coneLog: store.get('coneLog', []), // each round's cone at 5 min left (close band, chance above the target), graded at the close
   pcLog: store.get('pcLog', []), // each minute's prediction candle as it stood when the minute began, graded at its close
   predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
@@ -834,7 +835,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
+    cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
@@ -1099,11 +1100,16 @@ function flipNow(live, snap, now) {
     amp: flipRecord(state.flipLog, state.flipBase).amp, reversal: state.playbook?.reversal && now - state.playbook.reversal.at < 16 * 60000 ? state.playbook.reversal : null });
 }
 function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
-  if (!live) return { candles: [], turns: [], flip: null };
+  if (!live) return { candles: [], turns: [], flip: null, path: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
   const micro = state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null; // the server's micro model, when fresh
-  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip, micro });
-  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip };
+  const weights = blendWeights(predictionRecord(state.predLog));
+  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, bars: snap.bars, flip, micro });
+  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip, path: expectedPath({ lines, spot, now, weights, flip, micro }) };
+}
+// The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
+function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
+  return marketCone({ path, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: until, bars: snap.bars, strike: live.strike, strikeType: live.m.strike_type, fix: coneRecord(state.coneLog).fix });
 }
 // With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed
 // (the close of Coinbase's last 1-minute candle of the round), next to "no change" as the baseline
@@ -1115,8 +1121,25 @@ function trackPredictions(snap, live, now) {
       for (const l of lines) e[l.key] = l.end;
       state.predLog.unshift(e); if (state.predLog.length > 300) state.predLog.length = 300;
       store.set('predLog', state.predLog);
+      // the cone's close band and its chance above the target, next to Kalshi's price for the same thing
+      const cs = coneNow(live, snap, now, candlesNow(live, snap, now, lines).path).summary, q = live.ev.quote;
+      const mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
+      if (cs) {
+        state.coneLog.unshift({ ticker: live.m.ticker, closeTime: live.m.close_time, at: now, mid: cs.mid, a: cs.a, b: cs.b, strike: live.strike, pAbove: cs.pAbove, kAbove: mid == null ? null : /^less/.test(live.m.strike_type || '') ? 1 - mid : mid, actual: null });
+        if (state.coneLog.length > 300) state.coneLog.length = 300;
+        store.set('coneLog', state.coneLog);
+      }
     }
   }
+  let coneChanged = false;
+  for (const e of state.coneLog) {
+    if (e.actual != null) continue;
+    const close = Date.parse(e.closeTime);
+    if (now < close + 70000) continue;
+    const bar = snap.bars.find((b) => b.t === close - 60000);
+    if (bar) { e.actual = bar.c; coneChanged = true; } else if (now > close + 3 * 3600000) { e.gone = true; coneChanged = true; }
+  }
+  if (coneChanged) { state.coneLog = state.coneLog.filter((e) => !e.gone); store.set('coneLog', state.coneLog); }
   let changed = false;
   for (const e of state.predLog) {
     if (e.actual != null) continue;
@@ -1163,6 +1186,13 @@ function trackPredictions(snap, live, now) {
   setHTML($('flipInfo'), (f ? `<b>Flip watch:</b> ${f.v0 >= 0 ? 'rising' : 'falling'} ${Math.abs(f.v0) < 1 ? '(barely)' : `$${Math.abs(f.v0).toFixed(0)}/min`} · ${f.dir === 'up' ? 'bounce' : 'pullback'} odds <b>${Math.round(f.score * 100)}%</b>${f.parts.length ? `: ${f.parts.map((p) => esc(p.why)).join(' · ')}` : ': no turn signs'}. ` : '')
     + (fr.n ? `Turns called: caught <b>${fr.hits} of ${fr.n}</b> (${Math.round(fr.rate * 100)}%)${fr.base != null ? ` vs <b>${Math.round(fr.base * 100)}%</b> for a random minute` : ''}${fr.n >= 20 ? ` · strength ×${fr.amp.toFixed(2)}` : ''}`
       : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.'));
+  const cr = coneRecord(state.coneLog);
+  if (!live) state.coneSum = null;
+  else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, candlesNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s
+  const cs = state.coneSum, $$ = (x) => `$${Math.round(x).toLocaleString()}`;
+  setHTML($('coneRead'), (cs ? `Cone: most likely close <b>${$$(cs.lo50)}–${$$(cs.hi50)}</b> (50%) · 90%: ${$$(cs.lo90)}–${$$(cs.hi90)} · <b>${Math.round(cs.pAbove * 100)}%</b> chance of finishing above the target${Math.abs(cs.skew.up - cs.skew.dn) > 0.15 ? ` · ${cs.skew.dn > cs.skew.up ? 'downside' : 'upside'} wider (the last hour's ${cs.skew.dn > cs.skew.up ? 'drops' : 'rallies'} were sharper)` : ''}. ` : '')
+    + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
+      : 'The cone is graded each round: does the close land inside its 50% and 90% bands, and is its above-the-target chance better than Kalshi\'s price? It recalibrates its width from that record.'));
   const pr = candleRecord(state.pcLog);
   setHTML($('pcRecord'), pr.n ? `Prediction candles, graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change"`
     : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');
