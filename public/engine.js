@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, kalshiFee, momentum, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, momentum, orderFee, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
@@ -101,6 +101,7 @@ export const leanSide = (ev) =>
 
 // Edge for `side` priced with `volScale` × the bot's volatility, keeping only drift and rejection tilt
 // that work AGAINST the call (anything that helps it is dropped), so it can only be harder than the real edge.
+// Returns { edge, p }: the edge after the exact fee of the order the bot would place, and the side's win chance
 function edgeUnder(row, snap, s, side, volScale) {
   const dir = side === 'YES' ? 1 : -1;
   const drift = (snap.driftMin || 0) * s.momentumWeight;
@@ -109,8 +110,8 @@ function edgeUnder(row, snap, s, side, volScale) {
   const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg);
   const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
   if (p0 == null || ask == null) return null;
-  const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));
-  return (side === 'YES' ? pS : 1 - pS) - ask - kalshiFee(ask);
+  const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift)), p = side === 'YES' ? pS : 1 - pS;
+  return { edge: p - ask - orderFee(ask, p, s), p };
 }
 
 // Should this market fire a BUY THE LOW alert right now? Two gates, both tested for profit:
@@ -129,13 +130,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // Everything the bot knows about buying one side right now
   const assess = (side) => {
     const timing = entrySignal(snap.bars, side, now);
-    let stressEdge = null, robustEdge = null;
+    let stressEdge = null, robustEdge = null, worstP = null;
     if (snap.sigmaMin && snap.spot && ev.minutesLeft > 0) {
       const edges = [0.8, 1, 1.25].map((k) => edgeUnder(row, snap, s, side, k));
-      if (edges.every((e) => e != null)) { stressEdge = edges[2]; robustEdge = Math.min(...edges); }
+      if (edges.every((e) => e != null)) { stressEdge = edges[2].edge; const worst = edges.reduce((a, b) => (b.edge < a.edge ? b : a)); robustEdge = worst.edge; worstP = worst.p; }
     }
-    const price0 = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
-    const winProb = robustEdge != null && price0 != null ? Math.min(1, Math.max(0, robustEdge + price0 + kalshiFee(price0))) : null;
+    const winProb = worstP != null ? Math.min(1, Math.max(0, worstP)) : null; // the win chance at the worst of the three vol guesses
     const deep = deepDive({
       winProb, ev: ev.side === side ? ev : { ...ev, side, edge: (side === 'YES' ? ev.evYes : ev.evNo) ?? 0 }, side, rej: row.rej, timing,
       sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, driftMin: snap.driftMin, spot: snap.spot, strike: row.strike,
@@ -147,7 +147,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const hold = ev.open && deep && deep.score >= 70 ? holdOdds({ market: row.m, strike: row.strike, spot: snap.mSpot ?? snap.spot, sigmaMin: (row.sigma ?? snap.sigmaMin) * s.volMultiplier, minutesLeft: ev.minutesLeft, side, floor: s.holdFloor }) : null;
     if (deep && stab.score != null) deep.checks.push({ pts: 0, ok: stab.level === 'stable' ? true : stab.level === 'unstable' ? false : null, label: `Market ${stab.level} (stability ${stab.score}/100)${stab.parts[0] ? `: ${stab.parts[0].label.toLowerCase()}` : ''}` });
     if (hold != null) deep.checks.push({ pts: 0, ok: hold >= 0.8 ? true : hold < 0.6 ? false : null, label: `Confidence stays above ${Math.round(s.holdFloor * 100)} to the end in ${Math.round(hold * 100)}% of simulated paths` });
-    return { side, timing, deep, robustEdge, point, price, hold, score: deep?.score ?? -1 };
+    return { side, timing, deep, robustEdge, winProb, point, price, hold, score: deep?.score ?? -1 };
   };
   // Has the gap for `side` held for persistSec? (quoteLog keeps Kalshi asks and the bot's odds every ~2s)
   const persisted = (side, edgeNeed) => {
@@ -158,7 +158,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     return log.filter((e) => e.t >= since).every((e) => {
       const ask = side === 'YES' ? e.yesAsk : e.noAsk;
       const p = side === 'YES' ? e.p : 1 - e.p;
-      return ask != null && p != null && p - ask - kalshiFee(ask) >= edgeNeed - 1e-9;
+      return ask != null && p != null && p - ask - orderFee(ask, p, s) >= edgeNeed - 1e-9;
     });
   };
   // Smart exception (Aggressive): a cheap side whose gap is huge even at the worst vol guess is worth buying below the
@@ -235,7 +235,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
   const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
   // Max price: the most you can pay and still clear limitEdgeFrac × minEdge with vol 20% off either way
-  const limit = callSide && pick.robustEdge != null ? maxPay(pick.robustEdge + pick.price + kalshiFee(pick.price), s.minEdge * s.limitEdgeFrac) : null;
+  const limit = callSide && pick.winProb != null ? maxPay(pick.winProb, s.minEdge * s.limitEdgeFrac, s) : null;
   // Scale-in tiers: a call opens at the first tier its gap clears; each time the gap later clears the next
   // tier (with full confidence) it signals an add. Small early entries, bigger ones as the edge proves out.
   const st = s.scaleStep;

@@ -11,16 +11,19 @@ test('normCdf matches known values', () => {
 });
 
 test('probAbove is 50% at the money and moves with distance and time', () => {
-  assert.ok(Math.abs(probAbove(100000, 100000, 0.001, 10) - 0.5) < 1e-6);
+  // 50% at the money, up to the settlement average's tiny upward skew (an average of a random walk sits a hair above its median)
+  assert.ok(Math.abs(probAbove(100000, 100000, 0.001, 10) - 0.5) < 5e-5);
   assert.ok(probAbove(100100, 100000, 0.001, 10) > 0.6);
   assert.ok(probAbove(100100, 100000, 0.001, 1) > probAbove(100100, 100000, 0.001, 10));
   assert.equal(probAbove(100100, 100000, 0.001, 0), 1);
 });
 
-test('settleVariance shrinks for the averaging window and is continuous', () => {
-  assert.ok(Math.abs(settleVariance(1, 1) - 1 / 3) < 1e-12);
-  assert.ok(Math.abs(settleVariance(1, 0.999999) - 1 / 3) < 1e-5);
-  assert.equal(settleVariance(1, 0), 0);
+test('settleVariance: the 60 one-second prints\' average, exactly (discrete, so a touch above the continuous t - 2/3)', () => {
+  const s = 0.0008, disc = (61 * 121) / (6 * 3600); // the variance of an average of 60 evenly spaced prints: (N+1)(2N+1)/6N^2
+  assert.ok(Math.abs(settleVariance(s, 1) / (s * s) - disc) < 1e-5);
+  assert.ok(Math.abs(settleVariance(s, 5) / (s * s) - (4 + disc)) < 1e-4);
+  assert.ok(settleVariance(s, 0.5) < settleVariance(s, 1) && settleVariance(s, 0.5) > 0);
+  assert.equal(settleVariance(s, 0), 0);
 });
 
 test('realizedVol recovers a known volatility', () => {

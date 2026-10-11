@@ -19,8 +19,10 @@
 import { ema } from './indicators.js';
 import { prep, to15 } from './reversal.js';
 import { swings } from './structure.js';
-import { kalshiFee, maxPay, oddsShift } from './model.js';
+import { fee10, oddsShift, pnl10 } from './model.js';
 
+// the most worth paying for a $10 order at win chance p (the exact fee included)
+const maxPay10 = (p) => { for (let c = 99; c >= 1; c--) if (p - c / 100 - fee10(c / 100) >= -1e-9) return c / 100; return null; };
 export const GUIDE = { minTested: 30, shrink: 10, lowVolPct: 0.2, volWindow: 672, provenCalls: 300, provenZ: 2.5, cap: 0.04 };
 const M15 = 900000;
 const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -100,7 +102,7 @@ export function guideBacktest(bars) {
 export function guideReport(bt) {
   const { rows } = bt, calls = rows.filter((r) => r.call !== 'NO CALL');
   const won = (r) => (r.call === 'UP') === r.up;
-  const fee = kalshiFee(0.5), usd = (r) => 20 * ((won(r) ? 1 : 0) - 0.5 - fee); // $10 at 50c = 20 contracts
+  const usd = (r) => pnl10(0.5, won(r)); // $10 at 50c = 20 contracts, with the order's exact fee
   let eq = 0, peak = 0, dd = 0;
   for (const r of calls) { eq += usd(r); peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq); }
   const wins = calls.filter(won).length, acc = calls.length ? wins / calls.length : null;
@@ -136,7 +138,7 @@ export function guideNow(bars, cal, { now = Date.now(), quote = null, flow = nul
   let kalshi = null;
   if (quote && f.pUp != null) {
     const side = f.call === 'DOWN' ? 'NO' : 'YES', ask = side === 'YES' ? quote.yesAsk : quote.noAsk, p = side === 'YES' ? f.pUp : 1 - f.pUp;
-    if (ask != null && ask > 0 && ask < 1) kalshi = { side, ask, p, fee: kalshiFee(ask), edge: p - ask - kalshiFee(ask), maxPay: maxPay(p, 0) };
+    if (ask != null && ask > 0 && ask < 1) kalshi = { side, ask, p, fee: fee10(ask), edge: p - ask - fee10(ask), maxPay: maxPay10(p) }; // a $10 order's exact fee
   }
   return { at, expiry: at + M15, ...f, entry: e.close, evidence, signals: e.ev, atr: e.atr, kalshi, levels: { above: e.above, below: e.below }, ud: ud(e.sum) };
 }

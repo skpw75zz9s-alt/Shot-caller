@@ -228,7 +228,7 @@ export function marketCone({ path, spot, sigmaMin, now, close, bars = null, stri
   for (let t = Math.floor(now / step) * step + step; t < close; t += step) pts.push(at(t));
   const end = at(close); pts.push(end);
   // the chance of SETTLING above the target: Kalshi settles on the last minute's average, a little less spread out
-  const mins = (close - now) / 60000, k = mins > 0 ? Math.sqrt(settleVariance(1, mins) / mins) : 1;
+  const mins = (close - now) / 60000, k = mins > 0 && sig > 0 ? Math.sqrt(settleVariance(sig, mins) / (sig * sig * mins)) : 1;
   const pUp = strike > 0 ? splitAbove(strike, end.mid, end.a * k, end.b * k) : null;
   return { pts, summary: { t: close, mid: end.mid, lo50: end.lo50, hi50: end.hi50, lo90: end.lo90, hi90: end.hi90, a: end.a, b: end.b, skew: sk, sig, fix,
     pAbove: pUp, pYes: pUp == null ? null : /^less/.test(strikeType || '') ? 1 - pUp : pUp } };

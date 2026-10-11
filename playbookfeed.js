@@ -10,7 +10,7 @@ import { backtest, scorecard } from './public/playbook.js';
 import { structureRead } from './public/structure.js';
 import { bandStudy, flipBacktest, reversalNow, reversalShift } from './public/reversal.js';
 import { guideBacktest, guideNow, guideReport, guideShift } from './public/guide.js';
-import { kalshiFee, quote as quoteOf } from './public/model.js';
+import { fee10, pnl10, quote as quoteOf } from './public/model.js';
 import { PRED, fit, predictNow, predictorReport, predictorShift, series, walkForward } from './public/predictor.js';
 import { cmFit, cmLive, cmReport, cmWalkForward } from './public/candlemodel.js';
 
@@ -134,7 +134,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
       if (p) {
         const q = lastLive.quote, less = /^less/.test(lastLive.strikeType || '');
         // Kalshi: UP = YES on a "greater" market (NO on a "less" one); the edge after fee and 1c slippage
-        const side = (s) => { const buyYes = (s === 'UP') !== less, ask = buyYes ? q?.yesAsk : q?.noAsk, pr = s === 'UP' ? p.pUp : p.pDown; return ask > 0 && ask < 1 ? { contract: buyYes ? 'YES' : 'NO', ask, p: pr, fee: kalshiFee(ask), edge: pr - ask - kalshiFee(ask) - PRED.slip } : null; };
+        const side = (s) => { const buyYes = (s === 'UP') !== less, ask = buyYes ? q?.yesAsk : q?.noAsk, pr = s === 'UP' ? p.pUp : p.pDown; return ask > 0 && ask < 1 ? { contract: buyYes ? 'YES' : 'NO', ask, p: pr, fee: fee10(ask), edge: pr - ask - fee10(ask) - PRED.slip } : null; };
         p.kalshi = { UP: side('UP'), DOWN: side('DOWN') };
         p.closeTime = lastLive.closeTime; p.strike = lastLive.strike; p.price = price; p.at = now;
         p.invalidation = lastLive.strike; // the settlement reference: the call is losing on the wrong side of it
@@ -190,7 +190,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
         if (conf < t) continue;
         n++; const won = up === e.up; if (won) right++;
         const buyYes = up !== e.less, ask = buyYes ? e.yesAsk : e.noAsk;
-        if (ask > 0 && ask < 1) { priced++; usd += (10 / ask) * ((won ? 1 : 0) - ask - kalshiFee(ask) - PRED.slip); }
+        if (ask > 0 && ask < 1) { priced++; usd += pnl10(ask, won, PRED.slip); }
       }
       return { t, n, accuracy: n ? right / n : null, usd, priced };
     };
@@ -203,7 +203,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
       const yesWins = e.less ? !e.up : e.up, buyYes = (e.call === 'UP') !== e.less, won = buyYes === yesWins; // YES = above the target (or below it on a "less" market)
       if (won) wins++;
       const ask = buyYes ? e.yesAsk : e.noAsk;
-      if (ask > 0 && ask < 1) { priced++; usd += (10 / ask) * ((won ? 1 : 0) - ask - kalshiFee(ask)); }
+      if (ask > 0 && ask < 1) { priced++; usd += pnl10(ask, won); }
     }
     return { rounds: done.length, calls: calls.length, wins, accuracy: calls.length ? wins / calls.length : null, usd, priced, skipped: done.length - calls.length, last: guideLive.slice(-10).reverse() };
   }

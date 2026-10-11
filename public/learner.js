@@ -21,7 +21,7 @@ const BASIS_MIN = 10;
 export const newLearned = () => ({
   v: 1,
   vol: { s2: Array(SLOTS).fill(0), n: Array(SLOTS).fill(0), lastT: 0, minutes: 0, firstT: null },
-  cal: CAL_BINS.slice(0, -1).map(() => ({ n: 0, wins: 0, sumQ: 0 })),
+  cal: CAL_BINS.slice(0, -1).map(() => ({ n: 0, n2: 0, wins: 0, sumQ: 0 })),
   basis: [], windows: 0,
   pulse: newPulse(), // learning every second (public/pulse.js)
 });
@@ -101,12 +101,20 @@ export function learnWindow(L, samples, result) {
   if (result !== 'yes' && result !== 'no') return;
   const ps = samples.filter((p) => p != null);
   if (!ps.length) return;
-  const w = 1 / ps.length, fade = 0.9995 ** w; // slow fade: about a year of 15-minute windows
+  // each sample weighs 1/(samples this window), with a slow fade (about a year of 15-minute windows). A window's samples
+  // in one bin share its outcome, so they enter as ONE observation of their combined weight: n2 (the sum of squared
+  // observation weights, faded twice as fast) gives the exact standard error of the weighted win rate
+  const w = 1 / ps.length, add = new Map();
   for (const p of ps) {
-    const q = Math.max(p, 1 - p), won = (p >= 0.5) === (result === 'yes');
-    const b = L.cal[binOf(q)];
-    if (!b) continue;
-    b.n = b.n * fade + w; b.wins = b.wins * fade + (won ? w : 0); b.sumQ = b.sumQ * fade + q * w;
+    const q = Math.max(p, 1 - p), won = (p >= 0.5) === (result === 'yes'), k = binOf(q);
+    if (!L.cal[k]) continue;
+    const x = add.get(k) || { w: 0, wins: 0, q: 0 };
+    x.w += w; x.wins += won ? w : 0; x.q += q * w; add.set(k, x);
+  }
+  for (const [k, x] of add) {
+    const b = L.cal[k], fade = 0.9995 ** x.w;
+    b.n2 = (b.n2 ?? b.n) * fade * fade + x.w * x.w; // (older saves without n2 start from n: the old, cautious count)
+    b.n = b.n * fade + x.w; b.wins = b.wins * fade + x.wins; b.sumQ = b.sumQ * fade + x.q;
   }
   L.windows++;
 }
@@ -116,7 +124,8 @@ export function learnWindow(L, samples, result) {
 function binShift(b) {
   if (!b || b.n < CAL_MIN_N) return 0;
   const said = b.sumQ / b.n, d = b.wins / b.n - said;
-  const se = Math.sqrt(Math.max(said * (1 - said), 0.01) / b.n);
+  // the weighted win rate's standard error: sqrt(p(1-p) x sum of squared weights) / sum of weights
+  const se = Math.sqrt(Math.max(said * (1 - said), 0.01) * (b.n2 ?? b.n)) / b.n;
   const real = Math.max(0, Math.abs(d) - 2 * se);
   return real > 0 ? Math.sign(d) * Math.min(CAL_MAX, real) : 0;
 }

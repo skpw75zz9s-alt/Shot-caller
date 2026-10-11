@@ -60,10 +60,10 @@ test('pure noise is never proven; a real edge is, and calibration beats a 50% gu
 test('the scorecard: $10 a call at 50c plus Kalshi\'s fee, drawdown', () => {
   const rows = [{ call: 'UP', up: true, pUp: 0.6, y: 1 }, { call: 'DOWN', up: true, pUp: 0.4, y: 1 }, { call: 'NO CALL', reason: 'conflicting indicators', up: false, pUp: 0.5, y: 0 }];
   const r = guideReport({ rows });
-  const fee = kalshiFee(0.5);
+  const fee = kalshiFee(0.5, 20); // 20 contracts for $10 at 50c: the order's fee, rounded once
   assert.equal(r.calls, 2); assert.equal(r.wins, 1); assert.equal(r.accuracy, 0.5);
-  assert.ok(Math.abs(r.usd - (20 * (0.5 - fee) + 20 * (-0.5 - fee))) < 1e-9);
-  assert.ok(Math.abs(r.maxDD - 20 * (0.5 + fee)) < 1e-9);
+  assert.ok(Math.abs(r.usd - ((10 - fee) + (-10 - fee))) < 1e-9);
+  assert.ok(Math.abs(r.maxDD - (10 + fee)) < 1e-9);
   assert.deepEqual(r.skipped, { 'conflicting indicators': 1 });
 });
 
@@ -73,7 +73,7 @@ test('the live forecast compares the calibrated chance with Kalshi\'s price and 
   const now = B[k].t + 900000, bars = all.filter((b) => b.t < now);
   const g = guideNow(bars, c, { now, quote: { yesAsk: 0.55, noAsk: 0.47 } });
   assert.equal(g.call, 'UP'); assert.equal(g.expiry - g.at, 900000);
-  assert.equal(g.kalshi.side, 'YES'); assert.ok(Math.abs(g.kalshi.edge - (g.pUp - 0.55 - kalshiFee(0.55))) < 1e-12);
+  assert.equal(g.kalshi.side, 'YES'); assert.ok(Math.abs(g.kalshi.edge - (g.pUp - 0.55 - kalshiFee(0.55, 18) / 18)) < 1e-12, 'a $10 order (18 contracts) and its exact fee');
   assert.ok(g.evidence.some((x) => /^Trend:/.test(x)) && g.evidence.some((x) => /^Liquidity:/.test(x)));
 });
 

@@ -1,7 +1,7 @@
 // The bot's call record: every BUY THE LOW call it makes, graded when Kalshi settles the market.
 // Confidence is the bot's claimed win odds, so this is the honest test of accuracy: calls it gave
 // 85-90% should win about 85-90% of the time. Pure functions; app.js keeps the log in localStorage.
-import { kalshiFee } from './model.js';
+import { pnl10 } from './model.js';
 import { confBucket } from './analysis.js';
 
 const MAX = 500;
@@ -24,8 +24,8 @@ export function settleCalls(log, ticker, result) {
   return n;
 }
 
-// Per $10 call held to settlement, after Kalshi's fee
-const usd10 = (e, won) => (10 / e.price) * ((won ? 1 : 0) - e.price - kalshiFee(e.price));
+// Per $10 call held to settlement: whole contracts and Kalshi's exact fee on the order
+const usd10 = (e, won) => pnl10(e.price, won);
 
 export function callStats(log) {
   const graded = log.filter((e) => e.result === 'yes' || e.result === 'no');

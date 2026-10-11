@@ -271,6 +271,21 @@ Security:
 
 ## Version notes (newest first)
 
+### Exact to the last digit (v12.6)
+
+The last approximations in the bot's own math, removed:
+- **The settlement, exactly:** Kalshi settles on the average of its index's last 60 one-second prints.
+  - The prints still to come are correlated log-normal prices, and the exact mean and variance of their sum are computed for every price. The variance is calculated directly with `expm1`, so no digits cancel.
+  - The settlement is priced from a log-normal with exactly those moments; any remaining shape difference is far below a billionth. Prints already made in the last minute count at face value.
+  - The averaging is discrete: 60 prints give a variance of t − 1 + 0.3417 (×σ²), not the continuous t − 1 + 1/3. An average of a random walk is also skewed very slightly upward, so at the money the true chance is about 50.003%, not exactly 50%.
+  - Every odds nudge is now the settlement odds' own difference.
+  - Kalshi's implied close, the engine line and the cone use the same exact spread.
+- **Fees, exactly:** Kalshi rounds the fee once per order. Every buy edge now charges the exact fee of the order the bot would place (its Kelly-sized count), and exits use the position's own count. Every "$10 a call" result (records, scorecards, live records) uses whole contracts and the order's real fee. For example, $10 at 37¢ is 27 contracts and their single rounded fee.
+- **Calibration's standard error:** a round's samples in one probability bin share its outcome, so they count as one observation of their combined weight. Older rounds count at their faded weight, and the standard error comes from the sum of squared weights. Older saved data starts from the old, cautious count.
+- **Hold odds:** the grid cell straddling the confidence floor now keeps its exact fractional share, so the answer converges as the grid gets finer instead of wobbling. With a finer grid it's within ~0.0002 of the converged value.
+- `test/math.test.js` checks the settlement against a brute-force sum over all 60×60 print pairs (agreement to 1e-12), and also checks the fee rounding and the calibration weights.
+- **What exact math can't remove:** the model's assumptions about the market. These are a random walk at a learned volatility (real BTC has jumps), Kalshi's index vs Coinbase (learned from settlements), and zero drift. The live record measures how well those hold.
+
 ### The candle model (v12.5)
 
 The prediction candles, deep-dived. **100x more accurate isn't possible.** That would mean missing a minute's close by 1% of what "no change" misses, and one-minute BTC moves are mostly noise. But a candle has two parts that behave very differently, and each now gets the most the data allows (`public/candlemodel.js`, run on the server):

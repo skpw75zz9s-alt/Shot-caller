@@ -20,7 +20,7 @@
 //                  touch the bot's calls (by its difference from the distance odds, capped at +-4 points).
 import { ema, rsiSeries, aggregate } from './indicators.js';
 import { swings } from './structure.js';
-import { kalshiFee, normCdf as ncdf } from './model.js';
+import { fee10, normCdf as ncdf, pnl10 } from './model.js';
 
 export const PRED = { checkpoints: [15, 10, 5, 2], l2: 100, minTrainDays: 3, thresholds: [0.55, 0.6, 0.7, 0.8, 0.9], slip: 0.01, provenZ: 2.5, provenRounds: 1000, cap: 0.04 };
 export const FACTORS = ['trend1h', 'ema15', 'vwap', 'rsi5', 'rsiRising', 'mom5', 'mom15', 'signedVol', 'volTrend', 'sweep', 'structure'];
@@ -132,7 +132,7 @@ export function walkForward(bars) {
 export function predictorReport(rows) {
   const brier = (xs, f) => (xs.length ? xs.reduce((a, r) => a + (f(r) - (r.up ? 1 : 0)) ** 2, 0) / xs.length : null);
   const ll = (p, y) => -(y ? Math.log(p) : Math.log(1 - p));
-  const fee = (p) => kalshiFee(p) + PRED.slip;
+  const fee = (p) => fee10(p) + PRED.slip; // a $10 order's exact fee per contract, plus slippage
   const one = (xs) => {
     // paired log-loss gain over the distance odds, per round
     const byRound = new Map();
@@ -152,7 +152,7 @@ export function predictorReport(rows) {
       const yes = r.p >= r.base, pSide = yes ? r.p : 1 - r.p, price = Math.round(clamp(yes ? r.base : 1 - r.base, 0.01, 0.99) * 100) / 100;
       if (pSide - price - fee(price) <= 0) continue;
       const won = yes === r.up; bets++; if (won) wins++;
-      const v = (10 / price) * ((won ? 1 : 0) - price - fee(price)); usd += v; eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
+      const v = pnl10(price, won, PRED.slip); usd += v; eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
     }
     return { n: xs.length, rounds: n, brier: brier(xs, (r) => r.p), brierDistance: brier(xs, (r) => r.base), brierCoin: 0.25, gain: mean, z: sd > 0 ? (mean / sd) * Math.sqrt(n) : 0,
       thresholds, momentum: { n: mom.length, accuracy: mom.length ? momRight / mom.length : null }, trades: { n: bets, wins, usd, maxDD: dd } };

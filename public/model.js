@@ -26,8 +26,8 @@ export function normCdf(x) {
 // minus without it, at this volatility and time left (with Kalshi's averaged settlement, like the bot's own odds). Flipped for "less than" markets, capped at +-cap. Every learned
 // nudge to the odds (micro model, tuned indicators, reversal checklist, guide forecast) goes through this.
 export function oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater' }, cap) {
-  if (!move || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0)) return 0;
-  const sd = spot * Math.sqrt(settleVariance(sigmaMin, minutesLeft)), d = normCdf((spot + move - strike) / sd) - normCdf((spot - strike) / sd);
+  if (!move || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0) || !(spot + move > 0)) return 0;
+  const d = probAbove(spot + move, strike, sigmaMin, minutesLeft) - probAbove(spot, strike, sigmaMin, minutesLeft);
   return Math.min(cap, Math.max(-cap, /^less/.test(strikeType || '') ? -d : d));
 }
 
@@ -59,27 +59,52 @@ export function momentum(closes, n = 10) {
   return a > 0 && b > 0 ? Math.log(b / a) / n : 0;
 }
 
-// Kalshi settles these markets on the average of the index over the final
-// `w` minutes, which has less variance than a single print.
-export function settleVariance(sigmaMin, minutesLeft, w = 1) {
-  const t = Math.max(minutesLeft, 0);
-  if (t >= w) return sigmaMin * sigmaMin * (t - w + w / 3);
-  return (sigmaMin * sigmaMin * t ** 3) / (3 * w * w);
+// ---------- the settlement ----------
+// Kalshi settles on the average of its index's last 60 one-second prints before the close (SETTLE). Seen from now, the
+// prints still to come are correlated log-normal prices; their sum's first two moments are computed exactly:
+//   E[S_i] = S exp(a t_i), E[S_i S_j] = S^2 exp(a (t_i + t_j) + s2 min(t_i, t_j)), a = drift + s2/2, s2 = sigma^2
+// (t in minutes from now), and the settlement is priced from a log-normal with exactly those moments. The prints
+// already made (inside the last minute) count at face value. The shape beyond two moments differs from the true one by
+// far less than a billionth at these volatilities.
+export const SETTLE = { prints: 60, w: 1 };
+// Returns the number of prints still to come, their sum's mean m1 and its variance c (computed directly as
+// sum E_i E_j (exp(s2 min(t_i, t_j)) - 1) with expm1, never as E[X^2] - E[X]^2, which would cancel away digits).
+function futurePrints(S, sigmaMin, t, driftMin = 0, { prints: N, w } = SETTLE) {
+  const v = sigmaMin * sigmaMin, a = driftMin + v / 2, d = w / N;
+  let n = 0, m1 = 0, c = 0, later = 0;
+  for (let i = N; i >= 1; i--) { // latest print first: `later` is the sum of E[S_j]/S over the prints after it
+    const tau = t - w + i * d;
+    if (!(tau > 1e-12)) break;
+    const e = Math.exp(a * tau);
+    n++; m1 += e; c += e * Math.expm1(v * tau) * (e + 2 * later); later += e;
+  }
+  return { n, m1: S * m1, c: S * S * c };
+}
+// The settlement average's log-variance (S = 1, no drift, no prints known yet): what its spread is, for anything that
+// needs it as one number (Kalshi's implied close, the cone)
+export function settleVariance(sigmaMin, minutesLeft) {
+  const t = Math.max(minutesLeft, 0), { prints: N } = SETTLE, f = futurePrints(1, sigmaMin, t), k = N - f.n;
+  return Math.log1p(f.c / ((k + f.m1) * (k + f.m1))); // the prints already made add no variance
 }
 
-// P(settlement value > K). In the final `w` minutes part of the settlement average is already printed:
-// pass `settleAvg` (the average of prices since close − w) so the locked-in part counts at face value.
+// P(settlement > K). settleAvg: the average of the prints made so far inside the last minute (when known); without it
+// those prints are taken as today's price.
 export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1, settleAvg = null) {
-  const t = Math.max(minutesLeft, 0);
-  if (settleAvg != null && t < w) {
-    const mean = (1 - t / w) * settleAvg + (t / w) * S * Math.exp(driftMin * t);
-    const sd = S * Math.sqrt(settleVariance(sigmaMin, t, w));
-    return sd > 0 ? normCdf((mean - K) / sd) : mean > K ? 1 : mean < K ? 0 : 0.5;
+  void w; // (the window is SETTLE.w)
+  const t = Math.max(minutesLeft, 0), { prints: N } = SETTLE;
+  const f = sigmaMin > 0 ? futurePrints(S, sigmaMin, t, driftMin) : { n: 0, m1: 0, c: 0 };
+  if (!(sigmaMin > 0) && t > 0) { // no volatility: the future prints are known too
+    const d = SETTLE.w / N; let sum = 0, n = 0;
+    for (let i = 1; i <= N; i++) { const tau = t - SETTLE.w + i * d; if (tau > 1e-12) { sum += S * Math.exp(driftMin * tau); n++; } }
+    const avg = ((settleAvg ?? S) * (N - n) + sum) / N;
+    return avg > K ? 1 : avg < K ? 0 : 0.5;
   }
-  const variance = settleVariance(sigmaMin, minutesLeft, w);
-  const mu = Math.log(S / K) + driftMin * t;
-  if (variance <= 0) return mu > 0 ? 1 : mu < 0 ? 0 : 0.5;
-  return normCdf(mu / Math.sqrt(variance));
+  const known = (settleAvg ?? S) * (N - f.n), need = N * K - known; // the future prints must add up to more than this
+  if (f.n === 0) { const avg = known / N; return avg > K ? 1 : avg < K ? 0 : 0.5; }
+  if (need <= 0) return 1;
+  const s2 = Math.log1p(f.c / (f.m1 * f.m1));
+  if (!(s2 > 0)) return f.m1 > need ? 1 : f.m1 < need ? 0 : 0.5;
+  return normCdf((Math.log(f.m1) - s2 / 2 - Math.log(need)) / Math.sqrt(s2));
 }
 
 // Kalshi's fee (in dollars) at price p: rate·contracts·p·(1−p), rounded up to the cent. The rates start at Kalshi's
@@ -224,8 +249,9 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
   out.pShift = pShift;
   out.pYes = Math.min(Math.max(p + pShift, 0.001), 0.999);
 
-  if (q.yesAsk !== null) out.evYes = out.pYes - q.yesAsk - kalshiFee(q.yesAsk);
-  if (q.noAsk !== null) out.evNo = (1 - out.pYes) - q.noAsk - kalshiFee(q.noAsk);
+  // edges after the exact fee of the order the bot would place (Kalshi rounds per order, not per contract)
+  if (q.yesAsk !== null) out.evYes = out.pYes - q.yesAsk - orderFee(q.yesAsk, out.pYes, s);
+  if (q.noAsk !== null) out.evNo = (1 - out.pYes) - q.noAsk - orderFee(q.noAsk, 1 - out.pYes, s);
 
   if (minutesLeft < s.minMinutesLeft) return { ...out, reason: 'Too close to settlement' };
   // No calls until waitMinutes into the window (early calls are mostly momentum guesses at the target)
@@ -267,11 +293,24 @@ export function contractsFor(prob, price, settings = {}) {
   return Math.max(1, n);
 }
 
-// Most you can pay for a side with win probability p and still clear minEdge after fees.
-export function maxPay(p, minEdge) {
+// The exact fee per contract on an order of n contracts: Kalshi rounds the ORDER's fee up to the cent once, so a
+// 48-contract order at 50c pays $0.84 (1.75c each), not 48 x 2c
+export const feeEach = (price, n = 1) => { const k = Math.max(1, Math.floor(n)); return kalshiFee(price, k) / k; };
+// ...on the order the bot would actually place at this price (its Kelly size); without settings, a single contract
+export const orderFee = (price, prob, settings = null) => (settings ? feeEach(price, contractsFor(prob, price, settings)) : kalshiFee(price));
+// Profit or loss of spending $10 on a contract at `price` held to settlement: whole contracts and the order's exact fee
+export const fee10 = (price) => feeEach(price, Math.floor(10 / price + 1e-9)); // the exact fee per contract on a $10 order
+export function pnl10(price, won, extraPer = 0) {
+  if (!(price > 0 && price < 1)) return 0;
+  const n = Math.floor(10 / price + 1e-9);
+  return n * ((won ? 1 : 0) - price - extraPer) - kalshiFee(price, n);
+}
+
+// Most you can pay for a side with win probability p and still clear minEdge after fees (at the size the bot would buy)
+export function maxPay(p, minEdge, settings = null) {
   for (let c = 99; c >= 1; c--) {
     const price = c / 100;
-    if (p - price - kalshiFee(price) >= minEdge - 1e-9) return price;
+    if (p - price - orderFee(price, p, settings) >= minEdge - 1e-9) return price;
   }
   return null;
 }
@@ -290,17 +329,17 @@ export function dipLimit({ market, strike, spot, dipLevel, sigmaMin, driftMin = 
   if (ask === null) return null;
   const sideDip = side === 'YES' ? pDip : 1 - pDip;
   const shift = side === 'YES' ? pDip - pNow : pNow - pDip;
-  const cap = maxPay(sideDip, s.minEdge);
+  const cap = maxPay(sideDip, s.minEdge, s);
   if (cap === null) return null;
   const limit = Math.min(Math.floor((ask + shift) * 100 + 1e-9) / 100, cap);
   return limit >= 0.01 ? { price: limit, dipLevel, fairAtDip: sideDip } : null;
 }
 
-// Lowest sell price whose proceeds after the exit fee are at least `value`.
-export function sellTarget(value) {
+// Lowest sell price whose proceeds after the exit fee (on n contracts, rounded once) are at least `value` each.
+export function sellTarget(value, n = 1) {
   for (let c = 1; c <= 99; c++) {
     const price = c / 100;
-    if (price - kalshiFee(price) >= value - 1e-9) return price;
+    if (price - feeEach(price, n) >= value - 1e-9) return price;
   }
   return 0.99;
 }
@@ -330,11 +369,11 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
   const s = { ...EXIT_DEFAULTS, ...settings };
   if (minutesLeft <= 0) return { action: 'WAIT', kind: 'closed', why: 'Market closed. Settles at $1 or $0.', signs: [] };
   if (pSide == null) return { action: 'HOLD', kind: 'nodata', why: 'Waiting for price data', signs: [] };
-  const entryCost = pos.price + kalshiFee(pos.price);
-  const target = sellTarget(Math.max(pSide, entryCost + s.minProfit));
+  const n = pos.contracts || 1, entryCost = pos.price + feeEach(pos.price, n); // this position's own order size
+  const target = sellTarget(Math.max(pSide, entryCost + s.minProfit), n);
   if (bid == null || bid <= 0) return { action: 'HOLD', kind: 'nobid', why: 'No bids to sell into right now', holdEv: pSide, target, signs: [] };
 
-  const net = bid - kalshiFee(bid);
+  const net = bid - feeEach(bid, n);
   const pnlPer = net - entryCost;
   const base = { bid, net, pnlPer, pnl: pnlPer * pos.contracts, holdEv: pSide, target };
   const inProfit = pnlPer >= s.minProfit - 1e-9;
@@ -397,12 +436,11 @@ function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, s
     for (let k = 0; k < 60; k++) { const m = (l + h) / 2; if ((sideP(m, t) >= floor) === rising) h = m; else l = m; }
     level.push((l + h) / 2);
   }
-  const holds = (x, i) => { const L = level[i]; return L === -Infinity ? true : L === Infinity ? false : rising ? x >= L : x <= L; };
   if (!steps) return 1;
   let total = 0;
   for (const [z, w] of GH7) {
     const vol = sigmaMin * Math.exp(0.2 * z - 0.02), sd = vol * Math.sqrt(HOLD_DT); // per-check move
-    const h = sd / 3, half = Math.ceil((6 * vol * Math.sqrt(steps * HOLD_DT) + 6 * sd) / h), n = 2 * half + 1;
+    const h = sd / 8, half = Math.ceil((6 * vol * Math.sqrt(steps * HOLD_DT) + 6 * sd) / h), n = 2 * half + 1;
     const kr = Math.ceil(6 * sd / h), ker = [];
     let ks = 0;
     for (let k = -kr; k <= kr; k++) { const v = Math.exp(-0.5 * (k * h / sd) ** 2); ker.push(v); ks += v; }
@@ -412,7 +450,10 @@ function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, s
     for (let i = 0; i < steps; i++) {
       q.fill(0);
       for (let j = 0; j < n; j++) { const v = p[j]; if (!v) continue; for (let k = -kr; k <= kr; k++) { const jj = j + k; if (jj >= 0 && jj < n) q[jj] += v * ker[k + kr]; } }
-      for (let j = 0; j < n; j++) if (!holds(x0 + (j - half) * h, i)) q[j] = 0;
+      // the floor usually falls inside a grid cell: keep the share of that cell on the holding side (second-order accurate)
+      const L = level[i];
+      if (L === Infinity) q.fill(0);
+      else if (L !== -Infinity) for (let j = 0; j < n; j++) { const x = x0 + (j - half) * h, keep = rising ? (x + h / 2 - L) / h : (L - (x - h / 2)) / h; if (keep <= 0) q[j] = 0; else if (keep < 1) q[j] *= keep; }
       [p, q] = [q, p];
     }
     let m = 0; for (let j = 0; j < n; j++) m += p[j];
