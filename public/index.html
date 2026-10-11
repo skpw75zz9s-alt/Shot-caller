@@ -37,6 +37,8 @@
   <link rel="modulepreload" href="suggest.js">
   <link rel="modulepreload" href="trader.js">
   <link rel="modulepreload" href="autopilot.js">
+  <link rel="modulepreload" href="structure.js">
+  <link rel="modulepreload" href="playbook.js">
   <link rel="modulepreload" href="micro.js">
   <link rel="modulepreload" href="sharps.js">
   <link rel="modulepreload" href="watch.js">
@@ -340,6 +342,11 @@
         <div class="stat"><label>Trades won</label><b id="tWins">—</b></div>
       </div>
       <ul id="tradeList" class="history"></ul>
+      <h2 class="sec">Playbook check</h2>
+      <div class="card playbook">
+        <p class="fine-left">From "The BTC Trader's Playbook": its 15-minute liquidity-sweep strategy, run exactly as written and measured the way it says to (100+ examples, win rate, average reward-to-risk, max drawdown, fees). With the 1-hour trend, a 15-minute candle sweeps yesterday's high or low and closes back inside; a market structure shift on above-average volume confirms; entry on the retest; stop beyond the sweep plus a volatility allowance; target 2R. Its other secrets (sweeps, structure shifts, fair value gaps, order blocks, volume divergence, VWAP, open interest, funding) are inputs the micro model learns from: they sway the candles and calls only once proven.</p>
+        <div id="pbReport" class="pb-report">Loading…</div>
+      </div>
       <h2 class="sec">What the bot has learned</h2>
       <p class="push-status" id="memSummary"></p>
       <div class="mem-using" id="memUsing"></div>
@@ -425,7 +432,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v11.3 · micro model in calls</p>
+      <p class="fine" id="version">Shot Caller v11.4 · the playbook</p>
     </section>
   </main>
 

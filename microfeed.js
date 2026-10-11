@@ -7,9 +7,11 @@ import { dirname } from 'node:path';
 import { HORIZONS, microLearn, microPredict, microRead, microShift, microVector, newMicro } from './public/micro.js';
 import { quote } from './public/model.js';
 
-export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = null, clock = () => Date.now(), log = console }) {
+// playbook: playbookfeed.js (the market-structure read)
+export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = null, playbook = null, clock = () => Date.now(), log = console }) {
   let M = newMicro(), pending = [], lastAt = 0, read = null, savedAt = 0, lastLive = null;
-  async function load() { try { const d = JSON.parse(await readFile(file, 'utf8')); if (d?.v === 1 && d.models) M = d; } catch { /* first run */ } }
+  // a saved model with a different set of inputs (an older version) starts fresh
+  async function load() { try { const d = JSON.parse(await readFile(file, 'utf8')); if (d?.v === 1 && d.models?.[1]?.w?.length === newMicro().models[1].w.length) M = d; } catch { /* first run */ } }
   async function save() {
     try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(M)); await rename(`${file}.tmp`, file); } catch (e) { log.error('saving the micro model failed', e.message); }
   }
@@ -22,6 +24,7 @@ export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = 
     const sc = scanFeed.lastScan()?.sc, live = snap.live;
     const dir = /^less/.test(live?.m?.strike_type || '') ? -1 : 1, q = live ? quote(live.m) : null;
     const mid = q?.yesBid != null && q?.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null, pBot = live?.pPre ?? live?.ev?.pYes;
+    const st = playbook?.structure(price, sig, now)?.features ?? {};
     return { price, sigmaMin: sig, x: microVector({
       flow30: scanFeed.imbalance(now - 30000) ?? 0, flow120: scanFeed.imbalance(now - 120000) ?? 0,
       ret1: p1 ? Math.log(price / p1) / sig : 0, ret5: p5 ? Math.log(price / p5) / (sig * Math.sqrt(5)) : 0,
@@ -30,6 +33,7 @@ export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = 
       cbPremium: sc?.cbPremium != null ? sc.cbPremium / (price * sig) : 0,
       kalshiTilt: mid != null && pBot != null ? (mid - pBot) * 3 * dir : 0, kFlow: (marketWatch?.kFlow(now) ?? 0) * dir,
       jump: marketWatch?.lastJump(now) ?? 0,
+      ...st, fFunding: f.live && f.funding != null ? Math.max(-3, Math.min(3, f.funding / 0.0001)) : 0,
     }) };
   }
   function observe({ snap }, now = clock()) {

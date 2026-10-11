@@ -766,3 +766,6 @@ body.split .pane-body { padding: 4px 6px 8px; }
 .sharps-who li em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sharps-rec { font-size: 12px; color: var(--muted); margin: 4px 0; } .sharps-rec b { color: var(--text); }
 .sharps-board summary { cursor: pointer; font-size: 12px; color: var(--accent); margin: 4px 0; }
+/* v11.4 playbook check */
+.pb-report { font-size: 12px; } .pb-report small { display: block; margin: 4px 0; line-height: 1.4; }
+.pb-row { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-2); } .pb-row b { font-size: 12px; } .pb-row span { color: var(--muted); }

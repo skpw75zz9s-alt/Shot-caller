@@ -6,11 +6,14 @@
 // (a strong prior), so nothing sways the lines on a hunch. Every prediction is graded once its horizon passes, against
 // "no change" (out of sample: it's made before the outcome is known), and a horizon is only used once it has beaten
 // no change by 0.5%+ over 500+ graded samples.
-export const MICRO_FEATURES = ['flow30', 'flow120', 'ret1', 'ret5', 'fLead', 'fFlow', 'fPremium', 'leader', 'absorb', 'cbPremium', 'kalshiTilt', 'kFlow', 'jump'];
+export const MICRO_FEATURES = ['flow30', 'flow120', 'ret1', 'ret5', 'fLead', 'fFlow', 'fPremium', 'leader', 'absorb', 'cbPremium', 'kalshiTilt', 'kFlow', 'jump',
+  // the playbook's market structure (public/structure.js) and futures funding
+  'sweep', 'shift', 'fvgPull', 'obZone', 'volDiv', 'vwapDev', 'fFunding'];
 export const MICRO_NAMES = {
   flow30: 'buyers vs sellers (30 s)', flow120: 'buyers vs sellers (2 min)', ret1: 'the last minute\'s move', ret5: 'the last 5 minutes\' move',
   fLead: 'futures moving ahead', fFlow: 'futures buyers vs sellers', fPremium: 'futures premium', leader: 'the leading exchange pulling away',
   absorb: 'big orders soaked up', cbPremium: 'Coinbase premium', kalshiTilt: 'Kalshi\'s price vs the bot', kFlow: 'Kalshi trade flow', jump: 'the latest jump',
+  sweep: 'a liquidity sweep', shift: 'a market structure shift', fvgPull: 'an unfilled fair value gap', obZone: 'an order block', volDiv: 'volume divergence', vwapDev: 'distance from VWAP', fFunding: 'futures funding',
 };
 export const HORIZONS = [1, 3, 5]; // minutes
 export const MICRO_GATE = { minN: 500, minSkill: 0.005 };

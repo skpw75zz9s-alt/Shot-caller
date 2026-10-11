@@ -21,7 +21,7 @@ test('learns a real push (buyers lead the next minutes) and switches on only onc
   const wFlow = m.w[1 + MICRO_FEATURES.indexOf('flow30')];
   assert.ok(wFlow > 0.25 && wFlow < 0.55, `flow weight ${wFlow}`);
   const others = MICRO_FEATURES.filter((k) => k !== 'flow30').map((k) => Math.abs(m.w[1 + MICRO_FEATURES.indexOf(k)]));
-  assert.ok(Math.max(...others) < 0.1, `noise weights stay small: ${others.map((v) => v.toFixed(2))}`);
+  assert.ok(Math.max(...others) < 0.15, `noise weights stay small (19 noise inputs, ~0.04 sampling error each): ${others.map((v) => v.toFixed(2))}`);
   const r = microRead(M, microVector({ flow30: 1 }), { price: 100000, sigmaMin: 0.0008 });
   assert.ok(r.horizons[5].move > 50, `buyers in control: +$${r.horizons[5].move.toFixed(0)} in 5 min`);
   assert.equal(r.sway[0].key, 'flow30');

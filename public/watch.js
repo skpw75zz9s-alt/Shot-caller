@@ -11,6 +11,8 @@
 //   flush       futures open interest fell sharply while the price moved: positions forced out (liquidations)
 //   funding     futures funding is extreme (one side crowded, squeeze risk)
 //   premium     futures trading well above or below spot
+//   sweep       a liquidity sweep: a key level taken out and reclaimed (the playbook's stop hunt reversing)
+//   shift       a market structure shift: a close through the last swing against the move
 // Severe events hold NEW calls for a short while (bad data or an untradeable book); everything else is logged, shown
 // on the Deck, and counted into each call's record so the call filter can learn whether it matters.
 const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
@@ -41,7 +43,8 @@ export function createDetector({ clock = () => Date.now() } = {}) {
   //   kalshi { ticker, yesBid, yesAsk, near, levels: [[side, price, qty]] }  the live round's book
   //   kTrades [{ t, count, side }] Kalshi trades on the live round since the last step
   //   futures { funding, premium, oiChange5, priceChange5 }  Hyperliquid's BTC perpetual (futures.js)
-  function step({ now = clock(), price = null, sigmaMin = null, venues = {}, feeds = {}, flowUsd = 0, kalshi = null, kTrades: newK = [], futures = null } = {}) {
+  //   structure { sweep, shift }  the playbook's market structure (public/structure.js)
+  function step({ now = clock(), price = null, sigmaMin = null, venues = {}, feeds = {}, flowUsd = 0, kalshi = null, kTrades: newK = [], futures = null, structure = null } = {}) {
     const out = [];
     const add = (e) => { if (e) out.push(e); };
     // BTC: jumps
@@ -113,6 +116,9 @@ export function createDetector({ clock = () => Date.now() } = {}) {
         }
       }
     }
+    // market structure: liquidity sweeps (a stop hunt reversing) and structure shifts
+    if (structure?.sweep && now - structure.sweep.t < 300000) { const w = structure.sweep; add(emit(now, 'sweep', 'info', `${w.dir > 0 ? 'Bullish' : 'Bearish'} liquidity sweep: took out ${w.level} ($${w.p.toFixed(0)}) and closed back ${w.dir > 0 ? 'above' : 'below'} it (a failed ${w.dir > 0 ? 'breakdown' : 'breakout'})`, `sweep-${w.level}-${w.t}`, 0, w.dir)); }
+    if (structure?.shift && now - structure.shift.t < 300000) { const w = structure.shift; add(emit(now, 'shift', 'info', `Market structure shift ${w.dir > 0 ? 'up' : 'down'}: ${w.text}`, `shift-${w.t}`, 0, w.dir)); }
     // futures: forced position closes, crowded funding, a stretched premium
     if (futures) {
       const { oiChange5: oi, priceChange5: pc, funding, premium } = futures;

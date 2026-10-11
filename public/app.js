@@ -18,6 +18,7 @@ import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { blendWeights, candleRecord, candleTurns, predictionCandles, predictionLines, predictionRecord } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
+import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
@@ -830,7 +831,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
@@ -890,6 +891,23 @@ function renderMicro() {
   setHTML($('microInfo'), on
     ? `<b>Small details:</b> next 5 min <b class="${h[5].move >= 0 ? 'pos' : 'neg'}">${h[5].move >= 0 ? '+' : '−'}$${Math.abs(h[5].move).toFixed(0)}</b> (1 min ${h[1].move >= 0 ? '+' : '−'}$${Math.abs(h[1].move).toFixed(0)}, 3 min ${h[3].move >= 0 ? '+' : '−'}$${Math.abs(h[3].move).toFixed(0)}), bending the prediction candles${m.inCalls ? ` and shifting the bot's odds ${Object.values(m.inCalls)[0] >= 0 ? '+' : '−'}${(Math.abs(Object.values(m.inCalls)[0]) * 100).toFixed(1)} pts on UP` : ''}${m.read.sway?.length ? `. Swaying it: ${m.read.sway.map((x) => `${esc(x.name)} ${x.push > 0 ? '↑' : '↓'}`).join(', ')}` : ''}. <small>${learning}</small>`
     : `<b>Small details:</b> the micro model is learning how buy/sell pressure, futures, the leading exchange, absorption, Kalshi's flow and jumps move the next 1–5 minutes. It bends the candles and shifts the bot's odds (±6 pts max) only once it beats "no change" (500+ graded, 0.5%+ better). <small>${learning}</small>`);
+}
+
+// ---------- the playbook check (server: playbookfeed.js, public/playbook.js) ----------
+async function refreshPlaybook() {
+  if (document.hidden) return;
+  try { state.playbook = await getJSON('playbook'); renderPlaybook(); } catch { /* next time */ }
+}
+setInterval(refreshPlaybook, 60000);
+setTimeout(refreshPlaybook, 2500);
+function renderPlaybook() {
+  const p = state.playbook, r = p?.report;
+  if (!p) return;
+  const card = (title, x) => !x ? '' : `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${Math.round(x.winRate * 100)}% · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · fees ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the playbook's 100)</small>` : ''}</span></div>`;
+  setHTML($('pbReport'), !r ? (p.backfilling ? 'Reading two weeks of BTC history…' : 'Starting…')
+    : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
+      + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
+      + `<small class="muted">Break-even win rate before costs: 33% at 2R, 40% at 1.5R. ${(() => { const best = [r.day, r.hour].filter((x) => x?.n >= 30).sort((a, b) => b.avgR - a.avgR)[0]; return best ? (best.avgR > 0 ? 'One version is positive after fees so far; it still needs 100+ trades to mean much.' : 'After fees, it isn\'t profitable on this data yet.') : 'Too few trades to judge yet.'; })()}</small>`);
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------

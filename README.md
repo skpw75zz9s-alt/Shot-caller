@@ -269,6 +269,42 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### The playbook: market structure, tested instead of believed (v11.4)
+
+What "The BTC Trader's Playbook" teaches, and what the bot does with each part:
+
+| Secret | In the bot |
+|---|---|
+| Liquidity sweeps / stop hunts | `public/structure.js` finds a wick through yesterday's, the last hour's or the last swing's high or low that closes back inside. It's a micro-model input, a Market watch event and a chart marker. |
+| Market structure shift | A close through the last swing against the leg. Micro input, watch event, chart marker. |
+| Fair value gaps | Unfilled 3-candle gaps. The nearest one is a micro input (does price get pulled to it?) and is drawn on the chart. |
+| Order blocks | The last opposite candle before a 2×-body move. A micro input when price is back in the zone. |
+| VWAP | Distance from the UTC day's VWAP, in typical moves. Micro input. |
+| Volume divergence | A new 30-minute high or low on less than 70% of the last one's volume. Micro input. |
+| Open interest, funding | Already covered by the Hyperliquid futures feed (v10.9). Funding is now also a micro input. |
+| Liquidation clusters | Not added. Real liquidation maps need a paid CoinGlass key. Sweeps catch the result (the stop run) from the price itself. |
+| ETF flows | Not usable. They're published daily, too slow for 15-minute rounds. |
+| Session volatility | Already learned. The volatility table is by hour of the week. |
+
+**None of it is trusted on faith.** These are inputs to the micro model, so they move the prediction candles and the bot's calls only if the model proves they help, out of sample, by its usual rule (500+ graded predictions, 0.5%+ better than "no change"). If the playbook's ideas don't predict BTC's next minutes, they get zero weight automatically.
+
+**The 15-minute sweep strategy, paper-traded** (`public/playbook.js`, `playbookfeed.js`). The playbook says to test it on 100+ examples first, measuring win rate, average reward-to-risk, max drawdown and fees. The server does exactly that:
+- **Data:** 21 days of Coinbase 1-minute candles, two weeks read on first start, then topped up every minute.
+- **The rules, as written:**
+  - Trade with the 1-hour trend only.
+  - A 15-minute candle sweeps yesterday's high or low and closes back inside.
+  - Within 30 minutes, a structure shift on 1.2× average volume confirms it.
+  - Enter on the retest within 30 minutes. No retest, no trade.
+  - Stop beyond the sweep's extreme plus 30% of a typical 15-minute range.
+  - Target 2R (1.5R also recorded), with a 24-hour cap. If the stop and target are hit in the same minute, the stop counts.
+  - Fees are 0.05% a side, counted in R.
+- **A variant with more examples** uses the last hour's high or low instead of yesterday's.
+- **No parameter is tuned to the data,** so the backtest and the live paper trades are one walk-forward test. It reruns every 15 minutes.
+- **Record → Playbook check** shows each version's trades, win rate, average R, total R, worst drawdown, fees, open trades, and how many more it needs to reach 100. Break-even before costs is 33% at 2R and 40% at 1.5R.
+- It's a scorecard, not a signal: it doesn't place orders or change calls.
+- The chart's **Market structure** toggle draws unfilled gaps and sweep and shift markers.
+- `PLAYBOOK=off` turns it off.
+
 ### The micro model: small details bend the prediction candles (v11.2)
 
 To make the candles more accurate where small details matter most (the next few minutes), a **micro model** learns how those details move BTC 1, 3 and 5 minutes out (`public/micro.js`, `microfeed.js`).

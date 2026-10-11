@@ -130,12 +130,19 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
       lines.ceil = candles.createPriceLine({ price: fc.ceiling, color: '#ff4d6d99', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'ceiling' });
     }
     candles.applyOptions({ lastValueVisible: !!show.labels });
+    // market structure (public/structure.js): the nearest unfilled fair value gap above and below the price
+    if (show.structure && d.structure?.fvg?.length && barMs === 60000) {
+      const px = last.c, above = d.structure.fvg.filter((g) => g.lo > px).sort((a, b) => a.lo - b.lo)[0], below = d.structure.fvg.filter((g) => g.hi < px).sort((a, b) => b.hi - a.hi)[0];
+      for (const [k, g] of [['fvgUp', above], ['fvgDn', below]]) if (g) lines[k] = candles.createPriceLine({ price: (g.lo + g.hi) / 2, color: '#e879f999', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'FVG' });
+    }
     // markers: the bot's calls, your trades and the Auto-trader's, EMA 9/21 crosses
     const marks = [];
     const inView = (ms) => ms >= bars[0].t && ms < last.t + barMs;
     const barOf = (ms) => sec(bars[Math.max(0, bars.findIndex((b) => b.t + barMs > ms))].t);
     // a flip predicted right now sits on the live candle (later ones go on the prediction candles)
     if (show.pcandles && show.flips !== false && barMs === 60000) for (const x of d.turns || []) if (x.now && x.t === last.t) marks.push({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar', color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir} now` });
+    // liquidity sweeps and structure shifts
+    if (show.structure && barMs === 60000) for (const [e, label] of [[d.structure?.sweep, 'sweep'], [d.structure?.shift, 'MSS']]) if (e && inView(e.t)) marks.push({ time: barOf(e.t), position: e.dir > 0 ? 'belowBar' : 'aboveBar', color: '#e879f9', shape: e.dir > 0 ? 'arrowUp' : 'arrowDown', text: `${label} ${e.dir > 0 ? '↑' : '↓'}` });
     if (show.markers) for (const m of d.markers || []) if (inView(m.t)) marks.push({ time: barOf(m.t), position: m.side === 'YES' ? 'belowBar' : 'aboveBar', color: m.side === 'YES' ? C.up : C.dn, shape: m.side === 'YES' ? 'arrowUp' : 'arrowDown', text: m.label });
     if (show.fills) for (const f of d.fills || []) if (inView(f.t)) marks.push({ time: barOf(f.t), position: f.kind === 'buy' ? 'belowBar' : 'aboveBar', color: f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24', shape: 'circle', text: `${f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S'} ${f.label || ''}`.trim() });
     // why it moved: a marker naming the cause on each candle that made a real move (public/why.js)

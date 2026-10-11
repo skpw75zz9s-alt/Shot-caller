@@ -6,7 +6,7 @@ import { createDetector } from './public/watch.js';
 import { parseBook } from './public/trader.js';
 import { parseKalshiTrades } from './public/feeds.js';
 
-export function createMarketWatch({ kalshi, scanFeed, futures = null, fetchJSON = defaultFetch, clock = () => Date.now(), log = console }) {
+export function createMarketWatch({ kalshi, scanFeed, futures = null, playbook = null, fetchJSON = defaultFetch, clock = () => Date.now(), log = console }) {
   const det = createDetector({ clock });
   const recentK = [];
   let book = null, bookAt = 0, tradesAt = 0, busy = { book: false, trades: false }, seen = new Set(), pending = [], lastFlowAt = 0;
@@ -39,7 +39,7 @@ export function createMarketWatch({ kalshi, scanFeed, futures = null, fetchJSON 
     if (live) { pollBook(live.m.ticker, now); pollTrades(live.m.ticker, now); }
     const flowUsd = scanFeed.flowSince(Math.max(lastFlowAt, now - 5000)); lastFlowAt = now;
     const events = det.step({ now, price: scanFeed.spot(now) ?? snap?.spot ?? null, sigmaMin: snap?.sigmaMin ?? null, venues: scanFeed.venues(now), feeds: scanFeed.feedTimes(),
-      flowUsd, kalshi: live ? kalshiView(live.m.ticker) : null, kTrades: pending.splice(0), futures: futures?.context(now) ?? null });
+      flowUsd, kalshi: live ? kalshiView(live.m.ticker) : null, kTrades: pending.splice(0), futures: futures?.context(now) ?? null, structure: playbook && snap?.sigmaMin ? playbook.structure(scanFeed.spot(now) ?? snap.spot, snap.sigmaMin, now) : null });
     for (const e of events) if (e.sev === 'severe') log.log?.(`market watch: ${e.text}`);
   }
   // for the micro model: Kalshi takers' YES share of the last 30 s (-1..+1), and the latest jump's direction (last minute)
