@@ -1,6 +1,6 @@
 // The move model: what the 1-minute BTC history says about where BTC will be over the next 15 minutes, tested
-// walk-forward. Pure; playbookfeed.js runs it on the server and the phone adds its proven moves to the expected path
-// (public/predict.js expectedPath), which the cone is centred on.
+// walk-forward. Pure; playbookfeed.js runs it on the server and the phone draws its proven moves as a prediction line
+// (public/predict.js predictionLines), blended into the expected path the cone is centred on.
 //   Moves   where BTC will be 1, 2, 3, 5, 8, 12 and 15 minutes from now: one ridge regression per horizon on the
 //           prediction engine's factors (public/predictor.js: trend, EMAs, VWAP, RSI, momentum, volume, sweeps,
 //           structure), in typical moves (log return / (1-minute volatility x sqrt(minutes))). Graded by out-of-sample

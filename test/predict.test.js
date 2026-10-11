@@ -171,15 +171,24 @@ test('the new lines: the bot\'s own odds, the guide, the micro model and the mov
 test('the blend: minimum-variance weights from the error covariance, biases removed, "no change" only once it has a record', () => {
   // hand-made errors: a and b share a common miss (they miss together), c is independent
   const errs = Array.from({ length: 400 }, (_, i) => { const r = (k) => Math.sin(i * k) * 100; return { a: r(1.3) + r(2.9), b: r(1.3) + 0.5 * r(4.1), c: r(5.3) }; });
-  const log = errs.map((e, i) => ({ closeTime: String(i), spot: 1e5 + 7, actual: 1e5, a: 1e5 + e.a + 30, b: 1e5 + e.b, c: 1e5 + e.c }));
+  const mv = (i) => Math.sin(i * 0.7) * 150; // where BTC really went from the price at the call
+  const log = errs.map((e, i) => ({ closeTime: String(i), spot: 1e5, actual: 1e5 + mv(i), a: 1e5 + mv(i) + e.a + 30, b: 1e5 + mv(i) + e.b, c: 1e5 + mv(i) + e.c }));
   const fit = blendFit(log);
-  // by hand: M (bias removed, shrunk off the diagonal), then w = M^-1 1 / (1' M^-1 1) on the lines kept (non-negative)
-  const keys = ['a', 'b', 'c', 'still'], n = log.length, bias = {};
-  for (const k of keys) { const xs = log.map((e) => (k === 'still' ? e.spot : e[k]) - e.actual); bias[k] = xs.reduce((s, x) => s + x, 0) / n * (n / (n + 60)); }
-  const s0 = 7; // older rounds have no logged typical move: "no change"'s spread stands in (spot is $7 off every close here); biases come back in those units
+  // by hand: each line's move scaled (its least-squares slope on the real move, shrunk toward 1 by 20 rounds' worth),
+  // then M (bias removed, shrunk off the diagonal), then w = M^-1 1 / (1' M^-1 1) on the lines kept (non-negative)
+  const keys = ['a', 'b', 'c', 'still'], n = log.length, bias = {}, scale = {}, val = {};
+  for (const k of keys) {
+    const x = log.map((e) => (k === 'still' ? e.spot : e[k]) - e.spot), y = log.map((e) => e.actual - e.spot), mx = x.reduce((t, v) => t + v, 0) / n, my = y.reduce((t, v) => t + v, 0) / n;
+    const sxx = x.reduce((t, v) => t + (v - mx) ** 2, 0), sxy = x.reduce((t, v, i) => t + (v - mx) * (y[i] - my), 0), c = 20 * sxx / n;
+    scale[k] = k === 'still' ? 1 : (sxy + c) / (sxx + c);
+    val[k] = log.map((e, i) => e.spot + scale[k] * x[i]);
+  }
+  for (const k of ['a', 'b', 'c']) assert.ok(Math.abs(fit.scale[k] - scale[k]) < 1e-9 && scale[k] > 0.5 && scale[k] < 1, `scale ${k}: ${fit.scale[k]}`);
+  for (const k of keys) { const xs = log.map((e, i) => val[k][i] - e.actual); bias[k] = xs.reduce((t, x) => t + x, 0) / n * (n / (n + 60)); }
+  const s0 = Math.sqrt(log.reduce((t, e) => t + (e.spot - e.actual) ** 2, 0) / n); // older rounds have no logged typical move: "no change"'s spread stands in; biases come back in those units
   for (const k of keys) assert.ok(Math.abs(fit.bias[k] * s0 - bias[k]) < 1e-9, `bias ${k}`);
-  assert.ok(Math.abs(fit.bias.a * s0 - 30 * n / (n + 60) - (log.reduce((s, e) => s + e.a - e.actual - 30, 0) / n) * n / (n + 60)) < 1e-9, 'a\'s +$30 bias is measured');
-  const lam = 20 / (n + 20), E = log.map((e) => keys.map((k) => (k === 'still' ? e.spot : e[k]) - e.actual - bias[k]));
+  assert.ok(bias.a > scale.a * 30 * 0.8 && bias.a < scale.a * 30 * 1.2, 'a\'s +$30 bias is measured (on its scaled move)');
+  const lam = 20 / (n + 20), E = log.map((e, i) => keys.map((k) => val[k][i] - e.actual - bias[k]));
   const M = keys.map((_, i) => keys.map((_, j) => E.reduce((s, r) => s + r[i] * r[j], 0) / n * (i === j ? 1 : 1 - lam)));
   const solve = (A, y) => { const m = A.map((r, i) => [...r, y[i]]), N = y.length; for (let c = 0; c < N; c++) { for (let r = 0; r < N; r++) if (r !== c) { const f = m[r][c] / m[c][c]; for (let k = c; k <= N; k++) m[r][k] -= f * m[c][k]; } } return m.map((r, i) => r[N] / r[i]); };
   let act = [0, 1, 2, 3], w;
@@ -195,7 +204,8 @@ test('the blend: minimum-variance weights from the error covariance, biases remo
   assert.ok(best <= mse({ a: 1 / 3, b: 1 / 3, c: 1 / 3 }));
   // lines that miss together share weight: copying a line can't double its say
   const twin = blendFit(log.map((e) => ({ ...e, a2: e.a }))), t2 = Object.values(twin.weights).reduce((s, v) => s + v, 0);
-  assert.ok(Math.abs(((twin.weights.a + twin.weights.a2) / t2 - pull * 2 / 4) - (fit.weights.a / tot - pull / 3)) < 1e-6, 'a and its copy split a\'s optimal share (the pull toward equal weights aside)');
+  const pair = (twin.weights.a + twin.weights.a2) / t2 - pull * 2 / 4, alone = fit.weights.a / tot - pull / 3;
+  assert.ok(Math.abs(pair / alone - 1) < 0.1, `a and its copy share a's optimal share (the pull toward equal weights aside): ${pair} vs ${alone}`);
   // too few rounds: everything an average line, and "no change" left out until it has a record
   const short = blendFit(log.slice(0, 4));
   assert.deepEqual(short.known, []); assert.equal(short.weights.a, 1); assert.equal(short.weights.still, 0);
@@ -250,4 +260,36 @@ test('the blend scoreboard: its own logged close vs "no change" and the best sin
   assert.equal(sc.blend, (3 + 1 + 4) / 3); assert.equal(sc.still, (10 + 6 + 10) / 3);
   assert.deepEqual(sc.best, { key: 'kalshi', miss: (4 + 2 + 10) / 3, blend: 8 / 3, n: 3 }, 'exch (drawn once in three) isn\'t compared');
   assert.deepEqual(blendScore([]), { n: 0 });
+});
+
+// ---------- v13.1: each line's moves scaled to how far they really carry ----------
+import { scaleLines, expectedPath, SCALE } from '../public/predict.js';
+test('each line\'s move scale: an overshooting line is pulled in, a timid one stretched (to at most 2x), pure noise collapses onto "no change"', () => {
+  let x = 3; const g = () => { let t = 0; for (let k = 0; k < 12; k++) { x = (x * 1103515245 + 12345) % 2147483648; t += x / 2147483648; } return t - 6; };
+  const n = 400, log = Array.from({ length: n }, (_, i) => {
+    const y = g(); // the real move to the close, in typical moves (sd 10)
+    return { closeTime: String(i), actual: 100 + 10 * y, cps: { 5: { sd: 10, still: 100, over: 100 + 20 * y, timid: 100 + 2.5 * y, noise: 100 + 10 * g() } } };
+  });
+  const sc = blendFit(log).scale, shrink = (b) => (b + SCALE.prior / n) / (1 + SCALE.prior / n); // exact slope b, shrunk toward 1 by 20 rounds' worth
+  assert.ok(Math.abs(sc.over - shrink(0.5)) < 1e-9, `over ${sc.over}`);
+  assert.equal(sc.timid, SCALE.hi, 'a 4x-too-timid line is stretched to the cap');
+  assert.ok(sc.noise < 0.15, `noise ${sc.noise}`);
+  assert.equal(blendFit(log.slice(0, 1)).scale.over > 0.9, true, 'one round: barely moved from 1');
+  // the chart's lines: moves from the price scaled, the whole line
+  const [l] = scaleLines([{ key: 'over', end: 100040, pts: [{ t: 0, v: 100000 }, { t: 1, v: 100040 }, { t: 2, v: 100060 }] }], { over: 0.5 }, 100000);
+  assert.deepEqual([l.end, ...l.pts.map((p) => p.v)], [100020, 100000, 100020, 100030]);
+  assert.deepEqual(scaleLines([{ key: 'k', end: 5, pts: [] }], {}, 1)[0].end, 5, 'no scale yet: unchanged');
+});
+test('the blend\'s own scale: averaging lines each shrunk on their own is too timid, so the blended move is stretched', () => {
+  let x = 9; const g = () => { let t = 0; for (let k = 0; k < 12; k++) { x = (x * 1103515245 + 12345) % 2147483648; t += x / 2147483648; } return t - 6; };
+  // two lines, each the real move plus its own independent noise of the same size: alone each is worth half its move;
+  // their average cancels half the noise, so it's worth 2/3 of its move: 4/3 of the two halves averaged
+  const log = Array.from({ length: 2000 }, (_, i) => { const y = g(); return { closeTime: String(i), actual: 100 + 10 * y, cps: { 5: { sd: 10, still: 100, p: 100 + 10 * (y + g()), q: 100 + 10 * (y + g()) } } }; });
+  const f = blendFit(log);
+  assert.ok(Math.abs(f.scale.p - 0.5) < 0.05 && Math.abs(f.scale.q - 0.5) < 0.05, `${f.scale.p} ${f.scale.q}`);
+  assert.ok(Math.abs(f.final - 4 / 3) < 0.1, `final ${f.final}`);
+  // the expected path multiplies the blended move (not the flip forecast) by it
+  const lines = [{ key: 'p', pts: [{ t: 0, v: 100 }, { t: 60000, v: 110 }] }];
+  assert.equal(expectedPath({ lines, spot: 100, now: 0, final: 1.5 })(60000), 115);
+  assert.equal(expectedPath({ lines, spot: 100, now: 0, final: 1.5, beta: 0.5 })(60000), 107.5);
 });

@@ -271,6 +271,31 @@ Security:
 
 ## Version notes (newest first)
 
+### Calibrated lines (v13.1)
+
+Each prediction line is now made more accurate on its own before the blend.
+- **Move scale per line.** A line can point the right way but call the size of the move wrong. Kalshi's price or the
+  bot's odds turned into a close overshoot when they're noisy or priced with another volatility; the exchanges' trend
+  undershoots. Each line's predicted move (from "no change") is multiplied by its least-squares slope on the real move
+  (Cov(predicted, actual) / Var(predicted), in typical moves). The slope is shrunk toward 1 by 20 rounds' worth of
+  data, kept within 0–2, and fitted per stretch of the round. A line that knows nothing collapses onto "no change".
+  The chart draws the scaled lines.
+- **The blend's own scale.** Averaging lines that were each shrunk on their own leaves the blend too timid, because
+  combining cancels some of their noise. So the blended move gets its own slope the same way. The expected path (the
+  cone's centre) multiplies its move by it.
+- The Prediction lines card shows each line's scale ("moves ×0.62") and the blend's.
+
+Walk-forward simulation (3 seeds × 3 scenarios, 300 rounds), blend average miss vs v13.0:
+
+| Lines | Change |
+|---|---|
+| Know part of the move, roughly well sized | 0–1.7% smaller |
+| Over- or undershoot | 12–14% smaller |
+| Know nothing | 1.3–1.5% smaller, level with "no change" (v13.0 was 1–2% behind) |
+
+Single lines: the exchanges' trend about 4–10% smaller miss when scaled; noise-only lines about 7–15% smaller. These are
+simulated rounds; the scoreboard on the card shows the real numbers.
+
 ### Every-minute blend (v13.0)
 
 There is no magic accuracy switch, because BTC over 15 minutes is mostly noise. v13.0 makes the blend learn faster and

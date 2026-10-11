@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
+import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -1117,9 +1117,9 @@ function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
   const close = Date.parse(live.m.close_time), mins = Math.max(0, (close - now) / 60000), fit = blendNow(mins), weights = fit.weights, beta = pathRecord(state.pcLog).beta;
   const move = spot * sigma * Math.sqrt(mins); // a typical move to the close: the fit's biases are in these
-  lines = correctLines(lines, Object.fromEntries(Object.entries(fit.bias).map(([k, b]) => [k, b * move])), now, close); // each line minus its measured bias
-  const minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta });
-  return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta }) };
+  lines = correctLines(scaleLines(lines, fit.scale, spot), Object.fromEntries(Object.entries(fit.bias).map(([k, b]) => [k, b * move])), now, close); // each line's moves scaled to how far they really carry, minus its measured bias
+  const final = fit.final, minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta, final });
+  return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
 }
 // The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
@@ -1225,9 +1225,9 @@ function trackPredictions(snap, live, now) {
     : 'The expected path (the cone\'s centre) is graded every minute: the direction and close it predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog), fit = blendNow(), wsum = fit.known.reduce((a, k) => a + fit.weights[k], 0) || 1;
   const rows = Object.entries(r.lines).sort((a, b) => a[1].miss - b[1].miss);
-  const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs(fit.bias[k]) >= 0.05 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}${Math.round(Math.abs(fit.bias[k]) * 100)}% of a typical move removed` : ''})` : ''}`;
+  const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs((fit.scale[k] ?? 1) - 1) >= 0.05 ? `, moves ×${fit.scale[k].toFixed(2)}` : ''}${Math.abs(fit.bias[k]) >= 0.05 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}${Math.round(Math.abs(fit.bias[k]) * 100)}% of a typical move removed` : ''})` : ''}`;
   const sc = blendScore(state.predLog), d = (x) => `$${x.toFixed(0)}`;
-  setHTML($('predRecord'), (r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Blended by their error covariance (lines that miss together share weight), learned from every minute of every round and fitted separately for early, middle and late in the round. `
+  setHTML($('predRecord'), (r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Each line's moves are scaled to how far they've really carried, then the lines are blended by their error covariance (lines that miss together share weight)${Math.abs(fit.final - 1) >= 0.05 ? ` and the blended move ×${fit.final.toFixed(2)}` : ''}, learned from every minute of every round and fitted separately for early, middle and late in the round. `
     : 'Prediction lines are graded each round: what each one said at every minute vs where BTC closed (keep the app open through a few rounds). ')
     + (sc.n ? `Blend scoreboard (${int(sc.n)} calls over ${int(sc.rounds)} round${sc.rounds === 1 ? '' : 's'}, every minute, out of sample): blend <b>${d(sc.blend)}</b> average miss`
       + `${sc.still != null ? ` vs <b>${d(sc.still)}</b> for "no change"` : ''}${sc.best ? ` · best single line ${LINE_NAMES[sc.best.key] || sc.best.key} <b>${d(sc.best.miss)}</b> vs the blend's ${d(sc.best.blend)} on the same calls` : ''}` : ''));

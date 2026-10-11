@@ -148,6 +148,9 @@ export function predictionRecord(log) {
 // miss is mostly noise), M toward its diagonal (by 20/(n+20)) and the weights toward equal ones (by 20/(n+20): on a short
 // record a plain average is hard to beat). Lines with fewer than 5 graded rounds get the average weight until they have
 // a record ("no change" gets none: it's the baseline, and joins the blend only when its record earns it a share).
+// Each line's moves are scaled first (scaleSamples: how far they really carry), and the blended move gets its own
+// scale (finalScale): v13.1, ~0-2% better again where lines are well sized, ~12-14% where they over- or undershoot,
+// and level with "no change" when they know nothing.
 // Checked walk-forward on simulated rounds (lines that know part of the move, better or worse by the time left): ~3-8%
 // smaller average miss than v12.9's one-sample-a-round fit, about level with a plain average for the first 30 rounds
 // and ~2-5% better after; with lines that know nothing, level with v12.9 (both 1-2% behind "no change").
@@ -172,13 +175,65 @@ export function blendSamples(log) {
 }
 // Which stretch of the round a number of minutes left falls in (the index into BLEND.bands)
 export const blendBand = (mins) => { const m = Math.min(14, Math.max(1, Math.round(mins))); return BLEND.bands.findIndex(([a, b]) => m >= a && m <= b); };
-// The fit: { weights (an average line = 1), bias (typical moves), known (lines with a record), rounds }. With mins, the
+// The fit: { weights (an average line = 1), bias (typical moves), known (lines with a record), rounds, scale (each line's
+// move scale) }. With mins, the
 // fit for that stretch of the round; without, the all-minutes fit.
 export function blendFit(log, mins = null) {
-  const ss = blendSamples(log), all = fitSamples(ss);
+  const ss = blendSamples(log), sAll = scaleSamples(ss), xAll = applyScale(ss, sAll), fAll = fitSamples(xAll);
+  const all = { ...fAll, scale: sAll, final: finalScale(xAll, fAll) };
   if (mins == null) return all;
-  const [a, b] = BLEND.bands[blendBand(mins)];
-  return fitSamples(ss.filter((s) => s.m >= a && s.m <= b), all);
+  const [a, b] = BLEND.bands[blendBand(mins)], bs = ss.filter((s) => s.m >= a && s.m <= b), sc = scaleSamples(bs, sAll), xs = applyScale(bs, sc), f = fitSamples(xs, all);
+  return { ...f, scale: sc, final: finalScale(xs, f, all.final) };
+}
+// Each line's scale (v13.1): how far its predicted moves really carry. A line can point the right way and still call the
+// size wrong: Kalshi's price or the bot's odds turned into a close overshoot when they're noisy (or priced with another
+// volatility), the exchanges' trend undershoots. The scale is the line's Mincer-Zarnowitz slope, the least-squares
+// answer to "actual move = scale x predicted move" (both from "no change", in typical moves, centred):
+//   scale = Cov(predicted, actual) / Var(predicted)
+// shrunk toward 1 by 20 rounds' worth of the line's own spread (so a short record barely moves it), kept within 0..2.
+// A line that knows nothing gets scaled toward 0 (it collapses onto "no change"), one that's too timid gets stretched.
+// Like the weights, per stretch of the round, pulled toward the all-minutes scale until it has 30 rounds of its own.
+export const SCALE = { prior: 20, lo: 0, hi: 2 };
+function scaleSamples(ss, prior = null) {
+  const out = {}, keys = new Set(ss.flatMap((s) => Object.keys(s.z)));
+  for (const k of keys) {
+    if (k === 'still') continue;
+    const xs = ss.filter((s) => s.z[k] != null && s.z.still != null), n = new Set(xs.map((s) => s.r)).size, target = prior?.[k] ?? 1;
+    if (!xs.length) { out[k] = target; continue; }
+    const x = xs.map((s) => s.z[k] - s.z.still), y = xs.map((s) => -s.z.still), mx = x.reduce((t, v) => t + v, 0) / x.length, my = y.reduce((t, v) => t + v, 0) / y.length;
+    const sxx = x.reduce((t, v) => t + (v - mx) ** 2, 0), sxy = x.reduce((t, v, i) => t + (v - mx) * (y[i] - my), 0);
+    if (!(sxx > 0)) { out[k] = target; continue; }
+    const c = (prior ? BLEND.pool : SCALE.prior) * sxx / n; // that many rounds' worth of the line's own spread
+    out[k] = Math.min(SCALE.hi, Math.max(SCALE.lo, (sxy + c * target) / (sxx + c)));
+  }
+  return out;
+}
+// The blend's own scale: averaging lines that were each shrunk on their own leaves the average too timid (combining
+// cancels some of their noise, so it can afford to go further), so the blended move gets its own slope, the same way
+// (shrunk toward 1, or toward the all-minutes one for a stretch). The expected path multiplies its move by it.
+function finalScale(ss, fit, target = 1) {
+  const pts = [];
+  for (const s of ss) {
+    if (s.z.still == null) continue;
+    let t = 0, w = 0;
+    for (const [k, v] of Object.entries(s.z)) { const wk = fit.weights[k] ?? 0; t += wk * (v - (fit.bias[k] || 0)); w += wk; }
+    if (w > 0) pts.push({ r: s.r, x: t / w - s.z.still, y: -s.z.still });
+  }
+  const n = new Set(pts.map((p) => p.r)).size;
+  if (!n) return target;
+  const mx = pts.reduce((t, p) => t + p.x, 0) / pts.length, my = pts.reduce((t, p) => t + p.y, 0) / pts.length;
+  const sxx = pts.reduce((t, p) => t + (p.x - mx) ** 2, 0), sxy = pts.reduce((t, p) => t + (p.x - mx) * (p.y - my), 0);
+  if (!(sxx > 0)) return target;
+  const c = (target === 1 ? SCALE.prior : BLEND.pool) * sxx / n;
+  return Math.min(SCALE.hi, Math.max(SCALE.lo, (sxy + c * target) / (sxx + c)));
+}
+// The samples with each line's predicted move scaled (its miss becomes scale x predicted move - actual move)
+function applyScale(ss, scale) {
+  return ss.map((s) => (s.z.still == null ? s : { ...s, z: Object.fromEntries(Object.entries(s.z).map(([k, v]) => [k, k === 'still' ? v : (scale[k] ?? 1) * (v - s.z.still) + s.z.still])) }));
+}
+// The lines with their moves (from the current price) scaled: what the chart draws and the blend combines
+export function scaleLines(lines, scale, spot) {
+  return (lines || []).map((l) => { const b = scale?.[l.key]; return b == null || b === 1 ? l : { ...l, end: spot + b * (l.end - spot), pts: l.pts.map((p) => ({ ...p, v: spot + b * (p.v - spot) })) }; });
 }
 function fitSamples(ss, prior = null) {
   const P = BLEND.pool, keys = [...new Set([...ss.flatMap((s) => Object.keys(s.z)), ...(prior ? Object.keys(prior.bias) : []), 'still'])];
@@ -276,19 +331,20 @@ export function candleSigma(bars, sigmaMin, now) {
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
 // The expected path (price at time t): the optimally blended prediction lines (blendFit: every forecast, the micro
-// model and the move model included, each bias-corrected), bent by the flip forecast (today's momentum carried forward,
+// model and the move model included, each scaled and bias-corrected; the blended move times the blend's own scale,
+// `final`), bent by the flip forecast (today's momentum carried forward,
 // turning where a flip looks ripe: public/flip.js), then scaled by beta (how far its minute moves have really carried,
 // fitted on its own graded minutes: pathRecord). The cone's centre follows it, and the flip markers sit on its turns.
-export function expectedPath({ lines, spot, now, weights = null, flip = null, beta = 1 }) {
+export function expectedPath({ lines, spot, now, weights = null, flip = null, beta = 1, final = 1 }) {
   const w = weights || {};
   const blend = (t) => { let s = 0, ws = 0; for (const l of lines || []) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
-  return (t) => spot + beta * (blend(t) + flipOffset(flip, (t - now) / 60000) - spot);
+  return (t) => spot + beta * (final * (blend(t) - spot) + flipOffset(flip, (t - now) / 60000));
 }
 // The expected path on whole minutes from the next one to the close: { t, o, c } (where it expects BTC at the start and
 // end of each minute). Each minute is graded at its close (pathRecord); its turns are the flip markers (pathTurns).
-export function pathMinutes({ lines, spot, sigmaMin, now, close, weights = null, flip = null, beta = 1 }) {
+export function pathMinutes({ lines, spot, sigmaMin, now, close, weights = null, flip = null, beta = 1, final = 1 }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
-  const path = expectedPath({ lines, spot, now, weights, flip, beta }), out = [];
+  const path = expectedPath({ lines, spot, now, weights, flip, beta, final }), out = [];
   for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) out.push({ t, o: path(t), c: path(Math.min(close, t + 60000)) });
   return out;
 }
