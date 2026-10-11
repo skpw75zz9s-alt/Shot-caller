@@ -53,7 +53,7 @@ test('the expected path\'s minutes: what the bot expects, no random noise, landi
   assert.ok(pathMinutes({ lines: [{ key: 'bot', pts: pts(1e5, 1e5) }], spot: 1e5, sigmaMin: 0.0008, now, close }).every((y) => Math.abs(y.c - y.o) < 1e-9), 'a flat read stays flat');
   assert.deepEqual(pathMinutes({ lines, spot: 100000, sigmaMin: 0.0008, now: now + 2000, close }).map((y) => y.c), c.map((y) => y.c), 'the same moment gives the same path');
   // weighted toward the line that has missed less
-  const log = Array.from({ length: 40 }, (_, i) => { const n = ((i * 7) % 11) - 5; return { closeTime: String(i), spot: 1e5, actual: 1e5, bot: 1e5 + 60 * n, kalshi: 1e5 + 20 * (((i * 3) % 7) - 3) }; });
+  const log = Array.from({ length: 400 }, (_, i) => { const n = ((i * 7) % 11) - 5; return { closeTime: String(i), spot: 1e5, actual: 1e5, bot: 1e5 + 60 * n, kalshi: 1e5 + 20 * (((i * 3) % 7) - 3) }; });
   const w = blendFit(log).weights;
   assert.ok(w.kalshi > w.bot * 4, JSON.stringify(w));
   assert.ok(pathMinutes({ lines, spot: 100000, sigmaMin: 0.0008, now, close, weights: w }).at(-1).c > 100120);
@@ -175,25 +175,27 @@ test('the blend: minimum-variance weights from the error covariance, biases remo
   const fit = blendFit(log);
   // by hand: M (bias removed, shrunk off the diagonal), then w = M^-1 1 / (1' M^-1 1) on the lines kept (non-negative)
   const keys = ['a', 'b', 'c', 'still'], n = log.length, bias = {};
-  for (const k of keys) { const xs = log.map((e) => (k === 'still' ? e.spot : e[k]) - e.actual); bias[k] = xs.reduce((s, x) => s + x, 0) / n * (n / (n + 20)); }
-  for (const k of keys) assert.ok(Math.abs(fit.bias[k] - bias[k]) < 1e-9, `bias ${k}`);
-  assert.ok(Math.abs(fit.bias.a - 30 * n / (n + 20) - (log.reduce((s, e) => s + e.a - e.actual - 30, 0) / n) * n / (n + 20)) < 1e-9, 'a\'s +$30 bias is measured');
+  for (const k of keys) { const xs = log.map((e) => (k === 'still' ? e.spot : e[k]) - e.actual); bias[k] = xs.reduce((s, x) => s + x, 0) / n * (n / (n + 60)); }
+  const s0 = 7; // older rounds have no logged typical move: "no change"'s spread stands in (spot is $7 off every close here); biases come back in those units
+  for (const k of keys) assert.ok(Math.abs(fit.bias[k] * s0 - bias[k]) < 1e-9, `bias ${k}`);
+  assert.ok(Math.abs(fit.bias.a * s0 - 30 * n / (n + 60) - (log.reduce((s, e) => s + e.a - e.actual - 30, 0) / n) * n / (n + 60)) < 1e-9, 'a\'s +$30 bias is measured');
   const lam = 20 / (n + 20), E = log.map((e) => keys.map((k) => (k === 'still' ? e.spot : e[k]) - e.actual - bias[k]));
   const M = keys.map((_, i) => keys.map((_, j) => E.reduce((s, r) => s + r[i] * r[j], 0) / n * (i === j ? 1 : 1 - lam)));
   const solve = (A, y) => { const m = A.map((r, i) => [...r, y[i]]), N = y.length; for (let c = 0; c < N; c++) { for (let r = 0; r < N; r++) if (r !== c) { const f = m[r][c] / m[c][c]; for (let k = c; k <= N; k++) m[r][k] -= f * m[c][k]; } } return m.map((r, i) => r[N] / r[i]); };
   let act = [0, 1, 2, 3], w;
   for (;;) { const x = solve(act.map((i) => act.map((j) => M[i][j])), act.map(() => 1)), t = x.reduce((s, v) => s + v, 0), ws = x.map((v) => v / t), lo = ws.indexOf(Math.min(...ws)); if (ws[lo] >= 0) { w = Object.fromEntries(act.map((i, k) => [keys[i], ws[k]])); break; } act = act.filter((_, k) => k !== lo); }
+  const wOpt = { ...w }, pull = 20 / (n + 20); for (const k of keys) w[k] = (1 - pull) * (w[k] ?? 0) + pull * (k === 'still' ? 0 : 1 / 3); // then pulled toward equal weights while the record is short
   const tot = keys.reduce((s, k) => s + fit.weights[k], 0);
   for (const k of keys) assert.ok(Math.abs(fit.weights[k] / tot - (w[k] ?? 0)) < 1e-9, `weight ${k}: ${fit.weights[k] / tot} vs ${w[k] ?? 0}`);
   assert.ok(Object.values(fit.weights).every((v) => v >= 0), 'never negative');
-  // the optimum beats every single line and the equal-weight average on these errors (it minimises their variance)
+  // the optimum (before the pull) beats every single line and the equal-weight average on these errors (it minimises their variance)
   const mse = (ws) => E.reduce((s, r) => s + keys.reduce((a, k, i) => a + (ws[k] || 0) * r[i], 0) ** 2, 0) / n;
-  const best = mse(Object.fromEntries(keys.map((k) => [k, fit.weights[k] / tot])));
+  const best = mse(wOpt);
   for (const k of keys) assert.ok(best <= mse({ [k]: 1 }) + 1e-9, `beats ${k} alone`);
   assert.ok(best <= mse({ a: 1 / 3, b: 1 / 3, c: 1 / 3 }));
   // lines that miss together share weight: copying a line can't double its say
   const twin = blendFit(log.map((e) => ({ ...e, a2: e.a }))), t2 = Object.values(twin.weights).reduce((s, v) => s + v, 0);
-  assert.ok(Math.abs((twin.weights.a + twin.weights.a2) / t2 - fit.weights.a / tot) < 1e-6, 'a and its copy split a\'s share');
+  assert.ok(Math.abs(((twin.weights.a + twin.weights.a2) / t2 - pull * 2 / 4) - (fit.weights.a / tot - pull / 3)) < 1e-6, 'a and its copy split a\'s optimal share (the pull toward equal weights aside)');
   // too few rounds: everything an average line, and "no change" left out until it has a record
   const short = blendFit(log.slice(0, 4));
   assert.deepEqual(short.known, []); assert.equal(short.weights.a, 1); assert.equal(short.weights.still, 0);
@@ -202,4 +204,50 @@ test('the blend: minimum-variance weights from the error covariance, biases remo
   const now = 0, close = 600000, line = { key: 'a', end: 100030, pts: [{ t: 0, v: 1e5 }, { t: 300000, v: 100015 }, { t: 600000, v: 100030 }, { t: 900000, v: 100030 }] };
   const [c] = correctLines([line], { a: 30 }, now, close);
   assert.deepEqual(c.pts.map((p) => p.v), [1e5, 1e5, 1e5, 1e5]); assert.equal(c.end, 1e5);
+});
+
+// ---------- v13: every minute, per stretch of the round ----------
+import { blendSamples, blendScore, blendBand, BLEND } from '../public/predict.js';
+test('every logged minute is a graded sample, its misses in typical moves; older rounds use "no change"\'s spread', () => {
+  const log = [
+    { closeTime: 'r1', actual: 100, cps: { 10: { sd: 20, still: 110, kalshi: 90, blend: 95 }, 2: { sd: 5, still: 102, kalshi: 101, blend: 101 } } },
+    { closeTime: 'r0', at: 1, spot: 104, actual: 100, kalshi: 98 },
+    { closeTime: 'r2', at: 1, spot: 96, actual: 100, kalshi: 101 },
+    { closeTime: 'r3', actual: null, cps: { 5: { sd: 9, still: 1 } } },
+  ];
+  const ss = blendSamples(log), by = (r, m) => ss.find((x) => x.r === r && x.m === m).z;
+  assert.equal(ss.length, 4, 'two minutes of r1 + one each for the two older rounds; ungraded skipped');
+  assert.deepEqual(by('r1', 10), { still: 0.5, kalshi: -0.5 }); assert.deepEqual(by('r1', 2), { still: 0.4, kalshi: 0.2 });
+  assert.deepEqual(by('r0', 5), { kalshi: -0.5, still: 1 }, 'older: miss / 4 (no change missed by $4 both times)');
+  assert.deepEqual([1, 3, 4, 7, 8, 14, 0.2, 30].map(blendBand), [0, 0, 1, 1, 2, 2, 0, 2]);
+  assert.equal(predictionRecord(log).rounds, 2, 'the card\'s 5-minute record skips rounds with no 5-minute call');
+});
+test('the blend is fitted per stretch of the round: the line that\'s best late leads late, the one best early leads early', () => {
+  let x = 7; const rnd = () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648 - 0.5; };
+  const log = Array.from({ length: 200 }, (_, i) => {
+    const cps = {};
+    for (let m = 1; m <= 14; m++) { const late = m <= 3; cps[m] = { sd: 10, still: 100 + 20 * rnd(), early: 100 + (late ? 30 : 3) * rnd(), late: 100 + (late ? 3 : 30) * rnd() }; }
+    return { closeTime: String(i), actual: 100, cps };
+  });
+  const share = (f, k) => f.weights[k] / Object.values(f.weights).reduce((a, b) => a + b, 0);
+  const lateFit = blendFit(log, 2), earlyFit = blendFit(log, 12), all = blendFit(log);
+  assert.ok(share(lateFit, 'late') > 0.85 && share(earlyFit, 'early') > 0.85, `${share(lateFit, 'late')} ${share(earlyFit, 'early')}`);
+  assert.ok(share(all, 'early') > share(lateFit, 'early') && share(all, 'late') > share(earlyFit, 'late'), 'the all-minutes fit sits between');
+  // a stretch with few rounds of its own stays close to the all-minutes fit
+  const thin = log.map((e, i) => ({ ...e, cps: Object.fromEntries(Object.entries(e.cps).filter(([m]) => i < 3 || +m >= 4)) }));
+  const t = blendFit(thin, 2), a = blendFit(thin);
+  assert.ok(Math.abs(share(t, 'late') - share(a, 'late')) < Math.abs(share(blendFit(log, 2), 'late') - share(a, 'late')), 'pulled toward the pooled fit');
+  assert.equal(BLEND.pool, 30);
+});
+test('the blend scoreboard: its own logged close vs "no change" and the best single line on the same calls', () => {
+  const log = [
+    { closeTime: 'a', actual: 100, cps: { 3: { sd: 5, still: 110, kalshi: 104, exch: 120, blend: 103 }, 2: { sd: 4, still: 106, kalshi: 98, blend: 101 } } },
+    { closeTime: 'b', actual: 200, cps: { 9: { sd: 9, still: 190, kalshi: 210, blend: 196 } } },
+    { closeTime: 'c', actual: null, cps: { 4: { sd: 5, still: 1, blend: 1 } } },
+  ];
+  const sc = blendScore(log);
+  assert.deepEqual({ n: sc.n, rounds: sc.rounds }, { n: 3, rounds: 2 });
+  assert.equal(sc.blend, (3 + 1 + 4) / 3); assert.equal(sc.still, (10 + 6 + 10) / 3);
+  assert.deepEqual(sc.best, { key: 'kalshi', miss: (4 + 2 + 10) / 3, blend: 8 / 3, n: 3 }, 'exch (drawn once in three) isn\'t compared');
+  assert.deepEqual(blendScore([]), { n: 0 });
 });

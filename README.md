@@ -271,6 +271,28 @@ Security:
 
 ## Version notes (newest first)
 
+### Every-minute blend (v13.0)
+
+There is no magic accuracy switch, because BTC over 15 minutes is mostly noise. v13.0 makes the blend learn faster and
+fit the moment better, and it adds a scoreboard so you can see whether it's working.
+- **Every minute is graded.** Each line's close prediction is logged at every whole minute of the round (14 down to 1
+  minute left), not only at 5 minutes left. A round now gives about 14 graded samples instead of 1. Misses are measured
+  in typical moves (miss ÷ (price × 1-minute volatility × √minutes left)), so samples taken early and late in the round
+  can be pooled.
+- **Weights by stretch of the round.** The weights are fitted separately for 1–3, 4–7 and 8–14 minutes left, each
+  pulled toward the all-minutes fit until it has 30 rounds of its own. Kalshi's price tends to say more near the close
+  and a trend more early, and the weights can now follow that. Error sizes are pulled toward the pooled fit on a log
+  scale and correlations linearly, so one stretch's bigger misses can't swamp another's.
+- **Steadier on a short record.** Weights are pulled toward equal weights by 20/(n+20), because a plain average is hard
+  to beat on a few rounds. Biases are shrunk by n/(n+60).
+- **Blend scoreboard.** The blend's own close forecast is logged each minute using the weights known at that moment, so
+  it's out of sample. The Prediction lines card shows its average miss next to "no change" and the best single line on
+  the same calls.
+
+Walk-forward simulation (5 seeds, 300 rounds): about 3–8% smaller average miss than v12.9, about level with a plain
+average for the first 30 rounds and about 2–5% better after that. When the lines carry no information, it's level with
+v12.9 (both 1–2% behind "no change"). These numbers come from simulated rounds; the scoreboard will show the real ones.
+
 ### More prediction lines, optimally blended (v12.9)
 
 Four new lines join Kalshi, the five exchanges and the prediction engine: the **bot's own odds** (its P(YES) turned into

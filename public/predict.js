@@ -116,10 +116,11 @@ export function predictionLines({ spot, sigmaMin, now, close, until = close, str
 }
 
 // The record: per line, its 5-minutes-left predictions against where BTC closed: average miss, mean squared error and
-// bias (dollars). `still` is "no change" (logged as spot by older versions)
-const META = new Set(['ticker', 'closeTime', 'at', 'spot', 'actual', 'gone']);
+// bias (dollars). `still` is "no change" (logged as spot by older versions). Rounds first seen after the 5-minute mark
+// (only minute checkpoints, no 5-minute call) aren't in it.
+const META = new Set(['ticker', 'closeTime', 'at', 'spot', 'actual', 'gone', 'cps', 'sd', 'blend']);
 export function predictionRecord(log) {
-  const done = log.filter((e) => e.actual != null);
+  const done = log.filter((e) => e.actual != null && (e.at != null || !e.cps));
   const keys = [...new Set(done.flatMap((e) => Object.keys(e).filter((k) => !META.has(k) && Number.isFinite(e[k]))))];
   const stat = (k) => {
     const xs = done.filter((e) => Number.isFinite(k === 'still' ? e.still ?? e.spot : e[k])).map((e) => (k === 'still' ? e.still ?? e.spot : e[k]) - e.actual);
@@ -131,46 +132,121 @@ export function predictionRecord(log) {
 
 // ---------- the expected path: where the bot expects BTC to be, minute by minute (the cone's centre) ----------
 // The blend of the lines: the minimum-variance combination of their bias-corrected forecasts (Bates-Granger with the full
-// error covariance). With e_i the line's miss at past closes and b_i its bias (shrunk toward 0 until there are plenty of
-// rounds), the weights minimise E[(sum w_i (e_i - b_i))^2] subject to sum w_i = 1, w_i >= 0:
+// error covariance). With e_i the line's miss at past closes and b_i its bias, the weights minimise
+// E[(sum w_i (e_i - b_i))^2] subject to sum w_i = 1, w_i >= 0:
 //   w = M^-1 1 / (1' M^-1 1) on the lines kept, M = the bias-corrected error second-moment matrix
 // Lines that miss together (Bot and Kalshi often do) share weight instead of each counting fully, which inverse-MSE
-// weights (only right when errors are independent) can't do. M is shrunk toward its diagonal (more while the record is
-// short) so a few rounds can't overfit, and any line whose weight would go negative is dropped and the rest re-solved.
-// Lines with fewer than 5 graded rounds get the average weight until they have a record ("no change" gets none: it's the
-// baseline, and joins the blend only when its record earns it a share).
-export const BLEND = { minRounds: 5, shrink: 20 };
-export function blendFit(log) {
-  const done = (log || []).filter((e) => e.actual != null), val = (e, k) => (k === 'still' ? e.still ?? e.spot : e[k]);
-  const keys = [...new Set(done.flatMap((e) => Object.keys(e).filter((k) => !META.has(k) && Number.isFinite(e[k]))))].concat('still').filter((k, i, a) => a.indexOf(k) === i);
-  const err = Object.fromEntries(keys.map((k) => [k, done.filter((e) => Number.isFinite(val(e, k))).map((e) => ({ e: val(e, k) - e.actual, r: e.closeTime }))]));
-  const bias = {}, known = keys.filter((k) => err[k].length >= BLEND.minRounds);
-  for (const k of keys) { const xs = err[k], n = xs.length; bias[k] = n ? (xs.reduce((a, x) => a + x.e, 0) / n) * (n / (n + BLEND.shrink)) : 0; }
-  const weights = {};
+// weights (only right when errors are independent) can't do. Any line whose weight would go negative is dropped and the
+// rest re-solved.
+// Every minute (v13): each line's close prediction is logged at every whole minute of the round (14 down to 1 minute
+// left), not just at 5 minutes left, so a round gives ~14 graded samples instead of 1. Misses are measured in typical
+// moves (miss / (spot x 1-minute vol x sqrt(minutes left))) so a miss with 14 minutes left and one with 1 minute left
+// are comparable and pool. Which line is best changes with the time left (the market's price says more near the close,
+// a trend more early), so the weights are fitted per stretch (1-3, 4-7 and 8-14 minutes left), each pulled toward the
+// all-minutes fit until it has 30 rounds of its own.
+// Shrinkage everywhere, so a short record can't overfit (n = rounds): biases toward 0 (n/(n+60): a few rounds' average
+// miss is mostly noise), M toward its diagonal (by 20/(n+20)) and the weights toward equal ones (by 20/(n+20): on a short
+// record a plain average is hard to beat). Lines with fewer than 5 graded rounds get the average weight until they have
+// a record ("no change" gets none: it's the baseline, and joins the blend only when its record earns it a share).
+// Checked walk-forward on simulated rounds (lines that know part of the move, better or worse by the time left): ~3-8%
+// smaller average miss than v12.9's one-sample-a-round fit, about level with a plain average for the first 30 rounds
+// and ~2-5% better after; with lines that know nothing, level with v12.9 (both 1-2% behind "no change").
+export const BLEND = { minRounds: 5, shrink: 20, biasShrink: 60, pool: 30, equal: 20, bands: [[1, 3], [4, 7], [8, 14]] };
+// The graded samples: one per round per logged minute. Rounds logged before v13 have one sample (5 minutes left) and no
+// sd: they use the spread of "no change"'s misses over those rounds (its typical miss is the typical move) as theirs.
+export function blendSamples(log) {
+  const done = (log || []).filter((e) => e.actual != null), old = done.filter((e) => !e.cps && Number.isFinite(e.spot));
+  const s0 = Math.sqrt(old.reduce((a, e) => a + (e.spot - e.actual) ** 2, 0) / (old.length || 1)) || 1; // (a perfect "no change": any scale will do)
+  const zs = (c, actual, sd) => {
+    const z = {};
+    for (const k of Object.keys(c)) if (!META.has(k) && Number.isFinite(c[k])) z[k] = (c[k] - actual) / sd;
+    if (z.still == null && Number.isFinite(c.spot)) z.still = (c.spot - actual) / sd;
+    return z;
+  };
+  const out = [];
+  for (const e of done) {
+    if (e.cps) { for (const [m, c] of Object.entries(e.cps)) if (c.sd > 0) out.push({ r: e.closeTime, m: +m, z: zs(c, e.actual, c.sd) }); }
+    else out.push({ r: e.closeTime, m: 5, z: zs(e, e.actual, s0) });
+  }
+  return out;
+}
+// Which stretch of the round a number of minutes left falls in (the index into BLEND.bands)
+export const blendBand = (mins) => { const m = Math.min(14, Math.max(1, Math.round(mins))); return BLEND.bands.findIndex(([a, b]) => m >= a && m <= b); };
+// The fit: { weights (an average line = 1), bias (typical moves), known (lines with a record), rounds }. With mins, the
+// fit for that stretch of the round; without, the all-minutes fit.
+export function blendFit(log, mins = null) {
+  const ss = blendSamples(log), all = fitSamples(ss);
+  if (mins == null) return all;
+  const [a, b] = BLEND.bands[blendBand(mins)];
+  return fitSamples(ss.filter((s) => s.m >= a && s.m <= b), all);
+}
+function fitSamples(ss, prior = null) {
+  const P = BLEND.pool, keys = [...new Set([...ss.flatMap((s) => Object.keys(s.z)), ...(prior ? Object.keys(prior.bias) : []), 'still'])];
+  const has = Object.fromEntries(keys.map((k) => [k, ss.filter((s) => s.z[k] != null)]));
+  const roundsOf = (xs) => new Set(xs.map((s) => s.r)).size, nr = Object.fromEntries(keys.map((k) => [k, roundsOf(has[k])]));
+  const bias = {};
+  for (const k of keys) {
+    const xs = has[k], mean = xs.length ? xs.reduce((t, s) => t + s.z[k], 0) / xs.length : 0, n = nr[k];
+    const own = mean * (n / (n + BLEND.biasShrink)); // a short record's average miss is mostly noise: shrunk toward 0
+    bias[k] = prior ? (n * own + P * (prior.bias[k] ?? 0)) / (n + P) : own;
+  }
+  const known = prior ? prior.known : keys.filter((k) => nr[k] >= BLEND.minRounds), weights = {}, M = {};
   if (known.length) {
-    const byRound = Object.fromEntries(known.map((k) => [k, new Map(err[k].map((x) => [x.r, x.e - bias[k]]))]));
-    const M = known.map((a) => known.map((b) => {
-      let s = 0, n = 0; for (const [r, ea] of byRound[a]) { const eb = byRound[b].get(r); if (eb != null) { s += ea * eb; n++; } }
-      return n ? s / n : 0;
-    }));
-    const n = Math.min(...known.map((k) => err[k].length)), lam = BLEND.shrink / (n + BLEND.shrink);
-    const Ms = M.map((row, i) => row.map((v, j) => (i === j ? v : (1 - lam) * v)));
+    // the stretch's own moments; a stretch's fit pulls its error sizes toward the all-minutes ones geometrically (so one
+    // stretch's much bigger misses can't swamp another's) and its correlations toward theirs linearly, by rounds
+    const mom = (a, b) => { const xs = has[a].filter((s) => s.z[b] != null), d = (s, k) => s.z[k] - bias[k]; return { n: roundsOf(xs), ab: xs.reduce((t, s) => t + d(s, a) * d(s, b), 0) / (xs.length || 1), aa: xs.reduce((t, s) => t + d(s, a) ** 2, 0) / (xs.length || 1), bb: xs.reduce((t, s) => t + d(s, b) ** 2, 0) / (xs.length || 1) }; };
+    const diag = {};
+    for (const a of known) {
+      const o = mom(a, a), pv = prior?.M[a]?.[a];
+      diag[a] = !prior ? o.aa : o.n && o.aa > 0 && pv > 0 ? Math.exp((o.n * Math.log(o.aa) + P * Math.log(pv)) / (o.n + P)) : (pv ?? o.aa);
+    }
+    for (const a of known) {
+      M[a] = {};
+      for (const b of known) {
+        if (a === b) { M[a][b] = diag[a]; continue; }
+        const o = mom(a, b), c = o.aa > 0 && o.bb > 0 ? o.ab / Math.sqrt(o.aa * o.bb) : 0;
+        const pc = prior && prior.M[a]?.[a] > 0 && prior.M[b]?.[b] > 0 ? (prior.M[a][b] ?? 0) / Math.sqrt(prior.M[a][a] * prior.M[b][b]) : 0;
+        M[a][b] = (prior ? (o.n * c + P * pc) / (o.n + P) : c) * Math.sqrt(diag[a] * diag[b]);
+      }
+    }
+    const n = prior ? prior.rounds : Math.min(...known.map((k) => nr[k])), lam = BLEND.shrink / (n + BLEND.shrink);
+    const Ms = known.map((a, i) => known.map((b, j) => (i === j ? M[a][b] : (1 - lam) * M[a][b])));
     let active = known.map((_, i) => i), w = null;
     while (active.length) {
-      const A = active.map((i) => active.map((j) => Ms[i][j])), x = solveSym(A, active.map(() => 1));
-      const tot = x ? x.reduce((a, b) => a + b, 0) : 0;
+      const x = solveSym(active.map((i) => active.map((j) => Ms[i][j])), active.map(() => 1)), tot = x ? x.reduce((t, v) => t + v, 0) : 0;
       if (!x || !(tot > 0)) { w = null; break; }
       const ws = x.map((v) => v / tot), neg = ws.reduce((m, v, i) => (v < ws[m] ? i : m), 0);
       if (ws[neg] >= 0) { w = new Map(active.map((i, k) => [i, ws[k]])); break; }
       active = active.filter((_, k) => k !== neg); // the most negative line drops out; re-solve
     }
-    if (!w) { const inv = known.map((_, i) => (Ms[i][i] > 0 ? 1 / Ms[i][i] : 0)), t = inv.reduce((a, b) => a + b, 0) || 1; w = new Map(inv.map((v, i) => [i, v / t])); } // degenerate: inverse-MSE
-    known.forEach((k, i) => { weights[k] = (w.get(i) ?? 0) * known.length; }); // scaled so an average line weighs 1
+    if (!w) { const inv = known.map((_, i) => (Ms[i][i] > 0 ? 1 / Ms[i][i] : 0)), t = inv.reduce((u, v) => u + v, 0) || 1; w = new Map(inv.map((v, i) => [i, v / t])); } // degenerate: inverse-MSE
+    // pulled toward the no-record weights (equal, "no change" 0) by S/(n+S): fitted weights are noisy on a short record,
+    // where a plain average is hard to beat
+    const n0 = prior ? prior.rounds : n, pull = BLEND.equal / (n0 + BLEND.equal), w0 = known.map((k) => (k === 'still' ? 0 : 1)), t0 = w0.reduce((u, v) => u + v, 0);
+    known.forEach((k, i) => { weights[k] = ((1 - pull) * (w.get(i) ?? 0) + pull * (t0 ? w0[i] / t0 : 1 / known.length)) * known.length; }); // scaled so an average line weighs 1
   }
   for (const k of keys) if (!(k in weights)) weights[k] = k === 'still' ? 0 : 1; // no record yet: an average line ("no change" only joins once it has one)
-  return { weights, bias, known };
+  return { weights, bias, known, M, rounds: prior ? prior.rounds : (known.length ? Math.min(...known.map((k) => nr[k])) : 0) };
 }
-// Each line shifted by its bias (proportionally from now to its close, then held)
+// The blend's own scoreboard: its close forecast logged each minute (with the weights known then, so out of sample) vs
+// "no change" and the best single line, each on the same checkpoints. Average miss in dollars.
+export function blendScore(log) {
+  const xs = [];
+  for (const e of log || []) if (e.actual != null && e.cps) for (const c of Object.values(e.cps)) if (Number.isFinite(c.blend)) xs.push({ c, a: e.actual, r: e.closeTime });
+  if (!xs.length) return { n: 0 };
+  const avg = (ys, k) => ys.reduce((t, x) => t + Math.abs(x.c[k] - x.a), 0) / ys.length;
+  let best = null;
+  for (const k of new Set(xs.flatMap((x) => Object.keys(x.c).filter((q) => !META.has(q) && q !== 'still')))) {
+    const ys = xs.filter((x) => Number.isFinite(x.c[k]));
+    if (ys.length < xs.length / 2) continue; // seldom drawn: not a fair comparison
+    const m = avg(ys, k);
+    if (!best || m < best.miss) best = { key: k, miss: m, blend: avg(ys, 'blend'), n: ys.length };
+  }
+  const st = xs.filter((x) => Number.isFinite(x.c.still));
+  return { n: xs.length, rounds: new Set(xs.map((x) => x.r)).size, blend: avg(xs, 'blend'), still: st.length ? avg(st, 'still') : null, stillBlend: st.length ? avg(st, 'blend') : null, best };
+}
+// Each line shifted by its bias in dollars (blendFit's, in typical moves, times the typical move to the close),
+// proportionally from now to its close, then held
 export function correctLines(lines, bias, now, close) {
   return (lines || []).map((l) => { const b = bias?.[l.key] || 0; return b ? { ...l, end: l.end - b, pts: l.pts.map((p) => ({ ...p, v: p.v - b * Math.min(1, Math.max(0, (p.t - now) / (close - now))) })) } : l; });
 }

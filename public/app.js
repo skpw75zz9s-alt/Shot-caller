@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { LINE_NAMES, blendFit, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
+import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -1090,11 +1090,12 @@ function predictionsNow(live, snap, now) {
     micro: state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null,
     cm: fresh ? pb?.candle?.live ?? null : null });
 }
-// The blend's fit (public/predict.js blendFit): weights and biases from the graded rounds, refit when a round is graded
-function blendNow() {
-  const n = state.predLog.filter((e) => e.actual != null).length;
-  if (state.blend?.n !== n) state.blend = { n, ...blendFit(state.predLog) };
-  return state.blend;
+// The blend's fit (public/predict.js blendFit): weights and biases from the graded rounds (every logged minute), for the
+// stretch of the round `mins` falls in (all minutes without it), refit when a round is graded
+function blendNow(mins = null) {
+  const n = state.predLog.filter((e) => e.actual != null).length, key = mins == null ? 'all' : blendBand(mins);
+  if (state.blend?.n !== n) state.blend = { n, fits: {} };
+  return (state.blend.fits[key] ||= blendFit(state.predLog, mins));
 }
 // the prediction engine's read (server), when it's fresh and for this round
 function engineFor(live, now) {
@@ -1114,8 +1115,9 @@ function flipNow(live, snap, now) {
 function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { minutes: [], turns: [], flip: null, path: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
-  const fit = blendNow(), close = Date.parse(live.m.close_time), weights = fit.weights, beta = pathRecord(state.pcLog).beta;
-  lines = correctLines(lines, fit.bias, now, close); // each line minus its measured bias
+  const close = Date.parse(live.m.close_time), mins = Math.max(0, (close - now) / 60000), fit = blendNow(mins), weights = fit.weights, beta = pathRecord(state.pcLog).beta;
+  const move = spot * sigma * Math.sqrt(mins); // a typical move to the close: the fit's biases are in these
+  lines = correctLines(lines, Object.fromEntries(Object.entries(fit.bias).map(([k, b]) => [k, b * move])), now, close); // each line minus its measured bias
   const minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta });
   return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta }) };
 }
@@ -1123,16 +1125,26 @@ function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
   return marketCone({ path, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: until, bars: snap.bars, strike: live.strike, strikeType: live.m.strike_type, fix: coneRecord(state.coneLog).fix });
 }
-// With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed
-// (the close of Coinbase's last 1-minute candle of the round), next to "no change" as the baseline
+// At every whole minute of the round (14 down to 1 minute left) keep each line's close prediction, the typical move to
+// the close and the blend's own forecast (for the blend's fit and its scoreboard); with 5 minutes left also the card's
+// record. After the close, grade them against where BTC closed (the close of Coinbase's last 1-minute candle of the
+// round), next to "no change" as the baseline
 function trackPredictions(snap, live, now) {
-  if (live && live.ev.minutesLeft <= 5 && live.ev.minutesLeft > 4 && !state.predLog.some((e) => e.ticker === live.m.ticker)) {
-    const lines = predictionsNow(live, snap, now);
-    if (lines.length) {
-      const e = { ticker: live.m.ticker, closeTime: live.m.close_time, at: now, spot: modelSpot(), actual: null };
-      for (const l of lines) e[l.key] = l.end;
-      state.predLog.unshift(e); if (state.predLog.length > 300) state.predLog.length = 300;
-      store.set('predLog', state.predLog);
+  const ml = live?.ev.minutesLeft, m = Math.round(ml ?? 0);
+  let pe = live ? state.predLog.find((e) => e.ticker === live.m.ticker) : null;
+  const cpDue = live && m >= 1 && m <= 14 && Math.abs(ml - m) < 0.25 && !pe?.cps?.[m], fiveDue = live && ml <= 5 && ml > 4 && pe?.at == null;
+  const lines = cpDue || fiveDue ? predictionsNow(live, snap, now) : [];
+  if (lines.length) {
+    if (!pe) { pe = { ticker: live.m.ticker, closeTime: live.m.close_time, actual: null, cps: {} }; state.predLog.unshift(pe); if (state.predLog.length > 300) state.predLog.length = 300; }
+    if (cpDue) {
+      const cents = (v) => Math.round(v * 100) / 100, c = { sd: cents(modelSpot() * (live.sigma ?? snap.sigmaMin) * Math.sqrt(ml)) };
+      for (const l of lines) c[l.key] = cents(l.end);
+      c.blend = cents(pathNow(live, snap, now, lines).path(Date.parse(live.m.close_time)));
+      (pe.cps ||= {})[m] = c;
+    }
+    if (fiveDue) {
+      pe.at = now; pe.spot = modelSpot();
+      for (const l of lines) pe[l.key] = l.end;
       // the cone's close band and its chance above the target, next to Kalshi's price for the same thing
       const cs = coneNow(live, snap, now, pathNow(live, snap, now, lines).path).summary, q = live.ev.quote;
       const mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
@@ -1142,6 +1154,7 @@ function trackPredictions(snap, live, now) {
         store.set('coneLog', state.coneLog);
       }
     }
+    store.set('predLog', state.predLog);
   }
   let coneChanged = false;
   for (const e of state.coneLog) {
@@ -1212,9 +1225,12 @@ function trackPredictions(snap, live, now) {
     : 'The expected path (the cone\'s centre) is graded every minute: the direction and close it predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog), fit = blendNow(), wsum = fit.known.reduce((a, k) => a + fit.weights[k], 0) || 1;
   const rows = Object.entries(r.lines).sort((a, b) => a[1].miss - b[1].miss);
-  const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs(fit.bias[k]) >= 1 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}$${Math.abs(fit.bias[k]).toFixed(0)} removed` : ''})` : ''}`;
-  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Blended by their error covariance (lines that miss together share weight)`
-    : 'Prediction lines are graded each round: what each one said with 5 minutes left vs where BTC closed (keep the app open through a few rounds).');
+  const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs(fit.bias[k]) >= 0.05 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}${Math.round(Math.abs(fit.bias[k]) * 100)}% of a typical move removed` : ''})` : ''}`;
+  const sc = blendScore(state.predLog), d = (x) => `$${x.toFixed(0)}`;
+  setHTML($('predRecord'), (r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Blended by their error covariance (lines that miss together share weight), learned from every minute of every round and fitted separately for early, middle and late in the round. `
+    : 'Prediction lines are graded each round: what each one said at every minute vs where BTC closed (keep the app open through a few rounds). ')
+    + (sc.n ? `Blend scoreboard (${int(sc.n)} calls over ${int(sc.rounds)} round${sc.rounds === 1 ? '' : 's'}, every minute, out of sample): blend <b>${d(sc.blend)}</b> average miss`
+      + `${sc.still != null ? ` vs <b>${d(sc.still)}</b> for "no change"` : ''}${sc.best ? ` · best single line ${LINE_NAMES[sc.best.key] || sc.best.key} <b>${d(sc.best.miss)}</b> vs the blend's ${d(sc.best.blend)} on the same calls` : ''}` : ''));
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track
 function chartFills() {
