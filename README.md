@@ -271,6 +271,27 @@ Security:
 
 ## Version notes (newest first)
 
+### More prediction lines, optimally blended (v12.9)
+
+Four new lines join Kalshi, the five exchanges and the prediction engine: the **bot's own odds** (its P(YES) turned into
+the close it implies), the **guide** forecast, the **micro model**'s push over the next five minutes and the **move
+model**'s proven moves (both used to be bolted onto the path; now they're lines like the rest and get graded the same
+way). **No change** is logged and graded as a hidden line too.
+
+The expected path (the cone's centre) is now the **minimum-variance combination** of the lines (Bates–Granger with the
+full error covariance): w = M⁻¹1 / (1ᵀM⁻¹1), with M the matrix of the lines' past misses at the close. The old
+inverse-MSE weights were only right if the lines' errors were independent. Bot and Kalshi often miss together, so they
+used to count twice; now they share weight, and a duplicated line can't double its say.
+- **Bias removed.** Each line's average miss is subtracted (shrunk by n/(n+20) while the record is short).
+- **Shrinkage.** M is shrunk toward its diagonal by 20/(n+20), so a handful of rounds can't overfit.
+- **Non-negative.** A line whose weight would go negative drops out and the rest are re-solved.
+- **Waiting lines.** A line with fewer than 5 graded rounds weighs as an average line. No change weighs nothing until it
+  has a record.
+
+The Prediction lines card shows each line's share of the blend and the bias removed. This is the exact optimum *given
+the measured errors*; it can't make the combined forecast better than the information in the lines, and it needs
+graded rounds before the weights move.
+
 ### Ghost candles removed (v12.8)
 
 The faint prediction candles after the live candle are gone from the chart.

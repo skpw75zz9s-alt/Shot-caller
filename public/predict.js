@@ -75,43 +75,114 @@ export function exchangeTrend(trades, now, close, { lookback = 5 * 60000, damp =
   return { start: last, end: last * Math.exp(slope * damp * minutes), slopePerMin: last * slope };
 }
 
-// All three lines, clipped to the 90% cone so a runaway trend can't fly off the chart
+// The close a probability implies: P(settlement > K) = p  =>  median settlement = K exp(sd z(p)), sd the settlement's
+const impliedClose = (strike, pAbove, sigmaMin, mins) => strike * Math.exp(Math.sqrt(settleVariance(sigmaMin, mins)) * normInv(Math.min(0.98, Math.max(0.02, pAbove))));
+export const LINE_NAMES = { bot: 'Bot', kalshi: 'Kalshi', exch: '5 exch', engine: 'Engine', guide: 'Guide', micro: 'Micro', moves: 'Move model', still: 'No change' };
+// Every independent forecast of the close, each a line from today's price, clipped to the 90% cone so a runaway can't
+// fly off the chart:
+//   bot      the close the bot's own final odds imply (after every proven nudge), pBot = its P(YES)
+//   kalshi   the close Kalshi's price implies
+//   exch     the 5 exchanges' trend, half carried to the close
+//   engine   the close the prediction engine's P(UP) implies (public/predictor.js)
+//   guide    the close the 15-minute forecast's calibrated P(UP) implies (public/guide.js), for the round it was made for
+//   micro    the micro model's proven 1-5 minute read (public/micro.js), held after 5 minutes
+//   moves    the move model's proven moves (public/candlemodel.js)
+//   still    no change: today's price (blended and graded, not drawn); at these horizons it's often the one to beat
+// micro and moves only appear when they say something (a proven read that isn't flat).
 // until: how far ahead the lines run (at least the close; the chart uses a rolling 15 minutes). `end` stays the close prediction.
-// engine: the prediction engine's live read (public/predictor.js) { pUp } - its implied close becomes a line too
-export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, until = close, strike, yesMid, strikeType, trades = [], engine = null }) {
+export function predictionLines({ spot, sigmaMin, now, close, until = close, strike, yesMid, strikeType, trades = [], pBot = null, engine = null, guide = null, micro = null, cm = null }) {
   if (!spot || !(close > now) || !(sigmaMin > 0)) return [];
-  const mins = (close - now) / 60000, sd = spot * sigmaMin * Math.sqrt(mins);
+  const mins = (close - now) / 60000, sd = spot * sigmaMin * Math.sqrt(mins), less = /^less/.test(strikeType || '');
   const z90 = 1.6448536269514722, clip = (v) => Math.min(spot + z90 * sd, Math.max(spot - z90 * sd, v)); // the 90% band's edge, exactly
   const lines = [];
-  lines.push({ key: 'bot', name: 'Bot', color: '#22d3ee', end: clip(spot * Math.exp(driftMin * mins)), from: spot });
+  if (pBot != null && strike > 0) lines.push({ key: 'bot', name: 'Bot', color: '#22d3ee', end: clip(impliedClose(strike, less ? 1 - pBot : pBot, sigmaMin, mins)), from: spot });
   const k = kalshiImplied({ strike, yesMid, strikeType, sigmaMin, minutesLeft: mins });
   if (k) lines.push({ key: 'kalshi', name: 'Kalshi', color: '#a78bfa', end: clip(k), from: spot });
   const tr = exchangeTrend(trades, now, close);
   if (tr) lines.push({ key: 'exch', name: '5 exch', color: '#fbbf24', end: clip(tr.end), from: tr.start });
-  // the engine's P(UP) as a close: the price it expects BTC to finish at (P(close > target) = P(UP) => median close)
-  if (engine?.pUp != null && strike > 0) lines.push({ key: 'engine', name: 'Engine', color: '#34d399', end: clip(strike * Math.exp(Math.sqrt(settleVariance(sigmaMin, mins)) * normInv(Math.min(0.98, Math.max(0.02, engine.pUp))))), from: spot });
+  if (engine?.pUp != null && strike > 0) lines.push({ key: 'engine', name: 'Engine', color: '#34d399', end: clip(impliedClose(strike, engine.pUp, sigmaMin, mins)), from: spot });
+  if (guide?.pUp != null && strike > 0) lines.push({ key: 'guide', name: 'Guide', color: '#f472b6', end: clip(impliedClose(strike, guide.pUp, sigmaMin, mins)), from: spot });
+  if (micro?.horizons) {
+    const since = Math.max(0, (now - (micro.at ?? now)) / 60000), move = microOffset(micro, since + Math.min(5, mins)) - microOffset(micro, since);
+    if (Math.abs(move) >= 0.01) lines.push({ key: 'micro', name: 'Micro', color: '#60a5fa', end: clip(spot + move), from: spot });
+  }
+  if (cm?.moves) {
+    const move = cmMove(cm, (close - cm.at) / 60000) - cmMove(cm, (now - cm.at) / 60000);
+    if (Math.abs(move) >= 0.01) lines.push({ key: 'moves', name: 'Move model', color: '#fb923c', end: clip(spot + move), from: spot });
+  }
+  lines.push({ key: 'still', name: 'No change', color: '#94a3b8', end: spot, from: spot, hidden: true });
   for (const l of lines) l.pts = path(l.from, l.end, now, close, Math.max(close, until), l.key === 'kalshi');
   return lines;
 }
 
-// The record: average miss (dollars) of each line's 5-minutes-left prediction, vs "no change", and its mean squared error
+// The record: per line, its 5-minutes-left predictions against where BTC closed: average miss, mean squared error and
+// bias (dollars). `still` is "no change" (logged as spot by older versions)
+const META = new Set(['ticker', 'closeTime', 'at', 'spot', 'actual', 'gone']);
 export function predictionRecord(log) {
   const done = log.filter((e) => e.actual != null);
-  const avg = (k) => { const xs = done.filter((e) => e[k] != null).map((e) => e[k] - e.actual); return xs.length ? { miss: xs.reduce((a, b) => a + Math.abs(b), 0) / xs.length, mse: xs.reduce((a, b) => a + b * b, 0) / xs.length, n: xs.length } : null; };
-  return { rounds: done.length, bot: avg('bot'), kalshi: avg('kalshi'), exch: avg('exch'), engine: avg('engine'), still: avg('spot') };
+  const keys = [...new Set(done.flatMap((e) => Object.keys(e).filter((k) => !META.has(k) && Number.isFinite(e[k]))))];
+  const stat = (k) => {
+    const xs = done.filter((e) => Number.isFinite(k === 'still' ? e.still ?? e.spot : e[k])).map((e) => (k === 'still' ? e.still ?? e.spot : e[k]) - e.actual);
+    return xs.length ? { miss: xs.reduce((a, b) => a + Math.abs(b), 0) / xs.length, mse: xs.reduce((a, b) => a + b * b, 0) / xs.length, bias: xs.reduce((a, b) => a + b, 0) / xs.length, n: xs.length } : null;
+  };
+  const lines = Object.fromEntries([...new Set([...keys, 'still'])].map((k) => [k, stat(k)]).filter(([, v]) => v));
+  return { rounds: done.length, lines, ...lines };
 }
 
 // ---------- the expected path: where the bot expects BTC to be, minute by minute (the cone's centre) ----------
-// The expected path is a blend of the prediction lines, each weighted by its inverse mean squared error at past closes
-// (inverse-variance weighting: the weights that minimise the blend's error for independent errors), equal weights until
-// each has 5 graded rounds.
-export function blendWeights(record) {
-  const w = {};
-  for (const k of ['bot', 'kalshi', 'exch', 'engine']) { const x = record?.[k], mse = x?.mse ?? (x?.miss > 0 ? x.miss * x.miss : null); w[k] = x && x.n >= 5 && mse > 0 ? 1 / mse : null; }
-  const known = Object.values(w).filter((v) => v != null);
-  const fill = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
-  for (const k of Object.keys(w)) w[k] ??= fill; // a line without a record yet counts as average
-  return w;
+// The blend of the lines: the minimum-variance combination of their bias-corrected forecasts (Bates-Granger with the full
+// error covariance). With e_i the line's miss at past closes and b_i its bias (shrunk toward 0 until there are plenty of
+// rounds), the weights minimise E[(sum w_i (e_i - b_i))^2] subject to sum w_i = 1, w_i >= 0:
+//   w = M^-1 1 / (1' M^-1 1) on the lines kept, M = the bias-corrected error second-moment matrix
+// Lines that miss together (Bot and Kalshi often do) share weight instead of each counting fully, which inverse-MSE
+// weights (only right when errors are independent) can't do. M is shrunk toward its diagonal (more while the record is
+// short) so a few rounds can't overfit, and any line whose weight would go negative is dropped and the rest re-solved.
+// Lines with fewer than 5 graded rounds get the average weight until they have a record ("no change" gets none: it's the
+// baseline, and joins the blend only when its record earns it a share).
+export const BLEND = { minRounds: 5, shrink: 20 };
+export function blendFit(log) {
+  const done = (log || []).filter((e) => e.actual != null), val = (e, k) => (k === 'still' ? e.still ?? e.spot : e[k]);
+  const keys = [...new Set(done.flatMap((e) => Object.keys(e).filter((k) => !META.has(k) && Number.isFinite(e[k]))))].concat('still').filter((k, i, a) => a.indexOf(k) === i);
+  const err = Object.fromEntries(keys.map((k) => [k, done.filter((e) => Number.isFinite(val(e, k))).map((e) => ({ e: val(e, k) - e.actual, r: e.closeTime }))]));
+  const bias = {}, known = keys.filter((k) => err[k].length >= BLEND.minRounds);
+  for (const k of keys) { const xs = err[k], n = xs.length; bias[k] = n ? (xs.reduce((a, x) => a + x.e, 0) / n) * (n / (n + BLEND.shrink)) : 0; }
+  const weights = {};
+  if (known.length) {
+    const byRound = Object.fromEntries(known.map((k) => [k, new Map(err[k].map((x) => [x.r, x.e - bias[k]]))]));
+    const M = known.map((a) => known.map((b) => {
+      let s = 0, n = 0; for (const [r, ea] of byRound[a]) { const eb = byRound[b].get(r); if (eb != null) { s += ea * eb; n++; } }
+      return n ? s / n : 0;
+    }));
+    const n = Math.min(...known.map((k) => err[k].length)), lam = BLEND.shrink / (n + BLEND.shrink);
+    const Ms = M.map((row, i) => row.map((v, j) => (i === j ? v : (1 - lam) * v)));
+    let active = known.map((_, i) => i), w = null;
+    while (active.length) {
+      const A = active.map((i) => active.map((j) => Ms[i][j])), x = solveSym(A, active.map(() => 1));
+      const tot = x ? x.reduce((a, b) => a + b, 0) : 0;
+      if (!x || !(tot > 0)) { w = null; break; }
+      const ws = x.map((v) => v / tot), neg = ws.reduce((m, v, i) => (v < ws[m] ? i : m), 0);
+      if (ws[neg] >= 0) { w = new Map(active.map((i, k) => [i, ws[k]])); break; }
+      active = active.filter((_, k) => k !== neg); // the most negative line drops out; re-solve
+    }
+    if (!w) { const inv = known.map((_, i) => (Ms[i][i] > 0 ? 1 / Ms[i][i] : 0)), t = inv.reduce((a, b) => a + b, 0) || 1; w = new Map(inv.map((v, i) => [i, v / t])); } // degenerate: inverse-MSE
+    known.forEach((k, i) => { weights[k] = (w.get(i) ?? 0) * known.length; }); // scaled so an average line weighs 1
+  }
+  for (const k of keys) if (!(k in weights)) weights[k] = k === 'still' ? 0 : 1; // no record yet: an average line ("no change" only joins once it has one)
+  return { weights, bias, known };
+}
+// Each line shifted by its bias (proportionally from now to its close, then held)
+export function correctLines(lines, bias, now, close) {
+  return (lines || []).map((l) => { const b = bias?.[l.key] || 0; return b ? { ...l, end: l.end - b, pts: l.pts.map((p) => ({ ...p, v: p.v - b * Math.min(1, Math.max(0, (p.t - now) / (close - now))) })) } : l; });
+}
+function solveSym(A, b) { // Gaussian elimination with partial pivoting
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-300) return null;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
 }
 const valueAt = (pts, t) => { // the line's value at time t (straight between its points)
   if (!pts?.length) return null;
@@ -128,24 +199,20 @@ export function candleSigma(bars, sigmaMin, now) {
   const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / Math.sqrt(8 / Math.PI);
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
-// flip (public/flip.js flipForecast): bends the expected path to carry today's momentum and turn where a flip looks ripe
-// micro (public/micro.js microRead): the small details' learned push over the next 5 minutes (zero until proven)
-// The expected path (price at time t): the weighted prediction lines, bent by the flip forecast and the micro model,
-// then scaled by beta (how far its minute moves have really carried, fitted on its own graded minutes: pathRecord),
-// plus the candle model's proven moves (public/candlemodel.js; zero for horizons that haven't beaten "no change").
-// The cone's centre follows it, and the flip markers sit on its turns.
-export function expectedPath({ lines, spot, now, weights = null, flip = null, micro = null, beta = 1, cm = null }) {
-  const w = weights || blendWeights(null);
+// The expected path (price at time t): the optimally blended prediction lines (blendFit: every forecast, the micro
+// model and the move model included, each bias-corrected), bent by the flip forecast (today's momentum carried forward,
+// turning where a flip looks ripe: public/flip.js), then scaled by beta (how far its minute moves have really carried,
+// fitted on its own graded minutes: pathRecord). The cone's centre follows it, and the flip markers sit on its turns.
+export function expectedPath({ lines, spot, now, weights = null, flip = null, beta = 1 }) {
+  const w = weights || {};
   const blend = (t) => { let s = 0, ws = 0; for (const l of lines || []) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
-  const microAt = micro?.at ?? now, cmAt = cm?.at ?? now;
-  const raw = (t) => blend(t) + flipOffset(flip, (t - now) / 60000) + microOffset(micro, (t - microAt) / 60000) - microOffset(micro, (now - microAt) / 60000);
-  return (t) => spot + beta * (raw(t) - spot) + cmMove(cm, (t - cmAt) / 60000) - cmMove(cm, (now - cmAt) / 60000);
+  return (t) => spot + beta * (blend(t) + flipOffset(flip, (t - now) / 60000) - spot);
 }
 // The expected path on whole minutes from the next one to the close: { t, o, c } (where it expects BTC at the start and
 // end of each minute). Each minute is graded at its close (pathRecord); its turns are the flip markers (pathTurns).
-export function pathMinutes({ lines, spot, sigmaMin, now, close, weights = null, flip = null, micro = null, beta = 1, cm = null }) {
+export function pathMinutes({ lines, spot, sigmaMin, now, close, weights = null, flip = null, beta = 1 }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
-  const path = expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }), out = [];
+  const path = expectedPath({ lines, spot, now, weights, flip, beta }), out = [];
   for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) out.push({ t, o: path(t), c: path(Math.min(close, t + 60000)) });
   return out;
 }

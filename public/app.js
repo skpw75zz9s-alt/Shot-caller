@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { blendWeights, coneRecord, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
+import { LINE_NAMES, blendFit, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -835,7 +835,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: preds, path: pcs.minutes, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
+    cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: pcs.lines || [], path: pcs.minutes, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
@@ -1082,8 +1082,19 @@ const horizonOf = (live, now) => Math.max(Date.parse(live.m.close_time), Math.ce
 function predictionsNow(live, snap, now) {
   if (!live) return [];
   const q = live.ev.quote, mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
-  return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, driftMin: (snap.driftMin || 0) * (settings.momentumWeight ?? 0), now, close: Date.parse(live.m.close_time),
-    until: horizonOf(live, now), strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex, engine: engineFor(live, now) });
+  const pb = state.playbook, fresh = now - (state.playbookAt || 0) < 20000, open = Date.parse(live.m.open_time);
+  return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: Date.parse(live.m.close_time),
+    until: horizonOf(live, now), strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex,
+    pBot: live.ev.pYes, engine: engineFor(live, now),
+    guide: fresh && pb?.guide?.at === open ? pb.guide : null, // the 15-minute forecast, for the round it was made for
+    micro: state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null,
+    cm: fresh ? pb?.candle?.live ?? null : null });
+}
+// The blend's fit (public/predict.js blendFit): weights and biases from the graded rounds, refit when a round is graded
+function blendNow() {
+  const n = state.predLog.filter((e) => e.actual != null).length;
+  if (state.blend?.n !== n) state.blend = { n, ...blendFit(state.predLog) };
+  return state.blend;
 }
 // the prediction engine's read (server), when it's fresh and for this round
 function engineFor(live, now) {
@@ -1103,11 +1114,10 @@ function flipNow(live, snap, now) {
 function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { minutes: [], turns: [], flip: null, path: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
-  const micro = state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null; // the server's micro model, when fresh
-  const weights = blendWeights(predictionRecord(state.predLog)), beta = pathRecord(state.pcLog).beta;
-  const cm = state.playbook?.candle?.live && now - (state.playbookAt || 0) < 20000 ? state.playbook.candle.live : null; // the server's move model, when fresh
-  const minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, micro, beta, cm });
-  return { minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }) };
+  const fit = blendNow(), close = Date.parse(live.m.close_time), weights = fit.weights, beta = pathRecord(state.pcLog).beta;
+  lines = correctLines(lines, fit.bias, now, close); // each line minus its measured bias
+  const minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta });
+  return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta }) };
 }
 // The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
@@ -1200,10 +1210,10 @@ function trackPredictions(snap, live, now) {
   setHTML($('pcRecord'), pr.n ? `The expected path (the cone's centre), graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change" · scaled <b>×${pr.beta.toFixed(2)}</b> by its own record`
       + `${cmr ? `. Move model (walk-forward on ${int(cmr.rows)} past minutes): ${moveOn.length ? `<b>on</b> at ${moveOn.join(', ')} min` : 'off (no horizon beats "no change")'}` : ''}`
     : 'The expected path (the cone\'s centre) is graded every minute: the direction and close it predicted vs what that minute really did.');
-  const r = predictionRecord(state.predLog);
-  const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);
-  const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['Engine', r.engine], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];
-  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${[cell('Bot', r.bot), cell('Kalshi', r.kalshi), cell('5 exch', r.exch), cell('Engine', r.engine), cell('no change', r.still)].filter(Boolean).join(' · ')}${best ? ` · closest so far: <b>${best[0]}</b>` : ''}`
+  const r = predictionRecord(state.predLog), fit = blendNow(), wsum = fit.known.reduce((a, k) => a + fit.weights[k], 0) || 1;
+  const rows = Object.entries(r.lines).sort((a, b) => a[1].miss - b[1].miss);
+  const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs(fit.bias[k]) >= 1 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}$${Math.abs(fit.bias[k]).toFixed(0)} removed` : ''})` : ''}`;
+  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Blended by their error covariance (lines that miss together share weight)`
     : 'Prediction lines are graded each round: what each one said with 5 minutes left vs where BTC closed (keep the app open through a few rounds).');
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track

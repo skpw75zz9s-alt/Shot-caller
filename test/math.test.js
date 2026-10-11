@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normCdf, holdOdds, contractsFor, kalshiFee, oddsShift, settleVariance, probAbove } from '../public/model.js';
-import { normInv, splitCdf, splitQuantile, blendWeights, candleSigma, marketCone } from '../public/predict.js';
+import { normInv, splitCdf, splitQuantile, candleSigma, marketCone } from '../public/predict.js';
 
 const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-300);
 test('normal CDF to full precision, tails included (reference values)', () => {
@@ -41,11 +41,6 @@ test('order sizing: Kalshi rounds the fee once per order, and the count is the m
   assert.ok(n * 0.5 + kalshiFee(0.5, n) <= 25 + 1e-9, 'fits');
   assert.ok((n + 1) * 0.5 + kalshiFee(0.5, n + 1) > 25, 'one more would not');
   assert.equal(n, 48, '48 x 50c + $0.84 fee = $24.84 (charging every contract the 1-contract 2c fee would have allowed only 47)');
-});
-test('blend weights: inverse mean squared error (inverse-variance), not inverse squared average miss', () => {
-  // same average miss, but one line's misses are erratic (bigger squared error): it gets less weight
-  const w = blendWeights({ bot: { miss: 10, mse: 100, n: 10 }, kalshi: { miss: 10, mse: 400, n: 10 }, exch: null });
-  assert.ok(Math.abs(w.bot / w.kalshi - 4) < 1e-12);
 });
 test('every nudge and implied price uses the settlement average\'s variance, like the bot\'s own odds', () => {
   const mk = { spot: 100000, strike: 100000, sigmaMin: 0.0008, minutesLeft: 5 };

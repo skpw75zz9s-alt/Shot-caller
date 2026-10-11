@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CM, cmFit, cmLive, cmMove, cmReport, cmWalkForward } from '../public/candlemodel.js';
 import { series } from '../public/predictor.js';
-import { expectedPath, pathRecord } from '../public/predict.js';
+import { expectedPath, pathRecord, predictionLines } from '../public/predict.js';
 import { createPlaybook } from '../playbookfeed.js';
 
 const T0 = Date.UTC(2026, 0, 1);
@@ -50,13 +50,14 @@ test('beta: the least-squares scale of the predicted moves, shrunk toward 1 unti
   const scaled = mk(2000, 0.5).map((e) => ({ ...e, c: 100 + (e.c - 100) * 0.5, beta: 0.5 }));
   assert.ok(Math.abs(pathRecord(scaled).beta - pathRecord(mk(2000, 0.5)).beta) < 1e-9);
 });
-test('the expected path: shrunk by beta, plus the move model\'s proven moves', () => {
+test('the expected path: shrunk by beta; the move model\'s proven moves come in as their own line', () => {
   const now = Date.UTC(2026, 0, 1, 12, 0, 30), close = now + 10 * 60000;
   const lines = [{ key: 'bot', pts: [{ t: now, v: 100000 }, { t: close, v: 100100 }] }];
   const full = expectedPath({ lines, spot: 100000, now })(close), half = expectedPath({ lines, spot: 100000, now, beta: 0.5 })(close);
   assert.ok(Math.abs(half - 100000 - (full - 100000) / 2) < 1e-6);
   const cm = { at: now, moves: [[0, 0], [5, 40], [15, 40]] };
-  assert.ok(Math.abs(expectedPath({ lines: [{ key: 'bot', pts: [{ t: now, v: 1e5 }, { t: close, v: 1e5 }] }], spot: 1e5, now, cm })(now + 5 * 60000) - (1e5 + 40)) < 1e-6);
+  const moves = predictionLines({ spot: 1e5, sigmaMin: 0.0008, now, close, cm }).filter((l) => l.key === 'moves');
+  assert.ok(Math.abs(expectedPath({ lines: moves, spot: 1e5, now })(close) - (1e5 + 40)) < 1e-6);
 });
 test('playbook feed: runs the move model and serves its read', () => {
   const bars = market({ garch: true, seed: 6, days: 6 }), now = bars.at(-1).t + 61000;
