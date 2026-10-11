@@ -35,9 +35,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
   for (const c of [rsiChart, macdChart]) c.applyOptions({ layout: { attributionLogo: false }, crosshair: { horzLine: { visible: false }, vertLine: { visible: false } } }); // one TradingView link (on the main chart) is the credit
 
   const candles = chart.addCandlestickSeries({ upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3', priceLineStyle: LineStyle.Dashed });
-  // prediction candles: ghost minutes from now to the close (public/predict.js predictionCandles)
-  const ghosts = chart.addCandlestickSeries({ upColor: '#2ee6a659', downColor: '#ff4d6d59', borderVisible: true, borderUpColor: '#2ee6a6', borderDownColor: '#ff4d6d',
-    wickUpColor: '#2ee6a6b3', wickDownColor: '#ff4d6db3', lastValueVisible: false, priceLineVisible: false });
+  // the expected path (public/predict.js pathMinutes), drawn invisibly: it only carries the flip (↺) and round-close markers
+  const pathLine = chart.addLineSeries({ color: 'rgba(0,0,0,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
   const volume = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
   const line = (color, opts = {}) => chart.addLineSeries({ color, lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...opts });
@@ -110,17 +109,16 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
       put(k, !!p, p ? dedupe(p.pts.map((q) => ({ time: sec(q.t), value: q.v }))) : []);
       s[k].applyOptions({ lastValueVisible: !!show.labels });
     }
-    // prediction candles: only on 1-minute bars (Round and 1m views)
-    const pc = show.pcandles && barMs === 60000 && d.predCandles?.length ? d.predCandles.filter((c) => c.t > last.t) : [];
-    ghosts.applyOptions({ visible: pc.length > 0 });
-    ghosts.setData(pc.map((c) => ({ time: sec(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
-    // predicted flips on them: ↺ where the expected path turns (public/flip.js)
+    // the expected path's minutes (1-minute bars only: Round and 1m views)
+    const pc = barMs === 60000 && d.path?.length ? d.path.filter((c) => c.t > last.t) : [];
+    pathLine.setData(pc.map((c) => ({ time: sec(c.t), value: c.c })));
+    // predicted flips on it: ↺ where the expected path turns (public/flip.js)
     const gm = pc.length && show.flips !== false ? (d.turns || []).filter((x) => pc.some((c) => c.t === x.t)).map((x) => ({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar',
       color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir}` })) : [];
     // where this round closes, when the predictions run past it into the next one
     const closeBar = d.closeTime ? pc.find((c) => c.t === d.closeTime) : null;
     if (closeBar) gm.push({ time: sec(closeBar.t), position: 'aboveBar', color: '#e8ecf3', shape: 'square', size: 0.4, text: '⏱ round closes' });
-    ghosts.setMarkers(gm.sort((a, b) => a.time - b.time));
+    pathLine.setMarkers(gm.sort((a, b) => a.time - b.time));
     // levels: the target and the round's floor / ceiling
     for (const l of Object.values(lines)) candles.removePriceLine(l);
     lines = {};
@@ -143,7 +141,7 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     const inView = (ms) => ms >= bars[0].t && ms < last.t + barMs;
     const barOf = (ms) => sec(bars[Math.max(0, bars.findIndex((b) => b.t + barMs > ms))].t);
     // a flip predicted right now sits on the live candle (later ones go on the prediction candles)
-    if (show.pcandles && show.flips !== false && barMs === 60000) for (const x of d.turns || []) if (x.now && x.t === last.t) marks.push({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar', color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir} now` });
+    if (show.flips !== false && barMs === 60000) for (const x of d.turns || []) if (x.now && x.t === last.t) marks.push({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar', color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir} now` });
     // liquidity sweeps and structure shifts
     if (show.structure && barMs === 60000) for (const [e, label] of [[d.structure?.sweep, 'sweep'], [d.structure?.shift, 'MSS']]) if (e && inView(e.t)) marks.push({ time: barOf(e.t), position: e.dir > 0 ? 'belowBar' : 'aboveBar', color: '#e879f9', shape: e.dir > 0 ? 'arrowUp' : 'arrowDown', text: `${label} ${e.dir > 0 ? '↑' : '↓'}` });
     if (show.markers) for (const m of d.markers || []) if (inView(m.t)) marks.push({ time: barOf(m.t), position: m.side === 'YES' ? 'belowBar' : 'aboveBar', color: m.side === 'YES' ? C.up : C.dn, shape: m.side === 'YES' ? 'arrowUp' : 'arrowDown', text: m.label });

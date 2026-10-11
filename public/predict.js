@@ -9,7 +9,7 @@
 import { normCdf, settleVariance } from './model.js';
 import { flipOffset, turnPoints } from './flip.js';
 import { microOffset } from './micro.js';
-import { cmMove, cmRange } from './candlemodel.js';
+import { cmMove } from './candlemodel.js';
 
 // Inverse of the standard normal CDF: Acklam's rational approximation (relative error ~1e-9), then one Halley step on
 // the exact CDF, which takes it to full double precision
@@ -101,7 +101,7 @@ export function predictionRecord(log) {
   return { rounds: done.length, bot: avg('bot'), kalshi: avg('kalshi'), exch: avg('exch'), engine: avg('engine'), still: avg('spot') };
 }
 
-// ---------- prediction candles: the minutes from now to the close, drawn as ghost candles ----------
+// ---------- the expected path: where the bot expects BTC to be, minute by minute (the cone's centre) ----------
 // The expected path is a blend of the prediction lines, each weighted by its inverse mean squared error at past closes
 // (inverse-variance weighting: the weights that minimise the blend's error for independent errors), equal weights until
 // each has 5 graded rounds.
@@ -119,18 +119,6 @@ const valueAt = (pts, t) => { // the line's value at time t (straight between it
   for (let i = 1; i < pts.length; i++) if (t <= pts[i].t) { const a = pts[i - 1], b = pts[i]; return a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t || 1)); }
   return pts[pts.length - 1].v;
 };
-// Prediction candles: what the bot actually expects, minute by minute, with NO random noise. (Up to v12.0 they were
-// one random scenario drawn around the forecast, so their ups and downs were dice rolls; now every candle reads the
-// market.)
-//   Body    the expected path for that minute: the blended prediction lines (the bot, Kalshi's implied close, the 5
-//           exchanges' trend and the prediction engine, each weighted by how close it has come at past closes), bent by
-//           the flip forecast (today's momentum carried forward, turning where a flip looks ripe) and by the micro
-//           model's proven 1-5 minute read. A small body means the read is unsure, not that BTC will sit still.
-//   Wicks   how the last 30 real candles have traded: their average upper and lower wicks (relative to price), so
-//           long lower wicks lately (buyers soaking up dips) give the ghosts long lower wicks too, plus any turn the
-//           expected path makes inside the minute.
-// eo/ec (the body) is what gets graded every minute.
-const STEP = 5000;
 // The volatility of the last 30 complete one-minute candles (average range / sqrt(8/pi): a random walk's expected
 // high-low range over a minute is sqrt(8/pi) = 1.596 times its per-minute sd), kept within
 // half to double the model's
@@ -140,19 +128,12 @@ export function candleSigma(bars, sigmaMin, now) {
   const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / Math.sqrt(8 / Math.PI);
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
-// The market's recent wicks: the average upper and lower wick of the last 30 complete candles, as fractions of price
-export function candleWicks(bars, now, sigmaMin = 0.0008) {
-  const done = (bars || []).filter((b) => b.t + 60000 <= now && b.h > 0 && b.l > 0).slice(-30);
-  if (done.length < 10) return { up: 0.4 * sigmaMin, dn: 0.4 * sigmaMin };
-  const avg = (f) => done.reduce((a, b) => a + f(b) / b.c, 0) / done.length;
-  return { up: avg((b) => b.h - Math.max(b.o, b.c)), dn: avg((b) => Math.min(b.o, b.c) - b.l) };
-}
 // flip (public/flip.js flipForecast): bends the expected path to carry today's momentum and turn where a flip looks ripe
 // micro (public/micro.js microRead): the small details' learned push over the next 5 minutes (zero until proven)
 // The expected path (price at time t): the weighted prediction lines, bent by the flip forecast and the micro model,
-// then scaled by beta (how far its minute moves have really carried, fitted on its own graded candles: candleRecord),
+// then scaled by beta (how far its minute moves have really carried, fitted on its own graded minutes: pathRecord),
 // plus the candle model's proven moves (public/candlemodel.js; zero for horizons that haven't beaten "no change").
-// The candles' bodies and the cone's centre both follow it.
+// The cone's centre follows it, and the flip markers sit on its turns.
 export function expectedPath({ lines, spot, now, weights = null, flip = null, micro = null, beta = 1, cm = null }) {
   const w = weights || blendWeights(null);
   const blend = (t) => { let s = 0, ws = 0; for (const l of lines || []) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
@@ -160,24 +141,12 @@ export function expectedPath({ lines, spot, now, weights = null, flip = null, mi
   const raw = (t) => blend(t) + flipOffset(flip, (t - now) / 60000) + microOffset(micro, (t - microAt) / 60000) - microOffset(micro, (now - microAt) / 60000);
   return (t) => spot + beta * (raw(t) - spot) + cmMove(cm, (t - cmAt) / 60000) - cmMove(cm, (now - cmAt) / 60000);
 }
-// beta, cm: see expectedPath. cm also sizes the candles when its size model is proven (else the recent average wicks)
-export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null, flip = null, micro = null, beta = 1, cm = null }) {
+// The expected path on whole minutes from the next one to the close: { t, o, c } (where it expects BTC at the start and
+// end of each minute). Each minute is graded at its close (pathRecord); its turns are the flip markers (pathTurns).
+export function pathMinutes({ lines, spot, sigmaMin, now, close, weights = null, flip = null, micro = null, beta = 1, cm = null }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
-  const path = expectedPath({ lines, spot, now, weights, flip, micro, beta, cm });
-  const wk = candleWicks(bars, now, sigmaMin);
-  const out = [];
-  for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) {
-    const end = Math.min(close, t + 60000), o = path(t), c = path(end);
-    let hi = Math.max(o, c), lo = Math.min(o, c);
-    for (let u = t + STEP; u < end; u += STEP) { const v = path(u); if (v > hi) hi = v; if (v < lo) lo = v; } // a turn inside the minute
-    const part = (end - t) / 60000; // a part-minute at the close gets part-size wicks
-    // the candle's size: the candle model's expected range for that minute when proven, split into wicks the way the
-    // market's recent wicks lean; otherwise the recent average wicks
-    const r = cmRange(cm, (t - (cm?.at ?? now)) / 60000);
-    let up = wk.up * hi * part, dn = wk.dn * lo * part;
-    if (r != null) { const extra = Math.max(0, r * part - (hi - lo)), lean = wk.up + wk.dn > 0 ? wk.up / (wk.up + wk.dn) : 0.5; up = extra * lean; dn = extra * (1 - lean); }
-    out.push({ t, o, c, h: hi + up, l: lo - dn, eo: o, ec: c, naive: (wk.up + wk.dn) * c * part + (hi - lo) });
-  }
+  const path = expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }), out = [];
+  for (let t = Math.floor(now / 60000) * 60000 + 60000; t < close; t += 60000) out.push({ t, o: path(t), c: path(Math.min(close, t + 60000)) });
   return out;
 }
 // ---------- the cone: the market's most predictable outcome, calibrated on its own record ----------
@@ -254,34 +223,31 @@ export function coneRecord(log) {
   return { n: done.length, in50, in90, fix, brier, brierKalshi: brierK, brierSame: brierC, nKalshi: km.length };
 }
 
-// The record: how often a minute's candle (as predicted just before that minute began) got the direction right; its
-// average miss at the minute's close vs "no change" (the minute's open); its size (high-low) miss vs the recent-average
-// size; and beta, the least-squares scale of its predicted moves (sum(pred x actual) / sum(pred^2): the factor that
-// minimises the squared miss), shrunk toward 1 until there are plenty of minutes and kept within 0-1.5
+// The record: how often the expected path's minute (as it stood just before that minute began) got the direction right;
+// its average miss at the minute's close vs "no change" (the minute's open); and beta, the least-squares scale of its
+// predicted moves (sum(pred x actual) / sum(pred^2): the factor that minimises the squared miss), shrunk toward 1 until
+// there are plenty of minutes and kept within 0-1.5
 export const BETA_PRIOR = 60;
-export function candleRecord(log) {
+export function pathRecord(log) {
   const done = log.filter((e) => e.actual != null && e.open != null);
   if (!done.length) return { n: 0, beta: 1 };
   const moved = done.filter((e) => e.actual !== e.open && e.c !== e.o);
   const right = moved.filter((e) => Math.sign(e.c - e.o) === Math.sign(e.actual - e.open)).length;
   const avg = (f) => done.reduce((a, e) => a + Math.abs(f(e) - e.actual), 0) / done.length;
-  // beta from the raw (unscaled) moves each candle was drawn from
+  // beta from the raw (unscaled) moves each minute was predicted with
   const rawMove = (e) => (e.c - e.o) / (e.beta || 1);
   let sxy = 0, sxx = 0;
   for (const e of done) { const m = rawMove(e), a = e.actual - e.open; sxy += m * a; sxx += m * m; }
   const fit = sxx > 0 ? sxy / sxx : 1, beta = Math.min(1.5, Math.max(0, (done.length * fit + BETA_PRIOR) / (done.length + BETA_PRIOR)));
-  const sized = done.filter((e) => e.range != null && e.naive != null && e.hi != null);
-  const sizeMiss = sized.length ? sized.reduce((a, e) => a + Math.abs(e.range - (e.hi - e.lo)), 0) / sized.length : null;
-  const naiveMiss = sized.length ? sized.reduce((a, e) => a + Math.abs(e.naive - (e.hi - e.lo)), 0) / sized.length : null;
-  return { n: done.length, called: moved.length, right, miss: avg((e) => e.c), still: avg((e) => e.open), beta, sized: sized.length, sizeMiss, naiveMiss };
+  return { n: done.length, called: moved.length, right, miss: avg((e) => e.c), still: avg((e) => e.open), beta };
 }
 
-// The turns on the prediction candles' expected path (where it bottoms or tops out by at least a fifth of a typical
-// minute), with the last 3 minutes in front so a turn happening right now (the live candle) shows too: the chart marks
-// them ↺. v0: the flip forecast's momentum ($/min), giving the price 3 minutes ago.
-export function candleTurns(candles, spot, now, sd1, v0 = 0) {
-  if (!candles?.length) return [];
+// The turns on the expected path (where it bottoms or tops out by at least a fifth of a typical minute), with the last 3
+// minutes in front so a turn happening right now (the live candle) shows too: the chart marks them ↺. v0: the flip
+// forecast's momentum ($/min), giving the price 3 minutes ago.
+export function pathTurns(minutes, spot, now, sd1, v0 = 0) {
+  if (!minutes?.length) return [];
   const live = Math.floor(now / 60000) * 60000;
-  const pts = [{ t: live - 180000, v: spot - 3 * v0 }, { t: live, v: spot }, ...candles.map((c) => ({ t: c.t, v: c.ec }))];
+  const pts = [{ t: live - 180000, v: spot - 3 * v0 }, { t: live, v: spot }, ...minutes.map((c) => ({ t: c.t, v: c.c }))];
   return turnPoints(pts, 0.2 * sd1).filter((x) => x.t >= live).map((x) => ({ ...x, now: x.t === live }));
 }

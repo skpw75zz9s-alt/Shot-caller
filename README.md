@@ -271,6 +271,13 @@ Security:
 
 ## Version notes (newest first)
 
+### Ghost candles removed (v12.8)
+
+The faint prediction candles after the live candle are gone from the chart.
+- **What stays:** the expected path they were drawn from: the prediction lines, the flip forecast, the micro model and the move model, scaled by its own record. It's what the **cone** is centred on, and the **flip markers (↺)** and **⏱ round closes** sit on it, carried by an invisible line.
+- **Grading:** it's still graded every minute (direction, close miss vs "no change", and its scale factor) in the line under the chart.
+- **Removed along with the candles:** the "Prediction candles" chart toggle, the candle-size (wick) model and the size grading, which only existed to draw the candles. The candle model is now just the **move model**.
+
 ### No wiggle room (v12.7)
 
 The last numerical gaps, closed and **checked against exact references**:
@@ -304,7 +311,7 @@ The last approximations in the bot's own math, removed:
 - `test/math.test.js` checks the settlement against a brute-force sum over all 60×60 print pairs (agreement to 1e-12), and also checks the fee rounding and the calibration weights.
 - **What exact math can't remove:** the model's assumptions about the market. These are a random walk at a learned volatility (real BTC has jumps), Kalshi's index vs Coinbase (learned from settlements), and zero drift. The live record measures how well those hold.
 
-### The candle model (v12.5)
+### The candle model (v12.5; its size half removed with the ghost candles in v12.8)
 
 The prediction candles, deep-dived. **100x more accurate isn't possible.** That would mean missing a minute's close by 1% of what "no change" misses, and one-minute BTC moves are mostly noise. But a candle has two parts that behave very differently, and each now gets the most the data allows (`public/candlemodel.js`, run on the server):
 - **Sizes (predictable):** how big each coming minute's candle will be.
@@ -355,7 +362,7 @@ The forecast cone used to be a plain funnel around the current price, sized by v
   - the chance of finishing above the target
   - the cone's record: how often each band held, and whether its above-the-target chance has scored better than Kalshi's own price at the same moment (Brier)
 
-### Prediction candles (v10.1; read from the market since v12.1)
+### Prediction candles (v10.1; read from the market since v12.1; removed from the chart in v12.8)
 
 In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`). Since v12.1 they draw **exactly what the bot expects, with no random noise**. From v10.2 to v12.0 each ghost was one random scenario around the forecast, so its ups and downs were dice rolls.
 - **Bodies: the expected path, minute by minute.** It blends the prediction lines, weighted toward whichever has missed least at past closes (1 / miss²; lines without 5 graded rounds count as average):

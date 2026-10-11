@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { flipForecast, flipOffset, flipRecord, turnBaseRate, turnHappened, turnPoints } from '../public/flip.js';
-import { candleTurns, predictionCandles } from '../public/predict.js';
+import { pathMinutes, pathTurns } from '../public/predict.js';
 
 const NOW = Date.UTC(2026, 0, 1, 12, 7, 30), M = Math.floor(NOW / 60000) * 60000;
 function bars(steps, lastWick = 10) { // 40 minutes; steps(i) = this minute's move (i = minutes before now)
@@ -36,16 +36,16 @@ test('a calm market: low score, the move just fades (no swing back)', () => {
   assert.equal(flipForecast({ bars: b.slice(0, 5), spot: 1, sigmaMin: 0.0008, now: NOW }), null, 'too little data');
 });
 
-test('the prediction candles bend with the flip and the turn is found', () => {
+test('the expected path bends with the flip and the turn is found', () => {
   const b = bars((i) => (i <= 6 ? -70 : i % 2 ? 8 : -8), 90);
   const spot = b.at(-1).c + 5, close = M + 8 * 60000;
   const f = flipForecast({ bars: b, spot, sigmaMin: 0.0008, now: NOW, openTime: M - 8 * 60000, flowBuyShare: 0.75 });
   const lines = [{ key: 'bot', pts: [{ t: NOW, v: spot }, { t: close, v: spot }] }];
-  const c = predictionCandles({ lines, spot, sigmaMin: 0.0008, now: NOW, close, bars: b, flip: f });
-  const turns = candleTurns(c, spot, NOW, f.sd1, f.v0);
+  const c = pathMinutes({ lines, spot, sigmaMin: 0.0008, now: NOW, close, flip: f });
+  const turns = pathTurns(c, spot, NOW, f.sd1, f.v0);
   assert.equal(turns[0]?.dir, 'up'); assert.equal(turns[0].now, true, 'the bounce starts now: flip up on the live candle');
   assert.ok(turns.some((x) => x.dir === 'down' && !x.now), `then it tops out on a prediction candle: ${JSON.stringify(turns)}`);
-  assert.ok(Math.max(...c.map((x) => x.ec)) > spot + 20, 'bounces');
+  assert.ok(Math.max(...c.map((x) => x.c)) > spot + 20, 'bounces');
 });
 
 test('turn grading: a real V counts, a straight line does not; base rate and strength', () => {

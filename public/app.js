@@ -16,7 +16,7 @@ import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
-import { blendWeights, candleRecord, candleTurns, coneRecord, expectedPath, marketCone, predictionCandles, predictionLines, predictionRecord } from './predict.js';
+import { blendWeights, coneRecord, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
@@ -824,7 +824,7 @@ async function drawChartTab(force = false) {
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
   const preds = showCone ? predictionsNow(live, snap, now) : [];
-  const pcs = showCone ? candlesNow(live, snap, now, preds) : { candles: [], turns: [] };
+  const pcs = showCone ? pathNow(live, snap, now, preds) : { minutes: [], turns: [] };
   const markers = state.callLog.filter((e) => e.at).map((e) => ({ t: e.at, side: e.side, label: `${e.side === 'YES' ? 'UP' : 'DN'} ${e.conf ?? ''}`.trim() }));
   const fk = `${state.positions.length}|${state.trades.length}|${autopilot?.state()?.log?.[0]?.t ?? 0}`;
   if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
@@ -835,7 +835,7 @@ async function drawChartTab(force = false) {
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
+    cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: preds, path: pcs.minutes, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
@@ -1099,14 +1099,15 @@ function flipNow(live, snap, now) {
   return flipForecast({ bars: snap.bars, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, openTime: Date.parse(live.m.open_time), flowBuyShare: tot > 0 ? b / tot : null,
     amp: flipRecord(state.flipLog, state.flipBase).amp, reversal: state.playbook?.reversal && now - state.playbook.reversal.at < 16 * 60000 ? state.playbook.reversal : null });
 }
-function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
-  if (!live) return { candles: [], turns: [], flip: null, path: null };
+// The expected path (public/predict.js): the cone's centre, its minute-by-minute points (graded each minute) and turns (↺)
+function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
+  if (!live) return { minutes: [], turns: [], flip: null, path: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
   const micro = state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null; // the server's micro model, when fresh
-  const weights = blendWeights(predictionRecord(state.predLog)), beta = candleRecord(state.pcLog).beta;
-  const cm = state.playbook?.candle?.live && now - (state.playbookAt || 0) < 20000 ? state.playbook.candle.live : null; // the server's candle model, when fresh
-  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, bars: snap.bars, flip, micro, beta, cm });
-  return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }) };
+  const weights = blendWeights(predictionRecord(state.predLog)), beta = pathRecord(state.pcLog).beta;
+  const cm = state.playbook?.candle?.live && now - (state.playbookAt || 0) < 20000 ? state.playbook.candle.live : null; // the server's move model, when fresh
+  const minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, micro, beta, cm });
+  return { minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, micro, beta, cm }) };
 }
 // The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
@@ -1123,7 +1124,7 @@ function trackPredictions(snap, live, now) {
       state.predLog.unshift(e); if (state.predLog.length > 300) state.predLog.length = 300;
       store.set('predLog', state.predLog);
       // the cone's close band and its chance above the target, next to Kalshi's price for the same thing
-      const cs = coneNow(live, snap, now, candlesNow(live, snap, now, lines).path).summary, q = live.ev.quote;
+      const cs = coneNow(live, snap, now, pathNow(live, snap, now, lines).path).summary, q = live.ev.quote;
       const mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
       if (cs) {
         state.coneLog.unshift({ ticker: live.m.ticker, closeTime: live.m.close_time, at: now, mid: cs.mid, a: cs.a, b: cs.b, strike: live.strike, pAbove: cs.pAbove, kAbove: mid == null ? null : /^less/.test(live.m.strike_type || '') ? 1 - mid : mid, actual: null });
@@ -1150,15 +1151,14 @@ function trackPredictions(snap, live, now) {
     if (bar) { e.actual = bar.c; changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
   }
   if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set('predLog', state.predLog); }
-  // prediction candles: keep the next minute's candle as it stands just before that minute begins; grade it at its close
+  // the expected path: keep the next minute as it stands just before that minute begins; grade it at its close
   if (live) {
     const next = Math.floor(now / 60000) * 60000 + 60000;
     if (next < horizonOf(live, now) && next - now <= 15000) {
-      const c = candlesNow(live, snap, now).candles[0];
+      const c = pathNow(live, snap, now).minutes[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next);
-        // graded on the expected path (eo/ec): the same body the ghost candle draws
-        const beta = candleRecord(state.pcLog).beta, rec = { o: c.eo, c: c.ec, beta, range: c.h - c.l, naive: c.naive };
+        const beta = pathRecord(state.pcLog).beta, rec = { o: c.o, c: c.c, beta };
         if (e) Object.assign(e, rec); else { state.pcLog.unshift({ t: next, ...rec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }
@@ -1167,13 +1167,13 @@ function trackPredictions(snap, live, now) {
   for (const e of state.pcLog) {
     if (e.actual != null || now < e.t + 70000) continue;
     const bar = snap.bars.find((b) => b.t === e.t);
-    if (bar) { e.open = bar.o; e.actual = bar.c; e.hi = bar.h; e.lo = bar.l; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
+    if (bar) { e.open = bar.o; e.actual = bar.c; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
   }
   if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
   // flips: keep each predicted turn until a minute before it (then it's frozen); grade it two minutes after
   if (live && now - (state.flipAt || 0) > 5000) {
     state.flipAt = now;
-    const { turns, flip } = candlesNow(live, snap, now);
+    const { turns, flip } = pathNow(live, snap, now);
     state.flipNow = flip;
     let changed = false;
     for (const e of state.flipLog) if (!e.frozen && now >= e.t - 60000) { e.frozen = true; changed = true; }
@@ -1190,17 +1190,16 @@ function trackPredictions(snap, live, now) {
       : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.'));
   const cr = coneRecord(state.coneLog);
   if (!live) state.coneSum = null;
-  else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, candlesNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s
+  else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, pathNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s
   const cs = state.coneSum, $$ = (x) => `$${Math.round(x).toLocaleString()}`;
   setHTML($('coneRead'), (cs ? `Cone: most likely close <b>${$$(cs.lo50)}–${$$(cs.hi50)}</b> (50%) · 90%: ${$$(cs.lo90)}–${$$(cs.hi90)} · <b>${Math.round(cs.pAbove * 100)}%</b> chance of finishing above the target${Math.abs(cs.skew.up - cs.skew.dn) > 0.15 ? ` · ${cs.skew.dn > cs.skew.up ? 'downside' : 'upside'} wider (the last hour's ${cs.skew.dn > cs.skew.up ? 'drops' : 'rallies'} were sharper)` : ''}. ` : '')
     + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
       : 'The cone is graded each round: does the close land inside its 50% and 90% bands, and is its above-the-target chance better than Kalshi\'s price? It recalibrates its width from that record.'));
-  const pr = candleRecord(state.pcLog);
-  const cmr = state.playbook?.report && state.playbook?.candle?.report, sizeOn = cmr && Object.values(cmr.size).filter((x) => x.proven).length, moveOn = cmr && Object.entries(cmr.move).filter(([, x]) => x.proven).map(([h]) => h);
-  setHTML($('pcRecord'), pr.n ? `Prediction candles, graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change"`
-      + `${pr.sized ? ` · candle size miss <b>$${pr.sizeMiss.toFixed(0)}</b> vs $${pr.naiveMiss.toFixed(0)} for the recent average` : ''} · bodies scaled <b>×${pr.beta.toFixed(2)}</b> by their own record`
-      + `${cmr ? `. Candle model (walk-forward on ${int(cmr.rows)} past minutes): sizes ${sizeOn ? `<b>on</b> (beat the recent average by ${Math.round(Math.max(...Object.values(cmr.size).map((x) => x.gain)) * 100)}%)` : 'off (not beating the recent average)'}, moves ${moveOn.length ? `<b>on</b> at ${moveOn.join(', ')} min` : 'off (no horizon beats "no change")'}` : ''}`
-    : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');
+  const pr = pathRecord(state.pcLog);
+  const cmr = state.playbook?.report && state.playbook?.candle?.report, moveOn = cmr && Object.entries(cmr.move).filter(([, x]) => x.proven).map(([h]) => h);
+  setHTML($('pcRecord'), pr.n ? `The expected path (the cone's centre), graded every minute (${int(pr.n)} minute${pr.n === 1 ? '' : 's'}): direction right <b>${pr.called ? Math.round(pr.right / pr.called * 100) : 0}%</b> of ${int(pr.called)} called · average miss at the minute's close <b>$${pr.miss.toFixed(0)}</b> vs <b>$${pr.still.toFixed(0)}</b> for "no change" · scaled <b>×${pr.beta.toFixed(2)}</b> by its own record`
+      + `${cmr ? `. Move model (walk-forward on ${int(cmr.rows)} past minutes): ${moveOn.length ? `<b>on</b> at ${moveOn.join(', ')} min` : 'off (no horizon beats "no change")'}` : ''}`
+    : 'The expected path (the cone\'s centre) is graded every minute: the direction and close it predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog);
   const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);
   const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['Engine', r.engine], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];

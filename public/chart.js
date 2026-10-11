@@ -6,7 +6,6 @@ export const CHART_TOGGLES = [
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
   ['beasts', 'Bull / bear trend + EMA crosses', true],
   ['predict', 'Prediction lines in the cone (Bot, Kalshi, 5 exchanges, Engine)', true],
-  ['pcandles', 'Prediction candles (what the bot expects, minute by minute: no random noise)', true],
   ['flips', 'Flip watch: bend the prediction toward predicted turns, mark them ↺', true],
   ['orders', 'Live orders (only ones that move the price)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
   ['why', 'Why it moved (explains each real move)', true],
