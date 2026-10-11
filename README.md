@@ -576,16 +576,18 @@ The prediction candles now try to catch the drops and the bounces (`public/flip.
   - After 20 graded calls, the flip shape's strength follows the record: hit rate ÷ random rate, between 0.3× and 1.3×. So it fades if it isn't beating chance.
 - Turn it off in Chart tools & indicators (**Flip watch**).
 
-### Prediction candles (v10.1, realistic since v10.2)
+### Prediction candles (v10.1; read from the market since v12.1)
 
-In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`):
-- **The expected path** blends the three prediction lines (Bot, Kalshi, 5 exch), weighted toward whichever has missed least at past closes (1 / miss²). Lines without 5 graded rounds yet count as average.
-- **Realistic minutes (v10.2):** the candles draw one plausible path, not a smooth line.
-  - BTC wanders randomly in 5-second steps around the expected path and is pinned to it at the close (a Brownian bridge). So the ghosts mix up and down minutes, dojis, long and short wicks, like real candles.
-  - The randomness is sized to the last 30 real one-minute candles. Their average high-low range is matched (tested: $118 simulated vs $120 real, half up and half down).
-  - It's drawn from the clock: each 5-second slot always gets the same random step, so the candles hold still between refreshes and only shift as the price and the prediction move.
-  - The first ghost opens on the expected path next to the live price.
-- **Graded every minute:** the expected path for each minute (not the random scenario), as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". Expect the direction to sit near 50%: one-minute moves are mostly noise, and the record shows that honestly.
+In the Chart tab's Round and 1m views, faint **prediction candles** follow the live candle, one for each minute left until the close (`public/predict.js`). Since v12.1 they draw **exactly what the bot expects, with no random noise**. From v10.2 to v12.0 each ghost was one random scenario around the forecast, so its ups and downs were dice rolls.
+- **Bodies: the expected path, minute by minute.** It blends the prediction lines, weighted toward whichever has missed least at past closes (1 / miss²; lines without 5 graded rounds count as average):
+  - **Bot:** the bot's own drift.
+  - **Kalshi:** the close Kalshi's price implies.
+  - **5 exch:** the exchanges' trend.
+  - **Engine (new):** the close the prediction engine's P(UP) implies.
+
+  The flip forecast then bends it (today's momentum carried forward, turning where the market looks ripe to flip), and so does the micro model's proven 1–5 minute read. When the read leans up, the candles go up; when it's unsure, the bodies are small. They don't invent moves.
+- **Wicks: how the market has been trading.** They're the average upper and lower wicks of the last 30 real candles. For example, long lower wicks lately (buyers absorbing dips) give the ghosts long lower wicks. They also include any turn the expected path makes inside the minute.
+- **Graded every minute:** each minute's candle, as it stood just before that minute began, is compared with what that minute really did. The line under the chart shows the direction hit rate and the average miss at the minute's close vs "no change". The prediction lines are graded at each close, the Engine line included.
 - Turn them off in Chart tools & indicators (**Prediction candles**).
 - **⟲ LIVE** now shows only when the live candle itself has scrolled off screen. Tapping it brings the live candle back with the minutes to the close in view, keeping your zoom.
 

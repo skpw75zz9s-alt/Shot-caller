@@ -1082,7 +1082,12 @@ function predictionsNow(live, snap, now) {
   if (!live) return [];
   const q = live.ev.quote, mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
   return predictionLines({ spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, driftMin: (snap.driftMin || 0) * (settings.momentumWeight ?? 0), now, close: Date.parse(live.m.close_time),
-    until: horizonOf(live, now), strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex });
+    until: horizonOf(live, now), strike: live.strike, yesMid: mid, strikeType: live.m.strike_type, trades: tape.ex, engine: engineFor(live, now) });
+}
+// the prediction engine's read (server), when it's fresh and for this round
+function engineFor(live, now) {
+  const e = state.playbook?.predictor;
+  return e && now - (state.playbookAt || 0) < 20000 && e.closeTime === Date.parse(live.m.close_time) && e.strike === live.strike ? e : null;
 }
 // The prediction candles and the flip forecast behind them (public/predict.js, public/flip.js), for the chart and grading
 function flipNow(live, snap, now) {
@@ -1163,8 +1168,8 @@ function trackPredictions(snap, live, now) {
     : 'Prediction candles are graded every minute: the direction and close each one predicted vs what that minute really did.');
   const r = predictionRecord(state.predLog);
   const cell = (name, x) => (x ? `${name} <b>$${x.miss.toFixed(0)}</b>` : null);
-  const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];
-  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${[cell('Bot', r.bot), cell('Kalshi', r.kalshi), cell('5 exch', r.exch), cell('no change', r.still)].filter(Boolean).join(' · ')}${best ? ` · closest so far: <b>${best[0]}</b>` : ''}`
+  const best = [['Bot', r.bot], ['Kalshi', r.kalshi], ['5 exch', r.exch], ['Engine', r.engine], ['no change', r.still]].filter(([, x]) => x && x.n >= 5).sort((a, b) => a[1].miss - b[1].miss)[0];
+  setHTML($('predRecord'), r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${[cell('Bot', r.bot), cell('Kalshi', r.kalshi), cell('5 exch', r.exch), cell('Engine', r.engine), cell('no change', r.still)].filter(Boolean).join(' · ')}${best ? ` · closest so far: <b>${best[0]}</b>` : ''}`
     : 'Prediction lines are graded each round: what each one said with 5 minutes left vs where BTC closed (keep the app open through a few rounds).');
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track

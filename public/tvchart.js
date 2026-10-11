@@ -50,6 +50,7 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     bot: line('#22d3ee', { lineWidth: 2, lastValueVisible: true, title: 'Bot' }),
     kalshi: line('#a78bfa', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Kalshi' }),
     exch: line('#fbbf24', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: '5 exch' }),
+    engine: line('#34d399', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Engine' }),
   };
   const rsi = rsiChart.addLineSeries({ color: '#a78bfa', lineWidth: 1.5, priceLineVisible: false });
   rsi.createPriceLine({ price: 70, color: '#ff4d6d55', lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '' });
@@ -104,7 +105,7 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     // the cone and the prediction lines run from now to the close
     const cone = show.cone && d.cone?.length ? d.cone : [];
     for (const [k, f] of [['hi90', 'hi90'], ['lo90', 'lo90'], ['hi50', 'hi50'], ['lo50', 'lo50']]) put(k, cone.length, dedupe(cone.map((c) => ({ time: sec(c.t), value: c[f] }))));
-    for (const k of ['bot', 'kalshi', 'exch']) {
+    for (const k of ['bot', 'kalshi', 'exch', 'engine']) {
       const p = show.predict && cone.length ? (d.predictions || []).find((x) => x.key === k) : null;
       put(k, !!p, p ? dedupe(p.pts.map((q) => ({ time: sec(q.t), value: q.v }))) : []);
       s[k].applyOptions({ lastValueVisible: !!show.labels });

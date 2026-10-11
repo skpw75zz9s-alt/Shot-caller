@@ -40,37 +40,40 @@ test('record: average miss per line vs no change', () => {
 
 // ---------- v10.1 prediction candles ----------
 import { blendWeights, candleRecord, predictionCandles } from '../public/predict.js';
-test('prediction candles: realistic minutes to the close, mixed up and down, sized like recent candles, landing on the blend', () => {
+test('prediction candles: what the bot expects, minute by minute; no random noise; wicks read from the market', () => {
   const now = Date.UTC(2026, 0, 1, 12, 3, 30), close = Date.UTC(2026, 0, 1, 12, 15);
   const pts = (from, to) => [{ t: now, v: from }, { t: close, v: to }];
   const lines = [{ key: 'bot', pts: pts(100000, 100000) }, { key: 'kalshi', pts: pts(100000, 100140) }];
   const bars = [];
-  for (let i = 40; i > 0; i--) { const t = Math.floor(now / 60000) * 60000 - i * 60000; bars.push({ t, o: 1e5, h: 1e5 + 60, l: 1e5 - 60, c: 1e5 }); }
+  // recent market: long LOWER wicks (buyers soaking up dips): $10 above the body, $50 below
+  for (let i = 40; i > 0; i--) { const t = Math.floor(now / 60000) * 60000 - i * 60000; bars.push({ t, o: 1e5, h: 1e5 + 15, l: 1e5 - 50, c: 1e5 + 5 }); }
   const c = predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now, close, bars });
   assert.equal(c.length, 11, '12:04 … 12:14');
   assert.equal(c[0].t, Date.UTC(2026, 0, 1, 12, 4));
   for (let i = 1; i < c.length; i++) assert.equal(c[i].o, c[i - 1].c, 'each opens where the last closed');
-  for (const x of c) assert.ok(x.h >= Math.max(x.o, x.c) && x.l <= Math.min(x.o, x.c));
-  assert.ok(Math.abs(c[0].o - c[0].eo) < 1e-6, 'the first ghost opens on the expected path, next to the live price');
+  for (const x of c) { assert.ok(x.h >= Math.max(x.o, x.c) && x.l <= Math.min(x.o, x.c)); assert.equal(x.o, x.eo); assert.equal(x.c, x.ec); }
   assert.ok(Math.abs(c.at(-1).c - 100070) < 1e-6, 'lands on the blend (equal weights: halfway) at the close');
-  assert.ok(Math.abs(c.at(-1).ec - 100070) < 1e-6);
-  assert.ok(c.some((x) => x.c > x.o) && c.some((x) => x.c < x.o), 'mixed up and down minutes');
-  // the same moment gives the same candles (no reshuffling between refreshes)
-  assert.deepEqual(predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now: now + 2000, close, bars }).map((x) => x.c), c.map((x) => x.c));
-  // across many rounds: as many up as down minutes, and ranges like the recent real ones ($120)
-  let up = 0, n = 0, range = 0;
-  for (let r = 0; r < 300; r++) {
-    const t = Date.UTC(2026, 0, 2) + r * 900000 + 30000, cl = t - 30000 + 900000;
-    const bs = bars.map((b, i) => ({ ...b, t: Math.floor(t / 60000) * 60000 - (40 - i) * 60000 }));
-    for (const x of predictionCandles({ lines: [{ key: 'bot', pts: [{ t, v: 1e5 }, { t: cl, v: 1e5 }] }], spot: 1e5, sigmaMin: 0.0008, now: t, close: cl, bars: bs }).slice(0, -3)) { n++; up += x.c > x.o ? 1 : 0; range += x.h - x.l; }
-  }
-  assert.ok(Math.abs(up / n - 0.5) < 0.05, `up share ${up / n}`);
-  assert.ok(Math.abs(range / n - 120) < 15, `average range ${range / n}`);
+  assert.ok(c.every((x) => x.c > x.o), 'the read says up, so every candle is up: nothing random against it');
+  const x = c[3], up = x.h - Math.max(x.o, x.c), dn = Math.min(x.o, x.c) - x.l;
+  assert.ok(Math.abs(up - 10) < 0.5 && Math.abs(dn - 50) < 0.5, `wicks like the market's: ${up} / ${dn}`);
+  // a flat read draws flat candles (it doesn't invent moves)
+  const flat = predictionCandles({ lines: [{ key: 'bot', pts: pts(1e5, 1e5) }], spot: 1e5, sigmaMin: 0.0008, now, close, bars });
+  assert.ok(flat.every((y) => Math.abs(y.c - y.o) < 1e-9));
+  // the same moment gives the same candles
+  assert.deepEqual(predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now: now + 2000, close, bars }).map((y) => y.c), c.map((y) => y.c));
   // weighted toward the line that has missed less
   const w = blendWeights({ bot: { miss: 60, n: 10 }, kalshi: { miss: 20, n: 10 }, exch: null });
   assert.ok(w.kalshi > w.bot * 8);
   assert.ok(predictionCandles({ lines, spot: 100000, sigmaMin: 0.0008, now, close, weights: w, bars }).at(-1).c > 100120);
   assert.deepEqual(predictionCandles({ lines: [], spot: 1, sigmaMin: 1, now, close }), []);
+});
+test('the prediction engine becomes a line: its P(UP) as the close it expects', async () => {
+  const { predictionLines } = await import('../public/predict.js');
+  const now = Date.UTC(2026, 0, 1, 12, 5), close = now + 10 * 60000;
+  const base = { spot: 100000, sigmaMin: 0.0008, now, close, strike: 100000 };
+  const up = predictionLines({ ...base, engine: { pUp: 0.7 } }).find((l) => l.key === 'engine'), dn = predictionLines({ ...base, engine: { pUp: 0.3 } }).find((l) => l.key === 'engine');
+  assert.ok(up.end > 100000 && dn.end < 100000 && Math.abs(up.end - 100000 - (100000 - dn.end)) < 1);
+  assert.equal(predictionLines(base).find((l) => l.key === 'engine'), undefined, 'no read, no line');
 });
 test('prediction candle record: direction and miss vs no change', () => {
   const r = candleRecord([
