@@ -63,15 +63,13 @@ test('range to volatility uses the exact random-walk constant sqrt(8/pi)', () =>
   assert.ok(Math.abs(candleSigma(bars, 0.0008, now) - (160 / 1e5) / Math.sqrt(8 / Math.PI)) < 1e-12);
 });
 
-test('the settlement average: exact moments, checked against brute force over the 60 prints', async () => {
+test('the settlement average: exact mean and spread, checked against brute force over all 60 x 60 print pairs', async () => {
   const { SETTLE } = await import('../public/model.js');
-  const S = 100000, s = 0.0008, t = 3, a = s * s / 2, d = SETTLE.w / SETTLE.prints, tau = Array.from({ length: 60 }, (_, i) => t - 1 + (i + 1) * d);
-  // brute force over all 60 x 60 pairs: E[S_i] = S e^(a t_i), Cov(S_i, S_j) = E[S_i] E[S_j] (e^(s^2 min(t_i, t_j)) - 1)
+  const s = 0.0008, t = 3, a = s * s / 2, d = SETTLE.w / SETTLE.prints, tau = Array.from({ length: 60 }, (_, i) => t - 1 + (i + 1) * d);
   let m1 = 0, cov = 0;
-  for (const x of tau) m1 += S * Math.exp(a * x);
-  for (const x of tau) for (const y of tau) cov += S * S * Math.exp(a * (x + y)) * Math.expm1(s * s * Math.min(x, y));
-  const s2 = Math.log1p(cov / (m1 * m1)), K = 100030, brute = normCdf((Math.log(m1) - s2 / 2 - Math.log(60 * K)) / Math.sqrt(s2));
-  assert.ok(Math.abs(probAbove(S, K, s, t) - brute) < 1e-12);
+  for (const x of tau) m1 += Math.exp(a * x);
+  for (const x of tau) for (const y of tau) cov += Math.exp(a * (x + y)) * Math.expm1(s * s * Math.min(x, y));
+  assert.ok(Math.abs(settleVariance(s, t) - Math.log1p(cov / (m1 * m1))) < 1e-15);
   // inside the last minute, the prints already made count at face value
   assert.ok(probAbove(100000, 100000, s, 0.3, 0, 1, 100040) > 0.999 && probAbove(100000, 100000, s, 0.3, 0, 1, 99960) < 0.001);
   assert.equal(probAbove(100000, 99999, s, 0), 1);
@@ -95,4 +93,32 @@ test('calibration\'s standard error: one observation per round per bin, older ro
   let n = 0, n2 = 0; for (let k = 0; k < 50; k++) { n += f ** k; n2 += f ** (2 * k); } // each round weighs 1, faded per round
   assert.ok(Math.abs(b.n - n) < 1e-9, `${b.n} vs ${n}`);
   assert.ok(Math.abs(b.n2 - n2) < 1e-9, 'each round is ONE observation of weight 1 (not 10 of weight 0.1)');
+});
+
+test('fees in exact integer arithmetic: the boundary cases floating point gets wrong', () => {
+  assert.equal(kalshiFee(0.5, 4), 0.07, '0.07 x 4 x 0.25 = exactly 7c (floating point says 7.000000000000001)');
+  assert.equal(kalshiFee(0.5, 48), 0.84); assert.equal(kalshiFee(0.57), 0.02); assert.equal(kalshiFee(0.01, 100), 0.07);
+  assert.equal(kalshiFee(0.5, 10, true), 0.05, 'maker: 0.0175 x 10 x 0.25 = 4.375c, up to 5c');
+  assert.equal(kalshiFee(0.5655, 10), Math.ceil(7 * 10 * 5655 * 4345 / 1e8 - 1e-12) / 100, 'sub-cent prices (4 decimals)');
+  assert.equal(kalshiFee(0.5, 0), 0); assert.equal(kalshiFee(1, 5), 0);
+});
+test('the settlement odds are exact to a billionth: two prints left, against the exact one-dimensional integral', () => {
+  // R = e^e1 (1 + e^e2): P(R > y) = E_e1[ P(e2 > ln(y e^-e1 - 1)) ], by a 40,000-point Simpson rule; at a volatility 25x
+  // BTC's usual so the shape is as visible as it gets
+  const s = 0.02, sd = s * Math.sqrt(1 / 60), t = 2 / 60 - 1e-9, S = 100000;
+  for (const z of [-0.6, -0.2, 0, 0.3, 0.8]) {
+    const K = S * (1 + z * sd), y = (60 * K - 58 * S) / S;
+    let p = 0; const M = 40000;
+    for (let i = 0; i <= M; i++) { const x = -12 + 24 * i / M, w = (i === 0 || i === M ? 1 : i % 2 ? 4 : 2) * (24 / M) / 3 * Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI); const r = y * Math.exp(-sd * x) - 1; p += w * (r <= 0 ? 1 : normCdf(-Math.log(r) / sd)); }
+    assert.ok(Math.abs(probAbove(S, K, s, t) - p) < 1e-8, `z ${z}: ${probAbove(S, K, s, t)} vs exact ${p}`);
+  }
+});
+test('hold odds: converged, within 3e-5 of a reference on a grid four times finer', async () => {
+  const { holdExact } = await import('../public/model.js');
+  const m = { ticker: 'T', strike_type: 'greater', floor_strike: 100000 };
+  for (const [spot, ml, side] of [[100075, 9, 'YES'], [99850, 8, 'NO']]) {
+    const a = { market: m, strike: 100000, sigmaMin: 0.0002, spot, minutesLeft: ml, side, floor: 0.8, stopMin: 1, confVol: 1.25 };
+    const r16 = holdExact(a, 16), r32 = holdExact(a, 32), ref = r32 + (r32 - r16) / 3;
+    assert.ok(Math.abs(holdOdds(a) - ref) < 3e-5, `${spot}: ${holdOdds(a)} vs ${ref}`);
+  }
 });

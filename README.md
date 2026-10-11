@@ -271,12 +271,30 @@ Security:
 
 ## Version notes (newest first)
 
+### No wiggle room (v12.7)
+
+The last numerical gaps, closed and **checked against exact references**:
+- **The settlement, done right.** Testing v12.6's claim showed its two-moment log-normal was off by up to 0.0004 in probability, because an average of prices isn't shaped like one log-normal price. The settlement sum now splits exactly into two independent parts:
+  - **The move until the last minute starts:** exactly normal in log terms.
+  - **The last minute's 60-print shape:** depends only on the volatility, so it's computed once and cached. It gets its exact mean, variance and third cumulant, and is represented by the shifted log-normal with all three.
+  - **Combining them:** 24-point Gauss–Hermite quadrature over whichever part is narrower.
+  - **Checked against:** an exact one-dimensional integral (two prints left, at 25× BTC's usual volatility), where it agrees to under 1e-9. And against an independent print-by-print exact recursion from 10 minutes out to the last seconds, where it agrees to within 3e-9, the reference's own accuracy.
+  - **A bug found on the way:** a log-normal's skewness is (w + 3)√w, not (w + 2)√w.
+- **Hold odds:**
+  - The 10-second move kernel keeps its variance exactly. Integrating the density over each grid cell would add the cell's own spread; I tested that and it biased the answer.
+  - Two grids are combined by Richardson extrapolation, which cancels the leading grid error.
+  - The result is within 0.00001–0.00003 of a reference on a grid four times finer.
+  - Seven Gauss–Hermite points cover the volatility uncertainty: five would shift answers by up to 0.000007.
+- **Fees in exact integer arithmetic:** prices in 1/10,000ths of a dollar, contracts in hundredths, the rate in parts per million, and a true ceiling. There's no floating-point fudge term any more. Floating point gets 4 contracts at 50¢ wrong (7.000000000000001 rounds up to 8¢); the exact answer is 7¢.
+- `test/math.test.js` pins each of these.
+- **What's left:** floating-point rounding (~1e-15), and the model's assumptions about the market (a random walk at a learned volatility, Kalshi's index vs Coinbase, zero drift). No math removes those; the live record measures them.
+
 ### Exact to the last digit (v12.6)
 
 The last approximations in the bot's own math, removed:
 - **The settlement, exactly:** Kalshi settles on the average of its index's last 60 one-second prints.
   - The prints still to come are correlated log-normal prices, and the exact mean and variance of their sum are computed for every price. The variance is calculated directly with `expm1`, so no digits cancel.
-  - The settlement is priced from a log-normal with exactly those moments; any remaining shape difference is far below a billionth. Prints already made in the last minute count at face value.
+  - The settlement is priced from a log-normal with exactly those moments. Prints already made in the last minute count at face value. *(Correction: these notes first claimed the remaining shape error was below a billionth. It was really up to ~0.0004, found and fixed in v12.7.)*
   - The averaging is discrete: 60 prints give a variance of t − 1 + 0.3417 (×σ²), not the continuous t − 1 + 1/3. An average of a random walk is also skewed very slightly upward, so at the money the true chance is about 50.003%, not exactly 50%.
   - Every odds nudge is now the settlement odds' own difference.
   - Kalshi's implied close, the engine line and the cone use the same exact spread.

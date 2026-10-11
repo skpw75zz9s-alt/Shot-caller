@@ -60,31 +60,91 @@ export function momentum(closes, n = 10) {
 }
 
 // ---------- the settlement ----------
-// Kalshi settles on the average of its index's last 60 one-second prints before the close (SETTLE). Seen from now, the
-// prints still to come are correlated log-normal prices; their sum's first two moments are computed exactly:
-//   E[S_i] = S exp(a t_i), E[S_i S_j] = S^2 exp(a (t_i + t_j) + s2 min(t_i, t_j)), a = drift + s2/2, s2 = sigma^2
-// (t in minutes from now), and the settlement is priced from a log-normal with exactly those moments. The prints
-// already made (inside the last minute) count at face value. The shape beyond two moments differs from the true one by
-// far less than a billionth at these volatilities.
+// Kalshi settles on the average of its index's last 60 one-second prints before the close (SETTLE). The sum of the
+// prints still to come splits exactly into two independent parts:
+//   F = S x e^X0 x R,   X0 = the log move from now to the start of the last minute: exactly normal
+//                       R  = sum of e^(W_j), the final minute's prints relative to its start: a fixed shape that depends
+//                            only on the volatility (never the price), so it's worked out once and cached
+// R gets its exact mean, variance and third cumulant (skewness), and is represented by the shifted log-normal with all
+// three; X0 is integrated exactly with 24-point Gauss-Hermite quadrature (over whichever of the two is narrower, so the
+// integrand stays smooth). Whatever shape R has beyond three moments is then averaged out by X0's much larger spread.
+// The prints already made (inside the last minute) count at face value.
 export const SETTLE = { prints: 60, w: 1 };
-// Returns the number of prints still to come, their sum's mean m1 and its variance c (computed directly as
-// sum E_i E_j (exp(s2 min(t_i, t_j)) - 1) with expm1, never as E[X^2] - E[X]^2, which would cancel away digits).
-function futurePrints(S, sigmaMin, t, driftMin = 0, { prints: N, w } = SETTLE) {
-  const v = sigmaMin * sigmaMin, a = driftMin + v / 2, d = w / N;
-  let n = 0, m1 = 0, c = 0, later = 0;
-  for (let i = N; i >= 1; i--) { // latest print first: `later` is the sum of E[S_j]/S over the prints after it
-    const tau = t - w + i * d;
-    if (!(tau > 1e-12)) break;
-    const e = Math.exp(a * tau);
-    n++; m1 += e; c += e * Math.expm1(v * tau) * (e + 2 * later); later += e;
+// Gauss-Hermite nodes and weights for E[f(Z)], Z ~ N(0,1) (Newton on the orthonormal Hermite recurrence, Numerical
+// Recipes' gauher, then rescaled from the e^(-x^2) weight to the standard normal)
+function gaussHermite(n) {
+  const x = new Array(n), w = new Array(n), m = (n + 1) >> 1;
+  let z = 0;
+  for (let i = 0; i < m; i++) {
+    if (i === 0) z = Math.sqrt(2 * n + 1) - 1.85575 * Math.pow(2 * n + 1, -0.16667);
+    else if (i === 1) z -= 1.14 * Math.pow(n, 0.426) / z;
+    else if (i === 2) z = 1.86 * z - 0.86 * x[0];
+    else if (i === 3) z = 1.91 * z - 0.91 * x[1];
+    else z = 2 * z - x[i - 2];
+    let pp = 0;
+    for (let it = 0; it < 200; it++) {
+      let p1 = Math.PI ** -0.25, p2 = 0;
+      for (let k = 0; k < n; k++) { const p3 = p2; p2 = p1; p1 = z * Math.sqrt(2 / (k + 1)) * p2 - Math.sqrt(k / (k + 1)) * p3; }
+      pp = Math.sqrt(2 * n) * p2;
+      const z1 = z; z = z1 - p1 / pp;
+      if (Math.abs(z - z1) <= 1e-15 * Math.max(1, Math.abs(z))) break;
+    }
+    x[i] = z; x[n - 1 - i] = -z; w[i] = 2 / (pp * pp); w[n - 1 - i] = w[i];
   }
-  return { n, m1: S * m1, c: S * S * c };
+  return x.map((xi, k) => [xi * Math.SQRT2, w[k] / Math.sqrt(Math.PI)]);
 }
-// The settlement average's log-variance (S = 1, no drift, no prints known yet): what its spread is, for anything that
-// needs it as one number (Kalshi's implied close, the cone)
+export const GH24 = gaussHermite(24);
+// The final-minute shape R for prints at times u_1 < ... < u_n (minutes): exact mean, variance and third cumulant
+// (variance and cumulant built from expm1 terms, never from raw moments, which would cancel away the digits), and the
+// shifted log-normal R = shift + e^Y, Y ~ N(mu, s^2), with all three
+const shapeCache = new Map();
+function windowShape(sigmaMin, driftMin, n, first) {
+  const key = `${sigmaMin}|${driftMin}|${n}|${first}`;
+  if (shapeCache.has(key)) return shapeCache.get(key);
+  const v = sigmaMin * sigmaMin, a = driftMin + v / 2, d = SETTLE.w / SETTLE.prints;
+  const u = Array.from({ length: n }, (_, j) => first + j * d), E = u.map((x) => Math.exp(a * x));
+  const suf = new Array(n + 1).fill(0);
+  for (let j = n - 1; j >= 0; j--) suf[j] = suf[j + 1] + E[j];
+  let M = 0, V = 0, K3 = 0;
+  for (let i = 0; i < n; i++) {
+    M += E[i];
+    V += E[i] * Math.expm1(v * u[i]) * (E[i] + 2 * suf[i + 1]); // Cov(e^Wi, e^Wj) = Ei Ej (e^(v min) - 1)
+    for (let j = i; j < n; j++) {
+      // the joint cumulant of (i, j, k) for i <= j <= k depends only on u_i, u_j: Ei Ej Ek (e^(2v ui + v uj) - 2e^(v ui) - e^(v uj) + 2)
+      const f = Math.expm1(2 * v * u[i] + v * u[j]) - 2 * Math.expm1(v * u[i]) - Math.expm1(v * u[j]), b = E[i] * E[j] * f;
+      K3 += i < j ? b * (6 * suf[j + 1] + 3 * E[j]) : b * (3 * suf[j + 1] + E[j]); // all orderings of the triple
+    }
+  }
+  let out;
+  const g = V > 0 ? K3 / V ** 1.5 : 0; // skewness
+  if (!(V > 0) || !(g > 0)) out = { M, V, shift: 0, mu: Math.log(M), s: 0 };
+  else {
+    let w = (g / 3) ** 2; // shifted log-normal: skewness (w + 3) sqrt(w), w = e^(s^2) - 1
+    for (let it = 0; it < 100; it++) { const r = Math.sqrt(w), fw = (w + 3) * r - g, dw = r + (w + 3) / (2 * r), nw = w - fw / dw; if (!(nw > 0)) { w /= 2; continue; } if (Math.abs(nw - w) <= 1e-16 * w) { w = nw; break; } w = nw; }
+    const em = Math.sqrt(V / (w * (w + 1)));
+    out = { M, V, shift: M - em * Math.sqrt(1 + w), mu: Math.log(em), s: Math.sqrt(Math.log1p(w)) };
+  }
+  if (shapeCache.size > 2000) shapeCache.delete(shapeCache.keys().next().value);
+  shapeCache.set(key, out);
+  return out;
+}
+// The prints still to come, seen from now: how many, X0's mean and sd, and R's shape
+function future(sigmaMin, t, driftMin) {
+  const { prints: N, w } = SETTLE, d = w / N, t0 = t - w;
+  let n = 0, first = null;
+  for (let i = 1; i <= N; i++) { const tau = t0 + i * d; if (tau > 1e-12) { n++; if (first == null) first = tau; } }
+  if (!n) return { n: 0 };
+  const lead = Math.max(t0, 0); // the time to the start of the last minute (0 inside it)
+  return { n, x0: driftMin * lead, sx: sigmaMin * Math.sqrt(lead), lead, R: windowShape(sigmaMin, driftMin, n, Math.round((first - lead) * 1e12) / 1e12) };
+}
+// The settlement average's log-variance (S = 1, no drift, no prints known yet), for anything that needs its spread as
+// one number (Kalshi's implied close, the cone): Var(e^X0 R) = g^2 (M^2 (e^(v lead) - 1) + V e^(v lead)), g = E[e^X0]
 export function settleVariance(sigmaMin, minutesLeft) {
-  const t = Math.max(minutesLeft, 0), { prints: N } = SETTLE, f = futurePrints(1, sigmaMin, t), k = N - f.n;
-  return Math.log1p(f.c / ((k + f.m1) * (k + f.m1))); // the prints already made add no variance
+  const t = Math.max(minutesLeft, 0), f = sigmaMin > 0 ? future(sigmaMin, t, 0) : { n: 0 };
+  if (!f.n) return 0;
+  const v = sigmaMin * sigmaMin, g1 = Math.exp(v * f.lead / 2), k = SETTLE.prints - f.n, mean = k + g1 * f.R.M;
+  const varSum = g1 * g1 * (f.R.M * f.R.M * Math.expm1(v * f.lead) + f.R.V * Math.exp(v * f.lead));
+  return Math.log1p(varSum / (mean * mean));
 }
 
 // P(settlement > K). settleAvg: the average of the prints made so far inside the last minute (when known); without it
@@ -92,19 +152,27 @@ export function settleVariance(sigmaMin, minutesLeft) {
 export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1, settleAvg = null) {
   void w; // (the window is SETTLE.w)
   const t = Math.max(minutesLeft, 0), { prints: N } = SETTLE;
-  const f = sigmaMin > 0 ? futurePrints(S, sigmaMin, t, driftMin) : { n: 0, m1: 0, c: 0 };
-  if (!(sigmaMin > 0) && t > 0) { // no volatility: the future prints are known too
+  if (!(sigmaMin > 0)) { // no volatility: every print is known
     const d = SETTLE.w / N; let sum = 0, n = 0;
     for (let i = 1; i <= N; i++) { const tau = t - SETTLE.w + i * d; if (tau > 1e-12) { sum += S * Math.exp(driftMin * tau); n++; } }
     const avg = ((settleAvg ?? S) * (N - n) + sum) / N;
     return avg > K ? 1 : avg < K ? 0 : 0.5;
   }
-  const known = (settleAvg ?? S) * (N - f.n), need = N * K - known; // the future prints must add up to more than this
-  if (f.n === 0) { const avg = known / N; return avg > K ? 1 : avg < K ? 0 : 0.5; }
+  const f = future(sigmaMin, t, driftMin), known = (settleAvg ?? S) * (N - f.n);
+  if (!f.n) { const avg = known / N; return avg > K ? 1 : avg < K ? 0 : 0.5; }
+  const need = N * K - known; // the future prints must add up to more than this
   if (need <= 0) return 1;
-  const s2 = Math.log1p(f.c / (f.m1 * f.m1));
-  if (!(s2 > 0)) return f.m1 > need ? 1 : f.m1 < need ? 0 : 0.5;
-  return normCdf((Math.log(f.m1) - s2 / 2 - Math.log(need)) / Math.sqrt(s2));
+  const L = Math.log(need / S), { shift, mu, s } = f.R;
+  // P(R > r) for the shifted log-normal R
+  const rAbove = (r) => (r <= shift ? 1 : s > 0 ? normCdf((mu - Math.log(r - shift)) / s) : shift + Math.exp(mu) > r ? 1 : 0);
+  if (!(f.sx > 0)) return rAbove(Math.exp(L)); // inside the last minute: only R is left
+  let p = 0;
+  if (s <= f.sx) { // integrate over R (the narrower): P(X0 > L - ln R)
+    for (const [z, wt] of GH24) { const r = shift + Math.exp(mu + s * z); p += wt * (r > 0 ? normCdf((f.x0 - (L - Math.log(r))) / f.sx) : 0); }
+  } else { // integrate over X0: P(R > e^(L - X0))
+    for (const [z, wt] of GH24) p += wt * rAbove(Math.exp(L - (f.x0 + f.sx * z)));
+  }
+  return Math.min(1, Math.max(0, p));
 }
 
 // Kalshi's fee (in dollars) at price p: rate·contracts·p·(1−p), rounded up to the cent. The rates start at Kalshi's
@@ -119,8 +187,16 @@ export function setFeeRates(learned) {
   return feeRates();
 }
 export const feeRates = () => ({ taker: FEE_RATES.taker, maker: FEE_RATES.maker, measured: { ...FEE_RATES.measured } });
+// Computed in exact integer arithmetic (no floating-point fudge): price in 1/10,000ths of a dollar (Kalshi quotes to
+// 4 decimals), contracts in hundredths (fractional counts exist), the rate in parts per million, and a true ceiling.
+// Floating point gets cases like 4 contracts at 50c wrong: 0.07 x 4 x 0.25 x 100 = 7.000000000000001, which rounds up to 8c.
 export function kalshiFee(p, contracts = 1, maker = false) {
-  return Math.ceil((maker ? FEE_RATES.maker : FEE_RATES.taker) * contracts * p * (1 - p) * 100 - 1e-9) / 100;
+  const rate = maker ? FEE_RATES.maker : FEE_RATES.taker;
+  const q = BigInt(Math.round(p * 10000)), n = BigInt(Math.max(0, Math.round(contracts * 100))), r = BigInt(Math.round(rate * 1e6));
+  if (q <= 0n || q >= 10000n || n === 0n) return 0;
+  // cents = r/1e6 x n/100 x q/1e4 x (1e4-q)/1e4 x 100  =  r n q (1e4-q) / 1e14
+  const num = r * n * q * (10000n - q), den = 100000000000000n;
+  return Number((num + den - 1n) / den) / 100;
 }
 
 const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
@@ -413,12 +489,15 @@ export function holdOdds(o) {
   if (!spot || !sigmaMin || !side || !(minutesLeft > stopMin)) return null;
   const key = [market?.ticker, market?.strike_type, market?.floor_strike, market?.cap_strike, strike, spot.toFixed(2), sigmaMin.toPrecision(6), minutesLeft.toFixed(3), side, floor, stopMin, confVol].join('|');
   if (holdCache.has(key)) return holdCache.get(key);
-  const v = holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol });
+  // Richardson extrapolation: the grid's error shrinks with the square of its spacing, so two grids (spacing sd/4 and
+  // sd/8) give v8 + (v8 - v4)/3 with that leading error cancelled
+  const args = { market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol };
+  const v4 = holdExact(args, 4), v8 = holdExact(args, 8), v = v4 == null || v8 == null ? v8 : Math.min(1, Math.max(0, v8 + (v8 - v4) / 3));
   if (holdCache.size > 500) holdCache.delete(holdCache.keys().next().value);
   holdCache.set(key, v);
   return v;
 }
-function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol }) {
+export function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol }, GRID) {
   const steps = Math.floor((minutesLeft - stopMin) / HOLD_DT);
   const x0 = Math.log(spot);
   const sideP = (x, t) => { const p = probYes(market, strike, Math.exp(x), sigmaMin * confVol, t, 0); return p == null ? null : side === 'YES' ? p : 1 - p; };
@@ -440,8 +519,11 @@ function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, s
   let total = 0;
   for (const [z, w] of GH7) {
     const vol = sigmaMin * Math.exp(0.2 * z - 0.02), sd = vol * Math.sqrt(HOLD_DT); // per-check move
-    const h = sd / 8, half = Math.ceil((6 * vol * Math.sqrt(steps * HOLD_DT) + 6 * sd) / h), n = 2 * half + 1;
-    const kr = Math.ceil(6 * sd / h), ker = [];
+    const h = sd / GRID, half = Math.ceil((6 * vol * Math.sqrt(steps * HOLD_DT) + 6 * sd) / h), n = 2 * half + 1;
+    // the 10-second move: the normal density on the grid, normalised (this keeps the step's variance exactly sd^2;
+    // integrating the density over each cell would add the cell's own spread, h^2/12 a step, and bias the answer),
+    // out to 8.5 sd where the tail is below 1e-17
+    const kr = Math.ceil(8.5 * sd / h), ker = [];
     let ks = 0;
     for (let k = -kr; k <= kr; k++) { const v = Math.exp(-0.5 * (k * h / sd) ** 2); ker.push(v); ks += v; }
     for (let k = 0; k < ker.length; k++) ker[k] /= ks;
