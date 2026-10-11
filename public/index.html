@@ -40,7 +40,6 @@
   <link rel="modulepreload" href="structure.js">
   <link rel="modulepreload" href="playbook.js">
   <link rel="modulepreload" href="micro.js">
-  <link rel="modulepreload" href="sharps.js">
   <link rel="modulepreload" href="watch.js">
   <link rel="modulepreload" href="fees.js">
   <link rel="modulepreload" href="callgate.js">
@@ -147,15 +146,6 @@
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
         <small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small>
-      </div>
-      <div class="card sharps" id="sharpsCard">
-        <div class="deep-head"><span>Copy the sharps</span><b id="sharpsWhen"></b></div>
-        <div class="sharps-now" id="sharpsNow">Loading…</div>
-        <div class="sharps-meter"><i id="sharpsFill"></i><em></em></div>
-        <ul class="sharps-who" id="sharpsWho"></ul>
-        <div class="sharps-rec" id="sharpsRec"></div>
-        <details class="sharps-board"><summary>Leaderboard</summary><div id="sharpsBoard"></div></details>
-        <small class="fine-left">Polymarket runs the same 15-minute BTC Up/Down rounds, and every trade there is public and tied to a wallet (Kalshi's trades are anonymous, and real insiders are barred from trading). The server grades every wallet on every round; <b>sharps</b> have 15+ graded rounds, win clearly more often than not and are up money. Their lean at 5 minutes left is recorded before each result, so the record shows whether copying them actually works. Polymarket settles on Chainlink's BTC price, Kalshi on CF Benchmarks', so rare close rounds can differ. Separate from the bot's calls.</small>
       </div>
       <div class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
@@ -432,7 +422,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v11.4 · the playbook</p>
+      <p class="fine" id="version">Shot Caller v11.5 · the playbook</p>
     </section>
   </main>
 
