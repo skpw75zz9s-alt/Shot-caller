@@ -8,6 +8,7 @@
 // "no change" (the price at that moment) as the baseline any prediction has to beat.
 import { normCdf } from './model.js';
 import { flipOffset, turnPoints } from './flip.js';
+import { microOffset } from './micro.js';
 
 // Inverse of the standard normal CDF (Acklam's approximation, plenty for a chart)
 export function normInv(p) {
@@ -129,11 +130,13 @@ export function candleSigma(bars, sigmaMin, now) {
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
 // flip (public/flip.js flipForecast): bends the expected path to carry today's momentum and turn where a flip looks ripe
-export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null, flip = null }) {
+// micro (public/micro.js microRead): the small details' learned push over the next 5 minutes (zero until proven)
+export function predictionCandles({ lines, spot, sigmaMin, now, close, weights = null, bars = null, flip = null, micro = null }) {
   if (!lines?.length || !spot || !(sigmaMin > 0) || !(close > now)) return [];
   const w = weights || blendWeights(null);
   const blend = (t) => { let s = 0, ws = 0; for (const l of lines) { const v = valueAt(l.pts, t), k = w[l.key] ?? 1; if (v != null) { s += v * k; ws += k; } } return ws ? s / ws : spot; };
-  const path = (t) => blend(t) + flipOffset(flip, (t - now) / 60000);
+  const microAt = micro?.at ?? now;
+  const path = (t) => blend(t) + flipOffset(flip, (t - now) / 60000) + microOffset(micro, (t - microAt) / 60000) - microOffset(micro, (now - microAt) / 60000);
   // per 5-second step, log price; x RANGE_FIX because twelve 5-second points per minute catch only part of a minute's
   // real high and low (measured: their average range is ~0.8 of a continuous walk's)
   const sig = candleSigma(bars, sigmaMin, now) / Math.sqrt(60000 / STEP) * RANGE_FIX;

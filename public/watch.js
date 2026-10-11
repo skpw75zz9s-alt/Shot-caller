@@ -24,10 +24,10 @@ export function createDetector({ clock = () => Date.now() } = {}) {
   let hold = null, round = null;
   const push = (arr, x, ms) => { arr.push(x); while (arr.length && arr[0].t < x.t - ms) arr.shift(); };
   const at = (arr, t) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i].t <= t) return arr[i]; return null; };
-  function emit(now, kind, sev, text, key = kind, holdSec = 0) {
+  function emit(now, kind, sev, text, key = kind, holdSec = 0, dir = 0) {
     if (last[key] && now - last[key] < WATCH.dedupeMs) return null;
     last[key] = now;
-    const e = { t: now, kind, sev, text };
+    const e = { t: now, kind, sev, text, ...(dir ? { dir } : {}) };
     events.unshift(e); if (events.length > WATCH.keep) events.length = WATCH.keep;
     if (holdSec > 0 && (!hold || hold.until < now + holdSec * 1000)) hold = { until: now + holdSec * 1000, why: text, kind };
     return e;
@@ -50,8 +50,8 @@ export function createDetector({ clock = () => Date.now() } = {}) {
       const then = at(prices, now - 5000);
       if (then && sigmaMin > 0 && now - then.t <= 8000) {
         const sd = price * sigmaMin * Math.sqrt(5 / 60), d = price - then.p, z = Math.abs(d) / sd;
-        if (z >= 5) add(emit(now, 'jump', 'severe', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds): new calls wait 30s for the dust to settle`, 'jump', 30));
-        else if (z >= 3) add(emit(now, 'jump', 'warn', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds)`));
+        if (z >= 5) add(emit(now, 'jump', 'severe', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds): new calls wait 30s for the dust to settle`, 'jump', 30, Math.sign(d)));
+        else if (z >= 3) add(emit(now, 'jump', 'warn', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds)`, 'jump', 0, Math.sign(d)));
       }
       // the price itself stopped: no fresh price for 30 s while the bot is running
     }

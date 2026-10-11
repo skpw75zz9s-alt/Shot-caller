@@ -871,6 +871,24 @@ function renderSharps() {
   setHTML($('sharpsBoard'), d.sharps.length ? `<table class="sc-rec"><tr><th>Trader</th><th>Rounds</th><th>Won</th><th>P&amp;L</th><th>ROI</th></tr>${d.sharps.map((x) => `<tr><td>${who(x)}</td><td>${x.rounds}</td><td>${Math.round(x.win * 100)}%</td><td class="${x.pnl >= 0 ? 'pos' : 'neg'}">${x.pnl >= 0 ? '+' : '−'}$${int(Math.abs(x.pnl))}</td><td>${Math.round(x.roi * 100)}%</td></tr>`).join('')}</table>` : '<small class="muted">No sharps yet.</small>');
 }
 
+// ---------- the micro model (server: microfeed.js, public/micro.js): small details' push on the next 5 minutes ----------
+async function refreshMicro() {
+  if (document.hidden) return;
+  try { state.micro = await getJSON('micro'); renderMicro(); } catch { /* next time */ }
+}
+setInterval(refreshMicro, 5000);
+setTimeout(refreshMicro, 1500);
+function renderMicro() {
+  const m = state.micro;
+  if (!m) return;
+  const h = m.read?.horizons, pct = (v) => `${(v * 100).toFixed(1)}%`, n = m.models;
+  const on = h && [1, 3, 5].some((k) => h[k]?.active);
+  const learning = [1, 3, 5].map((k) => `${k} min: ${int(n?.[k]?.n ?? 0)} graded, ${n?.[k]?.skill > 0 ? `${pct(n[k].skill)} better` : 'not better yet'} than "no change"`).join(' · ');
+  setHTML($('microInfo'), on
+    ? `<b>Small details:</b> next 5 min <b class="${h[5].move >= 0 ? 'pos' : 'neg'}">${h[5].move >= 0 ? '+' : '−'}$${Math.abs(h[5].move).toFixed(0)}</b> (1 min ${h[1].move >= 0 ? '+' : '−'}$${Math.abs(h[1].move).toFixed(0)}, 3 min ${h[3].move >= 0 ? '+' : '−'}$${Math.abs(h[3].move).toFixed(0)}), bending the prediction candles${m.read.sway?.length ? `. Swaying it: ${m.read.sway.map((x) => `${esc(x.name)} ${x.push > 0 ? '↑' : '↓'}`).join(', ')}` : ''}. <small>${learning}</small>`
+    : `<b>Small details:</b> the micro model is learning how buy/sell pressure, futures, the leading exchange, absorption, Kalshi's flow and jumps move the next 1–5 minutes. It bends the candles only once it beats "no change" (500+ graded, 0.5%+ better). <small>${learning}</small>`);
+}
+
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
 state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
 function runWhy() {
@@ -931,7 +949,8 @@ function flipNow(live, snap, now) {
 function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { candles: [], turns: [], flip: null };
   const flip = flipNow(live, snap, now), sigma = live.sigma ?? snap.sigmaMin, spot = modelSpot();
-  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip });
+  const micro = state.micro?.read && now - state.micro.read.at < 20000 ? state.micro.read : null; // the server's micro model, when fresh
+  const candles = predictionCandles({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights: blendWeights(predictionRecord(state.predLog)), bars: snap.bars, flip, micro });
   return { candles, turns: flip ? candleTurns(candles, spot, now, flip.sd1, flip.v0) : [], flip };
 }
 // With 5 minutes left, keep each line's close prediction; after the close, grade it against where BTC closed

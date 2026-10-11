@@ -269,6 +269,25 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### The micro model: small details bend the prediction candles (v11.2)
+
+To make the candles more accurate where small details matter most (the next few minutes), a **micro model** learns how those details move BTC 1, 3 and 5 minutes out (`public/micro.js`, `microfeed.js`).
+- **Every 10 s** the server reads:
+  - buyers vs sellers on the exchanges (30 s and 2 min)
+  - the last 1 and 5 minutes' move (does it continue or snap back?)
+  - futures moving ahead of spot, futures flow and the futures premium
+  - the leading exchange pulling away
+  - big orders soaked up without moving the price (absorption)
+  - Coinbase's premium
+  - Kalshi's price vs the bot's odds, and Kalshi's trade flow
+  - the direction of the latest jump Market watch flagged
+- **How it learns:** one recursive least-squares model per horizon, with recent data counting more (about a day's memory). It starts at "no opinion" and is pulled toward it, so nothing sways the lines on a hunch.
+- **Graded out of sample:** each prediction is made before its outcome and graded when its 1, 3 or 5 minutes pass, against simply predicting "no change".
+- **Proven-only:** a horizon bends the prediction candles only once it beats "no change" by 0.5%+ over 500+ graded predictions.
+  - Simulated: pure noise switched it on 0 times in 20 and a tiny push 0 in 20; a moderate push 6 in 20 (+0.4%) and a clear one 20 in 20 (+3.3%).
+- **Under the chart:** its current read (next 1, 3, 5 minutes in dollars), which details are swaying it right now, and each horizon's record.
+- **The candles:** the expected path bends through the 1-, 3- and 5-minute moves, then holds and blends into the longer-term lines. The per-minute candle grading shows whether it helps.
+
 ### Copy the sharps (v11.1, a separate panel)
 
 Real insiders (people trading on non-public information) are barred from trading Kalshi, and Kalshi's trades are anonymous. So this follows the next best thing in public data: **traders with proven records**. Polymarket runs the same 15-minute BTC Up/Down rounds, and every trade there is public and tied to a wallet (`smartmoney.js`, `public/sharps.js`; read-only, no keys).

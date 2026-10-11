@@ -89,6 +89,8 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     return ps.length ? (ps.length % 2 ? ps[(ps.length - 1) / 2] : (ps[ps.length / 2 - 1] + ps[ps.length / 2]) / 2) : null;
   }
   const feedTimes = () => Object.fromEntries(Object.entries(status).filter(([, v]) => v.lastAt).map(([k, v]) => [k, v.lastAt]));
+  // takers' buy share of the dollars since t, as -1 (all selling) .. +1 (all buying); null with no trades
+  function imbalance(since) { let b = 0, all = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > since; i--) { const u = trades[i].price * trades[i].size; all += u; if (trades[i].side === 'buy') b += u; } return all > 0 ? (b / all - 0.5) * 2 : null; }
   function flowSince(t) { let usd = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > t; i--) usd += trades[i].price * trades[i].size; return usd; }
   const liveFeeds = (now) => Object.values(status).filter((s) => s.lastAt > now - 60000).length;
 
@@ -143,7 +145,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds,
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
-  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, data: () => data };
+  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data };
 }
 const round3 = (v) => Math.round(v * 1000) / 1000;
 // The scan without what the phone doesn't need

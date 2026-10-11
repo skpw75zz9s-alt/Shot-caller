@@ -8,6 +8,7 @@ import { parseKalshiTrades } from './public/feeds.js';
 
 export function createMarketWatch({ kalshi, scanFeed, futures = null, fetchJSON = defaultFetch, clock = () => Date.now(), log = console }) {
   const det = createDetector({ clock });
+  const recentK = [];
   let book = null, bookAt = 0, tradesAt = 0, busy = { book: false, trades: false }, seen = new Set(), pending = [], lastFlowAt = 0;
   async function pollBook(ticker, now) {
     if (busy.book || now - bookAt < 2000) return;
@@ -19,7 +20,8 @@ export function createMarketWatch({ kalshi, scanFeed, futures = null, fetchJSON 
     busy.trades = true; tradesAt = now;
     try {
       const fresh = parseKalshiTrades(await fetchJSON(`${kalshi}/markets/trades?ticker=${encodeURIComponent(ticker)}&limit=100`)).filter((x) => !seen.has(x.id));
-      for (const x of fresh) { seen.add(x.id); pending.push({ t: x.t, count: x.count, side: x.side }); }
+      for (const x of fresh) { seen.add(x.id); pending.push({ t: x.t, count: x.count, side: x.side }); recentK.push({ t: x.t, count: x.count, side: x.side }); }
+      while (recentK.length && recentK[0].t < clock() - 120000) recentK.shift();
       if (seen.size > 5000) seen = new Set([...seen].slice(-2000));
     } catch { /* next time */ } finally { busy.trades = false; }
   }
@@ -40,7 +42,10 @@ export function createMarketWatch({ kalshi, scanFeed, futures = null, fetchJSON 
       flowUsd, kalshi: live ? kalshiView(live.m.ticker) : null, kTrades: pending.splice(0), futures: futures?.context(now) ?? null });
     for (const e of events) if (e.sev === 'severe') log.log?.(`market watch: ${e.text}`);
   }
-  return { observe, hold: () => det.hold(), status: () => det.status(), api: () => ({ status: det.status(), events: det.events().slice(0, 40) }) };
+  // for the micro model: Kalshi takers' YES share of the last 30 s (-1..+1), and the latest jump's direction (last minute)
+  function kFlow(now = clock()) { const r = recentK.filter((x) => x.t > now - 30000), all = r.reduce((a, x) => a + x.count, 0); return all >= 20 ? (r.filter((x) => x.side === 'YES').reduce((a, x) => a + x.count, 0) / all - 0.5) * 2 : 0; }
+  function lastJump(now = clock()) { const e = det.events().find((x) => x.kind === 'jump' && x.t > now - 60000); return e?.dir ?? 0; }
+  return { kFlow, lastJump, observe, hold: () => det.hold(), status: () => det.status(), api: () => ({ status: det.status(), events: det.events().slice(0, 40) }) };
 }
 async function defaultFetch(url) {
   const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(6000) });

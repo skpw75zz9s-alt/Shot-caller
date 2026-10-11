@@ -13,6 +13,7 @@ import { createFeeBook } from './feebook.js';
 import { createMarketWatch } from './marketwatch.js';
 import { createFutures } from './futures.js';
 import { createSmartMoney } from './smartmoney.js';
+import { createMicroFeed } from './microfeed.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -49,12 +50,15 @@ export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures });
 // Copy the sharps: wallets that keep winning Polymarket's 15-minute BTC rounds (smartmoney.js, public/sharps.js)
 export const smartMoney = createSmartMoney({ file: join(DATA_DIR, 'sharps.json') });
+// The micro model: how the market's small details move BTC over the next 1-5 minutes (microfeed.js, public/micro.js)
+export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
   onObserve: (o) => {
     try { scanFeed.observe(o); } catch (e) { console.error('round scan step failed', e.message); }
     try { marketWatch.observe(o); } catch (e) { console.error('market watch step failed', e.message); }
+    try { microFeed.observe(o); } catch (e) { console.error('micro model step failed', e.message); }
     autotrade?.step(o);
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
@@ -188,7 +192,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load(), smartMoney.load()]);
+const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load(), smartMoney.load(), microFeed.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -320,6 +324,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
     if (path === '/api/watch') return send(res, 200, marketWatch.api());
     if (path === '/api/sharps') return send(res, 200, smartMoney.api());
+    if (path === '/api/micro') return send(res, 200, microFeed.api());
     if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
