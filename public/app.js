@@ -347,7 +347,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
 const compute = () => {
-  const shifts = state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null; // the server's proven Round scan nudges
+  // the server's proven nudges to the odds: the Round scan and the micro model (added together per market)
+  const nudges = [state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null, state.micro?.read && Date.now() - state.micro.read.at < 20000 ? state.micro.inCalls : null];
+  let shifts = null;
+  for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
@@ -885,8 +888,8 @@ function renderMicro() {
   const on = h && [1, 3, 5].some((k) => h[k]?.active);
   const learning = [1, 3, 5].map((k) => `${k} min: ${int(n?.[k]?.n ?? 0)} graded, ${n?.[k]?.skill > 0 ? `${pct(n[k].skill)} better` : 'not better yet'} than "no change"`).join(' · ');
   setHTML($('microInfo'), on
-    ? `<b>Small details:</b> next 5 min <b class="${h[5].move >= 0 ? 'pos' : 'neg'}">${h[5].move >= 0 ? '+' : '−'}$${Math.abs(h[5].move).toFixed(0)}</b> (1 min ${h[1].move >= 0 ? '+' : '−'}$${Math.abs(h[1].move).toFixed(0)}, 3 min ${h[3].move >= 0 ? '+' : '−'}$${Math.abs(h[3].move).toFixed(0)}), bending the prediction candles${m.read.sway?.length ? `. Swaying it: ${m.read.sway.map((x) => `${esc(x.name)} ${x.push > 0 ? '↑' : '↓'}`).join(', ')}` : ''}. <small>${learning}</small>`
-    : `<b>Small details:</b> the micro model is learning how buy/sell pressure, futures, the leading exchange, absorption, Kalshi's flow and jumps move the next 1–5 minutes. It bends the candles only once it beats "no change" (500+ graded, 0.5%+ better). <small>${learning}</small>`);
+    ? `<b>Small details:</b> next 5 min <b class="${h[5].move >= 0 ? 'pos' : 'neg'}">${h[5].move >= 0 ? '+' : '−'}$${Math.abs(h[5].move).toFixed(0)}</b> (1 min ${h[1].move >= 0 ? '+' : '−'}$${Math.abs(h[1].move).toFixed(0)}, 3 min ${h[3].move >= 0 ? '+' : '−'}$${Math.abs(h[3].move).toFixed(0)}), bending the prediction candles${m.inCalls ? ` and shifting the bot's odds ${Object.values(m.inCalls)[0] >= 0 ? '+' : '−'}${(Math.abs(Object.values(m.inCalls)[0]) * 100).toFixed(1)} pts on UP` : ''}${m.read.sway?.length ? `. Swaying it: ${m.read.sway.map((x) => `${esc(x.name)} ${x.push > 0 ? '↑' : '↓'}`).join(', ')}` : ''}. <small>${learning}</small>`
+    : `<b>Small details:</b> the micro model is learning how buy/sell pressure, futures, the leading exchange, absorption, Kalshi's flow and jumps move the next 1–5 minutes. It bends the candles and shifts the bot's odds (±6 pts max) only once it beats "no change" (500+ graded, 0.5%+ better). <small>${learning}</small>`);
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------

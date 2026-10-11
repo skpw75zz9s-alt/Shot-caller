@@ -4,11 +4,11 @@
 // (against BTC's actual price then) before learning from it. Kept in DATA_DIR/micro.json.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { HORIZONS, microLearn, microPredict, microRead, microVector, newMicro } from './public/micro.js';
+import { HORIZONS, microLearn, microPredict, microRead, microShift, microVector, newMicro } from './public/micro.js';
 import { quote } from './public/model.js';
 
 export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = null, clock = () => Date.now(), log = console }) {
-  let M = newMicro(), pending = [], lastAt = 0, read = null, savedAt = 0;
+  let M = newMicro(), pending = [], lastAt = 0, read = null, savedAt = 0, lastLive = null;
   async function load() { try { const d = JSON.parse(await readFile(file, 'utf8')); if (d?.v === 1 && d.models) M = d; } catch { /* first run */ } }
   async function save() {
     try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(M)); await rename(`${file}.tmp`, file); } catch (e) { log.error('saving the micro model failed', e.message); }
@@ -33,6 +33,8 @@ export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = 
     }) };
   }
   function observe({ snap }, now = clock()) {
+    const lv = snap?.live;
+    lastLive = lv ? { ticker: lv.m.ticker, strike: lv.strike, spot: snap.mSpot ?? snap.spot, sigmaMin: lv.sigma ?? snap.sigmaMin, minutesLeft: lv.ev.minutesLeft, strikeType: lv.m.strike_type } : null;
     // grade the predictions whose time has come (only right on time: the price a few seconds late is still fair)
     const price = scanFeed.spot(now);
     let learned = false;
@@ -52,5 +54,11 @@ export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = 
     read = { ...microRead(M, f.x, { price: f.price, sigmaMin: f.sigmaMin }), at: now, price: f.price };
     if (learned && now - savedAt > 300000) { savedAt = now; save(); }
   }
-  return { load, observe, save, api: () => ({ read, models: Object.fromEntries(HORIZONS.map((h) => [h, { n: M.models[h].n, skill: M.models[h].e0 > 0 ? 1 - M.models[h].e1 / M.models[h].e0 : 0 }])) }), model: () => M };
+  // For the bot's calls: { ticker: points } from the proven horizons (bot.js shifts, with the Round scan's)
+  function shifts(now = clock()) {
+    if (!read || !lastLive || now - read.at > 20000 || !HORIZONS.some((h) => read.horizons[h]?.active)) return null;
+    const v = microShift(read, { ...lastLive, now });
+    return v ? { [lastLive.ticker]: v } : null;
+  }
+  return { load, observe, save, shifts, api: () => ({ read, inCalls: shifts(), models: Object.fromEntries(HORIZONS.map((h) => [h, { n: M.models[h].n, skill: M.models[h].e0 > 0 ? 1 - M.models[h].e1 / M.models[h].e0 : 0 }])) }), model: () => M };
 }

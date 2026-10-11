@@ -287,6 +287,12 @@ To make the candles more accurate where small details matter most (the next few 
   - Simulated: pure noise switched it on 0 times in 20 and a tiny push 0 in 20; a moderate push 6 in 20 (+0.4%) and a clear one 20 in 20 (+3.3%).
 - **Under the chart:** its current read (next 1, 3, 5 minutes in dollars), which details are swaying it right now, and each horizon's record.
 - **The candles:** the expected path bends through the 1-, 3- and 5-minute moves, then holds and blends into the longer-term lines. The per-minute candle grading shows whether it helps.
+- **In the bot's calls (v11.3):** a proven read also shifts the bot's odds. The predicted move over the minutes left (up to 5) shifts where BTC is expected to be at the close. With the distance to the target, the volatility and the time left, that's a change in P(YES).
+  - +$40 expected matters a lot right at the target and barely at all $500 away.
+  - Capped at ±6 points. Only proven horizons count; unproven ones predict 0 and add nothing.
+  - It adds to the Round scan's nudge and reaches official calls, push alerts, the Auto-trader and the phone alike.
+  - The micro model grades its read against the odds before its own nudge, so it can't fool itself.
+  - Record → **Used in the bot's calls** shows "Small details (micro model)" with ✓ once it's shaping calls, and the line under the chart shows how many points it's moving the current odds.
 
 ### Copy the sharps (v11.1, a separate panel)
 

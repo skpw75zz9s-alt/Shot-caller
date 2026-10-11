@@ -64,3 +64,23 @@ export function microOffset(read, t) {
   for (let i = 1; i < pts.length; i++) if (t <= pts[i][0]) { const [a, va] = pts[i - 1], [b, vb] = pts[i]; return va + (vb - va) * ((t - a) / (b - a)); }
   return pts[pts.length - 1][1];
 }
+
+// For the bot's calls: how the proven small details change the chance of finishing above the target. The predicted
+// move over the minutes left (up to 5) shifts where BTC is expected to be at the close; with the distance to the target,
+// the volatility and the time left, that's a shift in P(YES). Unproven horizons predict 0, so they add nothing.
+// Capped at +-6 points.
+export const MICRO_CALL_CAP = 0.06;
+export function microShift(read, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater', now = Date.now() }) {
+  if (!read?.horizons || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0)) return 0;
+  const since = Math.max(0, (now - (read.at ?? now)) / 60000);
+  const move = microOffset(read, since + Math.min(5, minutesLeft)) - microOffset(read, since);
+  if (!move) return 0;
+  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+  const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);
+  return clamp(/^less/.test(strikeType || '') ? -shift : shift, -MICRO_CALL_CAP, MICRO_CALL_CAP);
+}
+function erf(x) { // Abramowitz-Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return x >= 0 ? y : -y;
+}

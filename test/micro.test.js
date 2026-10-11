@@ -51,4 +51,21 @@ test('the server feed: samples every 10 s, grades each at its horizon, learns', 
   const api = mf.api();
   assert.ok(api.read && api.read.horizons[1]);
   assert.ok(api.models[1].n >= 30 && api.models[5].n >= 10, JSON.stringify(api.models));
+  assert.equal(api.inCalls, null, 'not proven yet: no say in the calls');
+  assert.equal(mf.shifts(), null);
+});
+
+import { microShift } from '../public/micro.js';
+test('for calls: a proven predicted move shifts P(YES) by how much it matters at the target, capped at 6 pts', () => {
+  const read = { at: 0, horizons: { 1: { move: 10 }, 3: { move: 25 }, 5: { move: 40 } } };
+  const base = { spot: 100000, strike: 100000, sigmaMin: 0.0008, minutesLeft: 8, now: 0 };
+  const atTarget = microShift(read, base);
+  assert.ok(atTarget > 0.05 && atTarget <= 0.06, `on the target: +$40 expected matters most (${atTarget})`);
+  const far = microShift(read, { ...base, strike: 99500 });
+  assert.ok(far > 0 && far < 0.01, `far above the target: barely matters (${far})`);
+  assert.ok(Math.abs(microShift(read, { ...base, strikeType: 'less' }) + atTarget) < 1e-12, 'flipped for "below" markets');
+  assert.equal(microShift({ at: 0, horizons: { 1: { move: 0 }, 3: { move: 0 }, 5: { move: 0 } } }, base), 0, 'unproven horizons add nothing');
+  const late = microShift(read, { ...base, minutesLeft: 1 });
+  assert.ok(late > 0 && late <= 0.06, 'one minute left: only the 1-minute move counts');
+  assert.equal(microShift(read, { ...base, minutesLeft: 0 }), 0);
 });

@@ -22,10 +22,11 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // on first start, and keep what's learned in learned.json next to the data file (public/learner.js).
 // indexSources: exchanges for the BTC index estimate (index.js); INDEX=off uses Coinbase alone.
 // watch: () => Market watch's status (marketwatch.js): its holds pause new calls; its event count goes into the call record
+// shiftInfo: () => { scan, micro } which nudges are in use right now (for the 'used in calls' panel)
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}) }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -416,7 +417,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   function usingStatus(p) {
     const cal = calTable(learned), corrected = cal.filter((b) => b.shift).length, pb = pulseBlend(learned.pulse), g = learned.callGate, fixOn = pulseStatus(learned.pulse);
-    const scanOn = learnedShifts && Object.keys(learnedShifts).length > 0;
+    const info = shiftInfo() || {}, scanOn = !!info.scan, microOn = !!info.micro;
     return [
       { key: 'vol', name: 'Volatility by time of week', on: !!p, detail: p ? 'prices the coming minutes with how busy this half hour usually is' : 'needs a week of history' },
       { key: 'cal', name: 'Calibration', on: corrected > 0, detail: corrected ? `corrects ${corrected} confidence band${corrected === 1 ? '' : 's'} from graded rounds` : 'no band has needed (or earned) a correction yet' },
@@ -424,6 +425,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       { key: 'fix', name: 'Live volatility check (every second)', on: fixOn.fix !== 1, detail: fixOn.helping == null ? `switches on after an hour of grading` : fixOn.helping ? `×${fixOn.fix.toFixed(2)} volatility` : 'off: not beating no correction lately' },
       { key: 'blend', name: 'Kalshi\'s price', on: pb.use, detail: pb.use ? `${Math.round(pb.w * 100)}% Kalshi in the odds (${(pb.gain * 100).toFixed(1)}% more accurate over ${pb.rounds} rounds)` : `${pb.rounds}/150 rounds${pb.rounds >= 150 ? ': no blend beats the bot alone yet' : ''}` },
       { key: 'scan', name: 'Round scan', on: !!scanOn, detail: scanOn ? 'its proven reads nudge the odds (±8 pts max)' : 'until its graded record shows it makes the odds more accurate' },
+      { key: 'micro', name: 'Small details (micro model)', on: microOn, detail: microOn ? 'its proven 1-5 minute read shifts the odds (±6 pts max)' : 'until it beats "no change" (500+ graded predictions, 0.5%+ better)' },
       { key: 'gate', name: 'Call filter (learns from the bot\'s own calls)', on: !!g?.active, detail: g?.active ? `skips calls like the ones that lost: in the replay the ${g.replay.skipped} it would have skipped won ${Math.round(g.replay.skippedWin * 100)}% (vs ${Math.round(g.replay.keptWin * 100)}% kept) and lost $${Math.abs(g.replay.skippedPnl).toFixed(2)}/contract`
         : `${g?.n ?? 0}/120 graded calls${g?.replay ? ` · replay: skipping would have ${g.replay.skippedPnl < 0 ? 'helped, not proven yet' : 'cost money, so it stays off'}` : ''}` },
     ];

@@ -40,6 +40,8 @@ export const access = createAccess({
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
+// add up proven nudges to the odds per market ({ ticker: points } each, or null)
+const mergeShifts = (...all) => { const out = {}; for (const m of all) for (const [k, v] of Object.entries(m || {})) out[k] = (out[k] || 0) + v; return Object.keys(out).length ? out : null; };
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
 // BTC futures as a leading signal (futures.js): extra Round scan inputs and Market watch events
 export const futures = createFutures();
@@ -63,7 +65,8 @@ export const bot = createBot({
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
-  shifts: () => scanFeed.shifts(),
+  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts()), // proven nudges: the Round scan and the micro model
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts() }),
   watch: () => marketWatch.status(),
 });
 setInterval(() => access.prune(), 3600000).unref();
