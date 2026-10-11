@@ -124,6 +124,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     for (const l of Object.values(lines)) candles.removePriceLine(l);
     lines = {};
     if (show.strike && d.strike) lines.strike = candles.createPriceLine({ price: d.strike, color: C.strike, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'target' });
+    // the prediction engine's call: its entry level (the target above is its invalidation)
+    if (d.round && d.forecast?.entry && d.forecast.call !== 'NO CALL') lines.entry = candles.createPriceLine({ price: d.forecast.entry, color: d.forecast.call === 'UP' ? '#2ee6a6' : '#ff4d6d', lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `entry ${d.forecast.call}` });
     const fc = d.round && show.floorCeil ? floorCeiling(bars, d.openTime) : null;
     if (fc) {
       lines.floor = candles.createPriceLine({ price: fc.floor, color: '#2ee6a699', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'floor' });

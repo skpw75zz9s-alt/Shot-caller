@@ -829,12 +829,12 @@ async function drawChartTab(force = false) {
   if (fk !== chartState.fillsKey) { chartState.fillsKey = fk; chartState.fills = chartFills(); }
   // Redraw the layers when something on them changed (or every 5s for the indicators); trades move the live candle in between
   const lb = bars[bars.length - 1];
-  const key = [tf, chartState.height, bars.length, lb.t, live?.strike, close, state.callLog.length, fk, state.whyLog[0]?.t, JSON.stringify(chartState.show), Math.floor(now / 5000)].join('|');
+  const key = [tf, chartState.height, bars.length, lb.t, live?.strike, close, state.callLog.length, fk, state.whyLog[0]?.t, state.enNow?.call, JSON.stringify(chartState.show), Math.floor(now / 5000)].join('|');
   if (key === chartState.key && !force) return;
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
   tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
-    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView });
+    cone: showCone ? forecastCone(spot, sigma, now, horizonOf(live, now)) : [], predictions: preds, predCandles: pcs.candles, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
@@ -876,16 +876,17 @@ async function refreshPlaybook() {
   if (document.hidden) return;
   try { state.playbook = await getJSON('playbook'); state.playbookAt = Date.now(); renderPlaybook(); } catch { /* next time */ }
 }
-setInterval(refreshPlaybook, 15000); // the reversal checklist changes as each 15-minute candle closes
+setInterval(refreshPlaybook, 5000); // the live forecast moves with the price (the checklist with each 15-minute candle)
 setTimeout(refreshPlaybook, 2500);
 function renderPlaybook() {
   const p = state.playbook, r = p?.report;
   if (!p) return;
-  renderReversal(p); renderGuide(p);
+  renderReversal(p); renderGuide(p); renderEngine(p);
   const card = (title, x) => !x ? '' : `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${Math.round(x.winRate * 100)}% · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · fees ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the playbook's 100)</small>` : ''}</span></div>`;
   setHTML($('pbReport'), !r ? (p.backfilling ? 'Reading two weeks of BTC history…' : 'Starting…')
     : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
       + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
+      + engineRecord(r.predictor, p.predictorLive)
       + guideRecord(r.guide, p.guideLive)
       + reversalReport(r.reversal)
       + `<small class="muted">Break-even win rate before costs: 33% at 2R, 40% at 1.5R. ${(() => { const best = [r.day, r.hour].filter((x) => x?.n >= 30).sort((a, b) => b.avgR - a.avgR)[0]; return best ? (best.avgR > 0 ? 'One version is positive after fees so far; it still needs 100+ trades to mean much.' : 'After fees, it isn\'t profitable on this data yet.') : 'Too few trades to judge yet.'; })()}</small>`);
@@ -910,6 +911,72 @@ function renderTune() {
     + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
     + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
       : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.7+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
+}
+
+// ---------- the prediction engine (server: playbookfeed.js, public/predictor.js): the live round's forecast ----------
+// The call at the confidence you pick: UP/DOWN only when the model is that sure, that level has held up walk-forward
+// at this point of the round (100+ past calls, right at least as often as it claims, within 2 pts), and Kalshi's price
+// plus fee and slippage leaves an edge. Otherwise NO CALL, with the reason.
+state.enThr = Number(store.get('enThr', 0.6)) || 0.6;
+function engineCall(p, rep, thr) {
+  if (!p) return null;
+  const up = p.pUp >= 0.5, side = up ? 'UP' : 'DOWN', conf = up ? p.pUp : p.pDown, cp = rep?.byCheckpoint?.[p.checkpoint];
+  const row = cp?.thresholds?.filter((x) => x.t <= thr + 1e-9).at(-1), k = p.kalshi?.[side];
+  let reason = null;
+  if (conf < thr) reason = `evidence too weak: ${Math.round(conf * 100)}% ${side}, under your ${Math.round(thr * 100)}%`;
+  else if (!row || row.model.n < 100) reason = `not validated yet: too few past ${Math.round(thr * 100)}%+ calls at ${p.checkpoint} min left`;
+  else if (row.model.accuracy < thr - 0.02) reason = `not validated: past ${Math.round(thr * 100)}%+ calls at ${p.checkpoint} min left were right ${Math.round(row.model.accuracy * 100)}%`;
+  else if (k && k.edge <= 0) reason = `priced in: Kalshi ${k.contract} ${Math.round(k.ask * 100)}¢ + fees vs ${Math.round(conf * 100)}%`;
+  return { call: reason ? 'NO CALL' : side, side, conf, reason, row, k };
+}
+function renderEngine(p) {
+  const e = p.predictor, rep = p.report?.predictor, thr = state.enThr;
+  setHTML($('enThr'), `Call at ${[0.6, 0.7, 0.8, 0.9].map((t) => `<button type="button" data-thr="${t}" class="${Math.abs(t - thr) < 1e-9 ? 'on' : ''}">${t * 100}%+</button>`).join('')}`);
+  const badge = $('fcBadge');
+  if (!e) { setText($('enCall'), !p.report ? 'Reading BTC history…' : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
+  const c = engineCall(e, rep, thr), t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => `$${Math.round(x).toLocaleString()}`;
+  const left = Math.max(0, (e.closeTime - Date.now()) / 60000);
+  setText($('enWhen'), `${left.toFixed(1)} min left · read at ${e.checkpoint}-min model`);
+  const cls = c.call === 'UP' ? 'up' : c.call === 'DOWN' ? 'down' : 'none';
+  setHTML($('enCall'), `<span>${c.call}</span><small>${c.call === 'NO CALL' ? `${esc(c.reason)} · leaning ${c.side}` : `${Math.round(c.conf * 100)}% ${c.side}, validated at this confidence and worth Kalshi's price`}</small>`);
+  $('enCall').className = `gd-call ${cls}`;
+  const timing = c.call === 'NO CALL' ? '—' : (c.side === 'UP' ? e.m1 <= 0 : e.m1 >= 0) ? 'now (1-min pullback)' : 'wait for a 1-min pullback';
+  setHTML($('enGrid'), [
+    ['P(UP) / P(DOWN)', `${(e.pUp * 100).toFixed(1)}% / ${(e.pDown * 100).toFixed(1)}%`],
+    ['Distance odds alone', `${(e.base * 100).toFixed(1)}% UP`],
+    ['Entry', c.call === 'NO CALL' ? '—' : `${$$(e.price)} · ${timing}`],
+    ['Invalidation', `${c.side === 'UP' ? 'below' : 'above'} ${$$(e.invalidation)} (the target)`],
+    ['Expiry', `${t(e.closeTime)} settlement`],
+  ].map(([k, v]) => `<div><label>${k}</label><b>${v}</b></div>`).join(''));
+  const f = e.factors, sg = (v, a = 0.25) => (v > a ? '↑' : v < -a ? '↓' : '·');
+  setHTML($('enEv'), [
+    `<b>Trend:</b> 1-hour ${sg(f.trend1h)} · 15-min EMA 20/50 ${sg(f.ema15)} · VWAP ${sg(f.vwap)}`,
+    `<b>Momentum:</b> 5-min RSI ${Math.round(50 + f.rsi5 * 25)} ${f.rsiRising > 0.2 ? 'rising' : f.rsiRising < -0.2 ? 'falling' : 'flat'} · 5-min move ${sg(f.mom5)} · 15-min move ${sg(f.mom15)}`,
+    `<b>Volume:</b> buyers ${Math.round((f.signedVol + 1) * 50)}% of the last 15 minutes' volume${Math.abs(f.volTrend) > 0.3 ? ` · volume ${f.volTrend > 0 ? 'rising with' : 'fading against'} the move` : ''}`,
+    `<b>Liquidity sweep:</b> ${f.sweep > 0 ? 'swept the hour\'s low and reclaimed it (bullish)' : f.sweep < 0 ? 'swept the hour\'s high and rejected (bearish)' : 'none'} · <b>Structure:</b> ${f.structure > 0 ? 'higher highs and lows' : f.structure < 0 ? 'lower highs and lows' : 'mixed'}`,
+    `<b>Moving the model most:</b> ${e.push.slice(0, 3).filter((x) => Math.abs(x.push) > 0.005).map((x) => `${esc(x.name)} ${x.push > 0 ? '+' : '−'}`).join(' · ') || 'nothing beyond the distance to the target'}`,
+  ].map((x) => `<li>${x}</li>`).join(''));
+  const k = c.k;
+  setHTML($('enKalshi'), k ? `Kalshi: ${c.side} = ${k.contract} at ${Math.round(k.ask * 100)}¢ + ${Math.round(k.fee * 100)}¢ fee + 1¢ slippage vs ${(k.p * 100).toFixed(1)}% → <b class="${k.edge > 0 ? 'pos' : 'neg'}">${k.edge >= 0 ? '+' : '−'}${Math.abs(k.edge * 100).toFixed(1)} pts</b>` : '');
+  const r = c.row, d = r?.distance;
+  setHTML($('enHist'), r ? `Tested: ${Math.round(thr * 100)}%+ calls at ${e.checkpoint} min left were right <b>${r.model.accuracy != null ? `${(r.model.accuracy * 100).toFixed(1)}%` : '—'}</b> of ${int(r.model.n)} (${Math.round(r.model.share * 100)}% of rounds)${d?.n ? `; the distance odds alone: ${(d.accuracy * 100).toFixed(1)}% of ${int(d.n)}` : ''}.${rep?.proven ? ' The model beats the distance odds overall.' : ' Overall the model hasn\'t beaten the distance odds yet, so it doesn\'t touch the bot\'s calls.'}` : '');
+  // the chart badge
+  setHidden(badge, false); badge.className = `fc-badge ${cls}`;
+  setHTML(badge, `${c.call}${c.call !== 'NO CALL' ? ` ${Math.round(c.conf * 100)}%` : ''}<small>P(UP) ${Math.round(e.pUp * 100)}% · exp ${t(e.closeTime)}</small>`);
+  state.enNow = { call: c.call, entry: e.price };
+}
+$('enThr').addEventListener('click', (ev) => { const v = Number(ev.target.closest('button[data-thr]')?.dataset.thr); if (!v) return; state.enThr = v; store.set('enThr', v); if (state.playbook) renderEngine(state.playbook); });
+function engineRecord(r, live) {
+  if (!r) return '';
+  const pc = (x) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
+  const cp = (m) => { const c = r.byCheckpoint[m]; return `<tr><td>${m} min</td>${c.thresholds.map((x) => `<td>${x.model.n ? `${pc(x.model.accuracy)}<small>${Math.round(x.model.share * 100)}% of rounds${x.distance.n ? ` · dist ${pc(x.distance.accuracy)}` : ''}</small>` : '—'}</td>`).join('')}</tr>`; };
+  const lv = live?.thresholds?.filter((x) => x.n).map((x) => `${Math.round(x.t * 100)}%+: ${pc(x.accuracy)} of ${x.n}${x.priced ? `, ${money(x.usd)}` : ''}`).join(' · ');
+  return `<h4 class="rec-h">Prediction engine: walk-forward on ${int(r.rounds)} rounds</h4>`
+    + `<div class="pb-row"><b>Probability quality (Brier, lower is better)</b><span>model ${r.brier?.toFixed(4) ?? '—'} · distance odds alone ${r.brierDistance?.toFixed(4) ?? '—'} · 50/50 guess 0.2500 · beats the distance odds: ${r.proven ? '✓ yes (z ' + r.z.toFixed(1) + ')' : `not yet (z ${r.z.toFixed(1)}, needs 2.5 over 1,000+ rounds)`}</span></div>`
+    + `<div class="pb-row"><b>Simple momentum at the open</b><span>calling the last 15 minutes' direction: right ${pc(r.momentum.accuracy)} of ${int(r.momentum.n)} rounds</span></div>`
+    + `<table class="sc-rec tune-tab"><tr><th>Minutes left</th>${r.thresholds.map((x) => `<th>${Math.round(x.t * 100)}%+</th>`).join('')}</tr>${[15, 10, 5, 2].map(cp).join('')}</table>`
+    + `<small class="muted">Each cell: how often calls at that confidence were right, and how many rounds reached it. High accuracy comes late in the round and the distance odds get most of it, which is why Kalshi prices those calls high. Betting every disagreement with the distance odds (after fee + 1¢ slippage): ${int(r.trades.n)} bets, ${money(r.trades.usd)}.</small>`
+    + `<div class="pb-row"><b>Live, at real Kalshi prices</b><span>${lv || 'builds up from the next round (a read at 15, 10, 5 and 2 minutes left)'}</span></div>`;
 }
 
 // ---------- the shot-caller guide's forecast (server: playbookfeed.js, public/guide.js) ----------

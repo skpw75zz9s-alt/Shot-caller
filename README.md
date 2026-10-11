@@ -269,6 +269,49 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### The prediction engine and the 90% question (v12.0)
+
+A statistical model trained on the 1-minute BTC history (`public/predictor.js`, run by `playbookfeed.js`). It gives a calibrated **P(UP) and P(DOWN)** for the live round at 15, 10, 5 and 2 minutes before the close.
+- **The start:** the distance-to-target odds, N(ln(price / target) / (volatility × √minutes left)). This is what the bot's odds are built on.
+- **The factors**, added by a logistic model (one per checkpoint, heavily regularised):
+  - 1-hour trend (20 vs 50-hour average)
+  - 15-minute EMA 20/50
+  - VWAP
+  - 5-minute RSI, and whether it's rising
+  - 5- and 15-minute momentum
+  - buy vs sell volume, and volume rising with the move
+  - a liquidity sweep and reclaim
+  - 5-minute market structure
+
+  The 1-minute chart is only used for entry timing. Live order flow is shown on the guide card.
+- **Walk-forward:** each day's predictions come from a model fitted on earlier days only, and every factor uses only candles already closed. Live reads need fresh candles; stale data is never a signal.
+- **Compared against** a 50/50 guess, the distance odds alone, and simple momentum (at the open, call the last 15 minutes' direction).
+  - Brier and log-loss are reported.
+  - For each confidence threshold (55–90%) and each checkpoint: how often calls were right, how often it called, and what the distance odds alone got.
+  - Profit from betting every disagreement with the distance odds, after Kalshi's fee and 1¢ slippage.
+  - A live record at real Kalshi asks.
+- **The 90% answer**, shown in the table: nobody is 90% sure at the open. 90%+ calls only come late (in simulation at 2 minutes left: right ~98% on ~60% of rounds), and **the distance odds alone are just as accurate there**. That's why Kalshi prices those contracts at 90¢+. High accuracy is easy to buy late; profit isn't.
+- **Live forecast card (Deck)** in the indicator format:
+  - **Call:** UP / DOWN / NO CALL at your chosen confidence (60/70/80/90%+). It calls only when that level has held up walk-forward at this point of the round (100+ past calls, right at least as often as claimed) **and** Kalshi's ask plus fee plus slippage leaves an edge. Otherwise NO CALL, with the reason.
+  - **Probabilities:** P(UP)/P(DOWN), and the distance odds.
+  - **Evidence:** trend, momentum and volume confirmation, sweep detection, and structure.
+  - **Entry:** with 1-minute pullback timing.
+  - **Invalidation:** the target, the settlement reference.
+  - **Expiry:** the round's settlement.
+  - **Track record:** the tested accuracy at your level.
+- **On the chart:** a forecast badge (call, P(UP), expiry), plus an entry line on round charts when there's a call.
+- **In the bot's calls:** only once it beats the distance odds walk-forward (log-loss z ≥ 2.5 over 1,000+ rounds). Then it nudges by its difference, capped at ±4 points (±6 with the guide and reversal nudges).
+- **Simulated:**
+  - On pure noise it never beat the distance odds, and momentum at the open was ~50%.
+  - A planted edge was found.
+  - One test "false positive" turned out to be the test's own random-number generator: a simple LCG with serial correlation, which is a real pattern the model correctly found. The test now uses a proper generator.
+- **TradingView:** `tradingview/shot-caller.pine` is a Pine Script v5 indicator for a 15-minute BTC chart. Paste it into TradingView's Pine Editor.
+  - **Factors:** 1-hour trend (no repainting), VWAP, EMA 20/50, RSI above 50 and rising, volume, sweep and reclaim, and pivot structure, summed to a score.
+  - **Probability:** P(UP) for that score, calibrated walk-forward on the chart's own history.
+  - **Calls:** UP / DOWN / NO CALL at your threshold.
+  - **On the chart:** entry and invalidation lines, the expiry time, sweep markers, and a table of its accuracy next to 50/50 and momentum, plus its Brier score. It also has alerts.
+  - It wasn't compiled here (no TradingView access); if the editor flags a line, it'll name it.
+
 ### The 15-minute forecast (v11.9)
 
 "The ultimate BTC 15-minute shot-caller guide" as a forecast card in its own output format (`public/guide.js`, run by `playbookfeed.js`).

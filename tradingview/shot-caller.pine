@@ -1,0 +1,157 @@
+//@version=5
+// Shot Caller: BTC 15-minute forecast (UP / DOWN / NO CALL) for TradingView.
+// Use it on a 15-minute BTC chart. Each closed candle forecasts the next one (one Kalshi round).
+//
+// Factors (+1 bullish, -1 bearish, 0 neither):
+//   1-hour trend (20/50 EMA on the 1-hour chart, last closed hour: no repainting), VWAP, EMA 20/50,
+//   RSI 14 above 50 and rising (or below 50 and falling), volume rising with the candle's direction,
+//   a liquidity sweep and reclaim of the recent low (or high), and market structure (higher highs and higher lows,
+//   or lower highs and lower lows, from 2-bar pivots).
+// The estimated UP probability is calibrated walk-forward on this chart's own history: for each score (-7..+7), how
+// often the next candle actually closed higher, counted only from candles already finished (shrunk toward 50%).
+// It calls UP or DOWN only when that probability clears your threshold AND the score has enough past examples;
+// otherwise NO CALL. The table shows its accuracy next to a 50/50 guess and a simple momentum strategy.
+// All predictions are probabilities, not guarantees. Kalshi settles on its own index at the round's close, and a
+// right call can still lose money at Kalshi's price after fees: compare the probability with the contract price.
+
+indicator("Shot Caller · BTC 15-min forecast", overlay = true, max_labels_count = 500)
+
+thr        = input.float(0.60, "Call threshold (probability)", minval = 0.5, maxval = 0.99, step = 0.01)
+minSamples = input.int(50, "Min past examples of a score before calling", minval = 10)
+sweepLen   = input.int(20, "Sweep lookback (candles)", minval = 5)
+showTable  = input.bool(true, "Show performance table")
+
+// ---- factors ----
+e20 = ta.ema(close, 20)
+e50 = ta.ema(close, 50)
+r   = ta.rsi(close, 14)
+vw  = ta.vwap(hlc3)
+atr = ta.atr(14)
+trendSig = e20 > e50 ? 1 : -1
+h1  = request.security(syminfo.tickerid, "60", trendSig[1], lookahead = barmerge.lookahead_on) // the last closed hour
+
+fTrend  = h1
+fVwap   = close > vw ? 1 : close < vw ? -1 : 0
+fEma    = e20 > e50 ? 1 : e20 < e50 ? -1 : 0
+fRsi    = r > 50 and r > r[1] ? 1 : r < 50 and r < r[1] ? -1 : 0
+volUp   = volume > ta.sma(volume, 20)
+fVol    = volUp and close > open ? 1 : volUp and close < open ? -1 : 0
+priorLo = ta.lowest(low, sweepLen)[1]
+priorHi = ta.highest(high, sweepLen)[1]
+sweepUp = low < priorLo and close > priorLo
+sweepDn = high > priorHi and close < priorHi
+fSweep  = sweepUp ? 1 : sweepDn ? -1 : 0
+
+ph = ta.pivothigh(high, 2, 2)
+pl = ta.pivotlow(low, 2, 2)
+var float hiA = na
+var float hiB = na
+var float loA = na
+var float loB = na
+if not na(ph)
+    hiA := hiB
+    hiB := ph
+if not na(pl)
+    loA := loB
+    loB := pl
+fStruct = hiB > hiA and loB > loA ? 1 : hiB < hiA and loB < loA ? -1 : 0
+
+score = int(fTrend + fVwap + fEma + fRsi + fVol + fSweep + nz(fStruct))
+
+// ---- walk-forward calibration and the record ----
+var int[] cnt = array.new_int(15, 0)
+var int[] ups = array.new_int(15, 0)
+var int   prevScore = na
+var float prevClose = na
+var float prevP     = na
+var int   prevCall  = 0
+var int   prevMom   = 0
+var int   calls     = 0
+var int   right     = 0
+var int   momN      = 0
+var int   momRight  = 0
+var int   graded    = 0
+var float brier     = 0.0
+var float brierCoin = 0.0
+
+if barstate.isconfirmed
+    // grade the last candle's forecast against this candle's close
+    if not na(prevScore)
+        isUp = close > prevClose
+        idx  = prevScore + 7
+        array.set(cnt, idx, array.get(cnt, idx) + 1)
+        if isUp
+            array.set(ups, idx, array.get(ups, idx) + 1)
+        if prevCall != 0
+            calls += 1
+            right += ((prevCall == 1) == isUp) ? 1 : 0
+        if prevMom != 0
+            momN += 1
+            momRight += ((prevMom == 1) == isUp) ? 1 : 0
+        if not na(prevP)
+            graded += 1
+            brier += math.pow(prevP - (isUp ? 1 : 0), 2)
+            brierCoin += 0.25
+
+momSig = close > close[1] ? 1 : close < close[1] ? -1 : 0 // simple momentum: the last candle's direction
+n    = array.get(cnt, score + 7)
+pUp  = (array.get(ups, score + 7) + 2.5) / (n + 5.0)
+call = n >= minSamples and pUp >= thr ? 1 : n >= minSamples and pUp <= 1 - thr ? -1 : 0
+
+if barstate.isconfirmed
+    prevScore := score
+    prevClose := close
+    prevP     := pUp
+    prevCall  := call
+    prevMom   := momSig
+
+// ---- levels ----
+inval   = call == 1 ? math.max(nz(loB, close - 1.5 * atr), close - 1.5 * atr) : call == -1 ? math.min(nz(hiB, close + 1.5 * atr), close + 1.5 * atr) : na
+expiry  = time_close + timeframe.in_seconds() * 1000
+
+// ---- drawing ----
+plot(e20, "EMA 20", color = color.new(color.teal, 0))
+plot(e50, "EMA 50", color = color.new(color.orange, 0))
+plot(vw, "VWAP", color = color.new(color.purple, 0), style = plot.style_circles, linewidth = 1)
+plotshape(call == 1, "UP call", shape.triangleup, location.belowbar, color.new(color.lime, 0), size = size.tiny)
+plotshape(call == -1, "DOWN call", shape.triangledown, location.abovebar, color.new(color.red, 0), size = size.tiny)
+plotshape(sweepUp, "Sweep + reclaim (bullish)", shape.xcross, location.belowbar, color.new(color.fuchsia, 0), size = size.tiny)
+plotshape(sweepDn, "Sweep + reject (bearish)", shape.xcross, location.abovebar, color.new(color.fuchsia, 0), size = size.tiny)
+
+var label lb = na
+var line  lEntry = na
+var line  lInval = na
+if barstate.islast
+    label.delete(lb)
+    line.delete(lEntry)
+    line.delete(lInval)
+    txt = (call == 1 ? "UP" : call == -1 ? "DOWN" : "NO CALL") + "  P(UP) " + str.tostring(pUp * 100, "#.0") + "%" +
+          "\nTrend " + (fTrend > 0 ? "up" : "down") + " · momentum " + (fRsi > 0 ? "up" : fRsi < 0 ? "down" : "flat") + " · structure " + (fStruct > 0 ? "bullish" : fStruct < 0 ? "bearish" : "mixed") +
+          (sweepUp ? "\nLiquidity sweep below, reclaimed" : sweepDn ? "\nLiquidity sweep above, rejected" : "") +
+          (call != 0 ? "\nEntry " + str.tostring(close, "#") + " · invalidation " + str.tostring(inval, "#") : "\n(" + str.tostring(n) + " past examples of score " + str.tostring(score) + ")") +
+          "\nExpires " + str.format_time(expiry, "HH:mm", syminfo.timezone)
+    lb := label.new(bar_index, call == -1 ? high : low, txt, style = call == -1 ? label.style_label_down : label.style_label_up,
+          color = call == 1 ? color.new(color.lime, 20) : call == -1 ? color.new(color.red, 20) : color.new(color.gray, 20), textcolor = color.white, size = size.small)
+    if call != 0
+        lEntry := line.new(bar_index, close, bar_index + 1, close, extend = extend.right, color = call == 1 ? color.lime : color.red)
+        lInval := line.new(bar_index, inval, bar_index + 1, inval, extend = extend.right, color = color.gray, style = line.style_dashed)
+
+var table tb = table.new(position.top_right, 2, 6, bgcolor = color.new(color.black, 20), border_width = 1)
+if showTable and barstate.islast
+    acc = calls > 0 ? right * 100.0 / calls : na
+    mom = momN > 0 ? momRight * 100.0 / momN : na
+    table.cell(tb, 0, 0, "Shot Caller", text_color = color.white)
+    table.cell(tb, 1, 0, call == 1 ? "UP" : call == -1 ? "DOWN" : "NO CALL", text_color = call == 1 ? color.lime : call == -1 ? color.red : color.gray)
+    table.cell(tb, 0, 1, "Calls / right", text_color = color.white)
+    table.cell(tb, 1, 1, str.tostring(calls) + " / " + (na(acc) ? "—" : str.tostring(acc, "#.0") + "%"), text_color = color.white)
+    table.cell(tb, 0, 2, "50/50 guess", text_color = color.white)
+    table.cell(tb, 1, 2, "50.0%", text_color = color.white)
+    table.cell(tb, 0, 3, "Momentum", text_color = color.white)
+    table.cell(tb, 1, 3, na(mom) ? "—" : str.tostring(mom, "#.0") + "%", text_color = color.white)
+    table.cell(tb, 0, 4, "Brier (vs 0.25)", text_color = color.white)
+    table.cell(tb, 1, 4, graded > 0 ? str.tostring(brier / graded, "#.0000") : "—", text_color = color.white)
+    table.cell(tb, 0, 5, "Threshold", text_color = color.white)
+    table.cell(tb, 1, 5, str.tostring(thr * 100, "#") + "%", text_color = color.white)
+
+alertcondition(call == 1, "Shot Caller UP", "Shot Caller: UP for the next 15 minutes")
+alertcondition(call == -1, "Shot Caller DOWN", "Shot Caller: DOWN for the next 15 minutes")
