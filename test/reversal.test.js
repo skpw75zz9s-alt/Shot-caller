@@ -98,6 +98,7 @@ test('the call nudge: only a proven band, only for the round right after its sig
   assert.equal(reversalShift(now, study, { ...m, strikeType: 'less' }), -v);
   assert.equal(reversalShift(now, study, { ...m, openTime: 1000 + 900000 }), 0, 'a later round: no');
   assert.equal(reversalShift(now, { strong: { n: 300, z15: 1.5, mean15: 0.4 } }, m), 0, 'unproven: no');
+  assert.equal(reversalShift({ ...now, best: { dir: 'down', band: 'insufficient' } }, { insufficient: { n: 900, z15: 4, mean15: 0.4 } }, m), 0, '0-4 never reaches the calls');
 });
 
 test('the flip forecast counts a 5+ checklist for a flip its way', () => {

@@ -760,6 +760,10 @@ body.split .pane-body { padding: 4px 6px 8px; }
 /* v11.4 playbook check */
 .pb-report { font-size: 12px; } .pb-report small { display: block; margin: 4px 0; line-height: 1.4; }
 .tune-tab td small { display: block; color: var(--muted); font-size: 11px; } .tune-tab tr.on td { color: var(--yes); }
+.gd-call { font: 800 22px var(--mono); margin: 4px 0 8px; } .gd-call.up { color: var(--yes); } .gd-call.down { color: var(--no); } .gd-call.none { color: var(--muted); } .gd-call small { font: 400 12px var(--sans, inherit); color: var(--muted); display: block; margin-top: 2px; }
+.gd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-bottom: 8px; } .gd-grid div { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; } .gd-grid label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; } .gd-grid b { font-family: var(--mono); font-size: 13px; }
+.gd-ev { list-style: none; margin: 0 0 6px; padding: 0; font-size: 12px; } .gd-ev li { padding: 3px 0; border-top: 1px solid var(--line-2); color: var(--muted); } .gd-ev li b { color: var(--text); font-weight: 600; }
+.gd-kalshi { font-size: 12px; margin-bottom: 6px; } .gd-kalshi b.pos { color: var(--yes); } .gd-kalshi b.neg { color: var(--no); }
 .rev-head { font-size: 14px; margin: 4px 0 6px; } .rev-head b.down { color: var(--no); } .rev-head b.up { color: var(--yes); } .rev-head small { color: var(--muted); }
 .rev-list { list-style: none; margin: 0 0 6px; padding: 0; } .rev-list li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line-2); font-size: 12px; }
 .rev-list li i { font-style: normal; color: var(--muted); } .rev-list li.ok i { color: var(--yes); } .rev-list li em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; } .rev-list li span { color: var(--muted); } .rev-list li.ok span { color: var(--text); }

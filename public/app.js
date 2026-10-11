@@ -881,11 +881,12 @@ setTimeout(refreshPlaybook, 2500);
 function renderPlaybook() {
   const p = state.playbook, r = p?.report;
   if (!p) return;
-  renderReversal(p);
+  renderReversal(p); renderGuide(p);
   const card = (title, x) => !x ? '' : `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${Math.round(x.winRate * 100)}% · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · fees ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the playbook's 100)</small>` : ''}</span></div>`;
   setHTML($('pbReport'), !r ? (p.backfilling ? 'Reading two weeks of BTC history…' : 'Starting…')
     : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
       + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
+      + guideRecord(r.guide, p.guideLive)
       + reversalReport(r.reversal)
       + `<small class="muted">Break-even win rate before costs: 33% at 2R, 40% at 1.5R. ${(() => { const best = [r.day, r.hour].filter((x) => x?.n >= 30).sort((a, b) => b.avgR - a.avgR)[0]; return best ? (best.avgR > 0 ? 'One version is positive after fees so far; it still needs 100+ trades to mean much.' : 'After fees, it isn\'t profitable on this data yet.') : 'Too few trades to judge yet.'; })()}</small>`);
 }
@@ -911,6 +912,40 @@ function renderTune() {
       : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.7+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
 }
 
+// ---------- the shot-caller guide's forecast (server: playbookfeed.js, public/guide.js) ----------
+function renderGuide(p) {
+  const g = p.guide;
+  if (!g) { setText($('gdCall'), p.backfilling ? 'Reading BTC history…' : 'Needs about 15 hours of candles first.'); return; }
+  const t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => (x == null ? '—' : `$${Math.round(x).toLocaleString()}`);
+  setText($('gdWhen'), `${t(g.at)} – ${t(g.expiry)} round`);
+  const cls = g.call === 'UP' ? 'up' : g.call === 'DOWN' ? 'down' : 'none';
+  setHTML($('gdCall'), `<span>${g.call}</span><small>${g.call === 'NO CALL' ? esc(g.reason) : `${g.candidate} candidate confirmed: all four signals agree and history backs it (${int(g.n)} past examples)`}</small>`);
+  $('gdCall').className = `gd-call ${cls}`;
+  setHTML($('gdGrid'), [
+    ['Est. UP probability', g.pUp != null ? `${(g.pUp * 100).toFixed(1)}%` : '—'],
+    ['Entry', g.call === 'NO CALL' ? '—' : `${$$(g.entry)} (candle close)`],
+    ['Invalidation', g.invalidation != null && g.call !== 'NO CALL' ? `${g.call === 'UP' ? 'below' : 'above'} ${$$(g.invalidation)}` : '—'],
+    ['Expiry', `${t(g.expiry)} settlement`],
+  ].map(([k, v]) => `<div><label>${k}</label><b>${v}</b></div>`).join(''));
+  setHTML($('gdEv'), g.evidence.map((e) => { const [h, ...rest] = e.split(': '); return `<li><b>${esc(h)}:</b> ${esc(rest.join(': '))}</li>`; }).join(''));
+  const k = g.kalshi;
+  setHTML($('gdKalshi'), !k ? '' : g.call === 'NO CALL' ? `<span class="muted">Kalshi: ${k.side} at ${Math.round(k.ask * 100)}¢. No call, so no trade.</span>`
+    : `Kalshi: ${k.side} at ${Math.round(k.ask * 100)}¢ + ${Math.round(k.fee * 100)}¢ fee vs a calibrated ${Math.round(k.p * 100)}% → <b class="${k.edge > 0 ? 'pos' : 'neg'}">${k.edge >= 0 ? '+' : '−'}${Math.abs(k.edge * 100).toFixed(1)} pts</b>${k.edge > 0 ? ` (worth it up to ${Math.round(k.maxPay * 100)}¢)` : ': priced in. A right call can still lose money at this price'}.`);
+}
+function guideRecord(r, live) {
+  if (!r) return '';
+  const pc = (x) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
+  const cal = r.calibration.map((b) => `<tr><td>${Math.round(b.from * 100)}–${Math.round(b.to * 100)}%</td><td>${int(b.n)}</td><td>${pc(b.said)}</td><td>${pc(b.actual)}</td></tr>`).join('');
+  const sk = Object.entries(r.skipped).map(([k, n]) => `${k} ${int(n)}`).join(' · ');
+  return `<h4 class="rec-h">Shot-caller guide: every past round, walk-forward</h4>`
+    + `<div class="pb-row"><b>Calls (UP/DOWN)</b><span>${r.calls ? `${int(r.calls)} calls of ${int(r.rounds)} rounds · right ${pc(r.accuracy)} (z ${r.z.toFixed(1)}) · UP ${r.up.wins}/${r.up.n} · DOWN ${r.down.wins}/${r.down.n} · $10 a call at 50¢ + fee: ${money(r.usd)} · worst drawdown $${r.maxDD.toFixed(0)}${r.proven ? ' · ✓ proven, nudges its round' : ''}` : 'no calls yet'}</span></div>`
+    + `<div class="pb-row"><b>Skipped</b><span>${sk || 'none'}</span></div>`
+    + `<div class="pb-row"><b>Calibration</b><span>Brier ${r.brier != null ? r.brier.toFixed(4) : '—'} vs 0.2500 for always saying 50% (lower is better)</span></div>`
+    + (cal ? `<table class="sc-rec"><tr><th>Said UP</th><th>Rounds</th><th>Avg said</th><th>Really UP</th></tr>${cal}</table>` : '')
+    + (live?.rounds ? `<div class="pb-row"><b>Live, at real Kalshi prices</b><span>${int(live.calls)} calls of ${int(live.rounds)} rounds · right ${pc(live.accuracy)} · $10 a call at the ask when the round opened, + fees: ${money(live.usd)}${live.priced < live.calls ? ` (${live.calls - live.priced} without a price)` : ''}</span></div>` : '<div class="pb-row"><b>Live, at real Kalshi prices</b><span>starts with the next round</span></div>')
+    + `<small class="muted">A high win rate doesn't guarantee profit: a call is only worth buying when the calibrated chance beats Kalshi's price plus fees.</small>`;
+}
+
 // ---------- reversal watch (server: playbookfeed.js, public/reversal.js): the 15-minute flip checklist ----------
 function renderReversal(p) {
   const v = p.reversal;
@@ -925,7 +960,7 @@ function renderReversal(p) {
 function reversalReport(rv) {
   if (!rv) return '';
   const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
-  const bandRow = (k, name) => { const s = rv.bands[k]; return `<div class="pb-row"><b>${name}</b><span>${s.n ? `${int(s.n)} signals · next round went that way ${pc(s.hit15)} · next hour ${pc(s.hit60)} · z ${s.z15.toFixed(1)}${s.n >= 100 && s.z15 >= 2.5 ? ' · ✓ beats a coin flip, used in calls' : ''}` : 'no signals yet'}</span></div>`; };
+  const bandRow = (k, name) => { const s = rv.bands[k]; return `<div class="pb-row"><b>${name}</b><span>${s.n ? `${int(s.n)} signals · next round went that way ${pc(s.hit15)} · next hour ${pc(s.hit60)} · z ${s.z15.toFixed(1)}${s.n >= 100 && s.z15 >= 2.5 ? (k === 'insufficient' ? ' · beats a coin flip, but 0–4 is too little confirmation to use' : ' · ✓ beats a coin flip, used in calls') : ''}` : 'no signals yet'}</span></div>`; };
   const strat = (title, x) => `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${pc(x.winRate)} · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · costs ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}${x.withTrend?.n || x.againstTrend?.n ? ` · with the 1-hour trend ${x.withTrend.n ? `${pc(x.withTrend.winRate)} of ${x.withTrend.n}` : '—'}, against it ${x.againstTrend.n ? `${pc(x.againstTrend.winRate)} of ${x.againstTrend.n}` : '—'}` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the guide's 200)</small>` : ''}</span></div>`;
   return `<h4 class="rec-h">Reversal guide: does the checklist call the flip?</h4>`
     + bandRow('strong', 'Strong (8+)') + bandRow('developing', 'Developing (5–7)') + bandRow('insufficient', 'Insufficient (0–4)')

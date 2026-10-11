@@ -41,6 +41,7 @@
   <link rel="modulepreload" href="playbook.js">
   <link rel="modulepreload" href="tune.js">
   <link rel="modulepreload" href="reversal.js">
+  <link rel="modulepreload" href="guide.js">
   <link rel="modulepreload" href="micro.js">
   <link rel="modulepreload" href="watch.js">
   <link rel="modulepreload" href="fees.js">
@@ -148,6 +149,14 @@
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
         <small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small>
+      </div>
+      <div class="card gd" id="guideCard">
+        <div class="deep-head"><span>BTC 15-minute forecast</span><b id="gdWhen"></b></div>
+        <div class="gd-call" id="gdCall">Loading…</div>
+        <div class="gd-grid" id="gdGrid"></div>
+        <ul class="gd-ev" id="gdEv"></ul>
+        <div class="gd-kalshi" id="gdKalshi"></div>
+        <small class="fine-left">From the shot-caller guide: UP when price is above VWAP, the 20 EMA above the 50, RSI above 50 and structure bullish (DOWN is the mirror); anything mixed is NO CALL. So is low volatility, an untested setup, or one history doesn't back. The UP probability is how often BTC really finished up after the same evidence, counted walk-forward. Major economic announcements aren't known to the bot: skip those yourself. No strategy is 100% accurate.</small>
       </div>
       <div class="card rev" id="revCard">
         <div class="deep-head"><span>Reversal watch · 15-min</span><b id="revWhen"></b></div>
@@ -445,7 +454,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v11.8 · reversal watch</p>
+      <p class="fine" id="version">Shot Caller v11.9 · the forecast</p>
     </section>
   </main>
 

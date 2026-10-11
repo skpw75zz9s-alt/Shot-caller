@@ -269,6 +269,35 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### The 15-minute forecast (v11.9)
+
+"The ultimate BTC 15-minute shot-caller guide" as a forecast card in its own output format (`public/guide.js`, run by `playbookfeed.js`).
+- **The rule**, on each closed 15-minute candle (each new Kalshi round):
+  - **UP candidate:** price above the day's VWAP, 20 EMA above the 50 EMA, RSI 14 above 50, and bullish structure (higher highs and higher lows, or a close above the last swing high).
+  - **DOWN candidate:** the mirror image.
+  - **NO CALL:** conflicting indicators; volatility too low (ATR 14 in the bottom 20% of the last week); an untested setup (fewer than 30 past examples); or one its history doesn't back (the calibrated chance for its side isn't above 50%).
+  - Major economic announcements aren't known to the bot (no calendar feed), so skip those yourself.
+- **Estimated UP probability:** how often BTC really finished up after the same evidence (the four signals summed, −4 to +4). It's counted walk-forward (only rounds already finished at that time) and shrunk toward 50%. Never assumed.
+- **The card:**
+  - **Calls:** UP / DOWN / NO CALL with the reason, and the estimated UP probability.
+  - **Levels:** entry at the candle close, and invalidation at the latest higher low (lower high), kept within 1.5 ATR. Expiry is the next settlement.
+  - **Evidence:**
+    - trend: VWAP and the EMAs
+    - momentum: RSI, and CVD from live exchange trades
+    - structure
+    - liquidity: the nearest swing high and low, where stops cluster
+    - volatility: ATR
+    - positioning: funding and open interest
+- **Kalshi:** the calibrated chance vs the contract's ask plus Kalshi's fee: the edge in points, and the most worth paying. A right call at a bad price still loses money.
+- **The record (Record → Playbook check):**
+  - every past round predicted walk-forward, with skipped rounds counted by reason
+  - accuracy (and z), UP and DOWN separately
+  - profit buying the called side at 50¢ plus fee (a round opens near 50¢), and drawdown
+  - the Brier score against always saying 50%, and a calibration table (said vs really up)
+  - a **live record** from each round's opening forecast at the real Kalshi ask then, plus fees. It's graded on Coinbase's price; Kalshi settles on its own index, so very close rounds can differ.
+- **In the bot's calls:** only once its walk-forward calls beat a coin flip (z ≥ 2.5 on 300+ calls) does a call nudge its round, by the measured move. That's capped at ±4 points, and the guide and reversal nudges together are capped at ±6. In simulation pure noise was never proven, and a planted momentum edge was (56% right, Brier 0.239 vs 0.250).
+- Also fixed: the reversal study's 0–4 "insufficient" band can never reach the calls, even if it beats a coin flip, because the reversal guide calls it too little confirmation.
+
 ### Reversal watch (v11.8)
 
 The 15-minute BTC reversal guide ("how to predict when the market is about to flip"), as code that gets measured (`public/reversal.js`, run by `playbookfeed.js`).

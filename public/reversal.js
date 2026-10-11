@@ -129,7 +129,8 @@ export function bandStudy(bars) {
   };
   return Object.fromEntries(Object.entries(rows).map(([k, xs]) => [k, sum(xs)]));
 }
-// A band is proven for the next round when it beat a coin flip with z >= 2.5 on 100+ signals
+// A band is proven for the next round when it beat a coin flip with z >= 2.5 on 100+ signals (only developing and
+// strong can reach the calls: the guide calls 0-4 insufficient confirmation)
 export const bandProven = (s) => !!s && s.n >= 100 && s.z15 >= 2.5;
 
 // For the bot's calls: a proven band's measured move over the next round, for the round that opened as the signal
@@ -137,7 +138,7 @@ export const bandProven = (s) => !!s && s.n >= 100 && s.z15 >= 2.5;
 // +-4 points. Unproven bands add nothing.
 export function reversalShift(now, study, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater', openTime }) {
   const b = now?.best, s = b ? study?.[b.band] : null;
-  if (!b || !bandProven(s) || now.at !== openTime || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0) || !(now.sd15 > 0)) return 0;
+  if (!b || b.band === 'insufficient' || !bandProven(s) || now.at !== openTime || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0) || !(now.sd15 > 0)) return 0;
   const move = (b.dir === 'up' ? 1 : -1) * s.mean15 * (s.n / (s.n + 100)) * now.sd15 * spot * Math.min(1, minutesLeft / 15);
   const sd = spot * sigmaMin * Math.sqrt(minutesLeft), ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
   const shift = ncdf((spot + move - strike) / sd) - ncdf((spot - strike) / sd);

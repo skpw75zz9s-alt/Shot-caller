@@ -53,6 +53,7 @@ export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // The playbook check: its 15-minute sweep strategy backtested and paper-traded, and the market-structure read (playbookfeed.js)
 export const playbook = createPlaybook({ coinbase: COINBASE, file: join(DATA_DIR, 'bars.json') });
 playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; }); // the reversal checklist's open-interest point
+playbook.setFlow(() => scanFeed.imbalance(Date.now() - 900000)); // the guide's CVD: buyers vs sellers over 15 minutes
 export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures, playbook });
 // The micro model: how the market's small details move BTC over the next 1-5 minutes (microfeed.js, public/micro.js)
 // Indicator tuning: which indicator settings have actually predicted the rounds (tunefeed.js, public/tune.js)
@@ -72,7 +73,7 @@ export const bot = createBot({
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
   shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
-  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([, s]) => s.n >= 100 && s.z15 >= 2.5).map(([k]) => k) }),
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven }),
   watch: () => marketWatch.status(),
 });
 setInterval(() => access.prune(), 3600000).unref();
