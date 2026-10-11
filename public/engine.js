@@ -191,6 +191,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
     if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
+    // Near-certain: Kalshi's own price has to agree (its bid for the side at kalshiAgree or more)
+    if (s.kalshiAgree > 0) { const bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid; if (!(bid >= s.kalshiAgree - 1e-9)) return false; }
     if (s.maxVolRatio > 0 && snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.maxVolRatio) return false;
     if (s.jumpSkip > 0) {
       const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';

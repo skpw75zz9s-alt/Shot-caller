@@ -213,6 +213,8 @@ test('official bot record: the server bot calls on its own (Steady) and grades t
   assert.equal(r.calls[0].side, 'YES');
   assert.equal(r.level, 'Steady');
   assert.equal(r.graded, 0);
+  // Near-certain keeps its own record; Kalshi at 38-40c doesn't agree with the bot here, so it makes no call
+  assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 0);
   await b.tick(NOW + 8 * 60000); // the round settled YES
   r = b.record();
   assert.equal(r.graded, 1); assert.equal(r.wins, 1);

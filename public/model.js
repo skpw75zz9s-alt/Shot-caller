@@ -154,6 +154,7 @@ export const DEFAULTS = {
                            // (3 × ~13,000 rounds) this made ~37% more calls than a fixed 60s, every one still at 85+,
                            // winning 94.8% vs 95.5%
   lockCall: false,      // Steady: once a side is called, never switch to the other side that round
+  kalshiAgree: 0,       // Near-certain: a new call needs Kalshi's own bid for the side at least this high (the market agrees; 0 = off)
   learn: true,          // use what the server learned over days and weeks (time-of-week volatility, calibration, basis)
 };
 
@@ -168,6 +169,12 @@ export const RISK_LEVELS = {
   // Sniper: the strictest. Confidence 90+ held for 90s, hold odds 90%+. Simulated: confidence stayed above 80 all round
   // 97-98% of the time and calls won 99.2-99.6%. Very few calls, and they're priced high, so each win pays a few cents.
   sniper: { label: 'Sniper', minEdge: 0.03, minConfidence: 90, bigEdgeOverride: 0, minHold: 0.9, steadySec: 90, lockCall: true, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest, surest calls: confidence 90+ for 90 seconds and likely to stay above 80 all round. Wins pay little' },
+  // Near-certain: the highest win rate the bot can honestly aim for (never 100%: the close is decided by trades that
+  // haven't happened yet). Confidence 95+ held for 2 minutes, a 95%+ chance it stays above 80 all round, and Kalshi's
+  // own bid for the side at 85c+ (when the bot is sure and the market isn't, the bot is usually the one that's wrong).
+  // Calls are rare and priced 90c+, so a win pays a few cents and one loss can cost 20+ wins. The server keeps this
+  // level's own graded record (Record tab) so its real win rate and profit after fees are measured, not assumed.
+  certain: { label: 'Near-certain', minEdge: 0.01, minConfidence: 95, bigEdgeOverride: 0, minHold: 0.95, steadySec: 120, lockCall: true, kalshiAgree: 0.85, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Only the surest calls: confidence 95+ for 2 minutes, very likely to hold all round, and Kalshi\'s price agrees. Rare, wins pay a few cents, and one loss can erase 20+ wins. Never 100%' },
   safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
   balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
@@ -176,7 +183,7 @@ export const RISK_LEVELS = {
     bigEdgeOverride: 0.10, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
 // The strategy settings a risk level sets
-export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'kalshiAgree', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
 export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key] ?? DEFAULTS[key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence && (RISK_LEVELS[k].minHold ?? 0) === (s.minHold ?? 0)) ?? 'custom';
 

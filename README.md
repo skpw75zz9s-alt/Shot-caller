@@ -269,6 +269,18 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Near-certain mode (v11.7)
+
+The highest win rate the bot can honestly aim for. It's never 100%: each round is decided by BTC's price at one second, moved by trades that haven't happened yet. And if the bot were ever truly certain, Kalshi's price would already be 99¢.
+- **Settings → Risk level → Near-certain.** A new call needs all of these:
+  - confidence 95+, held for 2 minutes (half that in a calm market, 1.5× in a jumpy one)
+  - a 95%+ chance that confidence stays above 80 for the rest of the round
+  - **Kalshi's own price agreeing:** its bid for the side at 85¢ or more. When the bot is sure and the market isn't, the bot is usually the one that's wrong. The new **Kalshi must agree** setting can also be used on any level (0 = off).
+  - the usual gap after fees (1 pt here), the call filter and Market watch
+  - and it never switches sides mid-round
+- **The cost:** calls are rare and priced 90¢+. A $10 call that wins pays well under $1; one that loses costs the $10. So one loss can erase 20+ wins, and a 95% win rate can still lose money.
+- **Measured, not assumed:** the server runs Near-certain on every round alongside the official (Steady) calls and keeps its own graded record (`record-certain.json`). These calls are never traded and never fed to the call filter. **Record → Near-certain record** shows its wins and losses, its win rate and its profit after fees at $10 a call, side by side with the official calls.
+
 ### Tuned indicators (v11.6)
 
 Which chart indicators, at which settings, have actually called BTC's 15-minute rounds (`public/tune.js`, `tunefeed.js`).

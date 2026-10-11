@@ -59,6 +59,7 @@ const SETTINGS_META = [
   ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, even if volatility is 20% off either way, to call BUY THE LOW', 'cents'],
   ['minConfidence', 'Min confidence (0-100)', 'Win odds a call needs before BUY THE LOW fires (80 = wins about 8 times in 10)', 'num'],
+  ['kalshiAgree', 'Kalshi must agree (pts)', 'A new call needs Kalshi\'s own price for that side at least this high (85 on Near-certain; 0 = off). When the bot is sure and the market isn\'t, the bot is usually the one that\'s wrong', 'cents'],
   ['rejectionWeight', 'Rejection weight', 'How much rejection trends move the bot\'s odds (0 = off, 1 = up to ±5 pts)', 'num'],
   ['multiFeeds', 'Live orders from all exchanges', 'Also stream trades from Kraken, Bitstamp, Gemini and Binance.US (more data). Off: Coinbase only', 'bool'],
   ['learn', 'Use what the bot learned', 'Price with the market patterns the server has learned over days and weeks (see History)', 'bool'],
@@ -1346,6 +1347,27 @@ function pulseHtml(p) {
   return out.map((l) => `<p>${l}</p>`).join('');
 }
 
+// ---------- Near-certain (server: the strictest level's own graded record, next to the official one) ----------
+function renderCertain(r) {
+  const c = r.certain, pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  if (!c) { setText($('crSub'), 'The server will start keeping this record after its next update.'); return; }
+  const losses = c.graded - c.wins, rate = c.graded ? c.wins / c.graded : null;
+  setText($('crWL'), c.graded ? `${c.wins}–${losses}` : '0–0');
+  setText($('crPct'), pctOf(c.wins, c.graded)); setClass($('crPct'), rate == null ? '' : rate >= 0.95 ? 'pos' : rate < 0.85 ? 'neg' : '');
+  setText($('crUsd'), c.graded ? money(c.usd) : '—'); setClass($('crUsd'), !c.graded ? '' : c.usd >= 0 ? 'pos' : 'neg');
+  const avgPrice = c.calls.length ? c.calls.reduce((a, e) => a + e.price, 0) / c.calls.length : null;
+  setText($('crSub'), !c.calls.length ? 'No near-certain calls yet. They\'re rare by design: confidence 95+ for 2 minutes, very likely to hold all round, and Kalshi\'s own price at 85¢+. The bot looks for them around the clock; pick Near-certain under Settings → Risk level to get them as your calls.'
+    : `Official calls (${r.level}): won ${pctOf(r.wins, r.graded)} of ${int(r.graded)}, ${money(r.usd)} at $10 a call. Near-certain: won ${pctOf(c.wins, c.graded)} of ${int(c.graded)}, ${money(c.usd)}. Near-certain calls cost about ${avgPrice != null ? `${Math.round(avgPrice * 100)}¢` : '—'}, so a win pays about ${avgPrice != null ? `$${((10 / avgPrice) * (1 - avgPrice)).toFixed(2)}` : '—'} on $10 before fees and a loss costs the $10.`
+      + `${c.graded < 50 ? ' Under 50 graded calls says little: one loss changes the picture.' : ''}`);
+  const now = Date.now();
+  setHTML($('crCalls'), c.calls.slice(-8).reverse().map((e) => {
+    const up = e.side === 'YES', graded = e.result === 'yes' || e.result === 'no', won = graded && e.side.toLowerCase() === e.result;
+    const badge = graded ? (won ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>') : e.result === 'unknown' ? '<span class="badge">VOID</span>' : Date.parse(e.closeTime) > now ? '<span class="badge live">LIVE</span>' : '<span class="badge">SETTLING</span>';
+    const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${Math.round(e.price * 100)}¢</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}</small></span>${badge}</li>`;
+  }).join(''));
+}
+
 // ---------- the official bot record (server: every call it made, around the clock) ----------
 async function refreshBotRecord() {
   try { state.botRecord = await getJSON('record'); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
@@ -1354,6 +1376,7 @@ setInterval(() => { if (!document.hidden) refreshBotRecord(); }, 60000);
 function renderBotRecord() {
   const r = state.botRecord;
   if (!r) return;
+  renderCertain(r);
   const losses = r.graded - r.wins, pctOf = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
   setText($('brLevel'), `${r.level} settings`);
   setText($('brWL'), r.graded ? `${r.wins}–${losses}` : '0–0');

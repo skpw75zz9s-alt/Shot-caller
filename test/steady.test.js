@@ -66,3 +66,23 @@ test('Steady waits by market stability: 30s when stable (👍), 60s moderate, 90
   assert.equal(b.steadyNeed, 90);
   assert.ok(!b.fire && !b.steadyOk, '70s is not enough when unstable');
 });
+
+test('Near-certain: confidence 95+ held 2 minutes, very likely to hold, and Kalshi agrees; otherwise no call', () => {
+  const nc = riskSettings('certain');
+  assert.equal(nc.minConfidence, 95); assert.equal(nc.kalshiAgree, 0.85); assert.equal(nc.minHold, 0.95);
+  const sure = setup(K + 250, 6, 90, 92, steadyLog(0.995, 130));
+  const a = buySignal(sure.row, sure.snap, nc, NOW, {});
+  assert.ok(a.deep.score >= 95 && a.hold >= 0.95, `score ${a.deep.score} hold ${a.hold}`);
+  assert.equal(a.fire, true, 'fires when everything agrees');
+  // the bot is sure but Kalshi's price says 70c: no call (the gap is huge, which is exactly the warning)
+  const doubt = setup(K + 250, 6, 70, 72, steadyLog(0.995, 130));
+  assert.equal(buySignal(doubt.row, doubt.snap, nc, NOW, {}).fire, false);
+  assert.equal(buySignal(doubt.row, doubt.snap, { ...nc, kalshiAgree: 0 }, NOW, {}).fire, true, 'without the agreement rule it would have called');
+  // only 60 seconds of steady odds: waits
+  const fresh = setup(K + 250, 6, 90, 92, steadyLog(0.995, 60));
+  assert.equal(buySignal(fresh.row, fresh.snap, { ...nc, steadyByStability: false }, NOW, {}).fire, false);
+  // closer to the target: confident enough for Steady, not for Near-certain
+  const close = setup(K + 100, 6, 90, 92, steadyLog(0.995, 130));
+  const c = buySignal(close.row, close.snap, nc, NOW, {});
+  assert.equal(c.fire, false, `score ${c.deep?.score} hold ${c.hold}`);
+});

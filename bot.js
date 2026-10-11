@@ -44,6 +44,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const recordFile = dataFile.replace(/[^/\\]+$/, 'record.json');
   let record = [], recordDirty = false, recordSavedAt = 0;
   const officialMem = {};
+  // Near-certain (v11.7): the same engine on the strictest level, with its own graded record next to the official one
+  const CERTAIN = { ...DEVICE_DEFAULTS, ...riskSettings('certain') };
+  const certainFile = dataFile.replace(/[^/\\]+$/, 'record-certain.json');
+  let certainRecord = [], certainDirty = false;
+  const certainMem = {};
   const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
   const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
 
@@ -75,6 +80,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     vapid.subject = env.VAPID_SUBJECT || 'https://github.com/skpw75zz9s-alt/Shot-caller';
     try { const r = JSON.parse(await readFile(recordFile, 'utf8')); if (Array.isArray(r)) record = r; } catch { /* no record yet */ }
+    try { const r = JSON.parse(await readFile(certainFile, 'utf8')); if (Array.isArray(r)) certainRecord = r; } catch { /* no record yet */ }
     try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L, pulse: L.pulse?.v === 1 ? { ...newPulse(), ...L.pulse } : newPulse() }; } catch { /* first run: learns from scratch */ }
     await save();
     if (learn) startLearning();
@@ -380,7 +386,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
       if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat }, 20000)) { recordDirty = true; saveRecord(); }
     }
+    // Near-certain's own calls (graded like the official ones; never traded, never fed to the call filter)
+    const sigC = snap.live ? buySignal(snap.live, snap, CERTAIN, now, certainMem) : null;
+    if (sigC?.fire && logCall(certainRecord, { ticker: snap.live.m.ticker, side: sigC.callSide, price: sigC.price, conf: sigC.deep?.score ?? null, hold: sigC.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sigC.callN }, 20000)) saveCertain();
     for (const [k, c] of Object.entries(officialMem)) if (!(c.at > now - 2 * 3600000)) delete officialMem[k];
+    for (const [k, c] of Object.entries(certainMem)) if (!(c.at > now - 2 * 3600000)) delete certainMem[k];
   }
   async function saveRecord() {
     recordDirty = false; recordSavedAt = Date.now();
@@ -390,8 +400,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       await rename(`${recordFile}.tmp`, recordFile);
     } catch (e) { log.error('saving the bot record failed', e.message); }
   }
+  async function saveCertain() {
+    certainDirty = false;
+    try { await mkdir(dirname(certainFile), { recursive: true }); await writeFile(`${certainFile}.tmp`, JSON.stringify(certainRecord)); await rename(`${certainFile}.tmp`, certainFile); } catch (e) { log.error('saving the near-certain record failed', e.message); }
+  }
   function officialRecord() {
-    return { level: 'Steady', since: record[0]?.at ?? null, ...callStats(record), ...streaks(record), calls: record.slice(-400) };
+    return { level: 'Steady', since: record[0]?.at ?? null, ...callStats(record), ...streaks(record), calls: record.slice(-400),
+      certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100) } };
   }
   function learnFrom(t) {
     const w = lw[t];
@@ -438,6 +453,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     for (const [t, w] of Object.entries(lw)) if (w.closeTime < now - 60000) pending.add(t);
     for (const [t, r] of Object.entries(learned.pulse.live)) if (r.closeTime < now - 60000) pending.add(t);
     for (const e of unsettledCalls(record, now)) pending.add(e.ticker);
+    for (const e of unsettledCalls(certainRecord, now)) pending.add(e.ticker);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
         const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
@@ -455,6 +471,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (results.has(e.ticker)) { settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; gateDirty = true; }
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
     }
+    for (const e of unsettledCalls(certainRecord, now)) {
+      if (results.has(e.ticker)) { settleCalls(certainRecord, e.ticker, results.get(e.ticker)); certainDirty = true; }
+      else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; certainDirty = true; }
+    }
+    if (certainDirty) saveCertain();
     if (recordDirty) saveRecord();
     if (gateDirty || !learned.callGate) { gateDirty = false; learned.callGate = learnGate(record); learnDirty = true; } // relearn the call filter after each settle
     if (settledValue.size > 500) settledValue.delete(settledValue.keys().next().value);
