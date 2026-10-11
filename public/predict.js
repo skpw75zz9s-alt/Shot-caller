@@ -6,12 +6,19 @@
 //              5 minutes, carried to the close at half strength (trends fade)
 // Every round, each line's close prediction with 5 minutes left is graded against where BTC really closed, next to
 // "no change" (the price at that moment) as the baseline any prediction has to beat.
-import { normCdf } from './model.js';
+import { normCdf, settleVariance } from './model.js';
 import { flipOffset, turnPoints } from './flip.js';
 import { microOffset } from './micro.js';
 
-// Inverse of the standard normal CDF (Acklam's approximation, plenty for a chart)
+// Inverse of the standard normal CDF: Acklam's rational approximation (relative error ~1e-9), then one Halley step on
+// the exact CDF, which takes it to full double precision
 export function normInv(p) {
+  const x = acklam(p);
+  if (!Number.isFinite(x)) return x;
+  const e = normCdf(x) - p, u = e * Math.sqrt(2 * Math.PI) * Math.exp(x * x / 2);
+  return x - u / (1 + x * u / 2);
+}
+function acklam(p) {
   if (!(p > 0 && p < 1)) return p <= 0 ? -Infinity : Infinity;
   const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239];
   const b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
@@ -37,12 +44,13 @@ const path = (from, to, now, close, until = close, hold = false, step = 60000) =
   return pts;
 };
 
-// Kalshi's implied close: P(close > strike) = YES mid  =>  close median = strike * exp(sigma * sqrt(t) * z(mid))
+// Kalshi's implied close: P(settlement > strike) = YES mid  =>  median = strike * exp(sd * z(mid)), with sd the settlement
+// average's (model.js settleVariance), the same one the bot prices with
 export function kalshiImplied({ strike, yesMid, strikeType = 'greater', sigmaMin, minutesLeft }) {
   if (!strike || yesMid == null || !(sigmaMin > 0) || !(minutesLeft > 0)) return null;
   const pAbove = /^less/.test(strikeType) ? 1 - yesMid : yesMid;
   const p = Math.min(0.98, Math.max(0.02, pAbove)); // the ends of the book say little about a level
-  return strike * Math.exp(sigmaMin * Math.sqrt(minutesLeft) * normInv(p));
+  return strike * Math.exp(Math.sqrt(settleVariance(sigmaMin, minutesLeft)) * normInv(p));
 }
 
 // The exchanges' trend: median price across exchanges every 10 seconds over the last 5 minutes, least-squares slope
@@ -72,7 +80,7 @@ export function exchangeTrend(trades, now, close, { lookback = 5 * 60000, damp =
 export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, until = close, strike, yesMid, strikeType, trades = [], engine = null }) {
   if (!spot || !(close > now) || !(sigmaMin > 0)) return [];
   const mins = (close - now) / 60000, sd = spot * sigmaMin * Math.sqrt(mins);
-  const clip = (v) => Math.min(spot + 1.645 * sd, Math.max(spot - 1.645 * sd, v));
+  const z90 = 1.6448536269514722, clip = (v) => Math.min(spot + z90 * sd, Math.max(spot - z90 * sd, v)); // the 90% band's edge, exactly
   const lines = [];
   lines.push({ key: 'bot', name: 'Bot', color: '#22d3ee', end: clip(spot * Math.exp(driftMin * mins)), from: spot });
   const k = kalshiImplied({ strike, yesMid, strikeType, sigmaMin, minutesLeft: mins });
@@ -80,24 +88,25 @@ export function predictionLines({ spot, sigmaMin, driftMin = 0, now, close, unti
   const tr = exchangeTrend(trades, now, close);
   if (tr) lines.push({ key: 'exch', name: '5 exch', color: '#fbbf24', end: clip(tr.end), from: tr.start });
   // the engine's P(UP) as a close: the price it expects BTC to finish at (P(close > target) = P(UP) => median close)
-  if (engine?.pUp != null && strike > 0) lines.push({ key: 'engine', name: 'Engine', color: '#34d399', end: clip(strike * Math.exp(sigmaMin * Math.sqrt(mins) * normInv(Math.min(0.98, Math.max(0.02, engine.pUp))))), from: spot });
+  if (engine?.pUp != null && strike > 0) lines.push({ key: 'engine', name: 'Engine', color: '#34d399', end: clip(strike * Math.exp(Math.sqrt(settleVariance(sigmaMin, mins)) * normInv(Math.min(0.98, Math.max(0.02, engine.pUp))))), from: spot });
   for (const l of lines) l.pts = path(l.from, l.end, now, close, Math.max(close, until), l.key === 'kalshi');
   return lines;
 }
 
-// The record: average miss (dollars) of each line's 5-minutes-left prediction, vs "no change"
+// The record: average miss (dollars) of each line's 5-minutes-left prediction, vs "no change", and its mean squared error
 export function predictionRecord(log) {
   const done = log.filter((e) => e.actual != null);
-  const avg = (k) => { const xs = done.filter((e) => e[k] != null).map((e) => Math.abs(e[k] - e.actual)); return xs.length ? { miss: xs.reduce((a, b) => a + b, 0) / xs.length, n: xs.length } : null; };
+  const avg = (k) => { const xs = done.filter((e) => e[k] != null).map((e) => e[k] - e.actual); return xs.length ? { miss: xs.reduce((a, b) => a + Math.abs(b), 0) / xs.length, mse: xs.reduce((a, b) => a + b * b, 0) / xs.length, n: xs.length } : null; };
   return { rounds: done.length, bot: avg('bot'), kalshi: avg('kalshi'), exch: avg('exch'), engine: avg('engine'), still: avg('spot') };
 }
 
 // ---------- prediction candles: the minutes from now to the close, drawn as ghost candles ----------
-// The expected path is a blend of the prediction lines, each weighted by how close it has come at past closes
-// (1 / miss², from predictionRecord; equal weights until each has 5 graded rounds).
+// The expected path is a blend of the prediction lines, each weighted by its inverse mean squared error at past closes
+// (inverse-variance weighting: the weights that minimise the blend's error for independent errors), equal weights until
+// each has 5 graded rounds.
 export function blendWeights(record) {
   const w = {};
-  for (const k of ['bot', 'kalshi', 'exch', 'engine']) { const x = record?.[k]; w[k] = x && x.n >= 5 && x.miss > 0 ? 1 / (x.miss * x.miss) : null; }
+  for (const k of ['bot', 'kalshi', 'exch', 'engine']) { const x = record?.[k], mse = x?.mse ?? (x?.miss > 0 ? x.miss * x.miss : null); w[k] = x && x.n >= 5 && mse > 0 ? 1 / mse : null; }
   const known = Object.values(w).filter((v) => v != null);
   const fill = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
   for (const k of Object.keys(w)) w[k] ??= fill; // a line without a record yet counts as average
@@ -121,12 +130,13 @@ const valueAt = (pts, t) => { // the line's value at time t (straight between it
 //           expected path makes inside the minute.
 // eo/ec (the body) is what gets graded every minute.
 const STEP = 5000;
-// The volatility of the last 30 complete one-minute candles (average range / 1.6, the random-walk ratio), kept within
+// The volatility of the last 30 complete one-minute candles (average range / sqrt(8/pi): a random walk's expected
+// high-low range over a minute is sqrt(8/pi) = 1.596 times its per-minute sd), kept within
 // half to double the model's
 export function candleSigma(bars, sigmaMin, now) {
   const done = (bars || []).filter((b) => b.t + 60000 <= now && b.h > 0 && b.l > 0).slice(-30);
   if (done.length < 10) return sigmaMin;
-  const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / 1.6;
+  const r = done.reduce((a, b) => a + (b.h - b.l) / ((b.h + b.l) / 2), 0) / done.length / Math.sqrt(8 / Math.PI);
   return sigmaMin > 0 ? Math.min(2 * sigmaMin, Math.max(0.5 * sigmaMin, r)) : r;
 }
 // The market's recent wicks: the average upper and lower wick of the last 30 complete candles, as fractions of price
@@ -183,34 +193,49 @@ export function coneSkew(bars, now) {
   const k = (x) => Math.min(1.4, Math.max(0.7, x / mean));
   return { up: k(up), dn: k(dn) };
 }
-// P(close > K) for a split normal (centre m, upside sd a, downside sd b)
-export function splitAbove(K, m, a, b) {
-  if (!(a > 0) || !(b > 0)) return K < m ? 1 : 0;
-  return K >= m ? (2 * a / (a + b)) * (1 - normCdf((K - m) / a)) : 1 - (2 * b / (a + b)) * normCdf((K - m) / b);
+// The split normal (centre m, sd a above it, b below it; a share a/(a+b) of the mass lies above m):
+//   CDF       x < m: 2b/(a+b) Phi((x-m)/b)          x >= m: 1 - 2a/(a+b) (1 - Phi((x-m)/a))
+//   quantile  the exact inverse of that
+export function splitCdf(x, m, a, b) {
+  if (!(a > 0) || !(b > 0)) return x < m ? 0 : 1;
+  return x < m ? (2 * b / (a + b)) * normCdf((x - m) / b) : 1 - (2 * a / (a + b)) * (1 - normCdf((x - m) / a));
+}
+export const splitAbove = (K, m, a, b) => 1 - splitCdf(K, m, a, b);
+export function splitQuantile(q, m, a, b) {
+  if (!(a > 0) || !(b > 0)) return m;
+  return q < b / (a + b) ? m + b * normInv(q * (a + b) / (2 * b)) : m + a * normInv(1 - (1 - q) * (a + b) / (2 * a));
 }
 export function marketCone({ path, spot, sigmaMin, now, close, bars = null, strike = null, strikeType = 'greater', fix = 1, step = 60000 }) {
   if (!spot || !(sigmaMin > 0) || !(close > now)) return { pts: [], summary: null };
   const center = path || (() => spot), real = candleSigma(bars, sigmaMin, now), sig = Math.sqrt(sigmaMin * real) * (fix > 0 ? fix : 1), sk = coneSkew(bars, now);
   const at = (t) => {
     const m = center(t), sd = spot * sig * Math.sqrt(Math.max(0, t - now) / 60000), a = sd * sk.up, b = sd * sk.dn;
-    return { t, mid: m, hi50: m + 0.674 * a, lo50: m - 0.674 * b, hi90: m + 1.645 * a, lo90: m - 1.645 * b, a, b };
+    if (!(sd > 0)) return { t, mid: m, hi50: m, lo50: m, hi90: m, lo90: m, a, b };
+    // the exact central 50% and 90% of the split normal (equal tails: 25/75%, 5/95%)
+    return { t, mid: m, lo50: splitQuantile(0.25, m, a, b), hi50: splitQuantile(0.75, m, a, b), lo90: splitQuantile(0.05, m, a, b), hi90: splitQuantile(0.95, m, a, b), a, b };
   };
   const pts = [{ ...at(now), t: Math.floor(now / step) * step }];
   for (let t = Math.floor(now / step) * step + step; t < close; t += step) pts.push(at(t));
   const end = at(close); pts.push(end);
-  const pUp = strike > 0 ? splitAbove(strike, end.mid, end.a, end.b) : null;
+  // the chance of SETTLING above the target: Kalshi settles on the last minute's average, a little less spread out
+  const mins = (close - now) / 60000, k = mins > 0 ? Math.sqrt(settleVariance(1, mins) / mins) : 1;
+  const pUp = strike > 0 ? splitAbove(strike, end.mid, end.a * k, end.b * k) : null;
   return { pts, summary: { t: close, mid: end.mid, lo50: end.lo50, hi50: end.hi50, lo90: end.lo90, hi90: end.hi90, a: end.a, b: end.b, skew: sk, sig, fix,
     pAbove: pUp, pYes: pUp == null ? null : /^less/.test(strikeType || '') ? 1 - pUp : pUp } };
 }
-// The cone's record: rounds whose close band (with 5 min left) has been graded. Coverage of the 50% and 90% bands,
-// the Brier score of its "above the target" chance vs Kalshi's price then, and the width factor that would have made
-// the 90% band hold 90%
+// The cone's record: rounds whose close band (with 5 min left) has been graded.
+//   Coverage  where each close fell in the cone's own distribution (its CDF value, the probability integral
+//             transform): inside the 50% band = between 25% and 75%, inside the 90% band = between 5% and 95%
+//   Width     for each round, the width factor that would have put that close exactly on the 90% band's edge (the
+//             band scales linearly with the width); the factor that holds 90% of closes is the 90th percentile of those
+//   Odds      the Brier score of its "above the target" chance vs Kalshi's price then
 export function coneRecord(log) {
   const done = (log || []).filter((e) => e.actual != null && e.a > 0 && e.b > 0);
   if (!done.length) return { n: 0, fix: 1 };
-  const z = done.map((e) => (e.actual >= e.mid ? (e.actual - e.mid) / e.a : (e.mid - e.actual) / e.b)).sort((x, y) => x - y);
-  const in50 = z.filter((x) => x <= 0.674).length / z.length, in90 = z.filter((x) => x <= 1.645).length / z.length;
-  const q90 = z[Math.min(z.length - 1, Math.floor(0.9 * z.length))], raw = Math.min(1.8, Math.max(0.6, q90 / 1.645));
+  const u = done.map((e) => splitCdf(e.actual, e.mid, e.a, e.b));
+  const in50 = u.filter((x) => x >= 0.25 && x <= 0.75).length / u.length, in90 = u.filter((x) => x >= 0.05 && x <= 0.95).length / u.length;
+  const need = done.map((e) => (e.actual >= e.mid ? (e.actual - e.mid) / (splitQuantile(0.95, e.mid, e.a, e.b) - e.mid) : (e.mid - e.actual) / (e.mid - splitQuantile(0.05, e.mid, e.a, e.b)))).sort((x, y) => x - y);
+  const q90 = need[Math.min(need.length - 1, Math.ceil(0.9 * need.length) - 1)], raw = Math.min(1.8, Math.max(0.6, q90));
   const fix = done.length >= 10 ? 1 + (raw - 1) * done.length / (done.length + 20) : 1;
   const gr = done.filter((e) => e.pAbove != null && e.strike > 0), y = (e) => (e.actual > e.strike ? 1 : 0);
   const brier = gr.length ? gr.reduce((a, e) => a + (e.pAbove - y(e)) ** 2, 0) / gr.length : null;

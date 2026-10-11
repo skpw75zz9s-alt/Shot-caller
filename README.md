@@ -271,6 +271,30 @@ Security:
 
 ## Version notes (newest first)
 
+### Exact math (v12.4)
+
+A full audit of the bot's math. The predictions can't be perfect (BTC's next 15 minutes are partly random), but every formula now computes exactly what it claims:
+- **Normal distribution:** the CDF behind every probability now uses Marsaglia's series in the middle and the continued fraction for Mills' ratio in the tails. It's accurate to ~1e-15, even for tiny tail chances; the old approximation was good to ~1e-7. The inverse adds a Halley step on the exact CDF, so it's full precision too (it was ~1e-9).
+- **Hold odds** ("will confidence stay above 80 all round", used by Steady, Sniper and Near-certain) were a 300-path random simulation, about ±2.5 points of noise. Now they're computed exactly:
+  - the price distribution is stepped forward on a fine grid, with the paths that break the floor removed at every 10-second check;
+  - it's averaged over the volatility uncertainty with 7-point Gauss–Hermite quadrature;
+  - it matches a 40,000-path simulation within that simulation's own error, and it's cached so every device shares the answer.
+- **One volatility rule everywhere:** Kalshi settles on the last minute's average, which the bot's own odds always accounted for. The odds nudges (micro model, tuned indicators, reversal checklist, guide forecast, engine), Kalshi's implied close, the engine line and the cone's chance above the target now use that same settlement variance instead of a single price's. That's about a 7% difference in variance with 5 minutes left.
+- **Blend weights:** the prediction lines are now weighted by inverse mean squared error, the correct inverse-variance weights. The old weights were inverse squared average miss.
+- **The cone:** it now uses the exact quantiles of its skewed (split-normal) distribution. Calibration is graded by where each close fell in that distribution (the probability integral transform), and the width factor is solved exactly from the band edges.
+- **Constants:** range-to-volatility uses √(8/π) (was 1.6), and the 90% edge uses 1.6448536…
+- **Order sizing:** Kalshi rounds the fee once per order, not per contract, so sizing now uses the order's exact total. For example, $25 at 50¢ buys 48 contracts with a $0.84 fee, not 47.
+- **Checked as correct and left alone:**
+  - the settlement-average variance
+  - the probability of settling above the target
+  - the Kelly formula
+  - Kalshi's fee rounding
+  - the volatility estimates
+  - RSI and EMAs
+  - the calibration's 2-standard-error rule
+  - the walk-forward tests' statistics
+- `test/math.test.js` pins all of it to reference values.
+
 ### The cone: the market's most predictable outcome (v12.2)
 
 The forecast cone used to be a plain funnel around the current price, sized by volatility, and it ignored everything the bot reads. Now it scans the market for where BTC is most likely to be (`public/predict.js` `marketCone`):

@@ -2,19 +2,32 @@
 // Pure functions only, shared by the browser app and the Node tests.
 
 export function normCdf(x) {
-  // Abramowitz & Stegun 7.1.26 approximation of erf
-  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t *
-    Math.exp(-(x * x) / 2);
-  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+  // |x| <= 3: Marsaglia's series (J. Stat. Software 11(4), 2004), Phi(x) = 1/2 + phi(x)(x + x^3/3 + x^5/15 + ...),
+  // summed until the terms stop changing the double. Beyond 3: the tail as phi(x) over the continued fraction for
+  // Mills' ratio, x + 1/(x + 2/(x + 3/(x + ...))), which keeps full relative precision even for tiny tails.
+  // Accurate to ~1e-15 (the old Abramowitz-Stegun formula was ~1e-7).
+  if (x < -38) return 0;
+  if (x > 38) return 1;
+  const phi = Math.exp(-0.5 * x * x - 0.91893853320467274178); // 0.9189... = ln(sqrt(2 pi))
+  if (Math.abs(x) <= 3) {
+    let s = x, t = 0, b = x;
+    const q = x * x;
+    for (let i = 1; s !== t; ) s = (t = s) + (b *= q / (i += 2));
+    return 0.5 + s * phi;
+  }
+  const z = Math.abs(x);
+  let cf = z;
+  for (let k = 80; k >= 1; k--) cf = z + k / cf;
+  const tail = phi / cf;
+  return x < 0 ? tail : 1 - tail;
 }
 
-// How a predicted move (dollars, by the close) changes P(YES): the chance of finishing above the target with the move
-// minus without it, at this volatility and time left. Flipped for "less than" markets, capped at +-cap. Every learned
+// How a predicted move (dollars, by the close) changes P(YES): the chance of settling above the target with the move
+// minus without it, at this volatility and time left (with Kalshi's averaged settlement, like the bot's own odds). Flipped for "less than" markets, capped at +-cap. Every learned
 // nudge to the odds (micro model, tuned indicators, reversal checklist, guide forecast) goes through this.
 export function oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeType = 'greater' }, cap) {
   if (!move || !(spot > 0) || !(strike > 0) || !(sigmaMin > 0) || !(minutesLeft > 0)) return 0;
-  const sd = spot * sigmaMin * Math.sqrt(minutesLeft), d = normCdf((spot + move - strike) / sd) - normCdf((spot - strike) / sd);
+  const sd = spot * Math.sqrt(settleVariance(sigmaMin, minutesLeft)), d = normCdf((spot + move - strike) / sd) - normCdf((spot - strike) / sd);
   return Math.min(cap, Math.max(-cap, /^less/.test(strikeType || '') ? -d : d));
 }
 
@@ -241,11 +254,17 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
 }
 
 // Quarter-Kelly position size (in contracts) for win probability `prob` at `price`, capped at maxStake.
+// Kelly for a binary contract bought at all-in cost c that pays $1: f* = (p - c) / (1 - c) of the bankroll. The fee is
+// charged on the whole order and rounded up once (not per contract), so the count is the most whose exact total
+// (price x n + the order's fee) fits the stake.
 export function contractsFor(prob, price, settings = {}) {
   const s = { ...DEFAULTS, ...settings };
-  const cost = price + kalshiFee(price);
+  const cost = price + FEE_RATES.taker * price * (1 - price); // the fee per contract before the order's rounding
   const kelly = Math.max(0, (prob - cost) / (1 - cost)) * s.kellyFraction;
-  return Math.max(1, Math.floor(Math.min(kelly * s.bankroll, s.maxStake) / cost));
+  const budget = Math.min(kelly * s.bankroll, s.maxStake);
+  let n = Math.floor(budget / cost);
+  while (n > 1 && n * price + kalshiFee(price, n) > budget + 1e-9) n--;
+  return Math.max(1, n);
 }
 
 // Most you can pay for a side with win probability p and still clear minEdge after fees.
@@ -340,35 +359,64 @@ export function exitSignal({ pos, bid, pSide, flips = [], minutesLeft, settings 
 }
 
 // ---------- hold odds: will this call's confidence last the round? ----------
-// Confidence moves with BTC. holdOdds simulates the rest of the window (fixed pseudo-random paths, so the number
-// doesn't jitter between ticks; each path also draws its own volatility, since the bot's estimate can be off) and
-// returns the share of paths where the side's confidence never drops below `floor` before the last `stopMin` minutes.
-const HOLD_PATHS = 300, HOLD_DT = 1 / 6; // minutes per step (10s)
-let holdNormals = null;
-function holdRandom() {
-  if (holdNormals) return holdNormals;
-  let s = 20261006 >>> 0;
-  const u = () => { s = (s * 1664525 + 1013904223) >>> 0; return (s + 0.5) / 2 ** 32; };
-  const n = HOLD_PATHS * (16 / HOLD_DT + 1);
-  holdNormals = new Float64Array(n);
-  for (let i = 0; i < n; i++) holdNormals[i] = Math.sqrt(-2 * Math.log(u())) * Math.cos(2 * Math.PI * u());
-  return holdNormals;
-}
-export function holdOdds({ market, strike, spot, sigmaMin, minutesLeft, side, floor = 0.8, stopMin = 1, confVol = 1.25 }) {
+// Confidence moves with BTC. holdOdds is the chance that the side's confidence never drops below `floor`, checked every
+// 10 seconds until the last `stopMin` minutes, when BTC follows a random walk at a volatility the bot can't know exactly
+// (log-normal around its estimate, 20% spread). Computed exactly rather than simulated (v12.4; it used to be 300
+// random paths, +-2.5 points of noise): for each volatility (7-point Gauss-Hermite quadrature over the 20% spread) the
+// price distribution is stepped forward on a fine grid, and at each check the paths that broke the floor are removed;
+// what's left at the end is the chance it held. Deterministic, so it never jitters between ticks.
+export const HOLD_DT = 1 / 6; // minutes between checks (10s)
+const GH7 = [[0, 0.457142857142857], [1.154405394739968, 0.240123178605013], [-1.154405394739968, 0.240123178605013],
+  [2.366759410734541, 0.030757123967586], [-2.366759410734541, 0.030757123967586], [3.750439717725742, 0.000548268855972], [-3.750439717725742, 0.000548268855972]];
+const holdCache = new Map(); // the same inputs give the same answer: every device and refresh shares it
+export function holdOdds(o) {
+  const { market, strike, spot, sigmaMin, minutesLeft, side, floor = 0.8, stopMin = 1, confVol = 1.25 } = o;
   if (!spot || !sigmaMin || !side || !(minutesLeft > stopMin)) return null;
-  const z = holdRandom();
+  const key = [market?.ticker, market?.strike_type, market?.floor_strike, market?.cap_strike, strike, spot.toFixed(2), sigmaMin.toPrecision(6), minutesLeft.toFixed(3), side, floor, stopMin, confVol].join('|');
+  if (holdCache.has(key)) return holdCache.get(key);
+  const v = holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol });
+  if (holdCache.size > 500) holdCache.delete(holdCache.keys().next().value);
+  holdCache.set(key, v);
+  return v;
+}
+function holdExact({ market, strike, spot, sigmaMin, minutesLeft, side, floor, stopMin, confVol }) {
   const steps = Math.floor((minutesLeft - stopMin) / HOLD_DT);
-  const per = 16 / HOLD_DT + 1;
-  let held = 0;
-  for (let k = 0; k < HOLD_PATHS; k++) {
-    const vol = sigmaMin * Math.exp(0.2 * z[k * per] - 0.02); // this path's volatility
-    let x = Math.log(spot), ok = true;
-    for (let i = 1; i <= steps; i++) {
-      x += vol * Math.sqrt(HOLD_DT) * z[k * per + i];
-      const p = probYes(market, strike, Math.exp(x), sigmaMin * confVol, minutesLeft - i * HOLD_DT, 0);
-      if (p == null || (side === 'YES' ? p : 1 - p) < floor) { ok = false; break; }
-    }
-    if (ok) held++;
+  const x0 = Math.log(spot);
+  const sideP = (x, t) => { const p = probYes(market, strike, Math.exp(x), sigmaMin * confVol, t, 0); return p == null ? null : side === 'YES' ? p : 1 - p; };
+  // the floor as a price level at each check: confidence is monotone in price, so it's one crossing (found by bisection)
+  const span = 12 * sigmaMin * Math.sqrt(minutesLeft) + 0.05;
+  const lo0 = sideP(x0 - span, minutesLeft), hi0 = sideP(x0 + span, minutesLeft);
+  if (lo0 == null || hi0 == null) return null;
+  const rising = hi0 >= lo0; // the side's confidence rises with the price (YES on an "above" market)
+  const level = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = minutesLeft - i * HOLD_DT, a = sideP(x0 - span, t), b = sideP(x0 + span, t);
+    if ((rising ? a : b) >= floor) { level.push(-Infinity); continue; } // holds anywhere in range
+    if ((rising ? b : a) < floor) { level.push(Infinity); continue; }   // fails anywhere in range
+    let l = x0 - span, h = x0 + span;
+    for (let k = 0; k < 60; k++) { const m = (l + h) / 2; if ((sideP(m, t) >= floor) === rising) h = m; else l = m; }
+    level.push((l + h) / 2);
   }
-  return held / HOLD_PATHS;
+  const holds = (x, i) => { const L = level[i]; return L === -Infinity ? true : L === Infinity ? false : rising ? x >= L : x <= L; };
+  if (!steps) return 1;
+  let total = 0;
+  for (const [z, w] of GH7) {
+    const vol = sigmaMin * Math.exp(0.2 * z - 0.02), sd = vol * Math.sqrt(HOLD_DT); // per-check move
+    const h = sd / 3, half = Math.ceil((6 * vol * Math.sqrt(steps * HOLD_DT) + 6 * sd) / h), n = 2 * half + 1;
+    const kr = Math.ceil(6 * sd / h), ker = [];
+    let ks = 0;
+    for (let k = -kr; k <= kr; k++) { const v = Math.exp(-0.5 * (k * h / sd) ** 2); ker.push(v); ks += v; }
+    for (let k = 0; k < ker.length; k++) ker[k] /= ks;
+    let p = new Float64Array(n), q = new Float64Array(n);
+    p[half] = 1;
+    for (let i = 0; i < steps; i++) {
+      q.fill(0);
+      for (let j = 0; j < n; j++) { const v = p[j]; if (!v) continue; for (let k = -kr; k <= kr; k++) { const jj = j + k; if (jj >= 0 && jj < n) q[jj] += v * ker[k + kr]; } }
+      for (let j = 0; j < n; j++) if (!holds(x0 + (j - half) * h, i)) q[j] = 0;
+      [p, q] = [q, p];
+    }
+    let m = 0; for (let j = 0; j < n; j++) m += p[j];
+    total += w * m;
+  }
+  return Math.min(1, Math.max(0, total));
 }
