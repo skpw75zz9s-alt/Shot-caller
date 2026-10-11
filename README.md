@@ -273,7 +273,7 @@ Security:
 
 Which chart indicators, at which settings, have actually called BTC's 15-minute rounds (`public/tune.js`, `tunefeed.js`).
 - **The question:** at 10, 6 and 3 minutes before each round's close, did the indicator's signal say which way BTC would move from there to the close?
-- **The candidates** (31 settings in 7 families):
+- **The candidates** (32 settings in 7 families):
   - EMA and RMA crosses: 5/13, 9/21, 12/26 and 20/50
   - RSI zones: lengths 7, 14 and 21, with levels 70/30, 65/35, 60/40 and 80/20
   - MACD: 12/26/9, 8/17/9 and 5/35/5
