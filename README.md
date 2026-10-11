@@ -291,7 +291,7 @@ To make the candles more accurate where small details matter most (the next few 
   - +$40 expected matters a lot right at the target and barely at all $500 away.
   - Capped at ±6 points. Only proven horizons count; unproven ones predict 0 and add nothing.
   - It adds to the Round scan's nudge and reaches official calls, push alerts, the Auto-trader and the phone alike.
-  - The micro model grades its read against the odds before its own nudge, so it can't fool itself.
+  - Its predictions are graded on BTC's actual price moves, and its "Kalshi vs the bot" input reads the bot's odds from before any nudge, so its own nudge can't feed back into it.
   - Record → **Used in the bot's calls** shows "Small details (micro model)" with ✓ once it's shaping calls, and the line under the chart shows how many points it's moving the current odds.
 
 ### Copy the sharps (v11.1, a separate panel)
