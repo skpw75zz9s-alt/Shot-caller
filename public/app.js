@@ -349,9 +349,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
 const compute = () => {
-  // the server's proven nudges to the odds: the Round scan, the micro model and tuned indicators (added together per market)
+  // the server's proven nudges to the odds: the Round scan, the micro model, tuned indicators and the reversal checklist (added per market)
   const nudges = [state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null, state.micro?.read && Date.now() - state.micro.read.at < 20000 ? state.micro.inCalls : null,
-    state.tune?.inCalls && Date.now() - (state.tuneAt || 0) < 30000 ? state.tune.inCalls : null];
+    state.tune?.inCalls && Date.now() - (state.tuneAt || 0) < 30000 ? state.tune.inCalls : null,
+    state.playbook?.inCalls && Date.now() - (state.playbookAt || 0) < 30000 ? state.playbook.inCalls : null];
   let shifts = null;
   for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
@@ -873,17 +874,19 @@ function renderMicro() {
 // ---------- the playbook check (server: playbookfeed.js, public/playbook.js) ----------
 async function refreshPlaybook() {
   if (document.hidden) return;
-  try { state.playbook = await getJSON('playbook'); renderPlaybook(); } catch { /* next time */ }
+  try { state.playbook = await getJSON('playbook'); state.playbookAt = Date.now(); renderPlaybook(); } catch { /* next time */ }
 }
-setInterval(refreshPlaybook, 60000);
+setInterval(refreshPlaybook, 15000); // the reversal checklist changes as each 15-minute candle closes
 setTimeout(refreshPlaybook, 2500);
 function renderPlaybook() {
   const p = state.playbook, r = p?.report;
   if (!p) return;
+  renderReversal(p);
   const card = (title, x) => !x ? '' : `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${Math.round(x.winRate * 100)}% · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · fees ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the playbook's 100)</small>` : ''}</span></div>`;
   setHTML($('pbReport'), !r ? (p.backfilling ? 'Reading two weeks of BTC history…' : 'Starting…')
     : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
       + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
+      + reversalReport(r.reversal)
       + `<small class="muted">Break-even win rate before costs: 33% at 2R, 40% at 1.5R. ${(() => { const best = [r.day, r.hour].filter((x) => x?.n >= 30).sort((a, b) => b.avgR - a.avgR)[0]; return best ? (best.avgR > 0 ? 'One version is positive after fees so far; it still needs 100+ trades to mean much.' : 'After fees, it isn\'t profitable on this data yet.') : 'Too few trades to judge yet.'; })()}</small>`);
 }
 
@@ -906,6 +909,29 @@ function renderTune() {
     + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
     + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
       : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.7+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
+}
+
+// ---------- reversal watch (server: playbookfeed.js, public/reversal.js): the 15-minute flip checklist ----------
+function renderReversal(p) {
+  const v = p.reversal;
+  if (!v) { setText($('revHead'), p.backfilling ? 'Reading BTC history…' : 'Needs about 8 hours of candles first.'); setHTML($('revList'), ''); return; }
+  setText($('revWhen'), `as of ${clock(v.at)}`);
+  const c = v.best || (v.down.score >= v.up.score ? v.down : v.up), other = c === v.down ? v.up : v.down;
+  const label = { strong: 'strong confluence', developing: 'developing: wait for confirmation', insufficient: 'not enough confirmation' }[c.band];
+  const inCalls = p.inCalls ? Object.values(p.inCalls)[0] : 0;
+  setHTML($('revHead'), `<b class="${c.dir}">${c.dir === 'down' ? 'DOWN' : 'UP'} flip ${c.score}/${v.max}</b> · ${label} <small>(${other.dir} ${other.score}/${v.max})${c.macdDiv ? ' · MACD divergence too' : ''}${inCalls ? ` · ${inCalls >= 0 ? '+' : '−'}${Math.abs(Math.round(inCalls * 100))} pts on YES this round` : ''}</small>`);
+  setHTML($('revList'), c.checks.map((x) => `<li class="${x.ok ? 'ok' : ''}"><i>${x.ok ? '✓' : '·'}</i><span>${esc(x.text)}</span><em>${x.ok ? `+${x.pts}` : `0/${{ sweep: 3, mss: 3, rsiDiv: 2 }[x.key] ?? 1}`}</em></li>`).join(''));
+}
+function reversalReport(rv) {
+  if (!rv) return '';
+  const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+  const bandRow = (k, name) => { const s = rv.bands[k]; return `<div class="pb-row"><b>${name}</b><span>${s.n ? `${int(s.n)} signals · next round went that way ${pc(s.hit15)} · next hour ${pc(s.hit60)} · z ${s.z15.toFixed(1)}${s.n >= 100 && s.z15 >= 2.5 ? ' · ✓ beats a coin flip, used in calls' : ''}` : 'no signals yet'}</span></div>`; };
+  const strat = (title, x) => `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${pc(x.winRate)} · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · costs ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}${x.withTrend?.n || x.againstTrend?.n ? ` · with the 1-hour trend ${x.withTrend.n ? `${pc(x.withTrend.winRate)} of ${x.withTrend.n}` : '—'}, against it ${x.againstTrend.n ? `${pc(x.againstTrend.winRate)} of ${x.againstTrend.n}` : '—'}` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the guide's 200)</small>` : ''}</span></div>`;
+  return `<h4 class="rec-h">Reversal guide: does the checklist call the flip?</h4>`
+    + bandRow('strong', 'Strong (8+)') + bandRow('developing', 'Developing (5–7)') + bandRow('insufficient', 'Insufficient (0–4)')
+    + `<h4 class="rec-h">Reversal guide: the DOWN/UP flip strategy</h4>`
+    + strat('Sweep + reclaim + RSI divergence + structure break + retest, 2R', rv.full) + strat('Same, 1.5R', rv.full15) + strat('Without RSI divergence (sweep + structure only), 2R', rv.noRsi)
+    + `<small class="muted">Costs: 0.05% fee + 0.02% spread/slippage a side. 50% = a coin flip for the next round.</small>`;
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
@@ -963,7 +989,7 @@ function flipNow(live, snap, now) {
   const usdOf = (side) => last.reduce((a, x) => a + (x.side === side ? x.price * x.size : 0), 0), b = usdOf('buy'), tot = b + usdOf('sell');
   state.flipBase = turnBaseRate(snap.bars.slice(-150, -1), 0.5 * modelSpot() * (live.sigma ?? snap.sigmaMin));
   return flipForecast({ bars: snap.bars, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, openTime: Date.parse(live.m.open_time), flowBuyShare: tot > 0 ? b / tot : null,
-    amp: flipRecord(state.flipLog, state.flipBase).amp });
+    amp: flipRecord(state.flipLog, state.flipBase).amp, reversal: state.playbook?.reversal && now - state.playbook.reversal.at < 16 * 60000 ? state.playbook.reversal : null });
 }
 function candlesNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   if (!live) return { candles: [], turns: [], flip: null };

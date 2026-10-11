@@ -52,6 +52,7 @@ export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
 // The playbook check: its 15-minute sweep strategy backtested and paper-traded, and the market-structure read (playbookfeed.js)
 export const playbook = createPlaybook({ coinbase: COINBASE, file: join(DATA_DIR, 'bars.json') });
+playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; }); // the reversal checklist's open-interest point
 export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures, playbook });
 // The micro model: how the market's small details move BTC over the next 1-5 minutes (microfeed.js, public/micro.js)
 // Indicator tuning: which indicator settings have actually predicted the rounds (tunefeed.js, public/tune.js)
@@ -65,12 +66,13 @@ export const bot = createBot({
     try { marketWatch.observe(o); } catch (e) { console.error('market watch step failed', e.message); }
     try { microFeed.observe(o); } catch (e) { console.error('micro model step failed', e.message); }
     try { tuneFeed.observe(o); } catch (e) { console.error('indicator tuning step failed', e.message); }
+    try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
     autotrade?.step(o);
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
-  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators
-  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting) }),
+  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([, s]) => s.n >= 100 && s.z15 >= 2.5).map(([k]) => k) }),
   watch: () => marketWatch.status(),
 });
 setInterval(() => access.prune(), 3600000).unref();

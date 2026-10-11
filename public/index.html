@@ -40,6 +40,7 @@
   <link rel="modulepreload" href="structure.js">
   <link rel="modulepreload" href="playbook.js">
   <link rel="modulepreload" href="tune.js">
+  <link rel="modulepreload" href="reversal.js">
   <link rel="modulepreload" href="micro.js">
   <link rel="modulepreload" href="watch.js">
   <link rel="modulepreload" href="fees.js">
@@ -147,6 +148,12 @@
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
         <small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small>
+      </div>
+      <div class="card rev" id="revCard">
+        <div class="deep-head"><span>Reversal watch · 15-min</span><b id="revWhen"></b></div>
+        <div class="rev-head" id="revHead">Loading…</div>
+        <ul class="rev-list" id="revList"></ul>
+        <small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small>
       </div>
       <div class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
@@ -438,7 +445,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v11.7 · near-certain</p>
+      <p class="fine" id="version">Shot Caller v11.8 · reversal watch</p>
     </section>
   </main>
 

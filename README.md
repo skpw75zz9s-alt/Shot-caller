@@ -269,6 +269,38 @@ Security:
 - **Positions** are compared with Kalshi's positions list. If the app's count, side or average price differs, Kalshi wins. The Kalshi card says *✓ matches Kalshi* or *corrected from Kalshi: 56 YES → 9 NO*.
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
+### Reversal watch (v11.8)
+
+The 15-minute BTC reversal guide ("how to predict when the market is about to flip"), as code that gets measured (`public/reversal.js`, run by `playbookfeed.js`).
+- **The checklist**, scored on each closed 15-minute candle for a DOWN flip and an UP flip:
+  | Signal | Points | What the bot checks (DOWN flip; UP is the mirror image) |
+  |---|---|---|
+  | Liquidity sweep and reclaim | 3 | a candle in the last 45 min took out the last swing high, and price has closed back below it |
+  | Market structure break | 3 | since the sweep, a 15-minute close below the latest higher low |
+  | RSI divergence | 2 | higher high in price, lower high in 15-minute RSI 14 |
+  | Volume confirmation | 1 | the sweep candle traded 1.5×+ average volume with little progress (exhaustion) |
+  | VWAP flip | 1 | price got above the day's VWAP in the last hour but closed back below it |
+  | Open interest | 1 | Hyperliquid open interest fell 0.5%+ in 5 min as price spiked (a flush). Live only |
+  | MACD divergence | — | shown, not scored (as in the guide) |
+
+  8+ is strong confluence, 5–7 developing, 0–4 not enough. The guide says its scoring is hypothetical and its scores aren't probabilities, so:
+- **The bot checks whether the scores predict anything.** After every closed 15-minute candle with a clear side, did the next 15 minutes and the next hour go that way? Results are kept per band against 50%. Rounds start when a 15-minute candle closes, so "the next 15 minutes" is the next Kalshi round. The scoring isn't tuned to the data, so the whole history is a fair test. On pure noise no band beats a coin flip.
+- **The guide's flip strategy, backtested step by step:**
+  1. a sweep above a previous high (below a previous low)
+  2. a close back inside
+  3. RSI divergence
+  4. within an hour, a 15-minute close through the latest higher low (lower high)
+  5. within the next hour, a retest of that level that gets rejected; entry at that candle's close ("wait for a candle close and retest")
+
+  The stop goes beyond the sweep's extreme plus 30% of a typical 15-minute range. The target is 2R (1.5R also recorded), with a 24-hour cap; if the stop and target are hit in the same minute, the stop counts. Costs are 0.05% fee plus 0.02% spread/slippage a side, counted in R. Tight stops make costs a big share of R (0.6R of a 2R win in the test setup).
+  - A looser variant without the RSI step is also recorded, as is a split of trades with and against the 1-hour trend.
+  - The guide asks for 200+ signals before trusting it. The full rules are strict, so expect a handful a week.
+- **Where it shows:**
+  - **Deck → Reversal watch**: the live checklist (each signal, its points, the band, the other side's score)
+  - **Record → Playbook check**: each band's hit rate for the next round and hour, and the strategy's scorecard (trades, win rate, average R, total R, drawdown, costs, how many to 200)
+  - **Chart:** a 5+ checklist score for a flip in the same direction adds to the flip forecast. The flip forecast's strength already follows its own graded record.
+- **In the bot's calls:** only a band that has called the next round better than a coin flip (z ≥ 2.5 on 100+ signals) nudges that round, by its measured move, capped at ±4 points. Until then it changes nothing. As the guide says, no indicator can guarantee a reversal.
+
 ### Near-certain mode (v11.7)
 
 The highest win rate the bot can honestly aim for. It's never 100%: each round is decided by BTC's price at one second, moved by trades that haven't happened yet. And if the bot were ever truly certain, Kalshi's price would already be 99¢.

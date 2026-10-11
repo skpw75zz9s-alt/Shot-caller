@@ -432,7 +432,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   function usingStatus(p) {
     const cal = calTable(learned), corrected = cal.filter((b) => b.shift).length, pb = pulseBlend(learned.pulse), g = learned.callGate, fixOn = pulseStatus(learned.pulse);
-    const info = shiftInfo() || {}, scanOn = !!info.scan, microOn = !!info.micro, tuned = info.tune || [];
+    const info = shiftInfo() || {}, scanOn = !!info.scan, microOn = !!info.micro, tuned = info.tune || [], revBands = info.reversal || [];
     return [
       { key: 'vol', name: 'Volatility by time of week', on: !!p, detail: p ? 'prices the coming minutes with how busy this half hour usually is' : 'needs a week of history' },
       { key: 'cal', name: 'Calibration', on: corrected > 0, detail: corrected ? `corrects ${corrected} confidence band${corrected === 1 ? '' : 's'} from graded rounds` : 'no band has needed (or earned) a correction yet' },
@@ -442,6 +442,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       { key: 'scan', name: 'Round scan', on: !!scanOn, detail: scanOn ? 'its proven reads nudge the odds (±8 pts max)' : 'until its graded record shows it makes the odds more accurate' },
       { key: 'micro', name: 'Small details (micro model)', on: microOn, detail: microOn ? 'its proven 1-5 minute read shifts the odds (±6 pts max)' : 'until it beats "no change" (500+ graded predictions, 0.5%+ better)' },
       { key: 'tune', name: 'Tuned indicators', on: tuned.length > 0, detail: tuned.length ? `${tuned.join(', ')}: proven on rounds they were never tuned on; nudges the odds (±4 pts max)` : 'no indicator setting has predicted the rounds out of sample yet (rechecked hourly)' },
+      { key: 'reversal', name: 'Reversal checklist', on: revBands.length > 0, detail: revBands.length ? `its ${revBands.join(' and ')} signals have called the next round better than a coin flip (100+ signals); they nudge that round (±4 pts max)` : 'until a score band calls the next round better than a coin flip (z 2.5+ on 100+ signals)' },
       { key: 'gate', name: 'Call filter (learns from the bot\'s own calls)', on: !!g?.active, detail: g?.active ? `skips calls like the ones that lost: in the replay the ${g.replay.skipped} it would have skipped won ${Math.round(g.replay.skippedWin * 100)}% (vs ${Math.round(g.replay.keptWin * 100)}% kept) and lost $${Math.abs(g.replay.skippedPnl).toFixed(2)}/contract`
         : `${g?.n ?? 0}/120 graded calls${g?.replay ? ` · replay: skipping would have ${g.replay.skippedPnl < 0 ? 'helped, not proven yet' : 'cost money, so it stays off'}` : ''}` },
     ];

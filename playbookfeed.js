@@ -8,10 +8,11 @@ import { dirname } from 'node:path';
 import { parseCandles } from './public/engine.js';
 import { backtest, scorecard } from './public/playbook.js';
 import { structureRead } from './public/structure.js';
+import { bandStudy, flipBacktest, reversalNow, reversalShift } from './public/reversal.js';
 
 const KEEP = 21 * 86400000;
 export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock = () => Date.now(), log = console, sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }) }) {
-  let bars = [], report = null, timer = null, busy = false, backfilling = false;
+  let bars = [], report = null, timer = null, busy = false, backfilling = false, oiFn = () => null, lastLive = null, revNow = null, revAt = 0;
   function merge(rows) {
     const m = new Map(bars.map((b) => [b.t, b]));
     for (const b of rows) if (b.t && b.c > 0) m.set(b.t, b);
@@ -37,7 +38,11 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
   }
   function rerun() {
     const run = (variant, target) => { const tr = backtest(bars, { variant, target }); return { ...scorecard(tr), last: tr.slice(-8).reverse() }; };
-    report = { at: clock(), bars: bars.length, from: bars[0]?.t ?? null, day: run('day', 2), day15: run('day', 1.5), hour: run('hour', 2), hour15: run('hour', 1.5) };
+    // the reversal guide (public/reversal.js): does its checklist predict the next round, and does its flip strategy pay?
+    const flip = (o) => { const tr = flipBacktest(bars, o), card = scorecard(tr); return { ...card, needs: Math.max(0, 200 - card.n), last: tr.slice(-8).reverse(),
+      withTrend: scorecard(tr.filter((t) => t.withTrend)), againstTrend: scorecard(tr.filter((t) => t.againstTrend)) }; };
+    const reversal = { bands: bandStudy(bars), full: flip({ target: 2 }), full15: flip({ target: 1.5 }), noRsi: flip({ target: 2, needRsi: false }) };
+    report = { at: clock(), bars: bars.length, from: bars[0]?.t ?? null, day: run('day', 2), day15: run('day', 1.5), hour: run('hour', 2), hour15: run('hour', 1.5), reversal };
   }
   async function tick() {
     if (busy) return;
@@ -59,7 +64,23 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     cache = { at: now, price, read: structureRead(bars.slice(-3000), { now, price, sigmaMin }) };
     return cache.read;
   }
-  return { load, start, tick, backfill, rerun, structure, merge, api: () => ({ report, backfilling, bars: bars.length }), bars: () => bars };
+  // The reversal checklist right now (with the futures' open interest when there is one), at most every 5 seconds
+  function reversal(now = clock()) {
+    if (!revNow || now - revAt >= 5000) { revAt = now; try { revNow = reversalNow(bars, { now, oi: oiFn() }); } catch { revNow = null; } }
+    return revNow;
+  }
+  function observe({ snap }) {
+    const lv = snap?.live;
+    lastLive = lv ? { ticker: lv.m.ticker, strike: lv.strike, spot: snap.mSpot ?? snap.spot, sigmaMin: lv.sigma ?? snap.sigmaMin, minutesLeft: lv.ev.minutesLeft, strikeType: lv.m.strike_type, openTime: Date.parse(lv.m.open_time) } : null;
+  }
+  // For the bot's calls: a proven checklist band nudges the round right after its signal (bot.js shifts)
+  function shifts(now = clock()) {
+    if (!lastLive || !report?.reversal) return null;
+    const v = reversalShift(reversal(now), report.reversal.bands, lastLive);
+    return v ? { [lastLive.ticker]: v } : null;
+  }
+  return { load, start, tick, backfill, rerun, structure, merge, reversal, observe, shifts, setOi: (f) => { oiFn = f; },
+    api: () => ({ report, backfilling, bars: bars.length, reversal: reversal(), inCalls: shifts() }), bars: () => bars };
 }
 async function defaultFetch(url) {
   const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });

@@ -5,6 +5,7 @@
 //      level       pinned at the round's floor after a fall (or its ceiling after a rise)
 //      wick        the last closed candle has a long wick against the move (rejection)
 //      flow        the live trades lean against the move (someone absorbing it)
+//      checklist   the reversal guide's 15-minute checklist (public/reversal.js) at 5+ points for a flip this way
 // 2) The shape: the prediction candles carry today's momentum, then bend like a damped spring around the blended
 //    prediction, plus the retracement a ripe flip wins back (score x 40% of the last 5 minutes' move). A high score
 //    turns sooner and swings back past the blend (a flip); a low one just lets the move fade.
@@ -17,7 +18,7 @@ import { rsi } from './candles.js';
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // bars: 1-minute candles oldest first (the last one may be the live minute). Returns null when there's too little data.
-export function flipForecast({ bars, spot, sigmaMin, now, openTime = null, flowBuyShare = null, amp = 1 }) {
+export function flipForecast({ bars, spot, sigmaMin, now, openTime = null, flowBuyShare = null, amp = 1, reversal = null }) {
   const done = (bars || []).filter((b) => b.t + 60000 <= now);
   if (done.length < 20 || !(spot > 0) || !(sigmaMin > 0)) return null;
   const px = spot, sd1 = px * sigmaMin; // dollars per typical minute
@@ -45,6 +46,8 @@ export function flipForecast({ bars, spot, sigmaMin, now, openTime = null, flowB
     add('Wick', clamp((wick / range - 0.4) / 0.4, 0, 1) * 0.15, `last candle's ${sgn < 0 ? 'lower' : 'upper'} wick is ${Math.round(wick / range * 100)}% of it (rejected)`);
   }
   if (flowBuyShare != null) add('Flow', clamp(((sgn < 0 ? flowBuyShare : 1 - flowBuyShare) - 0.55) / 0.2, 0, 1) * 0.1, `${Math.round((sgn < 0 ? flowBuyShare : 1 - flowBuyShare) * 100)}% of the last minute's trades ${sgn < 0 ? 'bought' : 'sold'} into the ${sgn < 0 ? 'drop' : 'rise'}`);
+  const rc = reversal?.[dir];
+  if (rc && rc.score >= 5) add('Checklist', clamp((rc.score - 4) / 6, 0, 1) * 0.3, `reversal checklist ${rc.score}/${reversal.max} for a ${dir} flip on the 15-minute chart`);
   const score = clamp(parts.reduce((a, p) => a + p.pts, 0), 0, 1);
   // the spring: quicker and bouncier the riper the move. omega in radians per minute.
   const omega = 0.35 + 0.9 * score, zeta = clamp(1.15 - 0.95 * score, 0.3, 1.15);
