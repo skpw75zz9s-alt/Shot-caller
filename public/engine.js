@@ -176,9 +176,13 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // With steadyByStability the wait follows the market: half in a stable one, 1.5× in an unstable one.
   const steadyNeed = !(s.steadySec > 0) ? 0 : !s.steadyByStability ? s.steadySec
     : Math.round(s.steadySec * (stab.level === 'stable' ? 0.5 : stab.level === 'unstable' ? 1.5 : 1));
+  // Fast lane (90% target): an overwhelming lead, the bot fastConf+ sure and Kalshi's ask fastAsk+, waits fastSec instead
+  const fastLane = (side) => s.fastSec > 0 && ev.pYes != null && (side === 'YES' ? ev.pYes : 1 - ev.pYes) * 100 >= s.fastConf - 1e-9
+    && (side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) >= s.fastAsk - 1e-9;
   const steady = (side) => {
-    if (!(steadyNeed > 0)) return true;
-    const log = snap.quoteLog?.[row.m.ticker] || [], since = now - steadyNeed * 1000;
+    const need = fastLane(side) ? Math.min(steadyNeed, s.fastSec) : steadyNeed;
+    if (!(need > 0)) return true;
+    const log = snap.quoteLog?.[row.m.ticker] || [], since = now - need * 1000;
     if (!log.length || log[0].t > since + 2500) return false;
     return log.filter((e) => e.t >= since).every((e) => e.p != null && (side === 'YES' ? e.p : 1 - e.p) * 100 >= s.minConfidence);
   };

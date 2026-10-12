@@ -1643,10 +1643,14 @@ function renderBotRecord() {
   const since = r.since ? new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
   const g = r.guard, b = r.before;
   const guardLine = g ? ` Win-rate guard: ${g.n ? `the last ${g.n} graded calls won ${pctOf(g.wins, g.n)}${g.low != null && g.n >= 10 ? ` (at least ${Math.round(g.low * 100)}% with 95% confidence)` : ''}` : 'no graded calls yet'}; it only calls sides Kalshi prices at <b>${Math.round(g.floor * 100)}¢</b>+ right now${g.floor > 0.9 ? ' (raised because the record slipped below its 92% aim)' : ''}.` : '';
+  // how early the calls come (minutes left at the call) and how the early ones (8+ minutes left) did
+  const leftAt = (e) => (Date.parse(e.closeTime) - e.at) / 60000, timed = r.calls.filter((e) => e.at && e.closeTime);
+  const early = timed.filter((e) => leftAt(e) >= 8 && (e.result === 'yes' || e.result === 'no')), earlyWon = early.filter((e) => e.side.toLowerCase() === e.result).length;
+  const timeLine = timed.length ? ` Calls come with <b>${(timed.reduce((a, e) => a + leftAt(e), 0) / timed.length).toFixed(1)} min</b> left on average${early.length ? `; early calls (8+ min left) won <b>${earlyWon} of ${early.length}</b>` : ''}.` : '';
   const beforeLine = b?.graded ? ` Before the 90% target (Steady, to ${new Date(b.until).toLocaleDateString([], { month: 'short', day: 'numeric' })}): won ${pctOf(b.wins, b.graded)} of ${int(b.graded)}.` : '';
   setHTML($('brSub'), (!r.calls.length ? `No calls yet on the ${esc(r.level)} level. The bot calls on its own around the clock, and every call shows up here, win or lose.`
     : `Every call the bot made${since ? ` since ${since}` : ''}, around the clock, graded against Kalshi's result. It said ${r.said != null ? Math.round(r.said) : '—'}% on average and won ${pctOf(r.wins, r.graded)}. $10 on every call, held to settlement: ${money(r.usd)}. Best win streak: ${r.bestWin}.` +
-      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`) + guardLine + beforeLine);
+      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`) + timeLine + guardLine + beforeLine);
   const days = dailyRecord(r.calls, 14), top = Math.max(1, ...days.map((d) => d.w + d.l));
   setHTML($('brDays'), days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join(''));
   $('brDays').classList.toggle('empty', !days.some((d) => d.w + d.l));

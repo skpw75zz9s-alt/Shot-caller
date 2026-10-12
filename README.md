@@ -271,6 +271,22 @@ Security:
 
 ## Version notes (newest first)
 
+### Fast lane for early calls (v13.6)
+
+The 90% target level now calls overwhelming leads sooner, without lowering its bar.
+- **Fast lane.** When the bot is **98%+ sure** and **Kalshi prices the side at 93¢+**, the steady wait drops from 60 s
+  (30 s in a calm market) to **20 s**. Every other check stays exactly as strict: the price floor and win-rate guard,
+  the 1¢ gap after the fee, 90%+ hold odds, and never switching sides.
+- **Why the hold rule stays.** Hold odds don't depend on time left (a 97% lead has ~0.83 hold odds at 12 minutes or
+  at 4), so the 90%-hold rule works as "be ~98.5%+ sure", not as a penalty on early calls. That rule keeps the record
+  clean, so it stays.
+- **Simulated** (30,000 rounds per case, 15-second steps):
+  - calls with 8–14 minutes left rose 30–75% (470 → 767, 279 → 498, 660 → 852)
+  - those early calls won 92–95%, about the same as or a bit better than before
+  - all calls won 94–96% vs 92–94% before
+- **Record tab.** It shows how many minutes are left on average when calls come, and how the early calls (8+
+  minutes left) have done.
+
 ### 90% target level and win-rate guard (v13.5)
 
 From now on the official bot record is made on a new risk level built for a 90%+ win rate. The earlier Steady calls

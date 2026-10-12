@@ -262,6 +262,9 @@ export const DEFAULTS = {
   maxStake: 25,
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
   winFloor: 0,          // 90% target: Kalshi's ask for the side must be at least this (0 = off; public/winguard.js)
+  fastSec: 0,           // fast lane: the steady wait drops to this many seconds (0 = off) when the bot is fastConf+ sure
+  fastConf: 98,         //   and Kalshi's ask for the side is fastAsk or more
+  fastAsk: 0.93,
   volTails: 0,          // fat tails: the spread of the volatility's own uncertainty (set by the volatility tuner once proven)
   minConfidence: 85,    // confidence = win odds (0-100) a call needs before it fires (Balanced)
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
@@ -315,8 +318,10 @@ export const RISK_LEVELS = {
   // start; the win-rate guard raises it if the real record slips: public/winguard.js) and the bot rates higher still at
   // that price after the fee (1c gap, confidence 92+ held for a minute, likely to hold all round). Kalshi's price is a
   // well-calibrated win chance, so these win ~90%+ on their own and the bot's agreement lifts it (simulated 92-97%).
-  // Wins pay 10c or less a contract, so fees can make it lose money even while it wins
-  target90: { label: '90% target', minEdge: 0.01, minConfidence: 92, bigEdgeOverride: 0, minHold: 0.9, steadySec: 60, lockCall: true, winFloor: 0.9, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Built for a 90%+ win rate: only sides Kalshi prices at 90¢+ (raised automatically if the record slips) that the bot rates higher still. Many calls win; each win pays little' },
+  // Wins pay 10c or less a contract, so fees can make it lose money even while it wins. Fast lane (v13.6): when the bot
+  // is 98%+ sure and Kalshi prices the side at 93c+, the steady wait is 20 s instead of 60 (every other check unchanged),
+  // so overwhelming leads get called early in the round
+  target90: { label: '90% target', minEdge: 0.01, minConfidence: 92, bigEdgeOverride: 0, minHold: 0.9, steadySec: 60, lockCall: true, winFloor: 0.9, fastSec: 20, fastConf: 98, fastAsk: 0.93, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Built for a 90%+ win rate: only sides Kalshi prices at 90¢+ (raised automatically if the record slips) that the bot rates higher still. Many calls win; each win pays little' },
   safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
   balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
@@ -325,7 +330,7 @@ export const RISK_LEVELS = {
     bigEdgeOverride: 0.10, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
 // The strategy settings a risk level sets
-export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'kalshiAgree', 'winFloor', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'kalshiAgree', 'winFloor', 'fastSec', 'fastConf', 'fastAsk', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
 export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key] ?? DEFAULTS[key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence && (RISK_LEVELS[k].minHold ?? 0) === (s.minHold ?? 0)) ?? 'custom';
 

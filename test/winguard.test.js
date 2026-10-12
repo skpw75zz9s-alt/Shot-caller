@@ -34,10 +34,10 @@ test('Wilson\'s lower bound and the settings helper', () => {
 // a confident YES with BTC well above the target (same harness as test/steady.test.js)
 const NOW = 1_700_000_040_000, K = 100000, SIG = 0.0002;
 const bars = [...Array(30)].map((_, i) => ({ t: NOW - (30 - i) * 60000, o: 100000, c: 100002, h: 100010, l: 99992 }));
-function setup(yb, ya) {
+function setup(yb, ya, secs = 70) {
   const m = { ticker: 'T', close_time: new Date(NOW + 9 * 60000).toISOString(), strike_type: 'greater', floor_strike: K, yes_bid: yb, yes_ask: ya };
   const ev = evaluate({ market: m, strike: K, spot: K + 150, sigmaMin: SIG, now: NOW });
-  const log = { T: [...Array(36)].map((_, i) => ({ t: NOW - 70000 + i * 2000, p: 0.99, yesAsk: null, noAsk: null })) };
+  const log = { T: [...Array(secs / 2 + 1)].map((_, i) => ({ t: NOW - secs * 1000 + i * 2000, p: 0.99, yesAsk: null, noAsk: null })) };
   return { row: { m, strike: K, ev, rej: { tilt: 0, summary: [], events: [] } }, snap: { now: NOW, bars, sigmaMin: SIG, sigmaLong: SIG, driftMin: 0, spot: K + 150, quoteLog: log } };
 }
 test('the 90% target level: calls only a side Kalshi prices at the floor or more, and only if the bot rates it higher still', () => {
@@ -52,4 +52,15 @@ test('the 90% target level: calls only a side Kalshi prices at the floor or more
   assert.equal(buySignal(priced.row, priced.snap, withGuard(t90, 0.95), NOW, {}).fire, false, 'the guard raised the floor to 95c');
   const dear = setup(98, 99);
   assert.equal(buySignal(dear.row, dear.snap, t90, NOW, {}).fire, false, 'at 99c there\'s no room left for the bot\'s 1c gap after the fee');
+});
+
+test('the fast lane: an overwhelming lead (bot 98%+, Kalshi 93c+) is called after 20 s of steady odds, not a full wait', () => {
+  const t90 = riskSettings('target90');
+  assert.deepEqual([t90.fastSec, t90.fastConf, t90.fastAsk], [20, 98, 0.93]);
+  const strong = setup(93, 94, 24), a = buySignal(strong.row, strong.snap, t90, NOW, {});
+  assert.ok(a.fire && a.callSide === 'YES', `bot ~99%, Kalshi 94c, 24 s of history: ${JSON.stringify({ fire: a.fire, need: a.steadyNeed })}`);
+  const merely = setup(90, 91, 24);
+  assert.equal(buySignal(merely.row, merely.snap, t90, NOW, {}).fire, false, 'Kalshi at 91c: not overwhelming, so the normal wait applies');
+  assert.equal(buySignal(strong.row, strong.snap, { ...t90, fastSec: 0 }, NOW, {}).fire, false, 'without the fast lane it would still be waiting');
+  assert.equal(buySignal(strong.row, strong.snap, withGuard(t90, 0.95), NOW, {}).fire, false, 'the guard\'s floor still applies in the fast lane');
 });
