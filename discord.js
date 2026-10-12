@@ -6,9 +6,11 @@
 //            while the profit guard has buy alerts paused
 //   result   win or loss, the price it was bought at, and the record so far with profit after fees at $10 a call
 // One message at a time, at least 1.2 s apart; on a 429 it waits Discord's retry_after and tries again (3 tries).
-const HOOK = /^https:\/\/(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d{5,30}\/[\w-]{20,120}$/;
+const HOOK = /^https:\/\/(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com\/api(?:\/v\d+)?\/webhooks\/\d{5,30}\/[\w-]{20,120}$/;
 const DISCLAIMER = 'Signals only. Not financial advice. Every call can lose.';
-export const validWebhook = (url) => typeof url === 'string' && HOOK.test(url.trim());
+// The address as pasted, tidied: surrounding spaces and quotes, and any ?query or trailing slash, are dropped
+export const cleanWebhook = (url) => (typeof url === 'string' ? url.trim().replace(/^['"<]+|['">]+$/g, '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '') : '');
+export const validWebhook = (url) => HOOK.test(cleanWebhook(url));
 
 const sideName = (side) => (side === 'YES' ? 'UP' : 'DOWN');
 const cents = (p) => `${Math.round(p * 100)}¢`;
@@ -52,8 +54,10 @@ export function resultMessage(e, stats = null) {
 }
 
 export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, fetchImpl = (...a) => fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = console } = {}) {
-  const on = validWebhook(url);
-  if (url && !on) log.warn?.('DISCORD_WEBHOOK_URL is set but is not a Discord webhook address: Discord posts are off');
+  const hook = cleanWebhook(url), on = HOOK.test(hook);
+  // why it's off, for /healthz (never the address itself)
+  const why = on ? null : !url ? 'DISCORD_WEBHOOK_URL is not set' : 'DISCORD_WEBHOOK_URL is set but is not a Discord webhook address (https://discord.com/api/webhooks/...)';
+  if (url && !on) log.warn?.(`${why}: Discord posts are off`);
   const queue = []; let busy = false, sent = 0, failed = 0;
   async function drain() {
     if (busy) return;
@@ -62,7 +66,7 @@ export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, fetchImpl
       const body = queue.shift();
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const res = await fetchImpl(url.trim(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          const res = await fetchImpl(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
           if (res.status === 429) { const j = await res.json().catch(() => ({})); await sleep(Math.min(30, Number(j.retry_after) || 2) * 1000); continue; }
           if (res.ok) sent++; else { failed++; log.warn?.(`Discord post refused (${res.status})`); }
           break;
@@ -77,6 +81,6 @@ export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, fetchImpl
     on,
     call: (e, opts) => post(callMessage(e, opts)),
     result: (e, stats) => post(resultMessage(e, stats)),
-    status: () => ({ on, sent, failed, queued: queue.length }),
+    status: () => ({ on, why, sent, failed, queued: queue.length }),
   };
 }

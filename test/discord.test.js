@@ -8,6 +8,8 @@ const call = { ticker: 'KXBTC15M-26OCT12-T1', side: 'YES', price: 0.92, conf: 97
 test('only Discord\'s own webhook addresses are accepted', () => {
   assert.equal(validWebhook(HOOK), true);
   assert.equal(validWebhook(HOOK.replace('discord.com', 'discordapp.com')), true);
+  // as people paste it: quotes, spaces, a versioned address, ?wait=true, a trailing slash
+  for (const ok of [`"${HOOK}"`, ` ${HOOK}\n`, HOOK.replace('/api/', '/api/v10/'), `${HOOK}?wait=true`, `${HOOK}/`, `<${HOOK}>`]) assert.equal(validWebhook(ok), true, ok);
   for (const bad of ['', null, 'http://discord.com/api/webhooks/1/2', 'https://evil.example/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz', 'https://discord.com.evil.io/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz', `${HOOK}/../x`]) assert.equal(validWebhook(bad), false, String(bad));
 });
 
@@ -27,6 +29,8 @@ test('the call and result messages: side, price, confidence, the close in each r
 test('posting: off without a valid address; one at a time; waits out Discord\'s rate limit and retries', async () => {
   const off = createDiscord({ url: 'https://example.com/hook', log: { warn() {} } });
   assert.equal(off.on, false); assert.equal(off.call(call), false);
+  assert.match(off.status().why, /not a Discord webhook address/); assert.match(createDiscord({ url: '' }).status().why, /not set/);
+  assert.ok(!JSON.stringify(off.status()).includes('example.com'), 'the address itself is never shown');
   const hits = []; let first = true;
   const d = createDiscord({ url: HOOK, sleep: async () => {}, log: { warn() {} }, fetchImpl: async (url, opts) => {
     hits.push({ url, body: JSON.parse(opts.body) });
@@ -37,5 +41,5 @@ test('posting: off without a valid address; one at a time; waits out Discord\'s 
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(hits.length, 3, 'the rate-limited call retried, then the result');
   assert.equal(hits[0].url, HOOK); assert.match(hits[2].body.embeds[0].title, /WIN/);
-  assert.deepEqual(d.status(), { on: true, sent: 2, failed: 0, queued: 0 });
+  assert.deepEqual(d.status(), { on: true, why: null, sent: 2, failed: 0, queued: 0 });
 });

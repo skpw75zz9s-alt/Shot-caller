@@ -313,7 +313,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);

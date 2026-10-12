@@ -282,6 +282,9 @@ round (`discord.js`).
   1. In Discord, open `#bot-calls` → Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL.
   2. In Railway, open the service → Variables → New Variable. Set `DISCORD_WEBHOOK_URL` to the copied URL.
   3. Redeploy. `/healthz` shows `"discord": true`.
+- **Pasting it.** Quotes, spaces, a `?wait=true` and versioned addresses (`/api/v10/webhooks/`) are all fine (v13.11.1).
+  If `/healthz` shows `"discord": false`, its `discordWhy` says whether the variable is missing or isn't a Discord
+  webhook address (it never shows the address).
 - **Safety.** Only Discord webhook addresses are accepted, and the URL is never logged. Treat it like a password: anyone
   who has it can post in that channel. If it leaks, delete the webhook in Discord and make a new one. Posts go out one
   at a time and respect Discord's rate limits.
