@@ -2,7 +2,7 @@
 //   Bot        the bot's own model: today's price carried forward with its momentum (the cone is centred on it)
 //   Kalshi     what Kalshi's price implies: the close level at which "above the target" is exactly as likely as
 //              Kalshi's YES price says, using the bot's volatility
-//   Exchanges  the five exchanges' combined trend: a straight-line fit through their median price over the last
+//   Exchanges  the streamed markets' combined trend (the five USD exchanges plus the global markets, levels aligned): a straight-line fit through their median price over the last
 //              5 minutes, carried to the close at half strength (trends fade)
 // Every round, each line's close prediction with 5 minutes left is graded against where BTC really closed, next to
 // "no change" (the price at that moment) as the baseline any prediction has to beat.
@@ -77,12 +77,12 @@ export function exchangeTrend(trades, now, close, { lookback = 5 * 60000, damp =
 
 // The close a probability implies: P(settlement > K) = p  =>  median settlement = K exp(sd z(p)), sd the settlement's
 const impliedClose = (strike, pAbove, sigmaMin, mins) => strike * Math.exp(Math.sqrt(settleVariance(sigmaMin, mins)) * normInv(Math.min(0.98, Math.max(0.02, pAbove))));
-export const LINE_NAMES = { bot: 'Bot', kalshi: 'Kalshi', exch: '5 exch', engine: 'Engine', guide: 'Guide', micro: 'Micro', moves: 'Move model', still: 'No change' };
+export const LINE_NAMES = { bot: 'Bot', kalshi: 'Kalshi', exch: 'Exchanges', engine: 'Engine', guide: 'Guide', micro: 'Micro', moves: 'Move model', still: 'No change' };
 // Every independent forecast of the close, each a line from today's price, clipped to the 90% cone so a runaway can't
 // fly off the chart:
 //   bot      the close the bot's own final odds imply (after every proven nudge), pBot = its P(YES)
 //   kalshi   the close Kalshi's price implies
-//   exch     the 5 exchanges' trend, half carried to the close
+//   exch     the streamed markets' trend, half carried to the close
 //   engine   the close the prediction engine's P(UP) implies (public/predictor.js)
 //   guide    the close the 15-minute forecast's calibrated P(UP) implies (public/guide.js), for the round it was made for
 //   micro    the micro model's proven 1-5 minute read (public/micro.js), held after 5 minutes
@@ -99,7 +99,7 @@ export function predictionLines({ spot, sigmaMin, now, close, until = close, str
   const k = kalshiImplied({ strike, yesMid, strikeType, sigmaMin, minutesLeft: mins });
   if (k) lines.push({ key: 'kalshi', name: 'Kalshi', color: '#a78bfa', end: clip(k), from: spot });
   const tr = exchangeTrend(trades, now, close);
-  if (tr) lines.push({ key: 'exch', name: '5 exch', color: '#fbbf24', end: clip(tr.end), from: tr.start });
+  if (tr) lines.push({ key: 'exch', name: 'Exchanges', color: '#fbbf24', end: clip(tr.end), from: tr.start });
   if (engine?.pUp != null && strike > 0) lines.push({ key: 'engine', name: 'Engine', color: '#34d399', end: clip(impliedClose(strike, engine.pUp, sigmaMin, mins)), from: spot });
   if (guide?.pUp != null && strike > 0) lines.push({ key: 'guide', name: 'Guide', color: '#f472b6', end: clip(impliedClose(strike, guide.pUp, sigmaMin, mins)), from: spot });
   if (micro?.horizons) {

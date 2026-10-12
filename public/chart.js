@@ -5,7 +5,7 @@ export const CHART_TOGGLES = [
   ['vwap', 'VWAP (from round open)', true], ['floorCeil', 'Round floor / ceiling', true], ['cone', 'Forecast cone: the most likely outcome (centred on the market read, skewed, self-calibrating)', true],
   ['volume', 'Volume', true], ['rsi', 'RSI 14', true], ['macd', 'MACD 12/26/9', true], ['markers', 'Call markers', true], ['labels', 'Price labels', true],
   ['beasts', 'Bull / bear trend + EMA crosses', true],
-  ['predict', 'Prediction lines in the cone (Bot, Kalshi, 5 exchanges, Engine, Guide, Micro, Move model)', true],
+  ['predict', 'Prediction lines in the cone (Bot, Kalshi, Exchanges, Engine, Guide, Micro, Move model)', true],
   ['flips', 'Flip watch: bend the prediction toward predicted turns, mark them ↺', true],
   ['orders', 'Live orders (only ones that move the price)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
   ['why', 'Why it moved (explains each real move)', true],

@@ -271,6 +271,29 @@ Security:
 
 ## Version notes (newest first)
 
+### Global markets (v13.8)
+
+Seven more BTC markets stream live, the ones where most of bitcoin's price discovery happens, so moves often show up
+there before the USD exchanges (`public/feeds.js` GLOBAL_EXCHANGES):
+- **Perpetual futures:** Binance perp, Bybit perp, OKX perp and Deribit perp.
+- **The biggest USDT spot market:** Binance.
+- **More USD flow:** Bitfinex and Crypto.com.
+
+**What they feed:** the trade tape, the bull/bear tug of war, whale alerts, the live-order bubbles, "why it moved", the
+exchanges' trend line (renamed "Exchanges"; it's graded and weighted by its own record, so it only gains weight if it
+predicts better) and the flip forecast.
+
+**What they never feed:** the bot's live price, Market watch's bad-data checks, the Round scan and the server's proven
+learners. USDT prices and futures premiums sit off the USD spot price Kalshi settles on.
+
+**Price alignment.** Each venue's price level is aligned to USD spot. The offset is measured only when both traded
+within a second, at most once a second, with a ~3-minute time constant: premiums drift over minutes, while lead moves
+happen in seconds and are kept as they are. Trades are held back until the first offset is known.
+
+**Where they stream.** From the phone. Binance and Bybit block US servers, and outside the US they may block your phone
+too; a venue that can't connect just shows as down in the feed chips. Keep-alives are handled: Bybit and OKX pings,
+Crypto.com's heartbeat replies and its subscribe delay.
+
 ### Profit protection (v13.7)
 
 A high win rate isn't profit. Calls bought at 90¢+ win small and lose big: a level winning 92.5% of its calls at 93¢

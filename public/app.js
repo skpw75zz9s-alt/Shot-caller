@@ -7,7 +7,7 @@ import { explainMove } from './why.js';
 import { createSplit } from './split.js';
 import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
-import { ALL_FEEDS, byExchange, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
+import { ALL_FEEDS, byExchange, createAligner, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
 import { callSound, sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
@@ -452,7 +452,9 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
 const impact = createImpact(); // which trades moved the price (public/chart.js)
 tape.recent = []; // every exchange trade in the last ~10 minutes, for "why it moved" (public/why.js)
+const alignPrices = createAligner(); // the global markets' USDT / futures price levels, aligned to USD spot (public/feeds.js)
 function handleTrades(trades) {
+  trades = alignPrices(trades);
   const p = alerts.prefs();
   for (const x of trades) {
     const live = state.markets.find((m) => Date.parse(m.close_time) > x.t);

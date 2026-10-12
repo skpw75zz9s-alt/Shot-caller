@@ -48,7 +48,7 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     hi50: line('#22d3ee80', { lineWidth: 1, lineStyle: LineStyle.Dashed }), lo50: line('#22d3ee80', { lineWidth: 1, lineStyle: LineStyle.Dashed }),
     bot: line('#22d3ee', { lineWidth: 2, lastValueVisible: true, title: 'Bot' }),
     kalshi: line('#a78bfa', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Kalshi' }),
-    exch: line('#fbbf24', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: '5 exch' }),
+    exch: line('#fbbf24', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Exchanges' }),
     engine: line('#34d399', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Engine' }),
     guide: line('#f472b6', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Guide' }),
     micro: line('#60a5fa', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Micro' }),

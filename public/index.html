@@ -260,7 +260,7 @@
           <div class="pulse-press-mid">
             <div class="pulse-press-nums"><span class="neg">Sell <b id="pulseSell">—</b></span><b id="pulseLead" class="pulse-lead">Pressure</b><span class="pos">Buy <b id="pulseBuy">—</b></span></div>
             <div class="tug-bar"><i id="pulseTugFill"></i><em id="pulseTugMark"></em></div>
-            <small class="muted" id="pulseNow">Buy vs sell pressure: last 2 minutes of trades on 5 exchanges</small>
+            <small class="muted" id="pulseNow">Buy vs sell pressure: last 2 minutes of trades on every streamed market</small>
           </div>
           <img src="bull.svg" alt="" class="beast sm" id="pulseBull">
         </div>
@@ -278,7 +278,7 @@
         <p class="pred-record" id="flipInfo"></p>
         <p class="pred-record" id="microInfo"></p>
         <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
-        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">5 exch</b> (the exchanges' trend), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
+        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
       </div>
       <div class="card radar">
         <div class="radar-head"><b>Market radar</b><small class="muted" id="radarState"></small></div>
@@ -486,7 +486,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.7 · profit protection</p>
+      <p class="fine" id="version">Shot Caller v13.8 · global markets</p>
     </section>
   </main>
 
