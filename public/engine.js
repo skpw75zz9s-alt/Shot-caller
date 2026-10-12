@@ -53,10 +53,13 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   const s = { ...DEFAULTS, ...settings };
   const bars = withLiveBar(candles, spot, now);
   const closes = bars.map((c) => c.c);
-  const sigmaLong = longVol(closes.slice(-121));
-  const sigmaMin = effectiveVol(realizedVol(closes.slice(-121)), sigmaLong, s.minVol);
-  const driftMin = momentum(closes, 10);
   const useLearned = learned && s.learn !== false;
+  // the volatility settings the server's tuner proved on history (public/voltune.js), else the standard ones
+  const vt = useLearned && learned.volTune?.use ? learned.volTune : null;
+  if (vt) s.volTails = vt.tails;
+  const sigmaLong = longVol(closes.slice(-121)), ewma = realizedVol(closes.slice(-121), vt?.lambda ?? 0.94);
+  const sigmaMin = ewma || sigmaLong ? effectiveVol(ewma, sigmaLong, s.minVol, vt?.floor ?? 0.6) * (vt?.scale ?? 1) : null;
+  const driftMin = momentum(closes, 10);
   const basis = useLearned ? basisOf(learned) : 0;
   const mSpot = spot ? spot + basis : spot; // the price Kalshi will actually settle on, as best the bot knows
   const rows = markets.map((m) => {
@@ -70,7 +73,7 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
     // and the live correction learned every second (public/pulse.js): only while it's proving itself
     const vf = useLearned ? volFactor(learned, now, Date.parse(m.close_time)) * pulseFix(learned.pulse) : 1;
     const sig = sigmaMin ? sigmaMin * vf : sigmaMin;
-    const raw = useLearned && mSpot && sig ? probYes(m, strike, mSpot, sig * s.volMultiplier, (Date.parse(m.close_time) - now) / 60000, driftMin * s.momentumWeight, settleAvg) : null;
+    const raw = useLearned && mSpot && sig ? probYes(m, strike, mSpot, sig * s.volMultiplier, (Date.parse(m.close_time) - now) / 60000, driftMin * s.momentumWeight, settleAvg, s.volTails) : null;
     const cal = useLearned ? calShift(learned, raw) : 0; // what graded windows say about odds like these
     pShift += cal;
     let ev = evaluate({ market: m, strike, spot: mSpot, sigmaMin: sig, driftMin, pShift, settleAvg, now, settings: s });
@@ -92,7 +95,7 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   // the call filter the server has learned (public/callgate.js), when it has proven itself
   const callGate = useLearned && learned?.callGate?.active ? learned.callGate : null;
-  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
+  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, volTails: s.volTails, volTune: vt, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
@@ -107,7 +110,7 @@ function edgeUnder(row, snap, s, side, volScale) {
   const drift = (snap.driftMin || 0) * s.momentumWeight;
   const keptDrift = drift * dir > 0 ? 0 : drift;
   const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
-  const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg);
+  const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg, snap.volTails ?? s.volTails);
   const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
   if (p0 == null || ask == null) return null;
   const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift)), p = side === 'YES' ? pS : 1 - pS;

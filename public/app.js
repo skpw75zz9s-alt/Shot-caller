@@ -1323,7 +1323,7 @@ function render() {
     const { side, buyNow } = sig;
     const call = sig.callSide; // a low price that passed the robust-edge and deep-dive checks (or a call it's sticking with)
     timing = sig.timing;
-    const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings }) : null;
+    const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings: { ...settings, volTails: snap.volTails ?? 0 } }) : null;
 
     setText($('marketTitle'), m.title || m.ticker);
     setText($('countdown'), `closes in ${mmss(ev.minutesLeft)}`);

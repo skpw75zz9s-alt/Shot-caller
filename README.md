@@ -271,6 +271,36 @@ Security:
 
 ## Version notes (newest first)
 
+### Tuned volatility and fat tails (v13.3)
+
+Every probability the bot gives comes from its volatility estimate, so this is the most direct lever on how accurate its
+odds are. Until now the settings were hand-picked (EWMA decay 0.94, a floor at 60% of the 2-hour volatility, no
+scaling) and the moves were assumed normal.
+- **The tuner** (`public/voltune.js`, run hourly on the server by `voltunefeed.js`) tests 630 combinations on the
+  server's 1-minute history (up to 21 days):
+  - EWMA decay 0.88–0.98
+  - floor 0.4–0.8 × the 2-hour volatility
+  - scale 0.85–1.2
+  - fat tails 0–0.6
+- **How it's scored.** Every 15 minutes it checks how likely each setting made the real moves over the next 5, 10 and
+  15 minutes. That's the log score, a proper scoring rule: it rewards the setting whose whole distribution, middle and
+  tails, matches what happens.
+- **Walk-forward by day.** Each day is scored with the setting that did best on the days before it, against the
+  standard setting. The bot switches only when that out-of-sample gain has z ≥ 2.5. The 15-minute starts don't
+  overlap.
+- **Fat tails** (`public/model.js` probYes). The volatility itself is treated as uncertain: log-normal around the
+  estimate, with the same average variance, averaged with 9-point Gauss–Hermite. Big moves become likelier and middling
+  ones a little less likely. So the bot is **less sure of big leads (odds above ~95%)**, where Near-certain and the
+  radar's direction calls live, and slightly surer of modest ones.
+- **Where it's applied.** In the bot's odds on the server and the phone (through `/api/learn`), the stress-tested edge
+  and the dip limit, only while learning is on. "What it's using" shows the settings and their z. `/api/voltune` has
+  the full report, including how often each setting's 90% range held on out-of-sample days.
+- **Simulated markets (21 days).** When volatility shifts every half hour without warning, it's proven (z 3.7–5.6),
+  picks a faster decay and fat tails, and its 90% range holds 0.89–0.90 vs 0.885 for the standard setting. On GARCH and
+  constant-volatility markets it was proven on one seed of two. It can't be checked on real BTC from this build
+  environment; the server runs it on its own history.
+- An hourly run is ~2.5 s of work, done in slices, so the server never stalls more than ~0.13 s.
+
 ### Market radar (v13.2)
 
 A new card under the chart. It makes calls about the current round that come true **at least 90% of the time**,

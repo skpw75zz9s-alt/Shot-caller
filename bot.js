@@ -26,7 +26,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}) }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -284,7 +284,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         if (!canNotify(d)) continue; // paywall: no access, no bot
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
-        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned, now, shifts: learnedShifts });
+        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts });
         snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
@@ -351,10 +351,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     return true;
   }
 
+  // What the server has learned, with the volatility settings its tuner has proven (voltunefeed.js), for the odds
+  function learnedNow() { const v = volTune(); return v?.use ? { ...learned, volTune: v } : learned; }
+
   // ---------- learning (every window, all day, every day) ----------
   function observe(now) {
     if (!backfilling && learnCandles(learned, market.candles.filter((c) => c.t + 60000 <= now))) learnDirty = true;
-    const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: market.spot, settings: DEVICE_DEFAULTS, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned, now, shifts: learnedShifts });
+    const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: market.spot, settings: DEVICE_DEFAULTS, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned: learnedNow(), now, shifts: learnedShifts });
     snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
     for (const row of snap.rows) {
       const close = Date.parse(row.m.close_time);
@@ -434,6 +437,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const cal = calTable(learned), corrected = cal.filter((b) => b.shift).length, pb = pulseBlend(learned.pulse), g = learned.callGate, fixOn = pulseStatus(learned.pulse);
     const info = shiftInfo() || {}, scanOn = !!info.scan, microOn = !!info.micro, tuned = info.tune || [], revBands = info.reversal || [], guideOn = !!info.guide, predOn = !!info.predictor;
     return [
+      { key: 'voltune', name: 'Tuned volatility (and fat tails)', on: !!info.volTune?.use, detail: info.volTune?.use ? `EWMA ${info.volTune.lambda}, floor ${info.volTune.floor}× the 2-hour volatility, scale ×${info.volTune.scale}${info.volTune.tails ? `, fat tails ${info.volTune.tails}` : ''}: described the next 5-15 minutes better than the standard settings on days it was never tuned on (z ${info.volTune.z.toFixed(1)})` : 'standard settings until a tuned one describes BTC\'s moves better out of sample (z 2.5+, rechecked hourly)' },
       { key: 'vol', name: 'Volatility by time of week', on: !!p, detail: p ? 'prices the coming minutes with how busy this half hour usually is' : 'needs a week of history' },
       { key: 'cal', name: 'Calibration', on: corrected > 0, detail: corrected ? `corrects ${corrected} confidence band${corrected === 1 ? '' : 's'} from graded rounds` : 'no band has needed (or earned) a correction yet' },
       { key: 'basis', name: 'Coinbase vs Kalshi\'s settlement', on: learned.basis.length >= 10, detail: learned.basis.length >= 10 ? `${basisOf(learned) >= 0 ? '+' : '−'}$${Math.abs(basisOf(learned)).toFixed(2)} folded into the price` : `${learned.basis.length} of 10 settlements` },

@@ -15,6 +15,7 @@ import { createFutures } from './futures.js';
 import { createMicroFeed } from './microfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
+import { createVolTuneFeed } from './voltunefeed.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -58,6 +59,9 @@ export const marketWatch = createMarketWatch({ kalshi: KALSHI, scanFeed, futures
 // The micro model: how the market's small details move BTC over the next 1-5 minutes (microfeed.js, public/micro.js)
 // Indicator tuning: which indicator settings have actually predicted the rounds (tunefeed.js, public/tune.js)
 export const tuneFeed = createTuneFeed({ playbook });
+// Volatility tuning: which volatility settings (and how fat the tails) have described BTC's moves best, walk-forward
+// (voltunefeed.js, public/voltune.js). Once proven, the bot's odds use them
+export const volTuneFeed = createVolTuneFeed({ playbook });
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
@@ -67,14 +71,16 @@ export const bot = createBot({
     try { marketWatch.observe(o); } catch (e) { console.error('market watch step failed', e.message); }
     try { microFeed.observe(o); } catch (e) { console.error('micro model step failed', e.message); }
     try { tuneFeed.observe(o); } catch (e) { console.error('indicator tuning step failed', e.message); }
+    try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
     autotrade?.step(o);
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
   shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
-  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven }),
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live() }),
   watch: () => marketWatch.status(),
+  volTune: () => volTuneFeed.live(),
 });
 setInterval(() => access.prune(), 3600000).unref();
 
@@ -336,7 +342,8 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/micro') return send(res, 200, microFeed.api());
     if (path === '/api/playbook') return send(res, 200, playbook.api());
     if (path === '/api/tune') return send(res, 200, tuneFeed.api());
-    if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
+    if (path === '/api/voltune') return send(res, 200, volTuneFeed.api());
+    if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates(), volTune: volTuneFeed.live() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
     const route = ROUTES.find((r) => path.startsWith(r.prefix));

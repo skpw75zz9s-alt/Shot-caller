@@ -34,9 +34,9 @@ export function oddsShift(move, { spot, strike, sigmaMin, minutesLeft, strikeTyp
 // The volatility the model prices with: short-term EWMA vol, but never far below the 2-hour vol and
 // never below a floor. A few frozen minutes (thin overnight tape, stale ticks) would otherwise make
 // the bot ~100% sure of a $2 lead.
-export function effectiveVol(ewma, long, minVol = 0.00008) {
+export function effectiveVol(ewma, long, minVol = 0.00008, floor = 0.6) {
   if (!ewma && !long) return null;
-  return Math.max(ewma || 0, 0.6 * (long || 0), minVol);
+  return Math.max(ewma || 0, floor * (long || 0), minVol);
 }
 
 // Per-minute log-return volatility from a list of closes (oldest first), EWMA-weighted.
@@ -94,6 +94,7 @@ function gaussHermite(n) {
   return x.map((xi, k) => [xi * Math.SQRT2, w[k] / Math.sqrt(Math.PI)]);
 }
 export const GH24 = gaussHermite(24);
+export const GH9 = gaussHermite(9);
 // The final-minute shape R for prints at times u_1 < ... < u_n (minutes): exact mean, variance and third cumulant
 // (variance and cumulant built from expm1 terms, never from raw moments, which would cancel away the digits), and the
 // shifted log-normal R = shift + e^Y, Y ~ N(mu, s^2), with all three
@@ -219,7 +220,17 @@ export function quote(m) {
 }
 
 // Model probability that the market resolves YES, based on its strike definition.
-export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin, settleAvg = null) {
+// tails > 0 (v13.3, the volatility tuner's fat tails: public/voltune.js): the volatility itself is uncertain, log-normal
+// with spread `tails` around the estimate and the same average variance (sigma_j = sigma e^(tails z - tails^2)), so the
+// odds average over it (9-point Gauss-Hermite). Same spread, fatter tails: big moves are likelier than the normal curve
+// says, and middling ones a little less likely, so the bot is less sure of a big lead (odds above ~95%) and a little
+// surer of a modest one
+export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin, settleAvg = null, tails = 0) {
+  if (tails > 0 && sigmaMin > 0) {
+    let p = 0;
+    for (const [z, wt] of GH9) { const v = probYes(m, strike, S, sigmaMin * Math.exp(tails * z - tails * tails), minutesLeft, driftMin, settleAvg); if (v == null) return null; p += wt * v; }
+    return Math.min(1, Math.max(0, p));
+  }
   const type = m.strike_type || 'greater';
   const floor = num(m.floor_strike) ?? strike;
   const cap = num(m.cap_strike);
@@ -250,6 +261,7 @@ export const DEFAULTS = {
   bankroll: 100,
   maxStake: 25,
   minVol: 0.00008,      // volatility floor per minute (0.8 bp, ~$7/min at $85k): frozen tapes aren't certainty
+  volTails: 0,          // fat tails: the spread of the volatility's own uncertainty (set by the volatility tuner once proven)
   minConfidence: 85,    // confidence = win odds (0-100) a call needs before it fires (Balanced)
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)
   holdEdgeFrac: 0.5,    // once called, the call stands while the robust gap is at least half of minEdge...
@@ -319,7 +331,7 @@ export function evaluate({ market, strike, spot, sigmaMin, driftMin = 0, pShift 
   const out = { minutesLeft, quote: q, pYes: null, pBase: null, pShift: 0, evYes: null, evNo: null, call: 'PASS', reason: '', side: null, price: null, contracts: 0, edge: 0 };
 
   if (!spot || !sigmaMin) return { ...out, reason: 'Waiting for price data' };
-  const p = probYes(market, strike, spot, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight, settleAvg);
+  const p = probYes(market, strike, spot, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight, settleAvg, s.volTails);
   if (p === null) return { ...out, reason: 'Unknown strike' };
   out.pBase = p;
   out.pShift = pShift;
@@ -397,7 +409,7 @@ export function dipLimit({ market, strike, spot, dipLevel, sigmaMin, driftMin = 
   const s = { ...DEFAULTS, ...settings };
   if (!side || !spot || !dipLevel || !sigmaMin) return null;
   const minutesLeft = (Date.parse(market.close_time) - now) / 60000;
-  const p = (S) => probYes(market, strike, S, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight);
+  const p = (S) => probYes(market, strike, S, sigmaMin * s.volMultiplier, minutesLeft, driftMin * s.momentumWeight, null, s.volTails);
   const pNow = p(spot), pDip = p(dipLevel);
   if (pNow === null || pDip === null) return null;
   const q = quote(market);
