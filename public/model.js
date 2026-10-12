@@ -265,6 +265,8 @@ export const DEFAULTS = {
   fastSec: 0,           // fast lane: the steady wait drops to this many seconds (0 = off) when the bot is fastConf+ sure
   fastConf: 98,         //   and Kalshi's ask for the side is fastAsk or more
   fastAsk: 0.93,
+  dailyLossLimit: 25,   // buy alerts stop for the day once your tracked trades lose this much today ($; 0 = off)
+  lossStopUntil: 0,     //   (set by the phone when the limit is hit, so the server's pushes stop too)
   volTails: 0,          // fat tails: the spread of the volatility's own uncertainty (set by the volatility tuner once proven)
   minConfidence: 85,    // confidence = win odds (0-100) a call needs before it fires (Balanced)
   rejectionWeight: 1,   // how much rejection trends move the odds (0 = off, 1 = up to ±5 pts)

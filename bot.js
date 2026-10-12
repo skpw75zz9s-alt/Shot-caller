@@ -2,7 +2,8 @@
 // to subscribed phones, so alerts arrive even when the app is closed.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, quote, riskSettings } from './public/model.js';
+import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
+import { profitGuard } from './public/profitguard.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
@@ -46,7 +47,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const OFFICIAL_LEVEL = 'target90', OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
   const currentRecord = () => record.filter((e) => e.lv === OFFICIAL_LEVEL);
   let guardCache = null; // refreshed every 5 s (it scans the record)
-  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()) }).g);
+  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord) }).g);
+  // The profit guard (public/profitguard.js) for a level the server keeps a record of: the 90% target (official) and Near-certain
+  const profitNow = (level, now = Date.now()) => { guardNow(now); return level === OFFICIAL_LEVEL ? guardCache.pg : level === 'certain' ? guardCache.pgC : null; };
+  // Why a phone's buy alerts are paused: its daily loss limit (synced from the phone) or its level's profit guard
+  const buyBlocked = (s, now) => (s.lossStopUntil > now ? 'loss' : profitNow(riskLevelOf(s), now)?.paused ? 'profit' : null);
   const recordFile = dataFile.replace(/[^/\\]+$/, 'record.json');
   let record = [], recordDirty = false, recordSavedAt = 0;
   const officialMem = {};
@@ -305,7 +310,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const sig = buySignal(snap.live, snap, withGuard(s, guardNow().floor), now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, market.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
+          if (s.notifyBuy && sig.fire && !buyBlocked(s, now)) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, market.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
           // The bot's call went bad: bail out (phones tracking a position on it get the position's own sell alert)
           if (s.notifySell && sig.bail && !d.positions.some((p) => p.ticker === snap.live.m.ticker)) fire(`bail:${snap.live.m.ticker}`, bailMessage(snap.live, sig), 120, 'sell', { ticker: snap.live.m.ticker, posId: `bail:${snap.live.m.ticker}` });
           // Aggressive scale-in: only phones holding that call hear about the add
@@ -388,7 +393,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
-    try { onObserve?.({ snap, sig, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
+    // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
+    const sigTrade = sig && profitNow(OFFICIAL_LEVEL, now)?.paused ? { ...sig, fire: false, callSide: null, profitPaused: true } : sig;
+    try { onObserve?.({ snap, sig: sigTrade, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
     if (snap.live) {
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
@@ -415,9 +422,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
   function officialRecord() {
     const cur = currentRecord(), before = record.filter((e) => e.lv !== OFFICIAL_LEVEL);
-    return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: guardStats(cur),
+    return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: guardStats(cur), profitGuard: profitGuard(cur),
       before: before.length ? { level: 'Steady', since: before[0].at, until: before.at(-1).at, ...callStats(before) } : null,
-      certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100) } };
+      certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100), profitGuard: profitGuard(certainRecord) } };
   }
   function learnFrom(t) {
     const w = lw[t];

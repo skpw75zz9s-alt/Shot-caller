@@ -21,6 +21,7 @@ import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js'
 import { radarRead, radarRecord } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
+import { dailyLoss, profitGuard } from './profitguard.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -74,6 +75,7 @@ const SETTINGS_META = [
   ['minMinutesLeft', 'Min minutes left', 'Stop calling this close to settlement', 'num'],
   ['waitMinutes', 'Wait before calling (min)', 'Minutes into each 15-minute window before the bot makes any call', 'num'],
   ['volMultiplier', 'Vol multiplier', '1 = measured volatility. Above 1 expects bigger swings (odds closer to 50/50)', 'num'],
+  ['dailyLossLimit', 'Daily loss limit ($)', 'Once your tracked trades lose this much in a day, buy alerts stop until midnight (0 = off). Protects you from chasing losses', 'num'],
   ['momentumWeight', 'Momentum weight', 'How much of the 10-min drift to carry forward (0 to 1)', 'num'],
   ['learnBlend', 'Learn how much to trust Kalshi', 'Once the bot has proven a blend of its odds and Kalshi\'s price scores better (150+ rounds), use it instead of the setting below', 'bool'],
   ['marketWeight', 'Respect the market', 'Blend Kalshi\'s own price into the bot\'s odds (0 = the bot alone, 1 = Kalshi alone). History → What the bot has learned shows which blend has scored best, graded every second', 'num'],
@@ -1276,11 +1278,26 @@ function renderRadar(rd, spot) {
   if (rec.dir.n) parts.push(`direction <b>${rec.dir.hit} of ${rec.dir.n}</b>`);
   setHTML($('radarRecord'), parts.length ? `Radar record (graded at each close): ${parts.join(' · ')}` : 'Every radar call is graded at the close; the record shows here whether 90% really held.');
 }
+// Why buys are paused right now, if they are (public/profitguard.js): today's trades past the daily loss limit, or the
+// level's profit guard. The loss stop is synced to the server so its push alerts stop too.
+function levelCalls() {
+  const lvl = riskLevelOf(settings);
+  return lvl === 'target90' ? state.botRecord?.calls : lvl === 'certain' ? state.botRecord?.certain?.calls : state.callLog;
+}
+function buyBlock(now = Date.now()) {
+  const dl = dailyLoss(state.trades, settings.dailyLossLimit, now), until = dl.hit ? dl.until : 0;
+  if ((settings.lossStopUntil || 0) !== until && (dl.hit || settings.lossStopUntil > now)) { settings.lossStopUntil = until; store.set('settings', settings); pushSyncSoon(); }
+  if (dl.hit) return { kind: 'loss', dl };
+  const pg = profitGuard(levelCalls());
+  return pg.paused ? { kind: 'profit', pg } : null;
+}
 // The accuracy card (public/accuracy.js): every predictor's record next to its baseline, and the report to copy
 function accuracyNow() {
   const br = state.botRecord, bot = br?.graded != null ? br : callStats(state.callLog);
   return accuracyRows({ bot, predictor: state.playbook?.report?.predictor ?? null, blend: blendScore(state.predLog), path: pathRecord(state.pcLog), cone: coneRecord(state.coneLog),
-    radar: radarRecord(state.predLog, state.pcLog), flip: flipRecord(state.flipLog, state.flipBase), tune: state.memory?.learned?.volTune ?? null });
+    radar: radarRecord(state.predLog, state.pcLog), flip: flipRecord(state.flipLog, state.flipBase), tune: state.memory?.learned?.volTune ?? null,
+    guard: { level: RISK_LEVELS[riskLevelOf(settings)]?.label ?? 'your settings', ...profitGuard(levelCalls()) },
+    trades: { n: state.trades.length, total: state.trades.reduce((a, t) => a + (t.pnl || 0), 0), today: dailyLoss(state.trades, settings.dailyLossLimit) } });
 }
 function renderAccuracy(now = Date.now()) {
   if (now - (state.accAt || 0) < 5000) return;
@@ -1326,10 +1343,11 @@ function render() {
   renderPositions(snap);
   const sig = live && state.spotAt ? buySignal(live, snap, withGuard(settings, state.botRecord?.guard?.floor), now, state.calls) : null; // never call off the cached price from last visit (90% target: the server's guard floor)
   if (sig?.fire) store.set('calls', state.calls);
+  const block = buyBlock(now); // the daily loss limit or the profit guard: calls still show as paused, no buy alerts
   trackRule(snap, live, now);
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
-  const showBuy = !!state.liveCall && !state.positions.some((p) => p.ticker === live.m.ticker);
+  const showBuy = !!state.liveCall && !block && !state.positions.some((p) => p.ticker === live.m.ticker);
   setHidden($('boughtBtn'), !showBuy || !!state.kalshi.key); // linked: buys arrive from Kalshi on their own
   setHidden($('autoNote'), !showBuy || !state.kalshi.key);
   const card = $('callCard'), callEl = $('call'), entry = $('entry');
@@ -1400,6 +1418,17 @@ function render() {
       }
     }
 
+    // Paused (daily loss limit or profit guard): the call is shown, but not as a buy
+    if (block && call && !bail) {
+      if (setText(callEl, 'PAUSED')) pop(callEl);
+      setClass(callEl, 'call pass'); cardCls.length = 2;
+      setText($('callLabel'), block.kind === 'loss' ? 'Daily loss limit hit · no buys today' : 'Profit guard · buys paused');
+      setText($('callSub'), `The bot would call ${call === 'YES' ? 'UP' : 'DOWN'}, logged as a paper call`);
+      setText($('reason'), block.kind === 'loss'
+        ? `Your trades have lost ${money(block.dl.pnl)} today, past your ${dollars(block.dl.limit)} daily limit (Settings). Buy alerts are off until midnight so a bad day doesn't turn into chasing losses.`
+        : `This level's last ${block.pg.n} calls lost ${money(block.pg.usd)} after fees ($10 a call, held to settlement), even if most of them won. Its buy alerts are paused; it keeps paper-calling, and the alerts come back on their own once those calls are making money again.`);
+    }
+
     entry.hidden = !side;
     if (side) {
       const label = timing.state === 'NOW' ? `Candles: dip now, good timing for ${side}` : timing.state === 'CHASE' ? 'Candles: chasing, price just ran' : `Candles: no dip yet for ${side}`;
@@ -1408,7 +1437,7 @@ function render() {
         (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : ''));
     }
 
-    if (!call) setText($('order'), '');
+    if (!call || block) setText($('order'), '');
     else if (buyNow || !settings.waitForDip) {
       const age = sig.calledAt ? Math.round((now - sig.calledAt) / 1000) : 0;
       setText($('order'), `Buy ${dollars(sig.contracts * sig.price)} at ${pc(sig.price)} ${sideName(call)}` +
@@ -1420,7 +1449,7 @@ function render() {
     if (sig.fire) {
       if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN })) store.set('callLog', state.callLog);
       const key = `${m.ticker}:${call}:${sig.callN}`;
-      if (!state.alerted[key]) {
+      if (!state.alerted[key] && !block) {
         state.alerted[key] = true;
         if (settings.notifyBuy) alert(buyMessage(live, sig, state.spot), 'buy', { ticker: m.ticker });
         if (alerts.prefs().lockAnim && !alerts.prefs().quiet) fx.lockIn({ side: call, conf: sig.deep?.score, hold: sig.hold, price: sig.price, confident: (sig.deep?.score ?? 0) >= 90 && (sig.hold ?? 0) >= 0.9 });

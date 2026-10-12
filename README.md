@@ -271,6 +271,22 @@ Security:
 
 ## Version notes (newest first)
 
+### Profit protection (v13.7)
+
+A high win rate isn't profit. Calls bought at 90¢+ win small and lose big: a level winning 92.5% of its calls at 93¢
+loses money after fees. This version guards the money, not the win rate (`public/profitguard.js`).
+- **Profit guard.** It scores each level's last 40 graded calls as $10 held to settlement after Kalshi's fee.
+  - With 20+ calls adding up to a loss, that level's **buy alerts pause**: on the phone the call shows as PAUSED, and
+    push alerts and the Auto-trader's buys stop.
+  - The bot keeps logging what it would have called, so the alerts come back on their own once those calls make money
+    again.
+  - Sources: the official record for the 90% target level, Near-certain's record for Near-certain, and the phone's own
+    call log for other levels.
+- **Daily loss limit** (Settings, $25 by default, 0 = off). Once your tracked trades lose that much in a day, buy alerts
+  stop until midnight, on the phone and in push alerts (the stop is synced to the server).
+- **Accuracy card.** Levels are now judged by profit after fees, not win rate. New rows show the profit guard on your
+  level and your own trades against your daily limit.
+
 ### Fast lane for early calls (v13.6)
 
 The 90% target level now calls overwhelming leads sooner, without lowering its bar.

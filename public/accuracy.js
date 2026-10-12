@@ -8,17 +8,17 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const usd = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(x).toFixed(2)}`;
 const dol = (x) => `$${Math.round(x).toLocaleString('en-US')}`;
 
-export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null } = {}) {
+export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null, guard = null, trades = null } = {}) {
   const rows = [], add = (key, name, n, verdict, metric, vs, data) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' ? 'wait' : verdict, metric, vs, data });
   // the official calls and Near-certain: their win rates mean little alone (a 90¢ call should win 90%), so the bar is
   // profit after fees at $10 a call
   if (bot) {
     const g = bot.graded || 0;
-    // on the 90% target level (with its win-rate guard) the bar is the 90% win rate itself, with the profit shown
-    const gd = bot.guard, verdict = gd ? (g && bot.wins / g >= 0.9 ? 'good' : 'bad') : bot.usd == null ? 'wait' : bot.usd > 0 ? 'good' : 'bad';
+    // the bar is profit after fees: a high win rate on 90c+ calls can still lose money (v13.7)
+    const gd = bot.guard, verdict = bot.usd == null ? 'wait' : bot.usd > 0 ? 'good' : 'bad';
     add('calls', `Official calls${bot.level ? ` (${bot.level})` : ''}`, g, verdict, g ? `won ${bot.wins} of ${g} (${pct(bot.wins / g)})` : 'no graded calls yet',
       !g ? (gd ? `aims for 90%+: calls only sides Kalshi prices at ${Math.round(gd.floor * 100)}¢+` : 'graded at each settlement')
-        : gd ? `target 90%+ · price floor now ${Math.round(gd.floor * 100)}¢${bot.usd != null ? ` · ${usd(bot.usd)} at $10 a call after fees` : ''}`
+        : gd ? `${bot.usd != null ? `${usd(bot.usd)} at $10 a call after fees · ` : ''}win-rate target 90%+, price floor now ${Math.round(gd.floor * 100)}¢`
         : bot.usd == null ? 'profit isn\'t tracked on this phone yet (the server\'s record has it)' : `${usd(bot.usd)} at $10 a call after fees: the bar a win rate has to clear is the price paid`,
       { graded: g, wins: bot.wins ?? 0, usd: bot.usd ?? null, ...(gd ? { floor: gd.floor, guardN: gd.n, guardWins: gd.wins } : {}) });
     const c = bot.certain;
@@ -58,6 +58,13 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
   }
   if (flip) add('flips', 'Flip calls (↺)', flip.n || 0, flip.n && flip.base != null && flip.rate > flip.base ? 'good' : 'bad',
     flip.n ? `caught ${flip.hits} of ${flip.n} (${pct(flip.rate)})` : 'each predicted turn checked afterwards', flip.base != null ? `vs ${pct(flip.base)} for a random minute` : '', flip.n ? { n: flip.n, hits: flip.hits, base: flip.base } : null);
+  // the profit guard on your level, and your own trades against your daily limit
+  if (guard) add('profit', `Profit guard (${guard.level})`, Math.max(guard.n, ACC.min), guard.paused ? 'bad' : guard.n >= 20 ? 'good' : 'off',
+    guard.paused ? 'buy alerts PAUSED: this level is losing money' : guard.n >= 20 ? 'buy alerts on: this level is making money' : `watching (${guard.n} of 20 graded calls)`,
+    guard.n ? `last ${guard.n} calls: ${usd(guard.usd)} after fees at $10 a call` : 'pauses alerts when a level loses money after fees', { n: guard.n, usd: guard.usd, paused: guard.paused });
+  if (trades) add('trades', 'Your trades', trades.n, !trades.n ? 'wait' : trades.total > 0 ? 'good' : 'bad', trades.n ? `${usd(trades.total)} over ${trades.n} trades` : 'no tracked trades yet',
+    trades.today.limit > 0 ? `today ${usd(trades.today.pnl)} of your ${'$'}${trades.today.limit} daily loss limit${trades.today.hit ? ': limit hit, buy alerts off until midnight' : ''}` : 'no daily loss limit set (Settings)',
+    { n: trades.n, total: trades.total, today: trades.today.pnl, limit: trades.today.limit, hit: trades.today.hit });
   // the server's tuners: on only once proven
   add('tuning', 'Tuned volatility and momentum', ACC.min, tune?.use || tune?.drift ? 'good' : 'off',
     tune?.use ? `volatility: EWMA ${tune.lambda}, floor ${tune.floor}, ×${tune.scale}${tune.tails ? `, fat tails ${tune.tails}` : ''} (z ${tune.z.toFixed(1)})` : 'volatility: standard settings (nothing proven better yet)',
