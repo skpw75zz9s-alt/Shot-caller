@@ -63,3 +63,25 @@ test('the radar record grades every logged call at the close', () => {
   assert.deepEqual(r.range, { n: 2, hit: 1, rate: 0.5 }); assert.deepEqual(r.dir, { n: 1, hit: 1, rate: 1 });
   assert.deepEqual(r.next, { n: 2, hit: 1, rate: 0.5 });
 });
+
+test('the radar screen: prices run up the screen around the expected close, every exchange is a blip that flares with the beam', async () => {
+  const { scopeLayout, scopeSvg, scopeIdle, blipTag, SCOPE } = await import('../public/radar.js');
+  const rd = { expected: 100035, lo: 99955, hi: 100115, floor: 99980, ceil: 100090, target: 99990, dir: null, next: { lo: 100012, hi: 100058 } };
+  const ven = [{ ex: 'Binance', price: 100031, net: 5 }, { ex: 'Kraken', price: 100029, net: -1 }, { ex: 'OKX perp', price: 100120, net: 0 }];
+  const L = scopeLayout(rd, 100060, ven), c = SCOPE.size / 2;
+  assert.equal(L.Y(rd.expected), c, 'the expected close is the centre');
+  assert.ok(L.Y(rd.ceil) < c && L.Y(rd.floor) > c && L.Y(rd.target) > c, 'higher prices higher on the screen');
+  assert.ok(Math.abs(L.rr - (L.Y(rd.lo) - c)) < 1e-9, 'the 90% range is a circle around the centre');
+  for (const b of L.blips) assert.ok(Math.hypot(b.x - c, b.y - c) <= SCOPE.r + 1e-9, `${b.ex} stays on the screen`);
+  for (const p of [rd.target, rd.lo, rd.hi, 100060]) assert.ok(Math.abs(L.Y(p) - c) <= SCOPE.r, 'everything fits inside the rings');
+  const svg = scopeSvg(rd, 100060, ven, { phase: 1000 });
+  assert.match(svg, /TARGET \$99,990/); assert.match(svg, /FLOOR \$99,980/); assert.match(svg, /CEILING \$100,090/); assert.match(svg, /NOW \$100,060/); assert.match(svg, /NO CALL/);
+  assert.equal((svg.match(/animation-delay:-\d+ms/g) || []).length, 4, 'each blip and the price now are synced to the beam');
+  for (const d of svg.match(/animation-delay:(-\d+)ms/g).map((x) => +x.match(/-\d+/)[0])) assert.ok(d <= 0 && d > -SCOPE.period);
+  assert.ok(!scopeSvg(rd, 100060, ven).includes('animation-delay'), 'no beam phase, no sync');
+  assert.match(scopeSvg({ ...rd, floor: 100000, dir: 'UP' }, 100060, ven), /UP · 90%\+/);
+  assert.ok(!scopeSvg({ ...rd, target: 0 }, 100060, []).includes('TARGET'), 'no target, no line or zones');
+  assert.equal(blipTag('Bybit perp'), 'BYB·P'); assert.equal(blipTag('Newex'), 'NEW');
+  assert.match(scopeSvg(rd, 100060, [{ ex: '<x>', price: 100000, net: 0 }]), /&#60;x&#62;/, 'names are escaped');
+  assert.match(scopeIdle(), /WAITING FOR A LIVE ROUND/);
+});

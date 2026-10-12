@@ -656,21 +656,39 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 /* ---------- the market radar ---------- */
 .radar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .radar-head small { font-size: 10px; }
-.radar-scope { display: block; width: 100%; height: auto; margin: 8px 0 4px; background: radial-gradient(ellipse at 50% 120%, #2ee6a612, transparent 70%), var(--bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.radar-grid { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 2 4; }
-.radar-range { fill: var(--yes-bg); stroke: var(--yes); stroke-width: 1; }
-.radar-edge { stroke: var(--yes); stroke-width: 2; }
-.radar-target { stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.radar-exp { fill: var(--accent); }
-.radar-now { fill: var(--text); stroke: var(--bg); stroke-width: 1.5; }
-.radar-next { fill: #22d3ee22; stroke: var(--accent); stroke-width: 1; }
-.radar-lbl { fill: var(--muted); font: 9px var(--mono); }
-.radar-venue { fill: var(--pass); stroke: var(--bg); stroke-width: 1.5; opacity: .9; }
-.radar-venue.b { fill: var(--yes); } .radar-venue.s { fill: var(--no); }
-.radar-lbl.tgt { fill: var(--amber); }
-.radar-sweep { fill: #2ee6a60c; animation: radarSweep 4s linear infinite; }
-@keyframes radarSweep { from { transform: translateX(-40px); } to { transform: translateX(360px); } }
-@media (prefers-reduced-motion: reduce) { .radar-sweep { animation: none; display: none; } }
+/* the radar screen (v13.13): a round phosphor scope; the beam is a CSS overlay so redraws never restart it */
+.radar-wrap { position: relative; width: 100%; max-width: 340px; margin: 10px auto 4px; aspect-ratio: 1; }
+.radar-scope { display: block; width: 100%; height: 100%; overflow: visible; }
+.radar-beam { position: absolute; left: 4%; top: 4%; width: 92%; height: 92%; border-radius: 50%; pointer-events: none; mix-blend-mode: screen;
+  background: conic-gradient(from 0deg, transparent 0deg 270deg, #2ee6a600 270deg, #2ee6a62e 352deg, #7dffd0aa 359.2deg, #c8ffe9 360deg);
+  animation: radarBeam 4s linear infinite; }
+@keyframes radarBeam { to { transform: rotate(360deg); } }
+.rs-bezel { fill: #0b111d; stroke: #22304f; stroke-width: 2; }
+.rs-screen { stroke: #0f3a2b; stroke-width: 1.5; }
+.rs-up { fill: #2ee6a617; } .rs-down { fill: #ff4d6d2e; }
+.rs-ring { fill: none; stroke: #2ee6a62b; stroke-width: 1; }
+.rs-cross { stroke: #2ee6a624; stroke-width: 1; stroke-dasharray: 2 3; }
+.rs-tick { stroke: #2ee6a666; stroke-width: 1; }
+.rs-scale { fill: #2ee6a670; font: 7.5px var(--mono); }
+.rs-range { fill: #2ee6a60d; stroke: var(--yes); stroke-width: 1.6; filter: drop-shadow(0 0 3px #2ee6a6aa); }
+.rs-edge { stroke: var(--yes); stroke-width: 2.2; stroke-linecap: round; }
+.rs-target { stroke: var(--amber); stroke-width: 1.6; stroke-dasharray: 5 3; filter: drop-shadow(0 0 2px #fbbf2488); }
+.rs-next { fill: #22d3ee14; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 3 2; }
+.rs-exp { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+.rs-lbl { fill: #9fe9c9; font: 8px var(--mono); paint-order: stroke; stroke: #02100b; stroke-width: 2.5px; }
+.rs-lbl.tgt { fill: var(--amber); } .rs-lbl.now { fill: #fff; }
+.rs-ex { fill: #9fe9c9b3; font: 6.5px var(--mono); }
+.rs-corner { fill: #2ee6a699; font: 600 8.5px var(--mono); letter-spacing: .6px; }
+.rs-corner.up { fill: var(--yes); } .rs-corner.down { fill: var(--no); }
+.rs-blip circle { fill: var(--pass); } .rs-blip.b circle { fill: var(--yes); } .rs-blip.s circle { fill: var(--no); }
+.rs-now circle { fill: #fff; }
+/* each blip flares as the beam passes it, then fades like phosphor */
+.rs-blip, .rs-now { animation: radarBlip 4s linear infinite; }
+@keyframes radarBlip { 0% { opacity: 1; } 8% { opacity: 1; } 70% { opacity: .38; } 100% { opacity: .38; } }
+@media (prefers-reduced-motion: reduce) { .radar-beam { animation: none; display: none; } .rs-blip, .rs-now { animation: none; } }
+.radar-key { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; margin: 2px 0 6px; font: 10px var(--mono); color: var(--muted); }
+.radar-key .k-range, .radar-key .k-edge, .radar-key i.b { color: var(--yes); } .radar-key .k-tgt { color: var(--amber); } .radar-key .k-now { color: var(--text); }
+.radar-key .k-exp, .radar-key .k-next { color: var(--accent); } .radar-key i { font-style: normal; } .radar-key i.s { color: var(--no); margin-right: 3px; }
 .radar-dir { margin: 6px 0; font-size: 13px; line-height: 1.45; }
 .radar-calls { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
 .radar-calls li small { color: var(--yes); font: 10px var(--mono); margin-left: 4px; }

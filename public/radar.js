@@ -72,3 +72,103 @@ export function radarRecord(log, pcLog = []) {
   for (const x of Object.values(t)) x.rate = x.n ? x.hit / x.n : null;
   return t;
 }
+
+// The scope (v13.12): the radar drawn as a real radar screen, a round phosphor display with range rings, a bezel and a
+// sweeping beam (the beam is a CSS overlay, so it never restarts when this redraws). Price runs up and down the screen:
+//   centre      the expected close (+)
+//   range ring  the 90% range (it's symmetric around the expected close, so it's a circle)
+//   chords      the floor and ceiling, inside the ring
+//   target      a horizontal line across the screen; above it is the UP zone (green), below the DOWN zone (red)
+//   now         BTC's price now, the bright blip on the centre line
+//   next        the next minute's 90% band, the small dashed circle
+//   blips       every exchange, at its price (green: buyers led its last minute, red: sellers), spread left and right
+//   rings       each ring is labelled with its distance from the expected close
+// phase: where the beam is now (ms into its period), so each blip lights up as the beam passes it
+export const SCOPE = { size: 300, r: 132, beam: 138, period: 4000 };
+const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const money = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+// Each exchange's tag on its blip (perps marked ·P); anything new falls back to its first three letters
+const TAGS = { Coinbase: 'CB', Kraken: 'KRK', Bitstamp: 'BST', Gemini: 'GEM', 'Binance.US': 'BUS', Binance: 'BIN', 'Binance perp': 'BIN·P', 'Bybit perp': 'BYB·P',
+  'OKX perp': 'OKX·P', 'Deribit perp': 'DER·P', Bitfinex: 'BFX', 'Crypto.com': 'CRO' };
+export const blipTag = (ex) => TAGS[ex] ?? String(ex).slice(0, 3).toUpperCase();
+const short = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`);
+
+export function scopeLayout(rd, spot, venues = []) {
+  const { size, r: R } = SCOPE, c = size / 2, E = rd.expected;
+  const near = [rd.hi - E, E - rd.lo, Math.abs(rd.floor - E), Math.abs(rd.ceil - E), Number.isFinite(spot) ? Math.abs(spot - E) : 0,
+    rd.target > 0 ? Math.abs(rd.target - E) : 0, rd.next ? Math.max(Math.abs(rd.next.hi - E), Math.abs(rd.next.lo - E)) : 0, ...venues.map((v) => Math.abs(v.price - E))];
+  const S = Math.max(1, ...near.filter(Number.isFinite)) * 1.18;
+  const Y = (p) => c - ((p - E) / S) * R, half = (y, rad = R) => Math.sqrt(Math.max(0, rad * rad - (y - c) ** 2));
+  const sorted = [...venues].sort((a, b) => a.ex.localeCompare(b.ex)), per = Math.max(1, Math.ceil(sorted.length / 2) - 1);
+  const blips = sorted.map((v, i) => {
+    const y = Y(v.price), f = 0.3 + 0.55 * (Math.floor(i / 2) / per), x = c + (i % 2 ? 1 : -1) * f * half(y);
+    return { ...v, x, y };
+  });
+  const rr = ((rd.hi - E) / S) * R;
+  return { c, R, S, Y, half, rr, blips, now: Number.isFinite(spot) ? Y(spot) : null };
+}
+// The beam's angle at a point: degrees clockwise from 12 o'clock
+const bearing = (x, y, c) => ((Math.atan2(x - c, c - y) * 180) / Math.PI + 360) % 360;
+
+// The screen without a read: bezel, phosphor screen, range rings, crosshairs and bearing ticks. under: drawn between
+// the screen and the rings (the zones)
+function frame(under = '') {
+  const { size } = SCOPE, R = SCOPE.r, c = size / 2, f = (v) => v.toFixed(1);
+  const out = ['<defs><radialGradient id="rsScreen" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#06231a"/><stop offset=".75" stop-color="#03140f"/><stop offset="1" stop-color="#010806"/></radialGradient>'
+    + `<clipPath id="rsClip"><circle cx="${c}" cy="${c}" r="${R + 6}"/></clipPath>`
+    + '<filter id="rsGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'];
+  // bezel and screen
+  out.push(`<circle class="rs-bezel" cx="${c}" cy="${c}" r="${R + 13}"/><circle class="rs-screen" cx="${c}" cy="${c}" r="${R + 6}" fill="url(#rsScreen)"/>`);
+  out.push(under);
+  // range rings, crosshairs and bearing ticks
+  for (let k = 1; k <= 4; k++) out.push(`<circle class="rs-ring" cx="${c}" cy="${c}" r="${f((R * k) / 4)}"/>`);
+  out.push(`<line class="rs-cross" x1="${c - R - 6}" x2="${c + R + 6}" y1="${c}" y2="${c}"/><line class="rs-cross" x1="${c}" x2="${c}" y1="${c - R - 6}" y2="${c + R + 6}"/>`);
+  for (let a = 0; a < 360; a += 10) {
+    const t = (a * Math.PI) / 180, r1 = R + 6, r2 = R + (a % 30 ? 9 : 12);
+    out.push(`<line class="rs-tick" x1="${f(c + r1 * Math.sin(t))}" y1="${f(c - r1 * Math.cos(t))}" x2="${f(c + r2 * Math.sin(t))}" y2="${f(c - r2 * Math.cos(t))}"/>`);
+  }
+  return out;
+}
+export const scopeIdle = (msg = 'WAITING FOR A LIVE ROUND') => frame().join('') + `<text class="rs-corner" x="${SCOPE.size / 2}" y="${SCOPE.size / 2 + SCOPE.r / 2 + 4}" text-anchor="middle">${xmlEsc(msg)}</text>`;
+
+export function scopeSvg(rd, spot, venues = [], { phase = null } = {}) {
+  const { size, period: P } = SCOPE, L = scopeLayout(rd, spot, venues), { c, R, Y, half, rr } = L, f = (v) => v.toFixed(1);
+  const sync = (x, y) => {
+    if (phase == null) return '';
+    const d = ((((bearing(x, y, c) / 360) * P - phase) % P) + P) % P;
+    return ` style="animation-delay:${Math.round(d - P)}ms"`;
+  };
+  const yT = rd.target > 0 ? Y(rd.target) : null;
+  // the UP and DOWN zones either side of the target
+  const out = frame(yT == null ? '' : `<g clip-path="url(#rsClip)"><rect class="rs-up" x="0" y="0" width="${size}" height="${f(Math.max(0, yT))}"/><rect class="rs-down" x="0" y="${f(Math.max(0, yT))}" width="${size}" height="${f(Math.max(0, size - yT))}"/></g>`);
+  for (let k = 1; k <= 4; k++) out.push(`<text class="rs-scale" x="${f(c - (R * k) / 4 * 0.5 - 2)}" y="${f(c - (R * k) / 4 * 0.866 + 3)}" text-anchor="end">±${short((L.S * k) / 4)}</text>`); // on each ring, up and to the left
+  // the 90% range ring, the floor and ceiling chords
+  out.push(`<circle class="rs-range" cx="${c}" cy="${c}" r="${f(rr)}"/>`);
+  for (const [p, name] of [[rd.ceil, 'CEILING'], [rd.floor, 'FLOOR']]) {
+    const y = Y(p), w = Math.max(10, half(y, rr));
+    // labelled outside the ring's middle: the ceiling above its chord, the floor below
+    out.push(`<line class="rs-edge" x1="${f(c - w)}" x2="${f(c + w)}" y1="${f(y)}" y2="${f(y)}"/><text class="rs-lbl" x="${c}" y="${f(name === 'CEILING' ? y - 4 : y + 10)}" text-anchor="middle">${name} ${money(p)}</text>`);
+  }
+  // the target line
+  if (yT != null) {
+    const w = half(yT, R + 6);
+    out.push(`<line class="rs-target" x1="${f(c - w)}" x2="${f(c + w)}" y1="${f(yT)}" y2="${f(yT)}"/><text class="rs-lbl tgt" x="${f(c + Math.min(w, R) - 4)}" y="${f(yT - 4)}" text-anchor="end">TARGET ${money(rd.target)}</text>`);
+  }
+  // the next minute's band
+  if (rd.next) {
+    const y = Y((rd.next.lo + rd.next.hi) / 2), rad = Math.max(3, ((rd.next.hi - rd.next.lo) / 2 / L.S) * R);
+    out.push(`<circle class="rs-next" cx="${c}" cy="${f(y)}" r="${f(rad)}"/>`);
+  }
+  // the exchanges' blips, then the expected close and the price now
+  for (const b of L.blips) {
+    out.push(`<g class="rs-blip ${b.net > 0 ? 'b' : b.net < 0 ? 's' : ''}"${sync(b.x, b.y)}><circle cx="${f(b.x)}" cy="${f(b.y)}" r="3.6" filter="url(#rsGlow)"><title>${xmlEsc(b.ex)} ${money(b.price)}</title></circle>`
+      + `<text class="rs-ex" x="${f(b.x)}" y="${f(b.y - 6)}" text-anchor="middle">${xmlEsc(blipTag(b.ex))}</text></g>`);
+  }
+  out.push(`<path class="rs-exp" d="M${c - 6} ${c}h12M${c} ${c - 6}v12"/>`);
+  if (L.now != null) out.push(`<g class="rs-now"${sync(c, L.now)}><circle cx="${c}" cy="${f(L.now)}" r="4.8" filter="url(#rsGlow)"/><text class="rs-lbl now" x="${c + 8}" y="${f(L.now + 3)}">NOW ${money(spot)}</text></g>`);
+  // the corners: the zones and the verdict
+  if (yT != null) out.push(`<text class="rs-corner up" x="6" y="14">▲ UP ZONE</text><text class="rs-corner down" x="6" y="${size - 6}">▼ DOWN ZONE</text>`);
+  out.push(`<text class="rs-corner ${rd.dir === 'UP' ? 'up' : rd.dir === 'DOWN' ? 'down' : ''}" x="${size - 6}" y="${size - 6}" text-anchor="end">${rd.dir ? `${rd.dir} · 90%+` : rd.target > 0 ? 'NO CALL' : ''}</text>`);
+  out.push(`<text class="rs-corner" x="${size - 6}" y="14" text-anchor="end">${venues.length} EXCH</text>`);
+  return out.join('');
+}

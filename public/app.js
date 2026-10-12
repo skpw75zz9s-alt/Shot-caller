@@ -18,7 +18,7 @@ import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, GLOBAL_SCAN, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
-import { radarRead, radarRecord } from './radar.js';
+import { radarRead, radarRecord, scopeIdle, scopeSvg, SCOPE } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
 import { dailyLoss, profitGuard } from './profitguard.js';
@@ -1255,7 +1255,8 @@ function trackPredictions(snap, live, now) {
     + (sc.n ? `Blend scoreboard (${int(sc.n)} calls over ${int(sc.rounds)} round${sc.rounds === 1 ? '' : 's'}, every minute, out of sample): blend <b>${d(sc.blend)}</b> average miss`
       + `${sc.still != null ? ` vs <b>${d(sc.still)}</b> for "no change"` : ''}${sc.best ? ` · best single line ${LINE_NAMES[sc.best.key] || sc.best.key} <b>${d(sc.best.miss)}</b> vs the blend's ${d(sc.best.blend)} on the same calls` : ''}` : ''));
 }
-// The radar card: a price scope (the 90% range, floor and ceiling, the target, the price now and the next minute's band),
+// The radar card: a radar screen (public/radar.js scopeSvg: the 90% range ring, floor and ceiling, the target, the price now,
+// the next minute's band and every exchange's blip),
 // the direction verdict, the calls and their record
 // Every exchange right now (from the live trades, global markets' prices aligned to USD): its latest price (last 20 s)
 // and its last minute's net taker flow, for the radar's blips
@@ -1269,23 +1270,16 @@ function venueRead(now = Date.now()) {
   }
   return Object.entries(last).map(([ex, price]) => ({ ex, price, net: net[ex] || 0 }));
 }
+// Where the beam is in its sweep (ms into the 4 s period), so each blip flares as the beam passes it
+function beamPhase() {
+  try { const t = $('radarBeam')?.getAnimations?.()[0]?.currentTime; return Number.isFinite(t) ? t % SCOPE.period : null; } catch { return null; }
+}
 function renderRadar(rd, spot) {
   const $$ = (x) => `$${Math.round(x).toLocaleString()}`, rec = radarRecord(state.predLog, state.pcLog), ven = venueRead();
   if (!rd) {
-    setHTML($('radarScope'), ''); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), ''); setHTML($('radarVenues'), '');
+    setHTML($('radarScope'), scopeIdle()); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), ''); setHTML($('radarVenues'), '');
   } else {
-    const vs = [rd.lo, rd.hi, rd.floor, rd.ceil, rd.expected, spot, rd.target, rd.next?.lo, rd.next?.hi, ...ven.map((v) => v.price)].filter(Number.isFinite);
-    const mn = Math.min(...vs), mx = Math.max(...vs), pad = (mx - mn) * 0.08 || 10, X = (v) => (12 + (v - mn + pad) / (mx - mn + 2 * pad) * 336).toFixed(1);
-    const tag = (v, y, txt, cls) => `<text x="${X(v)}" y="${y}" class="${cls}" text-anchor="middle">${txt}</text>`;
-    setHTML($('radarScope'), '<rect class="radar-sweep" x="0" y="0" width="40" height="136"/>'
-      + `<line class="radar-grid" x1="12" x2="348" y1="40" y2="40"/><line class="radar-grid" x1="12" x2="348" y1="80" y2="80"/>`
-      + `<rect class="radar-range" x="${X(rd.lo)}" y="31" width="${(X(rd.hi) - X(rd.lo)).toFixed(1)}" height="18" rx="4"/>`
-      + `<line class="radar-edge" x1="${X(rd.floor)}" x2="${X(rd.floor)}" y1="26" y2="54"/><line class="radar-edge" x1="${X(rd.ceil)}" x2="${X(rd.ceil)}" y1="26" y2="54"/>`
-      + tag(rd.floor, 66, 'floor', 'radar-lbl') + tag(rd.ceil, 66, 'ceiling', 'radar-lbl')
-      + `<line class="radar-grid" x1="12" x2="348" y1="118" y2="118"/>${ven.map((v) => `<circle class="radar-venue ${v.net > 0 ? 'b' : v.net < 0 ? 's' : ''}" cx="${X(v.price)}" cy="118" r="5"><title>${esc(v.ex)}</title></circle>`).join('')}${ven.length ? tag((mn + mx) / 2, 134, 'exchanges', 'radar-lbl') : ''}`
-      + (rd.target > 0 ? `<line class="radar-target" x1="${X(rd.target)}" x2="${X(rd.target)}" y1="8" y2="126"/>${tag(rd.target, 18, `target ${$$(rd.target)}`, 'radar-lbl tgt')}` : '')
-      + `<path class="radar-exp" d="M${X(rd.expected)} 33 l6 7 l-6 7 l-6 -7z"/><circle class="radar-now" cx="${X(spot)}" cy="40" r="3.5"/>`
-      + (rd.next ? `<rect class="radar-next" x="${X(rd.next.lo)}" y="75" width="${Math.max(2, X(rd.next.hi) - X(rd.next.lo)).toFixed(1)}" height="10" rx="3"/>${tag((rd.next.lo + rd.next.hi) / 2, 99, 'next minute', 'radar-lbl')}` : ''));
+    setHTML($('radarScope'), scopeSvg(rd, spot, ven, { phase: beamPhase() }));
     setText($('radarState'), rd.sure ? `90%+ by its own record: ${int(rd.n)} past minutes${rd.stretch ? ' at this stage of the round' : ''}` : `Learning: normal-curve 90% until 9 graded minutes (${int(rd.n)} so far)`);
     setHTML($('radarDir'), !(rd.target > 0) ? '' : rd.dir ? `<b class="${rd.dir === 'UP' ? 'pos' : 'neg'}">${rd.dir}</b>, 90%+: even the 90% ${rd.dir === 'UP' ? `floor (${$$(rd.floor)}) is above` : `ceiling (${$$(rd.ceil)}) is below`} the target (${$$(rd.target)})`
       : `<b>No 90% direction call</b>: the expected close (${$$(rd.expected)}) is ${$$(rd.need)} short of a 90% margin from the target (${$$(rd.target)}). It comes when BTC moves further from the target or the time left runs down`);

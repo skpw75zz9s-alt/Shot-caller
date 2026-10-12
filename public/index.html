@@ -282,7 +282,8 @@
       </div>
       <div class="card radar">
         <div class="radar-head"><b>Market radar</b><small class="muted" id="radarState"></small></div>
-        <svg id="radarScope" class="radar-scope" viewBox="0 0 360 136" role="img" aria-label="The radar's 90% range, floor, ceiling and target, and every exchange's price"></svg>
+        <div class="radar-wrap"><svg id="radarScope" class="radar-scope" viewBox="0 0 300 300" role="img" aria-label="Radar screen: the expected close in the centre, the 90% range ring, the floor and ceiling, the target line, BTC now, and every exchange's price as a blip"></svg><div class="radar-beam" id="radarBeam" aria-hidden="true"></div></div>
+        <p class="radar-key"><span class="k-range">◯ 90% range</span><span class="k-edge">━ floor / ceiling</span><span class="k-tgt">┅ target</span><span class="k-now">● now</span><span class="k-exp">+ expected close</span><span class="k-next">◌ next minute</span><span class="k-blip"><i class="b">●</i><i class="s">●</i> exchanges (buying / selling)</span></p>
         <p class="radar-dir" id="radarDir"></p>
         <ul class="radar-calls" id="radarCalls"></ul>
         <p class="pred-record" id="radarVenues"></p>
@@ -487,7 +488,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.12 · Official Discord posts</p>
+      <p class="fine" id="version">Shot Caller v13.13 · Radar screen</p>
     </section>
   </main>
 
