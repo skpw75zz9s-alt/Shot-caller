@@ -271,6 +271,32 @@ Security:
 
 ## Version notes (newest first)
 
+### Market radar (v13.2)
+
+A new card under the chart. It makes calls about the current round that come true **at least 90% of the time**,
+graded at every close.
+- **How 90% is reached honestly.** Not by out-guessing BTC: any question whose answer is wide enough can be answered
+  90% of the time, and the radar finds the narrowest such answers from the bot's own record. The method is split
+  conformal prediction (`public/radar.js`). Every logged minute left a score, how far the close landed from the blend's
+  expected close in typical moves. With n past scores, the ⌈(n+1)·0.9⌉-th smallest is a threshold a new score stays
+  under with probability ≥ 90%, whatever the distribution (fat tails, skew), provided coming rounds behave like past
+  ones.
+- **The calls:**
+  - closes above a floor
+  - closes below a ceiling
+  - closes inside a range
+  - the next 1-minute candle closes inside its band
+  - **UP or DOWN**, but only when even the 90% floor (ceiling) clears the target, so it inherits the 90%. Otherwise it
+    says how far short the margin is.
+- **Per stage of the round.** Scores come from the same stretch (1–3, 4–7, 8–14 minutes left) once it has 30, else from
+  every minute. Below 9 graded minutes there's no guarantee yet: it uses the normal curve's 90% points and labels the
+  calls "≈90% (learning)".
+- **Graded.** Every call is logged each minute and graded at the close. The card shows how often each kind really held.
+- **What to expect from direction calls.** If the lines add nothing over the price, a random walk that starts at the
+  target gets a 90% direction call at 10 minutes left in about 7% of rounds, at 5 minutes left in about 37% and at 2
+  minutes left in about 62%. Kalshi prices those sides at about 90¢ or more as well, so they're accurate but rarely
+  profitable. Ninety percent accuracy on the open question (which way, from the start) isn't available to anyone.
+
 ### Calibrated lines (v13.1)
 
 Each prediction line is now made more accurate on its own before the blend.

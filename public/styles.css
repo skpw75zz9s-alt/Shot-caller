@@ -644,6 +644,27 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .pred-record { margin: 6px 0 2px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .pred-record b { color: var(--text); }
 
+/* ---------- the market radar ---------- */
+.radar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.radar-head small { font-size: 10px; }
+.radar-scope { display: block; width: 100%; height: auto; margin: 8px 0 4px; background: radial-gradient(ellipse at 50% 120%, #2ee6a612, transparent 70%), var(--bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.radar-grid { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 2 4; }
+.radar-range { fill: var(--yes-bg); stroke: var(--yes); stroke-width: 1; }
+.radar-edge { stroke: var(--yes); stroke-width: 2; }
+.radar-target { stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.radar-exp { fill: var(--accent); }
+.radar-now { fill: var(--text); stroke: var(--bg); stroke-width: 1.5; }
+.radar-next { fill: #22d3ee22; stroke: var(--accent); stroke-width: 1; }
+.radar-lbl { fill: var(--muted); font: 9px var(--mono); }
+.radar-lbl.tgt { fill: var(--amber); }
+.radar-sweep { fill: #2ee6a60c; animation: radarSweep 4s linear infinite; }
+@keyframes radarSweep { from { transform: translateX(-40px); } to { transform: translateX(360px); } }
+@media (prefers-reduced-motion: reduce) { .radar-sweep { animation: none; display: none; } }
+.radar-dir { margin: 6px 0; font-size: 13px; line-height: 1.45; }
+.radar-calls { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
+.radar-calls li small { color: var(--yes); font: 10px var(--mono); margin-left: 4px; }
+.radar-dir:empty, .radar-calls:empty { display: none; }
+
 /* ---------- fold any card by its title ---------- */
 .card.foldable > :first-child { cursor: pointer; user-select: none; -webkit-user-select: none; }
 .card.foldable > :first-child > span:first-child::before, .card.foldable > h3:first-child::before { content: '▾ '; color: var(--accent); display: inline-block; transition: transform .2s ease; }

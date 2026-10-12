@@ -118,7 +118,7 @@ export function predictionLines({ spot, sigmaMin, now, close, until = close, str
 // The record: per line, its 5-minutes-left predictions against where BTC closed: average miss, mean squared error and
 // bias (dollars). `still` is "no change" (logged as spot by older versions). Rounds first seen after the 5-minute mark
 // (only minute checkpoints, no 5-minute call) aren't in it.
-const META = new Set(['ticker', 'closeTime', 'at', 'spot', 'actual', 'gone', 'cps', 'sd', 'blend']);
+const META = new Set(['ticker', 'closeTime', 'at', 'spot', 'actual', 'gone', 'cps', 'sd', 'blend', 'r']);
 export function predictionRecord(log) {
   const done = log.filter((e) => e.actual != null && (e.at != null || !e.cps));
   const keys = [...new Set(done.flatMap((e) => Object.keys(e).filter((k) => !META.has(k) && Number.isFinite(e[k]))))];

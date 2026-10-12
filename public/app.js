@@ -18,6 +18,7 @@ import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
+import { radarRead, radarRecord } from './radar.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -1121,6 +1122,12 @@ function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   const final = fit.final, minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta, final });
   return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
 }
+// The market radar (public/radar.js): calls about this round that hold 90%+ of the time, from the bot's own record
+function radarNow(live, snap, now, pcs = pathNow(live, snap, now)) {
+  if (!live || !pcs.path) return null;
+  const close = Date.parse(live.m.close_time), mins = Math.max(0, (close - now) / 60000), spot = modelSpot(), sigma = live.sigma ?? snap.sigmaMin, m0 = pcs.minutes[0];
+  return radarRead({ log: state.predLog, pcLog: state.pcLog, expected: pcs.path(close), sd: spot * sigma * Math.sqrt(mins), mins, target: live.strike, next: m0 ? { t: m0.t, c: m0.c, sd: spot * sigma } : null });
+}
 // The cone (public/predict.js marketCone): centred on the expected path, skewed by the last hour, calibrated on its record
 function coneNow(live, snap, now, path, until = Date.parse(live.m.close_time)) {
   return marketCone({ path, spot: modelSpot(), sigmaMin: live.sigma ?? snap.sigmaMin, now, close: until, bars: snap.bars, strike: live.strike, strikeType: live.m.strike_type, fix: coneRecord(state.coneLog).fix });
@@ -1139,7 +1146,9 @@ function trackPredictions(snap, live, now) {
     if (cpDue) {
       const cents = (v) => Math.round(v * 100) / 100, c = { sd: cents(modelSpot() * (live.sigma ?? snap.sigmaMin) * Math.sqrt(ml)) };
       for (const l of lines) c[l.key] = cents(l.end);
-      c.blend = cents(pathNow(live, snap, now, lines).path(Date.parse(live.m.close_time)));
+      const pcs = pathNow(live, snap, now, lines), rd = radarNow(live, snap, now, pcs);
+      c.blend = cents(pcs.path(Date.parse(live.m.close_time)));
+      if (rd) c.r = { f: cents(rd.floor), c: cents(rd.ceil), l: cents(rd.lo), h: cents(rd.hi), d: rd.dir, tg: live.strike }; // the radar's calls, graded at the close
       (pe.cps ||= {})[m] = c;
     }
     if (fiveDue) {
@@ -1178,10 +1187,10 @@ function trackPredictions(snap, live, now) {
   if (live) {
     const next = Math.floor(now / 60000) * 60000 + 60000;
     if (next < horizonOf(live, now) && next - now <= 15000) {
-      const c = pathNow(live, snap, now).minutes[0];
+      const pcs = pathNow(live, snap, now), c = pcs.minutes[0];
       if (c && c.t === next) {
-        const e = state.pcLog.find((x) => x.t === next);
-        const beta = pathRecord(state.pcLog).beta, rec = { o: c.o, c: c.c, beta };
+        const e = state.pcLog.find((x) => x.t === next), rn = radarNow(live, snap, now, pcs)?.next;
+        const beta = pathRecord(state.pcLog).beta, rec = { o: c.o, c: c.c, beta, sd: modelSpot() * (live.sigma ?? snap.sigmaMin), ...(rn && rn.t === next ? { lo: rn.lo, hi: rn.hi } : {}) };
         if (e) Object.assign(e, rec); else { state.pcLog.unshift({ t: next, ...rec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }
@@ -1214,6 +1223,9 @@ function trackPredictions(snap, live, now) {
   const cr = coneRecord(state.coneLog);
   if (!live) state.coneSum = null;
   else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, pathNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s
+  if (!live) state.radar = null;
+  else if (!(now - (state.radarAt || 0) < 5000)) { state.radarAt = now; state.radar = radarNow(live, snap, now); } // every 5 s
+  renderRadar(state.radar, modelSpot());
   const cs = state.coneSum, $$ = (x) => `$${Math.round(x).toLocaleString()}`;
   setHTML($('coneRead'), (cs ? `Cone: most likely close <b>${$$(cs.lo50)}–${$$(cs.hi50)}</b> (50%) · 90%: ${$$(cs.lo90)}–${$$(cs.hi90)} · <b>${Math.round(cs.pAbove * 100)}%</b> chance of finishing above the target${Math.abs(cs.skew.up - cs.skew.dn) > 0.15 ? ` · ${cs.skew.dn > cs.skew.up ? 'downside' : 'upside'} wider (the last hour's ${cs.skew.dn > cs.skew.up ? 'drops' : 'rallies'} were sharper)` : ''}. ` : '')
     + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
@@ -1231,6 +1243,34 @@ function trackPredictions(snap, live, now) {
     : 'Prediction lines are graded each round: what each one said at every minute vs where BTC closed (keep the app open through a few rounds). ')
     + (sc.n ? `Blend scoreboard (${int(sc.n)} calls over ${int(sc.rounds)} round${sc.rounds === 1 ? '' : 's'}, every minute, out of sample): blend <b>${d(sc.blend)}</b> average miss`
       + `${sc.still != null ? ` vs <b>${d(sc.still)}</b> for "no change"` : ''}${sc.best ? ` · best single line ${LINE_NAMES[sc.best.key] || sc.best.key} <b>${d(sc.best.miss)}</b> vs the blend's ${d(sc.best.blend)} on the same calls` : ''}` : ''));
+}
+// The radar card: a price scope (the 90% range, floor and ceiling, the target, the price now and the next minute's band),
+// the direction verdict, the calls and their record
+function renderRadar(rd, spot) {
+  const $$ = (x) => `$${Math.round(x).toLocaleString()}`, rec = radarRecord(state.predLog, state.pcLog);
+  if (!rd) {
+    setHTML($('radarScope'), ''); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), '');
+  } else {
+    const vs = [rd.lo, rd.hi, rd.floor, rd.ceil, rd.expected, spot, rd.target, rd.next?.lo, rd.next?.hi].filter(Number.isFinite);
+    const mn = Math.min(...vs), mx = Math.max(...vs), pad = (mx - mn) * 0.08 || 10, X = (v) => (12 + (v - mn + pad) / (mx - mn + 2 * pad) * 336).toFixed(1);
+    const tag = (v, y, txt, cls) => `<text x="${X(v)}" y="${y}" class="${cls}" text-anchor="middle">${txt}</text>`;
+    setHTML($('radarScope'), '<rect class="radar-sweep" x="0" y="0" width="40" height="104"/>'
+      + `<line class="radar-grid" x1="12" x2="348" y1="40" y2="40"/><line class="radar-grid" x1="12" x2="348" y1="80" y2="80"/>`
+      + `<rect class="radar-range" x="${X(rd.lo)}" y="31" width="${(X(rd.hi) - X(rd.lo)).toFixed(1)}" height="18" rx="4"/>`
+      + `<line class="radar-edge" x1="${X(rd.floor)}" x2="${X(rd.floor)}" y1="26" y2="54"/><line class="radar-edge" x1="${X(rd.ceil)}" x2="${X(rd.ceil)}" y1="26" y2="54"/>`
+      + tag(rd.floor, 66, 'floor', 'radar-lbl') + tag(rd.ceil, 66, 'ceiling', 'radar-lbl')
+      + (rd.target > 0 ? `<line class="radar-target" x1="${X(rd.target)}" x2="${X(rd.target)}" y1="8" y2="96"/>${tag(rd.target, 18, `target ${$$(rd.target)}`, 'radar-lbl tgt')}` : '')
+      + `<path class="radar-exp" d="M${X(rd.expected)} 33 l6 7 l-6 7 l-6 -7z"/><circle class="radar-now" cx="${X(spot)}" cy="40" r="3.5"/>`
+      + (rd.next ? `<rect class="radar-next" x="${X(rd.next.lo)}" y="75" width="${Math.max(2, X(rd.next.hi) - X(rd.next.lo)).toFixed(1)}" height="10" rx="3"/>${tag((rd.next.lo + rd.next.hi) / 2, 99, 'next minute', 'radar-lbl')}` : ''));
+    setText($('radarState'), rd.sure ? `90%+ by its own record: ${int(rd.n)} past minutes${rd.stretch ? ' at this stage of the round' : ''}` : `Learning: normal-curve 90% until 9 graded minutes (${int(rd.n)} so far)`);
+    setHTML($('radarDir'), !(rd.target > 0) ? '' : rd.dir ? `<b class="${rd.dir === 'UP' ? 'pos' : 'neg'}">${rd.dir}</b>, 90%+: even the 90% ${rd.dir === 'UP' ? `floor (${$$(rd.floor)}) is above` : `ceiling (${$$(rd.ceil)}) is below`} the target (${$$(rd.target)})`
+      : `<b>No 90% direction call</b>: the expected close (${$$(rd.expected)}) is ${$$(rd.need)} short of a 90% margin from the target (${$$(rd.target)}). It comes when BTC moves further from the target or the time left runs down`);
+    setHTML($('radarCalls'), [`Closes above <b>${$$(rd.floor)}</b>`, `Closes below <b>${$$(rd.ceil)}</b>`, `Closes between <b>${$$(rd.lo)}</b> and <b>${$$(rd.hi)}</b>`, rd.next ? `Next minute closes between <b>${$$(rd.next.lo)}</b> and <b>${$$(rd.next.hi)}</b>` : null]
+      .filter(Boolean).map((t) => `<li>${t} <small>${rd.sure ? '90%+' : '≈90% (learning)'}</small></li>`).join(''));
+  }
+  const pct = (x) => `<b>${Math.round(x.rate * 100)}%</b> (${int(x.n)})`, parts = [['floor held', rec.floor], ['ceiling', rec.ceil], ['range', rec.range], ['next minute', rec.next]].filter(([, x]) => x.n).map(([k, x]) => `${k} ${pct(x)}`);
+  if (rec.dir.n) parts.push(`direction <b>${rec.dir.hit} of ${rec.dir.n}</b>`);
+  setHTML($('radarRecord'), parts.length ? `Radar record (graded at each close): ${parts.join(' · ')}` : 'Every radar call is graded at the close; the record shows here whether 90% really held.');
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track
 function chartFills() {

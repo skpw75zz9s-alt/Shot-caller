@@ -54,6 +54,7 @@
   <link rel="modulepreload" href="pulse.js">
   <link rel="modulepreload" href="roundscan.js">
   <link rel="modulepreload" href="predict.js">
+  <link rel="modulepreload" href="radar.js">
   <link rel="modulepreload" href="tvchart.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -274,7 +275,15 @@
         <p class="pred-record" id="flipInfo"></p>
         <p class="pred-record" id="microInfo"></p>
         <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
-        <p class="fine-left" id="chartNote">Cone: where BTC usually ends up by the close at the bot's own volatility (inner band 50% of outcomes, outer 90%). <b>Prediction lines</b> in the cone: where each market says BTC closes. <b style="color:#22d3ee">Bot</b> = the bot's model, <b style="color:#a78bfa">Kalshi</b> = the close Kalshi's price implies, <b style="color:#fbbf24">5 exch</b> = the five exchanges' trend over the last 5 minutes (half strength). Each is graded every round. <b>Prediction candles</b> (the faint candles after the live one): one realistic path for the minutes to the close. BTC wanders randomly around a blend of the three lines (weighted toward whichever has missed least), sized like the last 30 real minutes, and lands on the blend at the close. The expected path is what's graded each minute; the ups and downs are one plausible way it could get there. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe (a stretched move, RSI extremes, the round's floor or ceiling, a rejection wick, trades leaning against the move); ↺ marks each predicted turn, and every one is checked afterwards against whether a V really formed. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark where EMA 9 crossed EMA 21. The big faded animal behind the candles is the trend: bull while EMA 9 is above EMA 21, bear while it's below. <b>Live orders</b>: only orders that move the market bubble. An order (its fills on one exchange within a second) has to push the price its way by at least $5 and 30% of a typical 10-second move; trades the book soaks up don't show, even whales. It pops up at its price, green when buyers pushed it up and red when sellers pushed it down, sized by dollars (gold for a whale), with how far it moved the price above it, then bursts after about 3 seconds. <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs, and the Auto-trader's (🤖).</p>
+        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">5 exch</b> (the exchanges' trend), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
+      </div>
+      <div class="card radar">
+        <div class="radar-head"><b>Market radar</b><small class="muted" id="radarState"></small></div>
+        <svg id="radarScope" class="radar-scope" viewBox="0 0 360 104" role="img" aria-label="The radar's 90% range, floor, ceiling and target"></svg>
+        <p class="radar-dir" id="radarDir"></p>
+        <ul class="radar-calls" id="radarCalls"></ul>
+        <p class="pred-record" id="radarRecord"></p>
+        <p class="fine-left">Each call comes true at least 90% of the time if the coming rounds behave like the past ones. That's by construction (split conformal prediction on the bot's own graded minutes), not because BTC is predictable: the radar finds the narrowest answers that still hold 90%. A 90% direction call only shows when even the floor or ceiling clears the target, usually late in a round, when Kalshi prices that side at 90¢ or more too.</p>
       </div>
     </section>
 
@@ -467,7 +476,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.1 · calibrated lines</p>
+      <p class="fine" id="version">Shot Caller v13.2 · market radar</p>
     </section>
   </main>
 
