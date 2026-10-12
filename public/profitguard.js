@@ -6,7 +6,8 @@
 //                 the alerts come back by themselves
 //   Daily loss    your own tracked trades (what you actually bought and sold): once today's closed trades have lost
 //                 your daily limit, buy alerts stop until midnight (your phone's time)
-import { pnl10 } from './model.js';
+import { feeEach, pnl10 } from './model.js';
+import { wilsonLow } from './winguard.js';
 
 export const PG = { window: 40, min: 20 };
 
@@ -23,4 +24,22 @@ export function dailyLoss(trades, limit, now = Date.now()) {
   const pnl = today.reduce((a, t) => a + (t.pnl || 0), 0), hit = limit > 0 && pnl <= -limit + 1e-9;
   const next = new Date(start); next.setDate(next.getDate() + 1);
   return { pnl, trades: today.length, limit, hit, until: hit ? next.getTime() : null };
+}
+
+// The early lane's proof (v13.16): early calls (10 to 5 minutes left, Kalshi at 80-89c) start as test calls, graded but
+// never sent. They go live only once the test record shows they really beat Kalshi's price:
+//   n      50+ graded test calls
+//   low    the win rate's 90% lower bound (Wilson), at or above
+//   need   what those prices need to break even: the average price paid plus its fee, at $10 a call
+//   usd    and a profit after fees
+// and they drop back to test calls whenever their last 40 lose money after fees (the profit guard). Simulation couldn't
+// settle whether early calls beat Kalshi (it depends on how good Kalshi's early prices really are), so real rounds decide.
+export const EARLY = { min: 50 };
+export function earlyProof(calls) {
+  const graded = (calls || []).filter((e) => e.result === 'yes' || e.result === 'no');
+  const n = graded.length, wins = graded.filter((e) => e.side.toLowerCase() === e.result).length;
+  const usd = graded.reduce((a, e) => a + pnl10(e.price, e.side.toLowerCase() === e.result), 0);
+  const need = n ? graded.reduce((a, e) => a + e.price + feeEach(e.price, Math.floor(10 / e.price)), 0) / n : null;
+  const low = wilsonLow(wins, n), pg = profitGuard(calls);
+  return { n, wins, usd, need, low, live: n >= EARLY.min && usd > 0 && low >= need - 1e-9 && !pg.paused, paused: pg.paused };
 }

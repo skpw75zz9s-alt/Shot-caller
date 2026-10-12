@@ -32,13 +32,13 @@ const usd = (v) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toFixed(2)}`;
 const ts = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`; // Discord shows it in each reader's own time zone
 
 // The embeds (pure, so they're testable)
-export function callMessage(e, { strike = null, floor = null, paper = false, level = 'official', base = null, late = false } = {}) {
+export function callMessage(e, { strike = null, floor = null, paper = false, level = 'official', base = null, late = false, early = false } = {}) {
   const up = e.side === 'YES', { author, ...sender } = brand(base);
   return {
     ...sender,
     embeds: [{
       author,
-      title: `${paper ? '📝 PAPER · ' : ''}${up ? '🐂' : '🐻'} ${sideName(e.side)} call${late ? ' · ⏱ LATE' : ''}`,
+      title: `${paper ? '📝 PAPER · ' : ''}${up ? '🐂' : '🐻'} ${sideName(e.side)} call${late ? ' · ⏱ LATE' : early ? ' · ⚡ EARLY' : ''}`,
       description: paper ? 'The profit guard has buy alerts paused (this level is losing money after fees), so this is logged as a paper call, not a buy.' : `BTC ${up ? 'above' : 'below'} ${strike ? `$${Math.round(strike).toLocaleString('en-US')}` : 'the target'} when the round closes.`,
       color: paper ? 0x5d6880 : up ? 0x2ee6a6 : 0xff4d6d,
       fields: [
@@ -46,6 +46,7 @@ export function callMessage(e, { strike = null, floor = null, paper = false, lev
         { name: 'Confidence', value: e.conf != null ? `${Math.round(e.conf)}` : '—', inline: true },
         { name: 'Closes', value: ts(Date.parse(e.closeTime)), inline: true },
         ...(floor != null ? [{ name: 'Price floor', value: `${cents(floor)} (win-rate guard)`, inline: true }] : []),
+        ...(early ? [{ name: 'Early lane', value: 'Called before Kalshi is sure: live after its test calls beat Kalshi\'s prices on real rounds. Half size.', inline: false }] : []),
         ...(late ? [{ name: 'Late lane', value: 'Last 5 minutes: passed a stress test (1.35× volatility, fat tails). Half size.', inline: false }] : []),
         { name: 'Market', value: `\`${e.ticker}\``, inline: true },
       ],

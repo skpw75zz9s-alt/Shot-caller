@@ -197,14 +197,14 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (g?.skip) { gated = { side: a.side, ...g }; return false; }
     return true;
   };
-  const entryOk = (side) => {
+  const entryOk = (side, floor = true) => {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
     if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
     // Near-certain: Kalshi's own price has to agree (its bid for the side at kalshiAgree or more)
     if (s.kalshiAgree > 0) { const bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid; if (!(bid >= s.kalshiAgree - 1e-9)) return false; }
     // 90% target: Kalshi's own ask for the side at the floor or more (public/winguard.js)
-    if (s.winFloor > 0) { const ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk; if (!(ask >= s.winFloor - 1e-9)) return false; }
+    if (floor && s.winFloor > 0) { const ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk; if (!(ask >= s.winFloor - 1e-9)) return false; }
     if (s.maxVolRatio > 0 && snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.maxVolRatio) return false;
     if (s.jumpSkip > 0) {
       const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
@@ -247,6 +247,34 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     lateWhy = null;
     return true;
   };
+  // Early lane (v13.16): from earlyMin minutes left until the late lane, a call Kalshi still prices under the 90% floor
+  // (earlyMinAsk to the floor) when the bot is clearly surer than Kalshi. It starts as test calls (graded, never sent)
+  // and goes live only once they've beaten Kalshi's prices on real rounds (snap.earlyLive: public/profitguard.js
+  // earlyProof). Its bar: the bot's worst-case odds (volatility 20% off either way, momentum against kept) at earlyConf+
+  // (and the guard's floor), its worst-case gap after the fee earlyEdge+, Kalshi's bid earlyBid+ (Kalshi leans the same
+  // way), a calm market with no jump in the ask, the usual steady wait and hold odds. Live calls go out at half size.
+  const inEarly = s.earlyMin > 0 && ev.minutesLeft <= s.earlyMin && ev.minutesLeft > (s.lateMin || 0);
+  let earlyWhy = null;
+  const earlyOk = (a) => {
+    const side = a.side, ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk, bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid;
+    const no = (why) => { earlyWhy = why; return false; };
+    if (!ev.open) return no(ev.reason ? ev.reason.charAt(0).toLowerCase() + ev.reason.slice(1) : 'not open for calls');
+    if (ask == null || a.winProb == null || a.robustEdge == null) return no('no price to buy at');
+    if (ask < s.earlyMinAsk - 1e-9) return no(`Kalshi's ask ${Math.round(ask * 100)}¢ is under ${Math.round(s.earlyMinAsk * 100)}¢: too much doubt this early`);
+    if (s.winFloor > 0 && ask >= s.winFloor - 1e-9) return no('priced at the floor: the normal rules decide');
+    if (!(bid >= s.earlyBid - 1e-9)) return no(`Kalshi's bid isn't at ${Math.round(s.earlyBid * 100)}¢+`);
+    const bar = Math.max(s.earlyConf, s.winFloor || 0);
+    if (a.winProb < bar - 1e-9) return no(`worst-case odds ${(a.winProb * 100).toFixed(1)}%, needs ${(bar * 100).toFixed(0)}%`);
+    if (a.robustEdge < s.earlyEdge - 1e-9) return no(`worst-case gap ${(a.robustEdge * 100).toFixed(1)} pts over Kalshi, needs ${(s.earlyEdge * 100).toFixed(0)}`);
+    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('BTC is moving faster than usual');
+    const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
+    if (log.some((e) => e.t >= now - 30000 && e[key] != null && Math.abs(e[key] - ask) >= s.lateJump - 1e-9)) return no('Kalshi\'s price just jumped');
+    if (!holds(a)) return no(`its confidence holds to the end in only ${a.hold == null ? '—' : Math.round(a.hold * 100)}% of paths`);
+    if (!steady(side)) return no(`waiting for ${steadyNeed} s of steady odds`);
+    if (!entryOk(side, false) || !watchOk()) return no('held by a safety rule (rejections, market watch or a filter)');
+    earlyWhy = null;
+    return true;
+  };
   const passes = (a, edgeNeed, confNeed, persist = false) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 && a.point <= s.maxEdge &&
     a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && (a.score >= confNeed || bigGap(a)) && (!persist || persisted(a.side, edgeNeed));
 
@@ -257,7 +285,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     holding: [s.minEdge * s.holdEdgeFrac, s.minConfidence - s.holdConfDrop],
     switching: [s.minEdge + s.switchEdgeExtra, s.minConfidence + s.switchConfExtra],
   };
-  let pick = null, shown = null, stance = 'new';
+  let pick = null, shown = null, stance = 'new', earlyWould = null;
   if (called) {
     const a = assess(called);
     shown = a; stance = 'holding';
@@ -270,6 +298,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   } else if (lean) {
     shown = assess(lean);
     if ((inLate ? lateOk(shown) : passes(shown, ...need.new, true) && steady(lean)) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && watchOk() && gateOk(shown)) pick = shown;
+    // the early lane: a test call until it has proven itself (earlyWould), a real one after
+    else if (inEarly && !(mem.cooldownUntil > now) && earlyOk(shown) && gateOk(shown)) { earlyWould = shown; if (snap.earlyLive) pick = shown; }
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
@@ -277,7 +307,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   const prob = callSide ? (callSide === 'YES' ? ev.pYes : 1 - ev.pYes) : null;
   const firstOnly = s.scaleIn && callSide && callSide !== called; // a brand-new scaled call starts small
   const late = !!callSide && callSide !== called && inLate; // a new call made by the late lane (half size: see lateSize)
-  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5) * (firstOnly ? s.firstSize : 1) * (late ? s.lateSize : 1))) : 0;
+  const early = !!callSide && callSide !== called && !!earlyWould && pick === earlyWould; // a live early-lane call (half size)
+  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5) * (firstOnly ? s.firstSize : 1) * (late ? s.lateSize : early ? s.earlySize : 1))) : 0;
   const buyNow = !!callSide && pick.timing.state === 'NOW';
   // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
   const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
@@ -296,7 +327,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const pc = called === 'YES' ? ev.pYes : 1 - ev.pYes;
     if (pc < bailBelow) mem.bail = { side: called, at: now, p: pc, bid: called === 'YES' ? ev.quote.yesBid : ev.quote.noBid, entry: mem.price ?? null };
   }
-  if (fire) { mem.side = callSide; mem.at = now; mem.price = pick.price; mem.n = (mem.n || 0) + 1; mem.late = late; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
+  if (fire) { mem.side = callSide; mem.at = now; mem.price = pick.price; mem.n = (mem.n || 0) + 1; mem.late = late; mem.early = early; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
   else if (callSide && callSide === called && tiers.length > 1 && pick.deep && (pick.score >= s.minConfidence || bigGap(pick))) {
     const next = (mem.tier ?? 0) + 1;
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
@@ -313,7 +344,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     // the bot already called a side and is sticking with it while the other side wiggles
     sticking: !!called && !!lean && lean !== called && callSide !== lean,
     // the late lane: on in the last lateMin minutes; lane 'late' on a call it made; why it's holding off; its stress-test odds
-    late: inLate ? { on: true, why: callSide ? null : lateWhy, p: lateP, made: callSide ? (callSide === called ? !!mem.late : late) : false } : null, lane: callSide && (callSide === called ? mem.late : late) ? 'late' : null,
+    late: inLate ? { on: true, why: callSide ? null : lateWhy, p: lateP, made: callSide ? (callSide === called ? !!mem.late : late) : false } : null,
+    lane: callSide && (callSide === called ? mem.late : late) ? 'late' : callSide && (callSide === called ? mem.early : early) ? 'early' : null,
+    // the early lane: on from earlyMin minutes left; would = the call it makes now (a test call unless live)
+    early: inEarly && !called ? { on: true, live: !!snap.earlyLive, would: earlyWould ? { side: earlyWould.side, price: earlyWould.price, p: earlyWould.winProb, conf: earlyWould.score } : null, why: earlyWould ? null : earlyWhy } : null,
   };
 }
 

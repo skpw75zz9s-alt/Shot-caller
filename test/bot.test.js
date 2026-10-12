@@ -201,6 +201,27 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
   assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
 });
 
+test('the early lane: at 85c with ~6 minutes left the server logs a test call (no official call) and grades it', async () => {
+  Object.assign(quotes, { yes_bid: 84, yes_ask: 85 }); nextWindow = false; tape = 100050;
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-early-')), 'data.json'), calls = [];
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onCall: (e) => calls.push(e) });
+  await b.load();
+  const p = fakeBrowser();
+  b.sync({ subscription: { endpoint: `${svc.base}/push/early`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
+  for (let s = 0; s <= 57; s += 3) await b.tick(NOW + s * 1000); // 6 to 5 minutes left: the early lane's window
+  let r = b.record();
+  assert.equal(r.calls.length, 0, 'not live yet: no official call at 85c');
+  assert.equal(calls.length, 0, 'and nothing posted');
+  assert.equal(r.early.calls.length, 1, 'one test call for the round'); assert.equal(r.early.calls[0].lane, 'test');
+  assert.deepEqual([r.early.calls[0].side, r.early.calls[0].price], ['YES', 0.85]);
+  assert.equal(r.early.live, false);
+  await b.tick(NOW + 8 * 60000); // the round settled YES
+  r = b.record();
+  assert.deepEqual([r.early.n, r.early.wins], [1, 1], 'graded like the official calls');
+  assert.equal(JSON.parse(await readFile(join(file, '..', 'record-early.json'), 'utf8')).length, 1, 'kept on disk');
+  b.stop(); tape = 100000;
+});
+
 test('official bot record: the server bot calls on its own (90% target) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   tape = 100050; // a calm market: the tape ends near the live price

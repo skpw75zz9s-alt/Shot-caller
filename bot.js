@@ -3,7 +3,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
-import { profitGuard } from './public/profitguard.js';
+import { earlyProof, profitGuard } from './public/profitguard.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
@@ -47,11 +47,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const OFFICIAL_LEVEL = 'target90', OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
   const currentRecord = () => record.filter((e) => e.lv === OFFICIAL_LEVEL);
   let guardCache = null; // refreshed every 5 s (it scans the record)
-  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord), pgL: profitGuard(currentRecord().filter((e) => e.lane === 'late')) }).g);
+  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord), pgL: profitGuard(currentRecord().filter((e) => e.lane === 'late')), early: earlyProof(earlyRecord) }).g);
   // The profit guard (public/profitguard.js) for a level the server keeps a record of: the 90% target (official) and Near-certain
   const profitNow = (level, now = Date.now()) => { guardNow(now); return level === OFFICIAL_LEVEL ? guardCache.pg : level === 'certain' ? guardCache.pgC : null; };
   // The late lane's own profit guard (its calls only): once they lose money after fees, the lane is off for everyone
   const lateOffNow = (now = Date.now()) => { guardNow(now); return !!guardCache.pgL.paused; };
+  // The early lane goes live only once its test calls have beaten Kalshi's prices (public/profitguard.js earlyProof)
+  const earlyLiveNow = (now = Date.now()) => { guardNow(now); return !!guardCache.early.live; };
   // Why a phone's buy alerts are paused: its daily loss limit (synced from the phone) or its level's profit guard
   const buyBlocked = (s, now) => (s.lossStopUntil > now ? 'loss' : profitNow(riskLevelOf(s), now)?.paused ? 'profit' : null);
   const recordFile = dataFile.replace(/[^/\\]+$/, 'record.json');
@@ -61,6 +63,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const CERTAIN = { ...DEVICE_DEFAULTS, ...riskSettings('certain') };
   const certainFile = dataFile.replace(/[^/\\]+$/, 'record-certain.json');
   let certainRecord = [], certainDirty = false;
+  // The early lane's record (v13.16): every early call the official level would make, test or live, graded the same way
+  const earlyFile = dataFile.replace(/[^/\\]+$/, 'record-early.json');
+  let earlyRecord = [], earlyDirty = false;
   const certainMem = {};
   const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
   const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
@@ -84,6 +89,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       }
       if (d.settings) d.confOdds = true;
       if (d.settings && d.settings.lateMin == null && riskLevelOf(d.settings) === 'target90') d.settings.lateMin = RISK_LEVELS.target90.lateMin; // v13.15: the late lane
+      if (d.settings && d.settings.earlyMin == null && riskLevelOf(d.settings) === 'target90') d.settings.earlyMin = RISK_LEVELS.target90.earlyMin; // v13.16: the early lane
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
@@ -95,6 +101,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     vapid.subject = env.VAPID_SUBJECT || 'https://github.com/skpw75zz9s-alt/Shot-caller';
     try { const r = JSON.parse(await readFile(recordFile, 'utf8')); if (Array.isArray(r)) record = r; } catch { /* no record yet */ }
     try { const r = JSON.parse(await readFile(certainFile, 'utf8')); if (Array.isArray(r)) certainRecord = r; } catch { /* no record yet */ }
+    try { const r = JSON.parse(await readFile(earlyFile, 'utf8')); if (Array.isArray(r)) earlyRecord = r; } catch { /* no record yet */ }
     try { const L = JSON.parse(await readFile(learnFile, 'utf8')); if (L?.v === 1 && L.vol?.s2?.length === 336) learned = { ...newLearned(), ...L, pulse: L.pulse?.v === 1 ? { ...newPulse(), ...L.pulse } : newPulse() }; } catch { /* first run: learns from scratch */ }
     await save();
     if (learn) startLearning();
@@ -299,7 +306,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts });
-        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now);
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now);
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -394,7 +401,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
-    snap.lateOff = lateOffNow(now);
+    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now);
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
@@ -406,9 +413,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
       if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor, ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
         recordDirty = true; saveRecord();
-        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late' }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
+        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late', early: sig.lane === 'early' }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
       }
     }
+    // The early lane's calls, test or live, once per round (its record decides whether it goes live)
+    const ew = sig?.early?.would;
+    if (ew && !earlyRecord.some((e) => e.ticker === snap.live.m.ticker) && logCall(earlyRecord, { ticker: snap.live.m.ticker, side: ew.side, price: ew.price, conf: ew.conf ?? null, at: now, closeTime: snap.live.m.close_time, lane: sig.early.live ? 'early' : 'test' }, 5000)) { earlyDirty = true; saveEarly(); }
     // Near-certain's own calls (graded like the official ones; never traded, never fed to the call filter)
     const sigC = snap.live ? buySignal(snap.live, snap, CERTAIN, now, certainMem) : null;
     if (sigC?.fire && logCall(certainRecord, { ticker: snap.live.m.ticker, side: sigC.callSide, price: sigC.price, conf: sigC.deep?.score ?? null, hold: sigC.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sigC.callN }, 20000)) saveCertain();
@@ -423,6 +433,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       await rename(`${recordFile}.tmp`, recordFile);
     } catch (e) { log.error('saving the bot record failed', e.message); }
   }
+  async function saveEarly() {
+    earlyDirty = false;
+    try { await mkdir(dirname(earlyFile), { recursive: true }); await writeFile(`${earlyFile}.tmp`, JSON.stringify(earlyRecord)); await rename(`${earlyFile}.tmp`, earlyFile); } catch (e) { log.error('saving the early record failed', e.message); }
+  }
   async function saveCertain() {
     certainDirty = false;
     try { await mkdir(dirname(certainFile), { recursive: true }); await writeFile(`${certainFile}.tmp`, JSON.stringify(certainRecord)); await rename(`${certainFile}.tmp`, certainFile); } catch (e) { log.error('saving the near-certain record failed', e.message); }
@@ -432,6 +446,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const late = cur.filter((e) => e.lane === 'late');
     return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: guardStats(cur), profitGuard: profitGuard(cur),
       late: { ...callStats(late), profitGuard: profitGuard(late) }, // the late lane's own calls (last 5 minutes)
+      early: { ...earlyProof(earlyRecord), ...callStats(earlyRecord), calls: earlyRecord.slice(-50) }, // the early lane: test calls until proven
       before: before.length ? { level: 'Steady', since: before[0].at, until: before.at(-1).at, ...callStats(before) } : null,
       certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100), profitGuard: profitGuard(certainRecord) } };
   }
@@ -486,6 +501,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     for (const [t, r] of Object.entries(learned.pulse.live)) if (r.closeTime < now - 60000) pending.add(t);
     for (const e of unsettledCalls(record, now)) pending.add(e.ticker);
     for (const e of unsettledCalls(certainRecord, now)) pending.add(e.ticker);
+    for (const e of unsettledCalls(earlyRecord, now)) pending.add(e.ticker);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
         const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
@@ -509,6 +525,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (results.has(e.ticker)) { settleCalls(certainRecord, e.ticker, results.get(e.ticker)); certainDirty = true; }
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; certainDirty = true; }
     }
+    for (const e of unsettledCalls(earlyRecord, now)) {
+      if (results.has(e.ticker)) { settleCalls(earlyRecord, e.ticker, results.get(e.ticker)); earlyDirty = true; }
+      else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; earlyDirty = true; }
+    }
+    if (earlyDirty) saveEarly();
     if (certainDirty) saveCertain();
     if (recordDirty) saveRecord();
     if (gateDirty || !learned.callGate) { gateDirty = false; learned.callGate = learnGate(record); learnDirty = true; } // relearn the call filter after each settle

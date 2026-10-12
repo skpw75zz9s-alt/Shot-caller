@@ -32,6 +32,12 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
     lt.graded ? `won ${lt.wins} of ${lt.graded} (${pct(lt.wins / lt.graded)})` : 'none yet: only stress-tested calls are made this late',
     lt.profitGuard?.paused ? 'OFF: its calls lost money after fees; back on when they recover' : lt.graded ? `${usd(lt.usd ?? 0)} at $10 a call after fees · half size` : 'switches itself off if its calls lose money after fees',
     { graded: lt.graded || 0, wins: lt.wins ?? 0, usd: lt.usd ?? 0, paused: !!lt.profitGuard?.paused });
+  // the early lane (v13.16): test calls until they beat Kalshi's prices on real rounds, then live
+  const er = bot?.early;
+  if (er) add('early', `Early calls (10–5 min left)${er.live ? '' : ', testing'}`, Math.max(er.n || 0, er.live ? ACC.min : 0), er.live ? 'good' : er.n >= 50 || er.paused ? 'bad' : 'wait',
+    er.n ? `won ${er.wins} of ${er.n} (${pct(er.wins / er.n)}) · needs ${pct(er.need)} to break even` : 'none graded yet: the bot logs the early calls it would make',
+    er.live ? `LIVE: ${usd(er.usd)} at $10 a call after fees · half size` : er.n >= 50 ? `not live: ${er.usd <= 0 ? 'losing money after fees' : 'win rate not clearly above break-even yet'}` : `goes live after 50 graded test calls that beat Kalshi's prices (${er.n || 0} so far)`,
+    { n: er.n || 0, wins: er.wins ?? 0, usd: er.usd ?? 0, need: er.need ?? null, low: er.low ?? null, live: !!er.live });
   // the prediction engine, walk-forward on the server's history
   if (predictor?.n) {
     const t90 = predictor.thresholds?.find((t) => t.t === 0.9);
