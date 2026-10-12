@@ -54,3 +54,22 @@ test('the feed manager keeps venues alive: subscribe after its delay, pings on s
     feeds.stop();
   } finally { globalThis.WebSocket = prev; globalThis.setInterval = realSetInterval; }
 });
+
+// ---------- v13.10: the global markets in the Round scan ----------
+import { FEATURES, GLOBAL_SCAN, scanRound } from '../public/roundscan.js';
+test('the Round scan reads the global markets as two more inputs, leaving the USD exchanges\' reads exactly as they were', () => {
+  const open = 1_700_000_000_000, now = open + 6 * 60000, usd = [], glob = [];
+  // the five USD exchanges: balanced, flat at $100,000
+  for (let s = 0; s < 360; s += 2) for (const ex of ['Coinbase', 'Kraken', 'Bitstamp', 'Gemini', 'Binance.US']) usd.push({ ex, t: open + s * 1000, price: 100000, size: 0.1, side: s % 4 ? 'buy' : 'sell' });
+  // the global markets: buyers in control, and the perpetuals just ran $60 above spot in the last 30 s
+  for (let s = 0; s < 360; s += 2) for (const ex of GLOBAL_SCAN) glob.push({ ex, t: open + s * 1000, price: 100000 + (/ perp$/.test(ex) && s >= 340 ? 60 : 0), size: 0.3, side: s % 6 ? 'buy' : 'sell' });
+  const alone = scanRound(usd, { openTime: open, now, sigmaMin: 0.0008 }), both = scanRound([...usd, ...glob], { openTime: open, now, sigmaMin: 0.0008 });
+  for (const k of ['flow', 'agree', 'momentum', 'big', 'absorb', 'leader']) assert.equal(both.features[k], alone.features[k], `${k}: unchanged by the global markets`);
+  assert.deepEqual([both.exchanges, both.totalUsd], [alone.exchanges, alone.totalUsd], 'the USD table is the USD table');
+  assert.equal(alone.features.gFlow, 0); assert.equal(alone.features.gLead, 0); assert.equal(alone.global.live, 0);
+  assert.ok(Math.abs(both.features.gFlow - 1 / 3) < 0.02, `two thirds buyers = +0.33: ${both.features.gFlow}`);
+  assert.ok(both.global.edge > 50 && both.features.gLead > 0.3, `futures ahead: $${both.global.edge}, lead ${both.features.gLead}`);
+  assert.equal(both.global.live, GLOBAL_SCAN.length);
+  assert.ok(both.parts.some((p) => p.name === 'Global flow' && p.pts > 0) && both.parts.some((p) => p.name === 'Global lead' && p.pts > 0));
+  assert.deepEqual(FEATURES.slice(-2), ['gFlow', 'gLead'], 'appended: older graded samples read them as 0');
+});

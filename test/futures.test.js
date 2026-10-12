@@ -26,8 +26,8 @@ test('futures reads: lead over spot, taker flow, open interest with the price, p
 
 test('futures reads become scan inputs (flipped for "below" markets like the rest)', () => {
   const sc = scanRound([{ t: T + 1000, ex: 'Coinbase', side: 'buy', price: 100000, size: 1 }], { openTime: T, now: T + 5000, extra: { fLead: 0.4, fFlow: 0.5, fOi: 1, fPremium: 0.1, live: true } });
-  assert.deepEqual(featureVector(sc, 'greater').slice(6), [0.4, 0.5, 1, 0.1]);
-  assert.deepEqual(featureVector(sc, 'less').slice(6), [-0.4, -0.5, -1, -0.1]);
+  assert.deepEqual(featureVector(sc, 'greater').slice(6, 10), [0.4, 0.5, 1, 0.1]);
+  assert.deepEqual(featureVector(sc, 'less').slice(6, 10), [-0.4, -0.5, -1, -0.1]);
   assert.ok(sc.futures);
 });
 

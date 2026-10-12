@@ -181,7 +181,7 @@
         <small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small>
       </div>
       <div class="card scan" id="scanCard">
-        <div class="deep-head"><span>Round scan · 5 exchanges</span><b id="scanWhen"></b></div>
+        <div class="deep-head"><span>Round scan · 12 exchanges</span><b id="scanWhen"></b></div>
         <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
         <div class="scan-meter"><i id="scanFill"></i><em></em></div>
         <div class="scan-chance" id="scanChance"></div>
@@ -282,9 +282,10 @@
       </div>
       <div class="card radar">
         <div class="radar-head"><b>Market radar</b><small class="muted" id="radarState"></small></div>
-        <svg id="radarScope" class="radar-scope" viewBox="0 0 360 104" role="img" aria-label="The radar's 90% range, floor, ceiling and target"></svg>
+        <svg id="radarScope" class="radar-scope" viewBox="0 0 360 136" role="img" aria-label="The radar's 90% range, floor, ceiling and target, and every exchange's price"></svg>
         <p class="radar-dir" id="radarDir"></p>
         <ul class="radar-calls" id="radarCalls"></ul>
+        <p class="pred-record" id="radarVenues"></p>
         <p class="pred-record" id="radarRecord"></p>
         <p class="fine-left">Each call comes true at least 90% of the time if the coming rounds behave like the past ones. That's by construction (split conformal prediction on the bot's own graded minutes), not because BTC is predictable: the radar finds the narrowest answers that still hold 90%. A 90% direction call only shows when even the floor or ceiling clears the target, usually late in a round, when Kalshi prices that side at 90¢ or more too.</p>
       </div>
@@ -486,7 +487,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.9.1 · bitcoin icon</p>
+      <p class="fine" id="version">Shot Caller v13.10 · every exchange</p>
     </section>
   </main>
 

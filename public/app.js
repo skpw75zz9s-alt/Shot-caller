@@ -15,7 +15,7 @@ import { suggestEntry, suggestExit } from './suggest.js';
 import { ema } from './indicators.js';
 import { confTier, stability } from './analysis.js';
 import { createAutopilot } from './autopilot.js';
-import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
+import { CHECKPOINTS, FEATURES, FEATURE_NAMES, GLOBAL_SCAN, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { radarRead, radarRecord } from './radar.js';
@@ -590,7 +590,7 @@ function renderScan(live, snap, now) {
   } else {
     const cls = sc.score >= 15 ? 'up' : sc.score <= -15 ? 'down' : 'mixed';
     if (setText($('scanLabel'), sc.verdict)) pop($('scanLabel'));
-    setText($('scanScore'), `${sc.score > 0 ? '+' : ''}${sc.score} · ${sc.exchanges}/5 exchanges · $${fmtK(sc.totalUsd)} traded`);
+    setText($('scanScore'), `${sc.score > 0 ? '+' : ''}${sc.score} · ${sc.exchanges}/${SCAN_EXCHANGES.length} USD + ${sc.global?.live ?? 0}/${GLOBAL_SCAN.length} global exchanges · $${fmtK(sc.totalUsd + (sc.global?.usd ?? 0))} traded`);
     setClass($('scanVerdict'), `scan-verdict ${cls}`);
     // meter: centre is 0, left half sellers, right half buyers
     setStyle($('scanFill'), 'cssText', sc.score >= 0 ? `left:50%;width:${sc.score / 2}%;background:var(--yes)` : `left:${50 + sc.score / 2}%;width:${-sc.score / 2}%;background:var(--no)`);
@@ -604,20 +604,23 @@ function renderScan(live, snap, now) {
       setHTML($('scanChance'), `<div class="sc-ch ${ch.p >= 0.5 ? 'up' : 'down'}"><label>Scan chance</label><b>${side} ${pct(pS)}</b>`
         + `<small>${ch.active ? `bot alone ${pct(ch.p >= 0.5 ? ch.pModel : 1 - ch.pModel)} · scan ${shift >= 0 ? '+' : '−'}${Math.abs(shift)} pts on UP` : `= the bot's odds: still learning (${int(cp?.n ?? 0)}/${MIN_SAMPLES} graded rounds at this point)`}</small></div>`);
     } else setHTML($('scanChance'), '');
-    const rows = SCAN_EXCHANGES.map((ex) => sc.rows.find((r) => r.ex === ex));
-    setHTML($('scanTable'), `<div class="sc-h"><span>Exchange</span><span>Buy / sell</span><span>Net</span><span>Since open</span></div>` + rows.map((r) => {
-      if (!r || !r.n) return `<div class="sc-r off"><span>${esc(r?.ex ?? '')}</span><span class="muted">no trades yet</span><span></span><span></span></div>`;
+    const rows = SCAN_EXCHANGES.map((ex) => sc.rows.find((r) => r.ex === ex)), grows = GLOBAL_SCAN.map((ex) => sc.global?.rows?.find((r) => r.ex === ex) ?? { ex, n: 0 });
+    const scanRow = (r) => {
+      if (!r || !r.n) return `<div class="sc-r off"><span>${esc(r?.ex ?? '')}</span><span class="muted">${GLOBAL_SCAN.includes(r?.ex) ? 'not streaming' : 'no trades yet'}</span><span></span><span></span></div>`;
       const b = Math.round((r.buyShare ?? 0.5) * 100);
       return `<div class="sc-r${sc.leader?.ex === r.ex ? ' lead' : ''}"><span>${esc(r.ex.replace('.US', ''))}${sc.leader?.ex === r.ex ? ' <i title="moves first">⚡</i>' : ''}${r.whales ? ' 🐋' : ''}</span>`
         + `<span class="sc-bar" title="${b}% buy"><i style="width:${b}%"></i><em>${b}%</em></span>`
         + `<span class="${r.net >= 0 ? 'pos' : 'neg'}">${r.net >= 0 ? '+' : '−'}$${fmtK(Math.abs(r.net))}</span>`
         + `<span class="${r.change > 0 ? 'pos' : r.change < 0 ? 'neg' : ''}">${r.change == null ? '—' : `${r.change >= 0 ? '+' : '−'}$${Math.abs(r.change).toFixed(0)}`}</span></div>`;
-    }).join(''));
+    };
+    setHTML($('scanTable'), `<div class="sc-h"><span>Exchange</span><span>Buy / sell</span><span>Net</span><span>Since open</span></div>` + rows.map(scanRow).join('')
+      + `<div class="sc-h sc-sub"><span>Global markets</span><span></span><span></span><span></span></div>` + grows.map(scanRow).join(''));
     const facts = [
       sc.leader ? `⚡ <b>${esc(sc.leader.ex)}</b> moves first: the others follow about ${sc.leader.lag}s later` : 'No clear leader yet: the exchanges move together',
       sc.dispersion != null ? `Prices <b>$${sc.dispersion.toFixed(0)}</b> apart across exchanges${sc.dispersion > 40 ? ' (wide: a fragmented, jumpy market)' : ''}` : null,
       sc.cbPremium != null && Math.abs(sc.cbPremium) >= 5 ? `Coinbase is <b class="${sc.cbPremium > 0 ? 'pos' : 'neg'}">$${Math.abs(sc.cbPremium).toFixed(0)} ${sc.cbPremium > 0 ? 'above' : 'below'}</b> the other exchanges (${sc.cbPremium > 0 ? 'US buyers keen' : 'US sellers heavier'})` : null,
       `Flow is <b>${esc(sc.momentum.state)}</b>`,
+      sc.global?.edge != null ? `Global futures are <b class="${sc.global.edge > 0 ? 'pos' : sc.global.edge < 0 ? 'neg' : ''}">$${Math.abs(sc.global.edge).toFixed(0)} ${sc.global.edge >= 0 ? 'ahead up' : 'ahead down'}</b> of USD spot over 30 s${Math.abs(sc.global.lead) > 0.3 ? ' (spot usually follows)' : ''}` : null,
       sc.bigBuy + sc.bigSell > 0 ? `Big prints ($25k+): <b class="pos">$${fmtK(sc.bigBuy)}</b> buy · <b class="neg">$${fmtK(sc.bigSell)}</b> sell` : null,
       sc.futures ? `Futures (Hyperliquid): flow leans <b class="${sc.features.fFlow >= 0 ? 'pos' : 'neg'}">${sc.features.fFlow >= 0 ? 'buy' : 'sell'} ${Math.round(Math.abs(sc.features.fFlow) * 50 + 50)}%</b>${sc.futures.funding != null ? ` · funding ${(sc.futures.funding * 100).toFixed(4)}%/h` : ''}${sc.futures.oiChange != null ? ` · open interest ${sc.futures.oiChange >= 0 ? '+' : '−'}${Math.abs(sc.futures.oiChange * 100).toFixed(2)}% in 5 min` : ''}${Math.abs(sc.features.fLead) >= 0.15 ? ` · futures ${sc.features.fLead > 0 ? 'ahead up' : 'ahead down'}` : ''}` : null,
     ].filter(Boolean);
@@ -1254,20 +1257,33 @@ function trackPredictions(snap, live, now) {
 }
 // The radar card: a price scope (the 90% range, floor and ceiling, the target, the price now and the next minute's band),
 // the direction verdict, the calls and their record
+// Every exchange right now (from the live trades, global markets' prices aligned to USD): its latest price (last 20 s)
+// and its last minute's net taker flow, for the radar's blips
+function venueRead(now = Date.now()) {
+  const last = {}, net = {};
+  for (let i = tape.recent.length - 1; i >= 0; i--) {
+    const x = tape.recent[i];
+    if (x.t < now - 60000) break;
+    if (!(x.ex in last) && x.t >= now - 20000) last[x.ex] = x.price;
+    net[x.ex] = (net[x.ex] || 0) + (x.side === 'buy' ? 1 : -1) * x.price * x.size;
+  }
+  return Object.entries(last).map(([ex, price]) => ({ ex, price, net: net[ex] || 0 }));
+}
 function renderRadar(rd, spot) {
-  const $$ = (x) => `$${Math.round(x).toLocaleString()}`, rec = radarRecord(state.predLog, state.pcLog);
+  const $$ = (x) => `$${Math.round(x).toLocaleString()}`, rec = radarRecord(state.predLog, state.pcLog), ven = venueRead();
   if (!rd) {
-    setHTML($('radarScope'), ''); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), '');
+    setHTML($('radarScope'), ''); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), ''); setHTML($('radarVenues'), '');
   } else {
-    const vs = [rd.lo, rd.hi, rd.floor, rd.ceil, rd.expected, spot, rd.target, rd.next?.lo, rd.next?.hi].filter(Number.isFinite);
+    const vs = [rd.lo, rd.hi, rd.floor, rd.ceil, rd.expected, spot, rd.target, rd.next?.lo, rd.next?.hi, ...ven.map((v) => v.price)].filter(Number.isFinite);
     const mn = Math.min(...vs), mx = Math.max(...vs), pad = (mx - mn) * 0.08 || 10, X = (v) => (12 + (v - mn + pad) / (mx - mn + 2 * pad) * 336).toFixed(1);
     const tag = (v, y, txt, cls) => `<text x="${X(v)}" y="${y}" class="${cls}" text-anchor="middle">${txt}</text>`;
-    setHTML($('radarScope'), '<rect class="radar-sweep" x="0" y="0" width="40" height="104"/>'
+    setHTML($('radarScope'), '<rect class="radar-sweep" x="0" y="0" width="40" height="136"/>'
       + `<line class="radar-grid" x1="12" x2="348" y1="40" y2="40"/><line class="radar-grid" x1="12" x2="348" y1="80" y2="80"/>`
       + `<rect class="radar-range" x="${X(rd.lo)}" y="31" width="${(X(rd.hi) - X(rd.lo)).toFixed(1)}" height="18" rx="4"/>`
       + `<line class="radar-edge" x1="${X(rd.floor)}" x2="${X(rd.floor)}" y1="26" y2="54"/><line class="radar-edge" x1="${X(rd.ceil)}" x2="${X(rd.ceil)}" y1="26" y2="54"/>`
       + tag(rd.floor, 66, 'floor', 'radar-lbl') + tag(rd.ceil, 66, 'ceiling', 'radar-lbl')
-      + (rd.target > 0 ? `<line class="radar-target" x1="${X(rd.target)}" x2="${X(rd.target)}" y1="8" y2="96"/>${tag(rd.target, 18, `target ${$$(rd.target)}`, 'radar-lbl tgt')}` : '')
+      + `<line class="radar-grid" x1="12" x2="348" y1="118" y2="118"/>${ven.map((v) => `<circle class="radar-venue ${v.net > 0 ? 'b' : v.net < 0 ? 's' : ''}" cx="${X(v.price)}" cy="118" r="5"><title>${esc(v.ex)}</title></circle>`).join('')}${ven.length ? tag((mn + mx) / 2, 134, 'exchanges', 'radar-lbl') : ''}`
+      + (rd.target > 0 ? `<line class="radar-target" x1="${X(rd.target)}" x2="${X(rd.target)}" y1="8" y2="126"/>${tag(rd.target, 18, `target ${$$(rd.target)}`, 'radar-lbl tgt')}` : '')
       + `<path class="radar-exp" d="M${X(rd.expected)} 33 l6 7 l-6 7 l-6 -7z"/><circle class="radar-now" cx="${X(spot)}" cy="40" r="3.5"/>`
       + (rd.next ? `<rect class="radar-next" x="${X(rd.next.lo)}" y="75" width="${Math.max(2, X(rd.next.hi) - X(rd.next.lo)).toFixed(1)}" height="10" rx="3"/>${tag((rd.next.lo + rd.next.hi) / 2, 99, 'next minute', 'radar-lbl')}` : ''));
     setText($('radarState'), rd.sure ? `90%+ by its own record: ${int(rd.n)} past minutes${rd.stretch ? ' at this stage of the round' : ''}` : `Learning: normal-curve 90% until 9 graded minutes (${int(rd.n)} so far)`);
@@ -1275,6 +1291,8 @@ function renderRadar(rd, spot) {
       : `<b>No 90% direction call</b>: the expected close (${$$(rd.expected)}) is ${$$(rd.need)} short of a 90% margin from the target (${$$(rd.target)}). It comes when BTC moves further from the target or the time left runs down`);
     setHTML($('radarCalls'), [`Closes above <b>${$$(rd.floor)}</b>`, `Closes below <b>${$$(rd.ceil)}</b>`, `Closes between <b>${$$(rd.lo)}</b> and <b>${$$(rd.hi)}</b>`, rd.next ? `Next minute closes between <b>${$$(rd.next.lo)}</b> and <b>${$$(rd.next.hi)}</b>` : null]
       .filter(Boolean).map((t) => `<li>${t} <small>${rd.sure ? '90%+' : '≈90% (learning)'}</small></li>`).join(''));
+    const above = rd.target > 0 ? ven.filter((v) => v.price > rd.target).length : 0, buyers = ven.filter((v) => v.net > 0).length;
+    setHTML($('radarVenues'), ven.length ? `<b>${ven.length} exchange${ven.length === 1 ? '' : 's'}</b> on the scope right now${rd.target > 0 ? `: <b class="${above * 2 >= ven.length ? 'pos' : 'neg'}">${above} above</b> the target, ${ven.length - above} below` : ''} · buyers leading on <b>${buyers}</b>, sellers on <b>${ven.filter((v) => v.net < 0).length}</b> (last minute)` : 'Exchange blips show here once the live feeds are streaming.');
   }
   const pct = (x) => `<b>${Math.round(x.rate * 100)}%</b> (${int(x.n)})`, parts = [['floor held', rec.floor], ['ceiling', rec.ceil], ['range', rec.range], ['next minute', rec.next]].filter(([, x]) => x.n).map(([k, x]) => `${k} ${pct(x)}`);
   if (rec.dir.n) parts.push(`direction <b>${rec.dir.hit} of ${rec.dir.n}</b>`);

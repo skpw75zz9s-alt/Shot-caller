@@ -644,6 +644,9 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .pred-record { margin: 6px 0 2px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .pred-record b { color: var(--text); }
 
+/* the scan table's global markets sub-header */
+.scan-table .sc-sub { margin-top: 8px; color: var(--amber); }
+
 /* ---------- the accuracy card ---------- */
 .acc-list { display: grid; gap: 6px; margin: 8px 0; }
 .acc-r { display: grid; grid-template-columns: 1fr; gap: 1px; padding: 7px 10px; border-radius: 8px; background: var(--bg); border-left: 3px solid var(--pass); }
@@ -662,6 +665,8 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .radar-now { fill: var(--text); stroke: var(--bg); stroke-width: 1.5; }
 .radar-next { fill: #22d3ee22; stroke: var(--accent); stroke-width: 1; }
 .radar-lbl { fill: var(--muted); font: 9px var(--mono); }
+.radar-venue { fill: var(--pass); stroke: var(--bg); stroke-width: 1.5; opacity: .9; }
+.radar-venue.b { fill: var(--yes); } .radar-venue.s { fill: var(--no); }
 .radar-lbl.tgt { fill: var(--amber); }
 .radar-sweep { fill: #2ee6a60c; animation: radarSweep 4s linear infinite; }
 @keyframes radarSweep { from { transform: translateX(-40px); } to { transform: translateX(360px); } }

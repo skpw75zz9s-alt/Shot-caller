@@ -1,22 +1,26 @@
-// The Round scan on the server, around the clock: it streams the five exchanges' trades itself (the same public
+// The Round scan on the server, around the clock: it streams the five USD exchanges' and the global markets' trades itself (the same public
 // feeds the phone uses), scans every round, takes a sample at 10, 6 and 3 minutes left, grades each one once Kalshi
 // settles the round and learns the scan's weights from them (public/roundscan.js). The phone shows this when its
 // own feeds aren't live, and the record and weights always come from here, so the scan is graded every round
 // whether or not anyone has the app open.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { EXCHANGES, parseCoinbase } from './public/feeds.js';
+import { EXCHANGES, GLOBAL_EXCHANGES, createAligner, parseCoinbase } from './public/feeds.js';
 import { quote } from './public/model.js';
 import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
 
 const COINBASE = { name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['matches'] }], parse: parseCoinbase };
-const MAX_TRADES = 200000;
+const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
 const MAX_SAMPLES = 6000;
 
 // futures: futures.js (Hyperliquid's BTC perpetual), its reads become extra scan inputs
 export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null } = {}) {
   let data = { samples: [], models: {} };
-  let trades = [], roundOpen = null, last = null, lastScanAt = 0, saveTimer = null;
+  // trades: the five USD exchanges (the bot's price, Market watch, the micro model); gtrades: the global markets (v13.10),
+  // kept apart and level-aligned to USD spot, read only by the scan's global inputs (Binance and Bybit block US servers:
+  // whatever connects is used)
+  let trades = [], gtrades = [], roundOpen = null, last = null, lastScanAt = 0, saveTimer = null;
+  const align = createAligner(), globalNames = new Set(GLOBAL_EXCHANGES.map((e) => e.name));
   const socks = {}, status = {}, retry = {};
   let stopped = true;
 
@@ -38,12 +42,13 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
 
   function add(list) {
     const now = clock();
-    for (const x of list) {
+    for (const x of align(list)) {
       if (!x) continue;
       (status[x.ex] ||= { state: 'live' }).lastAt = now;
-      if (roundOpen == null || x.t >= roundOpen) trades.push(x);
+      if (roundOpen == null || x.t >= roundOpen) (globalNames.has(x.ex) ? gtrades : trades).push(x);
     }
     if (trades.length > MAX_TRADES) trades.splice(0, trades.length - MAX_TRADES);
+    if (gtrades.length > MAX_GLOBAL) gtrades.splice(0, gtrades.length - MAX_GLOBAL);
   }
   function open(ex) {
     if (stopped || socks[ex.name] || typeof WS !== 'function') return;
@@ -51,20 +56,30 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     try { ws = new WS(ex.url); } catch { status[ex.name] = { state: 'error' }; return; }
     socks[ex.name] = ws;
     status[ex.name] = { ...status[ex.name], state: 'connecting' };
-    ws.onopen = () => { retry[ex.name] = 0; status[ex.name] = { ...status[ex.name], state: 'live' }; for (const s of ex.subscribe) ws.send(JSON.stringify(s)); };
+    const send = (x) => { try { ws.send(typeof x === 'string' ? x : JSON.stringify(x)); } catch { /* closing */ } };
+    let pinger = null;
+    ws.onopen = () => {
+      retry[ex.name] = 0; status[ex.name] = { ...status[ex.name], state: 'live' };
+      const sub = () => { for (const s of ex.subscribe) send(s); };
+      if (ex.delay) setTimeout(sub, ex.delay).unref?.(); else sub();
+      if (ex.ping) { pinger = setInterval(() => send(ex.ping[1]), ex.ping[0]); pinger.unref?.(); } // keep-alives (Bybit, OKX)
+    };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
+      const r = ex.reply?.(m);
+      if (r) send(r); // heartbeat answers (Crypto.com)
       const got = ex.parse(m).filter(Boolean);
       if (got.length) add(got);
     };
     ws.onclose = () => {
+      clearInterval(pinger);
       delete socks[ex.name];
       status[ex.name] = { ...status[ex.name], state: 'down' };
       if (!stopped) { const t = setTimeout(() => open(ex), Math.min(60000, 1000 * 2 ** (retry[ex.name] = (retry[ex.name] || 0) + 1))); t.unref?.(); }
     };
     ws.onerror = () => { try { ws.close(); } catch { /* already closed */ } };
   }
-  function start() { stopped = false; [COINBASE, ...EXCHANGES].forEach(open); }
+  function start() { stopped = false; [COINBASE, ...EXCHANGES, ...GLOBAL_EXCHANGES].forEach(open); }
   function stop() { stopped = true; clearTimeout(saveTimer); for (const [n, ws] of Object.entries(socks)) { ws.onclose = null; try { ws.close(); } catch { /* */ } delete socks[n]; } }
   // The latest BTC price from the trade feeds: the median of each exchange's last trade in the past 10 seconds (null
   // with fewer than 2 exchanges streaming). The bot moves its price with this every second (bot.js liveSpot).
@@ -88,11 +103,12 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     const ps = Object.values(last).sort((a, b) => a - b);
     return ps.length ? (ps.length % 2 ? ps[(ps.length - 1) / 2] : (ps[ps.length / 2 - 1] + ps[ps.length / 2]) / 2) : null;
   }
-  const feedTimes = () => Object.fromEntries(Object.entries(status).filter(([, v]) => v.lastAt).map(([k, v]) => [k, v.lastAt]));
+  const usdNames = new Set([COINBASE.name, ...EXCHANGES.map((e) => e.name)]); // what counts as a live feed (a global market being down or blocked is normal)
+  const feedTimes = () => Object.fromEntries(Object.entries(status).filter(([k, v]) => v.lastAt && usdNames.has(k)).map(([k, v]) => [k, v.lastAt]));
   // takers' buy share of the dollars since t, as -1 (all selling) .. +1 (all buying); null with no trades
   function imbalance(since) { let b = 0, all = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > since; i--) { const u = trades[i].price * trades[i].size; all += u; if (trades[i].side === 'buy') b += u; } return all > 0 ? (b / all - 0.5) * 2 : null; }
   function flowSince(t) { let usd = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > t; i--) usd += trades[i].price * trades[i].size; return usd; }
-  const liveFeeds = (now) => Object.values(status).filter((s) => s.lastAt > now - 60000).length;
+  const liveFeeds = (now) => Object.entries(status).filter(([k, s]) => usdNames.has(k) && s.lastAt > now - 60000).length;
 
   // Every bot tick (bot.js onObserve): scan the live round, take checkpoint samples, grade settled ones
   function observe({ snap, known }, now = clock()) {
@@ -102,12 +118,12 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     const live = snap?.live;
     if (!live) return;
     const openT = Date.parse(live.m.open_time);
-    if (openT !== roundOpen) { roundOpen = openT; trades = trades.filter((x) => x.t >= openT); }
+    if (openT !== roundOpen) { roundOpen = openT; trades = trades.filter((x) => x.t >= openT); gtrades = gtrades.filter((x) => x.t >= openT); }
     if (now - lastScanAt < 4000 && last?.ticker === live.m.ticker) return;
     lastScanAt = now;
     const f = futures?.features({ now, spotAt, sigmaMin: snap.sigmaMin || undefined });
     const extra = f?.live ? { fLead: f.lead, fFlow: f.flow, fOi: f.oi, fPremium: f.premium, live: true, funding: f.funding, oiChange: f.oiChange } : null;
-    const sc = scanRound(trades, { openTime: openT, now, sigmaMin: snap.sigmaMin, extra });
+    const sc = scanRound(gtrades.length ? trades.concat(gtrades) : trades, { openTime: openT, now, sigmaMin: snap.sigmaMin, extra });
     const q = quote(live.m), kalshi = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
     const mLeft = live.ev.minutesLeft, pModel = live.pPre ?? live.ev.pYes; // the odds before the scan's own nudge
     const x = sc.ready ? featureVector(sc, live.m.strike_type) : null;

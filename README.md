@@ -271,6 +271,23 @@ Security:
 
 ## Version notes (newest first)
 
+### Every exchange in the Round scan and the Market radar (v13.10)
+
+- **Round scan.** It now reads the seven global markets as well (the Binance, Bybit, OKX and Deribit perpetuals,
+  Binance, Bitfinex and Crypto.com) as two new inputs:
+  - **global flow:** buyers' share across them, recent minutes counting more
+  - **global futures lead:** how far the perpetuals ran ahead of USD spot in 30 s, in typical moves
+
+  Both show in the verdict and the table (a new "Global markets" section), and both are learned like the rest. Older
+  graded rounds read them as 0, and they only shape the scan chance once the scan's own record proves them. The five
+  USD exchanges' reads are computed exactly as before, so the record the scan has earned keeps its meaning.
+- **Server.** It streams the global markets too, in their own store, with prices aligned to USD spot. They never touch
+  the bot's price, Market watch's feed and bad-data checks, the scan's sample gating or the micro model. Binance and
+  Bybit block US servers, so the server uses whichever ones connect; the phone streams all of them.
+- **Market radar.** Every exchange is now a blip on the radar's scope at its current price: green when buyers led its
+  last minute, red when sellers did. A summary line shows how many trade above vs below the target. The radar's 90%
+  calls keep their own math and graded record.
+
 ### Classic bitcoin icon (v13.9.1)
 
 The icon is cleaned up to the classic bitcoin mark: an orange coin (#F7931A) with a white ₿ tilted 14°, drawn with the
