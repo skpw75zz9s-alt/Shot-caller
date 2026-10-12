@@ -271,6 +271,13 @@ Security:
 
 ## Version notes (newest first)
 
+### Classic bitcoin icon (v13.9.1)
+
+The icon is cleaned up to the classic bitcoin mark: an orange coin (#F7931A) with a white ₿ tilted 14°, drawn with the
+logo's proportions (slab ends on the left, two ticks above and below), a soft rim, a light gloss and a gentle glow on
+deep navy. The circuit traces, milled edge and sparkle are gone, so it reads as bitcoin at every size. The icon links
+now carry `?v=3`.
+
 ### Gold bitcoin icon (v13.9)
 
 A new app icon: a gold bitcoin coin with a polished rim and 144 milled edge ridges, an engraved circuit-trace face with
