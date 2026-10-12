@@ -90,6 +90,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings) d.confOdds = true;
       if (d.settings && d.settings.lateMin == null && riskLevelOf(d.settings) === 'target90') d.settings.lateMin = RISK_LEVELS.target90.lateMin; // v13.15: the late lane
       if (d.settings && d.settings.earlyMin == null && riskLevelOf(d.settings) === 'target90') d.settings.earlyMin = RISK_LEVELS.target90.earlyMin; // v13.16: the early lane
+      if (d.settings && d.settings.noCallLastMin == null && riskLevelOf(d.settings) === 'target90') Object.assign(d.settings, { lateMin: RISK_LEVELS.target90.lateMin, noCallLastMin: RISK_LEVELS.target90.noCallLastMin }); // v13.17: no new calls in the last 5 minutes
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };

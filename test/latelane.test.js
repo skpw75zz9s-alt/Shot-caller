@@ -14,11 +14,19 @@ function setup({ yb, ya, lead = 150, mins = 3, secs = 24, sigmaLong = SIG, askTh
   const log = { T: [...Array(secs / 2 + 1)].map((_, i) => ({ t: NOW - secs * 1000 + i * 2000, p: 0.99, yesAsk: i === 1 && askThen != null ? askThen : null, noAsk: null })) };
   return { row: { m, strike: K, ev, rej: { tilt: 0, summary: [], events: [] } }, snap: { now: NOW, bars, sigmaMin: SIG, sigmaLong, driftMin: 0, spot: K + lead, quoteLog: log } };
 }
-const t90 = riskSettings('target90'), sig = (o, s = t90, mem = {}) => { const x = setup(o); return buySignal(x.row, x.snap, s, NOW, mem); };
+// the late lane is off on the 90% target level since v13.17 (no new calls in the last 5 minutes); these tests turn it on
+const t90 = { ...riskSettings('target90'), lateMin: 5, noCallLastMin: 0 }, sig = (o, s = t90, mem = {}) => { const x = setup(o); return buySignal(x.row, x.snap, s, NOW, mem); };
 
-test('the 90% target level turns the late lane on for the last 5 minutes', () => {
-  assert.equal(t90.lateMin, 5);
+test('the 90% target level makes no new calls in the last 5 minutes (late lane off)', () => {
+  const real = riskSettings('target90');
+  assert.deepEqual([real.lateMin, real.noCallLastMin], [0, 5]);
+  const a = sig({ yb: 93, ya: 94 }, real);
+  assert.equal(a.fire, false, 'a big lead with 3 minutes left: no call'); assert.equal(a.late, null);
+  assert.equal(sig({ yb: 93, ya: 94, mins: 6, secs: 70 }, real).fire, true, 'with 6 minutes left the normal rules still call it');
   assert.equal(riskSettings('steady').lateMin, 0, 'other levels: off');
+});
+
+test('the late lane (when turned on) covers the last 5 minutes only', () => {
   assert.equal(sig({ yb: 93, ya: 94, mins: 9 }).late, null, '9 minutes left: the normal rules');
 });
 

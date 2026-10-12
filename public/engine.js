@@ -253,7 +253,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // earlyProof). Its bar: the bot's worst-case odds (volatility 20% off either way, momentum against kept) at earlyConf+
   // (and the guard's floor), its worst-case gap after the fee earlyEdge+, Kalshi's bid earlyBid+ (Kalshi leans the same
   // way), a calm market with no jump in the ask, the usual steady wait and hold odds. Live calls go out at half size.
-  const inEarly = s.earlyMin > 0 && ev.minutesLeft <= s.earlyMin && ev.minutesLeft > (s.lateMin || 0);
+  const inEarly = s.earlyMin > 0 && ev.minutesLeft <= s.earlyMin && ev.minutesLeft > Math.max(s.lateMin || 0, s.noCallLastMin || 0);
   let earlyWhy = null;
   const earlyOk = (a) => {
     const side = a.side, ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk, bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid;

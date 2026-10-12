@@ -286,7 +286,8 @@ export const DEFAULTS = {
   reentrySec: 15,       // after selling, a new call on the same market can fire this many seconds later
   doubleRejRule: true,  // two decent rejections in a row in the window: never call against them (see analysis.js)
   // Late lane (public/engine.js buySignal): in the last lateMin minutes (0 = off) new calls must pass its stress test
-  // and guards instead of the normal edge bar. Off here; on for the 90% target level
+  // and guards instead of the normal edge bar. Off (the 90% target level makes no new calls in the last 5 minutes
+  // at all since v13.17: noCallLastMin 5; a win that late pays a few cents)
   // Early lane (public/engine.js buySignal): from earlyMin minutes left (0 = off) until the late lane, calls Kalshi prices
   // at earlyMinAsk up to the 90% floor; test calls until proven on real rounds (public/profitguard.js earlyProof)
   earlyMin: 0, earlyConf: 0.93, earlyEdge: 0.06, earlyMinAsk: 0.8, earlyBid: 0.75, earlySize: 0.5,
@@ -329,7 +330,7 @@ export const RISK_LEVELS = {
   // Wins pay 10c or less a contract, so fees can make it lose money even while it wins. Fast lane (v13.6): when the bot
   // is 98%+ sure and Kalshi prices the side at 93c+, the steady wait is 20 s instead of 60 (every other check unchanged),
   // so overwhelming leads get called early in the round
-  target90: { label: '90% target', minEdge: 0.01, minConfidence: 92, bigEdgeOverride: 0, minHold: 0.9, steadySec: 60, lockCall: true, winFloor: 0.9, fastSec: 20, fastConf: 98, fastAsk: 0.93, lateMin: 5, earlyMin: 10, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Built for a 90%+ win rate: only sides Kalshi prices at 90¢+ (raised automatically if the record slips) that the bot rates higher still. Many calls win; each win pays little' },
+  target90: { label: '90% target', minEdge: 0.01, minConfidence: 92, bigEdgeOverride: 0, minHold: 0.9, steadySec: 60, lockCall: true, winFloor: 0.9, fastSec: 20, fastConf: 98, fastAsk: 0.93, lateMin: 0, noCallLastMin: 5, earlyMin: 10, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Built for a 90%+ win rate: only sides Kalshi prices at 90¢+ (raised automatically if the record slips) that the bot rates higher still. Many calls win; each win pays little' },
   safe: { label: 'Safe', minEdge: 0.08, minConfidence: 90, bigEdgeOverride: 0.15, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'Fewest calls, biggest gaps only' },
   balanced: { label: 'Balanced', minEdge: 0.06, minConfidence: 85, bigEdgeOverride: 0.12, scaleIn: false, scaleStep: 0.02, reentrySec: 15, limitEdgeFrac: 0.5, cutMargin: 0.03, kellyFraction: 0.25, maxStake: 25, hint: 'About 2× the calls of Safe' },
   // Picked by a 100-configuration search scored across 6 simulated market types, then confirmed on fresh seeds
@@ -338,7 +339,7 @@ export const RISK_LEVELS = {
     bigEdgeOverride: 0.10, hint: 'Trades every small gap, adds as it grows, quick re-entry, double-size bets: biggest wins and biggest swings' },
 };
 // The strategy settings a risk level sets
-export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'kalshiAgree', 'winFloor', 'fastSec', 'fastConf', 'fastAsk', 'lateMin', 'earlyMin', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
+export const RISK_KEYS = ['minEdge', 'minConfidence', 'bigEdgeOverride', 'minHold', 'steadySec', 'lockCall', 'kalshiAgree', 'winFloor', 'fastSec', 'fastConf', 'fastAsk', 'lateMin', 'noCallLastMin', 'earlyMin', 'scaleIn', 'scaleStep', 'reentrySec', 'limitEdgeFrac', 'cutMargin', 'kellyFraction', 'maxStake'];
 export const riskSettings = (k) => Object.fromEntries(RISK_KEYS.map((key) => [key, RISK_LEVELS[k][key] ?? DEFAULTS[key]]));
 export const riskLevelOf = (s) => Object.keys(RISK_LEVELS).find((k) => Math.abs(RISK_LEVELS[k].minEdge - s.minEdge) < 1e-9 && RISK_LEVELS[k].minConfidence === s.minConfidence && (RISK_LEVELS[k].minHold ?? 0) === (s.minHold ?? 0)) ?? 'custom';
 
