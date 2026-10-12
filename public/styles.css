@@ -657,7 +657,7 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .radar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .radar-head small { font-size: 10px; }
 /* the radar screen (v13.13): a round phosphor scope; the beam is a CSS overlay so redraws never restart it */
-.radar-wrap { position: relative; width: 100%; max-width: 340px; margin: 10px auto 4px; aspect-ratio: 1; }
+.radar-wrap { position: relative; width: 100%; max-width: 340px; margin: 10px auto 4px; aspect-ratio: 1; overflow: hidden; }
 .radar-scope { display: block; width: 100%; height: 100%; overflow: visible; }
 .radar-beam { position: absolute; left: 4%; top: 4%; width: 92%; height: 92%; border-radius: 50%; pointer-events: none; mix-blend-mode: screen;
   background: conic-gradient(from 0deg, transparent 0deg 270deg, #2ee6a600 270deg, #2ee6a62e 352deg, #7dffd0aa 359.2deg, #c8ffe9 360deg);

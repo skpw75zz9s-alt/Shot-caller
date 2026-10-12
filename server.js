@@ -16,7 +16,8 @@ import { createMicroFeed } from './microfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createVolTuneFeed } from './voltunefeed.js';
-import { createDiscord } from './discord.js';
+import { appUrl, createDiscord } from './discord.js';
+import { discordInvite, publicRecord } from './website.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -102,7 +103,7 @@ const TYPES = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.mp3': 'audio/mpeg', '.webmanifest': 'application/manifest+json', '.json': 'application/json',
 };
 // Files anyone can load: the paywall page and what it (and "Add to Home Screen") needs.
-const OPEN_FILES = new Set(['/paywall.html', '/paywall.js', '/styles.css', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/sw.js']);
+const OPEN_FILES = new Set(['/site.html', '/site.js', '/robots.txt', '/paywall.html', '/paywall.js', '/styles.css', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/sw.js']);
 
 const cache = new Map(); // tiny ~1s cache so several open phones don't multiply upstream calls
 
@@ -296,6 +297,18 @@ async function pushApi(req, res, action, token) {
 }
 
 const files = new Map(); // rel -> { mtime, raw, br?, gzip? }, refreshed when the file changes on disk
+// The official website (public/site.html, website.js): %BASE% becomes the app's public address, so link previews
+// (Discord, iMessage, X) get absolute links and the icon
+async function serveSite(req, res) {
+  try {
+    const path = join(PUBLIC, '/site.html'), { mtimeMs } = await stat(path), key = '/site.html#base';
+    let entry = files.get(key);
+    if (!entry || entry.mtime !== mtimeMs) files.set(key, (entry = { mtime: mtimeMs, raw: Buffer.from((await readFile(path, 'utf8')).replaceAll('%BASE%', appUrl() ?? '')) }));
+    sendEntry(req, res, 200, entry, TYPES['.html'], { 'cache-control': 'no-cache' });
+  } catch {
+    send(res, 404, 'not found', 'text/plain');
+  }
+}
 async function serveFile(req, res, rel) {
   try {
     const path = join(PUBLIC, rel), { mtimeMs } = await stat(path);
@@ -315,6 +328,11 @@ export const server = http.createServer(async (req, res) => {
     const token = cookieToken(req);
     if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
+    // the official website and its public numbers, for everyone
+    if (req.method === 'GET' && (path === '/site' || path === '/site.html')) return serveSite(req, res);
+    if (path === '/api/public/record' && req.method === 'GET') return send(res, 200, publicRecord(bot.record()));
+    if (path === '/api/public/info' && req.method === 'GET') return send(res, 200, { app: 'Shot Caller', discord: discordInvite() });
+
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);
     const adm = path.match(/^\/api\/admin\/(\w+)$/);
@@ -324,7 +342,7 @@ export const server = http.createServer(async (req, res) => {
     const allowed = !PAYWALL || access.hasAccess(token);
     if (!allowed) {
       if (OPEN_FILES.has(rel) && req.method === 'GET') return serveFile(req, res, rel);
-      if (rel === '/index.html') return serveFile(req, res, '/paywall.html'); // the app's URL shows the paywall
+      if (rel === '/index.html') return serveSite(req, res); // the app's address shows the official website; it links to sign in
       return send(res, 401, { error: 'payment required', paywall: true });
     }
 

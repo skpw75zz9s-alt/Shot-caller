@@ -129,8 +129,15 @@ const jar = () => {
 test('without access: paywall page, open assets only, APIs locked', async () => {
   const get = jar();
   const home = await (await get('/')).text();
-  assert.match(home, /paywall\.js/);
+  assert.match(home, /site\.js/, 'the app\'s address shows the official website');
+  assert.match(home, /href="paywall\.html"/, 'which links to sign in');
   assert.doesNotMatch(home, /app\.js/);
+  assert.match(await (await get('/paywall.html')).text(), /paywall\.js/);
+  assert.equal((await get('/site.js')).status, 200);
+  assert.equal((await get('/robots.txt')).status, 200);
+  const rec = await (await get('/api/public/record')).json();
+  assert.equal(typeof rec.graded, 'number'); assert.ok(Array.isArray(rec.recent));
+  assert.equal((await get('/api/public/info')).status, 200);
   assert.equal((await get('/icon-192.png')).headers.get('content-type'), 'image/png');
   assert.equal((await get('/manifest.webmanifest')).status, 200);
   for (const p of ['/app.js', '/engine.js', '/model.js', '/api/kalshi/markets?series_ticker=X', '/api/push/key', '/api/admin/members']) {
