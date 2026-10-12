@@ -12,7 +12,8 @@ function market(kind, days, seed = 3) {
   const bars = []; let p = 80000, slow = 1;
   for (let i = 0; i < days * 1440; i++) {
     if (kind === 'jumps' && i % 30 === 0) slow = Math.exp(0.5 * g() - 0.125); // the volatility shifts every half hour, unseen
-    p *= Math.exp(0.0008 * (kind === 'jumps' ? slow : 1) * g());
+    const carry = kind === 'trend' && bars.length >= 15 ? 0.35 * Math.log(p / bars[bars.length - 15].c) / 15 : 0; // drift that carries
+    p *= Math.exp(carry + 0.0008 * (kind === 'jumps' ? slow : 1) * g());
     bars.push({ t: 1.7e12 + i * 60000, o: p, h: p, l: p, c: p, v: 1 });
   }
   return bars;
@@ -48,9 +49,10 @@ test('the tuner: finds the fat tails a market really has and proves them out of 
   const r = await tuneVolAsync(market('jumps', 12));
   assert.ok(r.proven && r.pick.tails > 0 && r.z >= VT.z, JSON.stringify({ z: r.z, pick: r.pick }));
   assert.ok(Math.abs(r.held90.tuned - 0.9) < Math.abs(r.held90.base - 0.9), 'its 90% range is closer to 90%');
-  assert.deepEqual(vtLive(r), { use: true, ...r.pick, gain: r.gain, z: r.z });
-  assert.deepEqual(vtLive({ ...r, proven: false }), { use: false }, 'unproven: standard settings');
-  assert.deepEqual(vtLive({ ...r, pick: VT_BASE }), { use: false });
+  assert.deepEqual(vtLive(r), { use: true, ...r.pick, gain: r.gain, z: r.z, drift: null }, 'no momentum in a market without any');
+  assert.equal(r.drift.proven, false);
+  assert.deepEqual(vtLive({ ...r, proven: false }), { use: false, drift: null }, 'unproven: standard settings');
+  assert.deepEqual(vtLive({ ...r, pick: VT_BASE }), { use: false, drift: null });
 });
 
 test('the engine prices with the proven settings, and only when learning is on', () => {
@@ -68,10 +70,25 @@ test('the engine prices with the proven settings, and only when learning is on',
 test('the feed: reruns hourly without blocking, and serves only a proven pick', async () => {
   let t = 0; const bars = market('jumps', 8);
   const feed = createVolTuneFeed({ playbook: { bars: () => bars }, clock: () => t, log: { error() {} } });
-  assert.deepEqual(feed.live(), { use: false }, 'nothing run yet');
+  assert.deepEqual(feed.live(), { use: false, drift: null }, 'nothing run yet');
   await feed.rerun();
   const r = feed.api().report;
   assert.equal(r.bars, bars.length); assert.equal(feed.live().use, r.proven && !(r.pick.lambda === 0.94 && r.pick.floor === 0.6 && r.pick.scale === 1 && r.pick.tails === 0));
   const short = createVolTuneFeed({ playbook: { bars: () => bars.slice(0, 100) }, clock: () => t });
   await short.rerun(); assert.equal(short.api().report, null, 'too little history: no report');
+});
+
+test('momentum: found and proven where drift really carries, and the engine carries it (unless you set your own weight)', async () => {
+  const r = await tuneVolAsync(market('trend', 10));
+  assert.ok(r.drift.proven && r.drift.pick.w > 0, JSON.stringify(r.drift));
+  const live = vtLive(r);
+  assert.deepEqual(live.drift, { ...r.drift.pick, gain: r.drift.gain, z: r.drift.z });
+  const now = 1.7e12 + 200 * 60000, candles = market('trend', 1).slice(0, 200).map((b, i) => ({ ...b, t: 1.7e12 + i * 60000 }));
+  const markets = [{ ticker: 'X', strike_type: 'greater', floor_strike: candles.at(-1).c, open_time: new Date(now - 5 * 60000).toISOString(), close_time: new Date(now + 10 * 60000).toISOString(), yes_bid: 50, yes_ask: 52, no_bid: 48, no_ask: 50 }];
+  const learned = { basis: [], volByHour: {}, cal: {}, volTune: { use: false, drift: { n: 15, w: 0.4, gain: 0.01, z: 3 } } };
+  const on = snapshot({ markets, candles, spot: candles.at(-1).c, settings: {}, learned, now });
+  assert.equal(on.momentumWeight, 0.4); assert.equal(on.sigmaMin, snapshot({ markets, candles, spot: candles.at(-1).c, settings: { learn: false }, now }).sigmaMin, 'volatility untouched');
+  const c = on.bars.map((b) => b.c); assert.ok(Math.abs(on.driftMin - Math.log(c.at(-1) / c.at(-16)) / 15) < 1e-12, 'the 15-minute drift (live bar included, as always)');
+  const mine = snapshot({ markets, candles, spot: candles.at(-1).c, settings: { momentumWeight: 0.2 }, learned, now });
+  assert.equal(mine.momentumWeight, 0.2, 'your own weight wins');
 });

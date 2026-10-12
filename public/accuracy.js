@@ -1,0 +1,66 @@
+// The accuracy card (v13.4): every predictor's out-of-sample record in one place, each next to the baseline it has to
+// beat, and the same numbers as a report to copy (to send to whoever tunes the bot). Pure: app.js gathers the records.
+//   verdict  good  beats its baseline (or holds its promised rate)
+//            bad   behind it
+//            wait  not enough graded data to say (fewer than `min` samples)
+export const ACC = { min: 30 };
+const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+const usd = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(x).toFixed(2)}`;
+const dol = (x) => `$${Math.round(x).toLocaleString('en-US')}`;
+
+export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null } = {}) {
+  const rows = [], add = (key, name, n, verdict, metric, vs, data) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' ? 'wait' : verdict, metric, vs, data });
+  // the official calls and Near-certain: their win rates mean little alone (a 90¢ call should win 90%), so the bar is
+  // profit after fees at $10 a call
+  if (bot) {
+    const g = bot.graded || 0;
+    add('calls', `Official calls${bot.level ? ` (${bot.level})` : ''}`, g, bot.usd == null ? 'wait' : bot.usd > 0 ? 'good' : 'bad', g ? `won ${bot.wins} of ${g} (${pct(bot.wins / g)})` : 'no graded calls yet',
+      !g ? 'graded at each settlement' : bot.usd == null ? 'profit isn\'t tracked on this phone yet (the server\'s record has it)' : `${usd(bot.usd)} at $10 a call after fees: the bar a win rate has to clear is the price paid`, { graded: g, wins: bot.wins ?? 0, usd: bot.usd ?? null });
+    const c = bot.certain;
+    if (c) add('certain', 'Near-certain calls', c.graded || 0, (c.usd ?? 0) > 0 ? 'good' : 'bad', c.graded ? `won ${c.wins} of ${c.graded} (${pct(c.wins / c.graded)})` : 'none yet (rare by design)',
+      c.graded ? `${usd(c.usd ?? 0)} at $10 a call: priced 90¢+, so one loss erases many wins` : 'kept on every round, never traded', { graded: c.graded || 0, wins: c.wins ?? 0, usd: c.usd ?? 0 });
+  }
+  // the prediction engine, walk-forward on the server's history
+  if (predictor?.n) {
+    const t90 = predictor.thresholds?.find((t) => t.t === 0.9);
+    add('engine', 'Prediction engine (walk-forward)', predictor.rounds, predictor.proven ? 'good' : predictor.brier > predictor.brierDistance ? 'bad' : 'wait',
+      `Brier ${predictor.brier.toFixed(4)} vs ${predictor.brierDistance.toFixed(4)} for the distance odds alone (lower is better)`,
+      t90?.model.n ? `90%+ calls right ${pct(t90.model.accuracy)} on ${pct(t90.model.share)} of checkpoints; the distance odds alone: ${pct(t90.distance.accuracy)} on ${pct(t90.distance.share)}` : 'no 90%+ calls in the history yet',
+      { rounds: predictor.rounds, brier: predictor.brier, brierDistance: predictor.brierDistance, z: predictor.z, proven: !!predictor.proven, t90: t90 ? { model: t90.model, distance: t90.distance } : null });
+  }
+  // the prediction lines' blend (the cone's centre), graded every minute
+  if (blend) {
+    const b = blend.best;
+    add('blend', 'Prediction lines, blended', blend.n || 0, blend.n && blend.blend < blend.still ? 'good' : 'bad',
+      blend.n ? `average miss at the close ${dol(blend.blend)} vs ${dol(blend.still)} for "no change"` : 'graded every minute of every round',
+      b ? `best single line ${b.key} ${dol(b.miss)} vs the blend's ${dol(b.blend)} on the same calls` : 'needs a few graded rounds', blend.n ? { calls: blend.n, rounds: blend.rounds, blend: blend.blend, still: blend.still, best: b } : null);
+  }
+  if (path) add('path', 'Expected path, minute by minute', path.n || 0, path.n && path.miss < path.still ? 'good' : 'bad',
+    path.n ? `direction right ${path.called ? pct(path.right / path.called) : '—'} of ${path.called} minutes called` : 'graded at each minute\'s close',
+    path.n ? `average miss ${dol(path.miss)} vs ${dol(path.still)} for "no change"` : '', path.n ? { minutes: path.n, called: path.called, right: path.right, miss: path.miss, still: path.still, beta: path.beta } : null);
+  if (cone) {
+    const ok = cone.n && Math.abs(cone.in90 - 0.9) <= 0.05 && Math.abs(cone.in50 - 0.5) <= 0.08;
+    add('cone', 'Cone (50% and 90% bands)', cone.n || 0, ok ? 'good' : 'bad', cone.n ? `the 50% band held ${pct(cone.in50)}, the 90% band ${pct(cone.in90)}` : 'graded each round',
+      cone.nKalshi >= 5 ? `above-the-target chance: Brier ${cone.brierSame.toFixed(3)} vs Kalshi's price ${cone.brierKalshi.toFixed(3)}` : 'it recalibrates its width from this record',
+      cone.n ? { rounds: cone.n, in50: cone.in50, in90: cone.in90, brier: cone.brierSame ?? null, brierKalshi: cone.brierKalshi ?? null } : null);
+  }
+  if (radar) {
+    const kinds = [['floor', 'floor'], ['ceil', 'ceiling'], ['range', 'range'], ['next', 'next minute']].filter(([k]) => radar[k]?.n);
+    const n = Math.min(...kinds.map(([k]) => radar[k].n), Infinity), low = kinds.some(([k]) => radar[k].rate < 0.87);
+    add('radar', 'Market radar (promises 90%+)', kinds.length ? n : 0, kinds.length && !low ? 'good' : 'bad',
+      kinds.length ? kinds.map(([k, name]) => `${name} ${pct(radar[k].rate)}`).join(' · ') : 'every call graded at the close',
+      radar.dir?.n ? `direction calls right ${radar.dir.hit} of ${radar.dir.n}` : 'no 90% direction calls graded yet', Object.fromEntries(Object.entries(radar).map(([k, x]) => [k, { n: x.n, hit: x.hit }])));
+  }
+  if (flip) add('flips', 'Flip calls (↺)', flip.n || 0, flip.n && flip.base != null && flip.rate > flip.base ? 'good' : 'bad',
+    flip.n ? `caught ${flip.hits} of ${flip.n} (${pct(flip.rate)})` : 'each predicted turn checked afterwards', flip.base != null ? `vs ${pct(flip.base)} for a random minute` : '', flip.n ? { n: flip.n, hits: flip.hits, base: flip.base } : null);
+  // the server's tuners: on only once proven
+  add('tuning', 'Tuned volatility and momentum', ACC.min, tune?.use || tune?.drift ? 'good' : 'off',
+    tune?.use ? `volatility: EWMA ${tune.lambda}, floor ${tune.floor}, ×${tune.scale}${tune.tails ? `, fat tails ${tune.tails}` : ''} (z ${tune.z.toFixed(1)})` : 'volatility: standard settings (nothing proven better yet)',
+    tune?.drift ? `momentum: ${tune.drift.w > 0 ? 'carry' : 'fade'} the last ${tune.drift.n} minutes at ${Math.abs(tune.drift.w)} (z ${tune.drift.z.toFixed(1)})` : 'momentum: none (nothing proven better yet)', tune || null);
+  return rows;
+}
+
+// The report to copy: the rows' numbers, sample sizes and verdicts, plus when and which version
+export function accuracyReport(rows, { version = null, at = Date.now() } = {}) {
+  return { app: 'Shot Caller', version, at: new Date(at).toISOString(), rows: rows.map((r) => ({ key: r.key, name: r.name, n: r.n, verdict: r.verdict, metric: r.metric, vs: r.vs, data: r.data })) };
+}

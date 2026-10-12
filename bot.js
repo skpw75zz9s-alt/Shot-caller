@@ -352,7 +352,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   // What the server has learned, with the volatility settings its tuner has proven (voltunefeed.js), for the odds
-  function learnedNow() { const v = volTune(); return v?.use ? { ...learned, volTune: v } : learned; }
+  function learnedNow() { const v = volTune(); return v?.use || v?.drift ? { ...learned, volTune: v } : learned; }
 
   // ---------- learning (every window, all day, every day) ----------
   function observe(now) {
@@ -438,6 +438,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const info = shiftInfo() || {}, scanOn = !!info.scan, microOn = !!info.micro, tuned = info.tune || [], revBands = info.reversal || [], guideOn = !!info.guide, predOn = !!info.predictor;
     return [
       { key: 'voltune', name: 'Tuned volatility (and fat tails)', on: !!info.volTune?.use, detail: info.volTune?.use ? `EWMA ${info.volTune.lambda}, floor ${info.volTune.floor}× the 2-hour volatility, scale ×${info.volTune.scale}${info.volTune.tails ? `, fat tails ${info.volTune.tails}` : ''}: described the next 5-15 minutes better than the standard settings on days it was never tuned on (z ${info.volTune.z.toFixed(1)})` : 'standard settings until a tuned one describes BTC\'s moves better out of sample (z 2.5+, rechecked hourly)' },
+      { key: 'drifttune', name: 'Tuned momentum', on: !!info.volTune?.drift, detail: info.volTune?.drift ? `${info.volTune.drift.w > 0 ? 'carries' : 'fades'} the last ${info.volTune.drift.n} minutes' drift at ${Math.abs(info.volTune.drift.w)}: described the next 5-15 minutes better than no momentum on days it was never tuned on (z ${info.volTune.drift.z.toFixed(1)})` : 'none (the standard) until carrying or fading recent drift proves itself out of sample (z 2.5+, rechecked hourly)' },
       { key: 'vol', name: 'Volatility by time of week', on: !!p, detail: p ? 'prices the coming minutes with how busy this half hour usually is' : 'needs a week of history' },
       { key: 'cal', name: 'Calibration', on: corrected > 0, detail: corrected ? `corrects ${corrected} confidence band${corrected === 1 ? '' : 's'} from graded rounds` : 'no band has needed (or earned) a correction yet' },
       { key: 'basis', name: 'Coinbase vs Kalshi\'s settlement', on: learned.basis.length >= 10, detail: learned.basis.length >= 10 ? `${basisOf(learned) >= 0 ? '+' : '−'}$${Math.abs(basisOf(learned)).toFixed(2)} folded into the price` : `${learned.basis.length} of 10 settlements` },

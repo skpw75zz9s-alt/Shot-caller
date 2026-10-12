@@ -55,11 +55,14 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   const closes = bars.map((c) => c.c);
   const useLearned = learned && s.learn !== false;
   // the volatility settings the server's tuner proved on history (public/voltune.js), else the standard ones
-  const vt = useLearned && learned.volTune?.use ? learned.volTune : null;
+  const tune = useLearned ? learned.volTune : null, vt = tune?.use ? tune : null;
   if (vt) s.volTails = vt.tails;
+  // and the momentum it proved (only while your own momentum weight is left at 0)
+  const dt = tune?.drift && !settings?.momentumWeight ? tune.drift : null;
+  if (dt) s.momentumWeight = dt.w;
   const sigmaLong = longVol(closes.slice(-121)), ewma = realizedVol(closes.slice(-121), vt?.lambda ?? 0.94);
   const sigmaMin = ewma || sigmaLong ? effectiveVol(ewma, sigmaLong, s.minVol, vt?.floor ?? 0.6) * (vt?.scale ?? 1) : null;
-  const driftMin = momentum(closes, 10);
+  const driftMin = momentum(closes, dt?.n ?? 10);
   const basis = useLearned ? basisOf(learned) : 0;
   const mSpot = spot ? spot + basis : spot; // the price Kalshi will actually settle on, as best the bot knows
   const rows = markets.map((m) => {
@@ -95,7 +98,7 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   // the call filter the server has learned (public/callgate.js), when it has proven itself
   const callGate = useLearned && learned?.callGate?.active ? learned.callGate : null;
-  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, volTails: s.volTails, volTune: vt, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
+  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, volTails: s.volTails, momentumWeight: s.momentumWeight, volTune: vt, driftTune: dt, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
@@ -107,7 +110,7 @@ export const leanSide = (ev) =>
 // Returns { edge, p }: the edge after the exact fee of the order the bot would place, and the side's win chance
 function edgeUnder(row, snap, s, side, volScale) {
   const dir = side === 'YES' ? 1 : -1;
-  const drift = (snap.driftMin || 0) * s.momentumWeight;
+  const drift = (snap.driftMin || 0) * (snap.momentumWeight ?? s.momentumWeight);
   const keptDrift = drift * dir > 0 ? 0 : drift;
   const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
   const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg, snap.volTails ?? s.volTails);

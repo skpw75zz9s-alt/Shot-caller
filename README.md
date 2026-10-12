@@ -271,6 +271,27 @@ Security:
 
 ## Version notes (newest first)
 
+### Tuned momentum, accuracy card, accuracy report (v13.4)
+
+- **Tuned momentum.** Momentum has been off since an old test found BTC's drift doesn't carry, a hand-made call that
+  was never retested. The volatility tuner (`public/voltune.js`) now also tests carrying or fading the last 5–60
+  minutes' drift at weights −0.6 to +0.6, walk-forward by log score against no momentum. A proven pick (z ≥ 2.5) sets
+  the bot's drift lookback and weight, unless you've set your own momentum weight in Settings. On simulated random
+  walks it was never proven (0 of 6 seeds); on a market whose drift really carries, it was.
+- **Accuracy card (Record tab, top)** (`public/accuracy.js`). Every predictor's out-of-sample record, each next to the
+  baseline it has to beat:
+  - official and Near-certain calls: win rate, with profit after fees at $10 a call as the bar
+  - the prediction engine: Brier vs the distance odds, and its 90%+ calls
+  - the blended prediction lines and the expected path vs "no change"
+  - the cone's band coverage and its Brier vs Kalshi
+  - the radar's promised 90%
+  - flip calls vs a random minute
+  - which tuners are on
+
+  Green beats its baseline, red is behind it, and grey means fewer than 30 samples.
+- **Copy accuracy report.** One tap copies all of it as JSON, with sample sizes and nothing personal (no keys,
+  balances or trades), to send to whoever tunes the bot.
+
 ### Tuned volatility and fat tails (v13.3)
 
 Every probability the bot gives comes from its volatility estimate, so this is the most direct lever on how accurate its

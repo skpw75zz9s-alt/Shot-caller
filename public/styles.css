@@ -644,6 +644,12 @@ body.scrolled .tk-right { max-height: 0; opacity: 0; }
 .pred-record { margin: 6px 0 2px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .pred-record b { color: var(--text); }
 
+/* ---------- the accuracy card ---------- */
+.acc-list { display: grid; gap: 6px; margin: 8px 0; }
+.acc-r { display: grid; grid-template-columns: 1fr; gap: 1px; padding: 7px 10px; border-radius: 8px; background: var(--bg); border-left: 3px solid var(--pass); }
+.acc-r.good { border-left-color: var(--yes); } .acc-r.bad { border-left-color: var(--no); }
+.acc-r b { font-size: 12px; } .acc-r span { font: 12px var(--mono); color: var(--text); } .acc-r small { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
 /* ---------- the market radar ---------- */
 .radar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .radar-head small { font-size: 10px; }

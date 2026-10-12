@@ -19,6 +19,7 @@ import { CHECKPOINTS, FEATURES, FEATURE_NAMES, MIN_SAMPLES, SCAN_EXCHANGES, chec
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { radarRead, radarRecord } from './radar.js';
+import { accuracyReport, accuracyRows } from './accuracy.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -434,6 +435,7 @@ const fx = createFx($);
 const trendState = {};
 $('fxTryLock').addEventListener('click', () => { alerts.play('call', 'bull'); fx.lockIn({ side: 'YES', conf: 91, hold: 0.87, price: 0.72 }); });
 $('fxTryBull').addEventListener('click', () => { alerts.play('trendBull'); fx.charge('bull'); });
+$('accCopy').addEventListener('click', copyAccuracy);
 const watch = {}; // sustained conditions for alerts (alerts.js)
 state.notes = [];
 function addNote(key, text, t = Date.now()) {
@@ -1226,6 +1228,7 @@ function trackPredictions(snap, live, now) {
   if (!live) state.radar = null;
   else if (!(now - (state.radarAt || 0) < 5000)) { state.radarAt = now; state.radar = radarNow(live, snap, now); } // every 5 s
   renderRadar(state.radar, modelSpot());
+  renderAccuracy(now);
   const cs = state.coneSum, $$ = (x) => `$${Math.round(x).toLocaleString()}`;
   setHTML($('coneRead'), (cs ? `Cone: most likely close <b>${$$(cs.lo50)}–${$$(cs.hi50)}</b> (50%) · 90%: ${$$(cs.lo90)}–${$$(cs.hi90)} · <b>${Math.round(cs.pAbove * 100)}%</b> chance of finishing above the target${Math.abs(cs.skew.up - cs.skew.dn) > 0.15 ? ` · ${cs.skew.dn > cs.skew.up ? 'downside' : 'upside'} wider (the last hour's ${cs.skew.dn > cs.skew.up ? 'drops' : 'rallies'} were sharper)` : ''}. ` : '')
     + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
@@ -1271,6 +1274,25 @@ function renderRadar(rd, spot) {
   const pct = (x) => `<b>${Math.round(x.rate * 100)}%</b> (${int(x.n)})`, parts = [['floor held', rec.floor], ['ceiling', rec.ceil], ['range', rec.range], ['next minute', rec.next]].filter(([, x]) => x.n).map(([k, x]) => `${k} ${pct(x)}`);
   if (rec.dir.n) parts.push(`direction <b>${rec.dir.hit} of ${rec.dir.n}</b>`);
   setHTML($('radarRecord'), parts.length ? `Radar record (graded at each close): ${parts.join(' · ')}` : 'Every radar call is graded at the close; the record shows here whether 90% really held.');
+}
+// The accuracy card (public/accuracy.js): every predictor's record next to its baseline, and the report to copy
+function accuracyNow() {
+  const br = state.botRecord, bot = br?.graded != null ? br : callStats(state.callLog);
+  return accuracyRows({ bot, predictor: state.playbook?.report?.predictor ?? null, blend: blendScore(state.predLog), path: pathRecord(state.pcLog), cone: coneRecord(state.coneLog),
+    radar: radarRecord(state.predLog, state.pcLog), flip: flipRecord(state.flipLog, state.flipBase), tune: state.memory?.learned?.volTune ?? null });
+}
+function renderAccuracy(now = Date.now()) {
+  if (now - (state.accAt || 0) < 5000) return;
+  state.accAt = now;
+  setHTML($('accList'), accuracyNow().map((r) => `<div class="acc-r ${r.verdict}"><b>${esc(r.name)}${r.verdict === 'wait' ? ` <small>(${int(r.n)} so far)</small>` : ''}</b><span>${esc(r.metric)}</span>${r.vs ? `<small>${esc(r.vs)}</small>` : ''}</div>`).join(''));
+}
+async function copyAccuracy() {
+  const text = JSON.stringify(accuracyReport(accuracyNow(), { version: $('version')?.textContent ?? null }), null, 1);
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch {
+    try { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch { /* no clipboard */ }
+  }
+  setText($('accNote'), ok ? 'Copied. Paste it into a message to whoever tunes the bot.' : 'Couldn\'t reach the clipboard on this device.');
 }
 // Buys and sells to flag on the chart: the server Auto-trader's fills (its log) and the positions you track
 function chartFills() {
@@ -1323,7 +1345,7 @@ function render() {
     const { side, buyNow } = sig;
     const call = sig.callSide; // a low price that passed the robust-edge and deep-dive checks (or a call it's sticking with)
     timing = sig.timing;
-    const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings: { ...settings, volTails: snap.volTails ?? 0 } }) : null;
+    const limit = side && timing.dipLevel ? dipLimit({ market: m, strike, spot: state.spot, dipLevel: timing.dipLevel, sigmaMin, driftMin, side, now, settings: { ...settings, volTails: snap.volTails ?? 0, momentumWeight: snap.momentumWeight ?? settings.momentumWeight } }) : null;
 
     setText($('marketTitle'), m.title || m.ticker);
     setText($('countdown'), `closes in ${mmss(ev.minutesLeft)}`);

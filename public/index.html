@@ -55,6 +55,7 @@
   <link rel="modulepreload" href="roundscan.js">
   <link rel="modulepreload" href="predict.js">
   <link rel="modulepreload" href="radar.js">
+  <link rel="modulepreload" href="accuracy.js">
   <link rel="modulepreload" href="tvchart.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -348,6 +349,13 @@
     </section>
 
     <section id="view-history" class="view">
+      <div class="card acc-card" id="accCard">
+        <div class="deep-head"><span>Accuracy: every predictor's real record</span></div>
+        <p class="push-status">Each one is graded on calls it made before the outcome was known, next to the baseline it has to beat. Green beats its baseline, red is behind it, grey needs more data.</p>
+        <div class="acc-list" id="accList"></div>
+        <button type="button" id="accCopy">Copy accuracy report</button>
+        <p class="fine-left" id="accNote">Paste the report to whoever tunes the bot: it has every number above, with sample sizes, and nothing personal (no keys, no balances, no trades).</p>
+      </div>
       <div class="card rec-card" id="botRec">
         <div class="deep-head"><span>Official bot record</span><b id="brLevel"></b></div>
         <div class="rec-hero">
@@ -476,7 +484,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.3 · tuned volatility</p>
+      <p class="fine" id="version">Shot Caller v13.4 · accuracy card</p>
     </section>
   </main>
 
