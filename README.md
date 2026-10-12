@@ -271,6 +271,32 @@ Security:
 
 ## Version notes (newest first)
 
+### 90% target level and win-rate guard (v13.5)
+
+From now on the official bot record is made on a new risk level built for a 90%+ win rate. The earlier Steady calls
+stay in the file and show under it as "Before the 90% target".
+- **90% target** (`RISK_LEVELS.target90`, also in Settings → Risk level). A call needs:
+  - **Kalshi's own ask for the side at the floor or more** (90¢ to start). Kalshi's price is a well-calibrated win
+    chance, so 90¢ sides win about 90% of the time on their own.
+  - **the bot rating it higher still at that price**, after the fee: a 1¢ gap at the worst of three volatility guesses,
+    confidence 92+ held for a minute, and a 90%+ chance it holds all round.
+  - It never switches sides mid-round.
+- **Win-rate guard** (`public/winguard.js`). It watches the level's last 100 graded calls, with the win rate shrunk
+  toward its 92% aim by 40 calls' worth. If the record slips, the price floor rises (90¢ + 1.5 × the shortfall, at most
+  97¢), so it makes fewer, surer calls until the record recovers. One early loss in 3 calls lifts it to 93¢; 88% over
+  100 calls lifts it to 95¢. The phone applies the same floor when you pick the level.
+- **Record tab.** It shows the guard's floor, the last 100 calls' win rate and its 95% lower bound. The Accuracy card
+  judges this record against the 90% win rate, with profit shown.
+- **Simulated** (20,000 rounds per case, Kalshi calibrated plus noise, the bot with real volatility errors):
+  - won 92–97%, vs 80–84% for Steady's rules on the same rounds
+  - with the guard on: about 92.5% when Kalshi prices fairly, 94–95% when favorites are 2¢ underpriced (common in
+    betting markets) and about 91% when they're 2¢ overpriced
+  - If Kalshi overpriced favorites by 4¢ across the board, it would hold only 89–90%. Raising the floor can't fix a
+    market that's wrong at every price, and the Accuracy card would show it red.
+- **The cost.** Calls cost 90¢+, so a $10 win pays $1 or less, and one loss costs the $10. When Kalshi's prices are
+  efficient, the fee makes these calls lose a little money even while they win 92%+ (simulated: −$0.06 to −$0.21 per
+  $10 call). When its prices are noisy, they made a little (+$0.08 to +$0.18).
+
 ### Tuned momentum, accuracy card, accuracy report (v13.4)
 
 - **Tuned momentum.** Momentum has been off since an old test found BTC's drift doesn't carry, a hand-made call that

@@ -20,6 +20,7 @@ import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, 
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
 import { radarRead, radarRecord } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
+import { withGuard } from './winguard.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
@@ -1323,7 +1324,7 @@ function render() {
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
-  const sig = live && state.spotAt ? buySignal(live, snap, settings, now, state.calls) : null; // never call off the cached price from last visit
+  const sig = live && state.spotAt ? buySignal(live, snap, withGuard(settings, state.botRecord?.guard?.floor), now, state.calls) : null; // never call off the cached price from last visit (90% target: the server's guard floor)
   if (sig?.fire) store.set('calls', state.calls);
   trackRule(snap, live, now);
   renderDeep(live, sig);
@@ -1640,9 +1641,12 @@ function renderBotRecord() {
   setText($('brStreak'), r.streak ? `${r.streak.kind}${r.streak.n}` : '—');
   setClass($('brStreak'), r.streak?.kind === 'W' ? 'pos' : r.streak?.kind === 'L' ? 'neg' : '');
   const since = r.since ? new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
-  setText($('brSub'), !r.calls.length ? 'No calls yet. The bot calls on its own around the clock (Steady settings), and every call shows up here, win or lose.'
+  const g = r.guard, b = r.before;
+  const guardLine = g ? ` Win-rate guard: ${g.n ? `the last ${g.n} graded calls won ${pctOf(g.wins, g.n)}${g.low != null && g.n >= 10 ? ` (at least ${Math.round(g.low * 100)}% with 95% confidence)` : ''}` : 'no graded calls yet'}; it only calls sides Kalshi prices at <b>${Math.round(g.floor * 100)}¢</b>+ right now${g.floor > 0.9 ? ' (raised because the record slipped below its 92% aim)' : ''}.` : '';
+  const beforeLine = b?.graded ? ` Before the 90% target (Steady, to ${new Date(b.until).toLocaleDateString([], { month: 'short', day: 'numeric' })}): won ${pctOf(b.wins, b.graded)} of ${int(b.graded)}.` : '';
+  setHTML($('brSub'), (!r.calls.length ? `No calls yet on the ${esc(r.level)} level. The bot calls on its own around the clock, and every call shows up here, win or lose.`
     : `Every call the bot made${since ? ` since ${since}` : ''}, around the clock, graded against Kalshi's result. It said ${r.said != null ? Math.round(r.said) : '—'}% on average and won ${pctOf(r.wins, r.graded)}. $10 on every call, held to settlement: ${money(r.usd)}. Best win streak: ${r.bestWin}.` +
-      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`);
+      `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`) + guardLine + beforeLine);
   const days = dailyRecord(r.calls, 14), top = Math.max(1, ...days.map((d) => d.w + d.l));
   setHTML($('brDays'), days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join(''));
   $('brDays').classList.toggle('empty', !days.some((d) => d.w + d.l));

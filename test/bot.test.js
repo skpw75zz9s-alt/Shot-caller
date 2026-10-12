@@ -200,21 +200,25 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
   assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
 });
 
-test('official bot record: the server bot calls on its own (Steady) and grades the call', async () => {
+test('official bot record: the server bot calls on its own (90% target) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   const file = join(await mkdtemp(join(tmpdir(), 'shot-rec-')), 'data.json');
   const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet });
   await b.load();
   const p = fakeBrowser();
   b.sync({ subscription: { endpoint: `${svc.base}/push/rec`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
-  for (let s = 0; s <= 75; s += 3) await b.tick(NOW + s * 1000); // Steady wants a minute of steady odds first
+  for (let s = 0; s <= 36; s += 3) await b.tick(NOW + s * 1000);
+  assert.equal(b.record().calls.length, 0, 'Kalshi gives YES only 40%: below the 90% target\'s floor, however sure the bot is');
+  Object.assign(quotes, { yes_bid: 90, yes_ask: 91 }); // now Kalshi agrees: 91c
+  for (let s = 39; s <= 180; s += 3) await b.tick(NOW + s * 1000); // the bot re-reads Kalshi, then a minute of steady odds
   let r = b.record();
   assert.equal(r.calls.length, 1, 'one locked call for the round');
-  assert.equal(r.calls[0].side, 'YES');
-  assert.equal(r.level, 'Steady');
+  assert.equal(r.calls[0].side, 'YES'); assert.equal(r.calls[0].lv, 'target90'); assert.equal(r.calls[0].fl, 0.9);
+  assert.equal(r.level, '90% target');
+  assert.equal(r.guard.floor, 0.9); assert.equal(r.before, null);
   assert.equal(r.graded, 0);
-  // Near-certain keeps its own record; Kalshi at 38-40c doesn't agree with the bot here, so it makes no call
-  assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 0);
+  // Near-certain keeps its own record: Kalshi's 90c bid agrees with it too, so it made its own call
+  assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 1);
   await b.tick(NOW + 8 * 60000); // the round settled YES
   r = b.record();
   assert.equal(r.graded, 1); assert.equal(r.wins, 1);

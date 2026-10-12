@@ -14,8 +14,13 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
   // profit after fees at $10 a call
   if (bot) {
     const g = bot.graded || 0;
-    add('calls', `Official calls${bot.level ? ` (${bot.level})` : ''}`, g, bot.usd == null ? 'wait' : bot.usd > 0 ? 'good' : 'bad', g ? `won ${bot.wins} of ${g} (${pct(bot.wins / g)})` : 'no graded calls yet',
-      !g ? 'graded at each settlement' : bot.usd == null ? 'profit isn\'t tracked on this phone yet (the server\'s record has it)' : `${usd(bot.usd)} at $10 a call after fees: the bar a win rate has to clear is the price paid`, { graded: g, wins: bot.wins ?? 0, usd: bot.usd ?? null });
+    // on the 90% target level (with its win-rate guard) the bar is the 90% win rate itself, with the profit shown
+    const gd = bot.guard, verdict = gd ? (g && bot.wins / g >= 0.9 ? 'good' : 'bad') : bot.usd == null ? 'wait' : bot.usd > 0 ? 'good' : 'bad';
+    add('calls', `Official calls${bot.level ? ` (${bot.level})` : ''}`, g, verdict, g ? `won ${bot.wins} of ${g} (${pct(bot.wins / g)})` : 'no graded calls yet',
+      !g ? (gd ? `aims for 90%+: calls only sides Kalshi prices at ${Math.round(gd.floor * 100)}¢+` : 'graded at each settlement')
+        : gd ? `target 90%+ · price floor now ${Math.round(gd.floor * 100)}¢${bot.usd != null ? ` · ${usd(bot.usd)} at $10 a call after fees` : ''}`
+        : bot.usd == null ? 'profit isn\'t tracked on this phone yet (the server\'s record has it)' : `${usd(bot.usd)} at $10 a call after fees: the bar a win rate has to clear is the price paid`,
+      { graded: g, wins: bot.wins ?? 0, usd: bot.usd ?? null, ...(gd ? { floor: gd.floor, guardN: gd.n, guardWins: gd.wins } : {}) });
     const c = bot.certain;
     if (c) add('certain', 'Near-certain calls', c.graded || 0, (c.usd ?? 0) > 0 ? 'good' : 'bad', c.graded ? `won ${c.wins} of ${c.graded} (${pct(c.wins / c.graded)})` : 'none yet (rare by design)',
       c.graded ? `${usd(c.usd ?? 0)} at $10 a call: priced 90¢+, so one loss erases many wins` : 'kept on every round, never traded', { graded: c.graded || 0, wins: c.wins ?? 0, usd: c.usd ?? 0 });
