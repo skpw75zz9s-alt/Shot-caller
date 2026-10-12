@@ -488,7 +488,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.14 · Official website</p>
+      <p class="fine" id="version">Shot Caller v13.14.1 · Official website</p>
     </section>
   </main>
 
@@ -503,6 +503,19 @@
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
 
+  <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
+       connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
+  <script>
+    window.SC_BUILD = '147';
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        if (window.SC_BOOT === window.SC_BUILD) return;
+        try { if (sessionStorage.getItem('scHeal') === window.SC_BUILD) return; sessionStorage.setItem('scHeal', window.SC_BUILD); } catch (e) { return; }
+        var go = function () { location.reload(); };
+        (window.caches ? caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }) : Promise.resolve()).then(go, go);
+      }, 500);
+    });
+  </script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

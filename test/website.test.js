@@ -22,3 +22,11 @@ test('the Discord invite: only discord.gg or discord.com/invite links', () => {
   for (const bad of ['', 'discord.gg/abc', 'http://discord.gg/abc', 'https://evil.gg/abc', 'https://discord.gg.evil.io/abc', 'https://discord.com/api/webhooks/1/2', 'javascript:alert(1)']) assert.equal(discordInvite({ DISCORD_INVITE: bad }), null, bad);
   assert.equal(discordInvite({}), null);
 });
+
+test('the self-heal build numbers match: index.html, app.js and the service worker cache', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'), app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), sw = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
+  const build = html.match(/SC_BUILD = '(\d+)'/)[1];
+  assert.equal(app.match(/SC_BOOT = '(\d+)'/)[1], build, 'app.js SC_BOOT');
+  assert.equal(sw.match(/shot-caller-v(\d+)/)[1], build, 'sw.js cache');
+});
