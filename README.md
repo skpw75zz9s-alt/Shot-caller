@@ -271,6 +271,14 @@ Security:
 
 ## Version notes (newest first)
 
+### Gold bitcoin icon (v13.9)
+
+A new app icon: a gold bitcoin coin with a polished rim and 144 milled edge ridges, an engraved circuit-trace face with
+a ring of nodes, an embossed ₿ tilted like the classic mark (depth shadow, bevel highlight), a light sweep, a warm halo
+and a glint, on a deep navy background. One vector (`public/icon.svg`) renders the 180, 192 and 512 px PNGs. The coin
+stays inside the safe zone, so circle or squircle crops never cut it, and the ₿ still reads at 32 px. The icon links
+carry `?v=2` so phones and installed apps pick it up.
+
 ### Global markets (v13.8)
 
 Seven more BTC markets stream live, the ones where most of bitcoin's price discovery happens, so moves often show up
