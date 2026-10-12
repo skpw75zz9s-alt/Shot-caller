@@ -271,6 +271,21 @@ Security:
 
 ## Version notes (newest first)
 
+### Discord auto-posts (v13.11)
+
+The server posts each official call to a Discord channel the moment it's made, and its result once Kalshi settles the
+round (`discord.js`).
+- **Call:** UP/DOWN, price, confidence, the target, when the round closes (shown in each reader's own time zone) and the
+  win-rate guard's floor. While the profit guard has buy alerts paused, calls post as **PAPER** calls.
+- **Result:** win or loss, with the record so far and profit after fees at $10 a call.
+- **Setup:**
+  1. In Discord, open `#bot-calls` → Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL.
+  2. In Railway, open the service → Variables → New Variable. Set `DISCORD_WEBHOOK_URL` to the copied URL.
+  3. Redeploy. `/healthz` shows `"discord": true`.
+- **Safety.** Only Discord webhook addresses are accepted, and the URL is never logged. Treat it like a password: anyone
+  who has it can post in that channel. If it leaks, delete the webhook in Discord and make a new one. Posts go out one
+  at a time and respect Discord's rate limits.
+
 ### Every exchange in the Round scan and the Market radar (v13.10)
 
 - **Round scan.** It now reads the seven global markets as well (the Binance, Bybit, OKX and Deribit perpetuals,

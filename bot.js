@@ -28,7 +28,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, onCall = () => {}, onSettle = () => {} }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -400,7 +400,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
-      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor }, 20000)) { recordDirty = true; saveRecord(); }
+      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor }, 20000)) {
+        recordDirty = true; saveRecord();
+        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
+      }
     }
     // Near-certain's own calls (graded like the official ones; never traded, never fed to the call filter)
     const sigC = snap.live ? buySignal(snap.live, snap, CERTAIN, now, certainMem) : null;
@@ -491,8 +494,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     for (const t of Object.keys(learned.pulse.live)) if (results.has(t) && pulseSettle(learned.pulse, t, results.get(t))) learnDirty = true;
     prunePulse(learned.pulse, now);
     for (const e of unsettledCalls(record, now)) {
-      if (results.has(e.ticker)) { settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; gateDirty = true; }
-      else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
+      if (results.has(e.ticker)) {
+        settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; gateDirty = true;
+        if (e.lv === OFFICIAL_LEVEL && (e.result === 'yes' || e.result === 'no')) try { onSettle(e, callStats(currentRecord())); } catch (err) { log.error('settle hook failed', err.message); }
+      } else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
     }
     for (const e of unsettledCalls(certainRecord, now)) {
       if (results.has(e.ticker)) { settleCalls(certainRecord, e.ticker, results.get(e.ticker)); certainDirty = true; }

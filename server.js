@@ -16,6 +16,7 @@ import { createMicroFeed } from './microfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createVolTuneFeed } from './voltunefeed.js';
+import { createDiscord } from './discord.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -62,6 +63,8 @@ export const tuneFeed = createTuneFeed({ playbook });
 // Volatility tuning: which volatility settings (and how fat the tails) have described BTC's moves best, walk-forward
 // (voltunefeed.js, public/voltune.js). Once proven, the bot's odds use them
 export const volTuneFeed = createVolTuneFeed({ playbook });
+// Discord auto-posts of the official calls and their results (discord.js; set DISCORD_WEBHOOK_URL to turn on)
+export const discord = createDiscord();
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
@@ -81,6 +84,8 @@ export const bot = createBot({
   shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live() }),
   watch: () => marketWatch.status(),
   volTune: () => volTuneFeed.live(),
+  onCall: (e, o) => discord.call(e, o),
+  onSettle: (e, stats) => discord.result(e, stats),
 });
 setInterval(() => access.prune(), 3600000).unref();
 
@@ -308,7 +313,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     const acc = path.match(/^\/api\/access\/(\w+)$/);
     if (acc) return await accessApi(req, res, acc[1], token);

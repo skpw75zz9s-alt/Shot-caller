@@ -203,7 +203,9 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
 test('official bot record: the server bot calls on its own (90% target) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   const file = join(await mkdtemp(join(tmpdir(), 'shot-rec-')), 'data.json');
-  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet });
+  const hooked = { calls: [], settled: [] };
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet,
+    onCall: (e, o) => hooked.calls.push({ e, o }), onSettle: (e, s) => hooked.settled.push({ e, s }) }); // (the Discord posts: discord.js)
   await b.load();
   const p = fakeBrowser();
   b.sync({ subscription: { endpoint: `${svc.base}/push/rec`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
@@ -216,12 +218,15 @@ test('official bot record: the server bot calls on its own (90% target) and grad
   assert.equal(r.calls[0].side, 'YES'); assert.equal(r.calls[0].lv, 'target90'); assert.equal(r.calls[0].fl, 0.9);
   assert.equal(r.level, '90% target');
   assert.equal(r.guard.floor, 0.9); assert.equal(r.before, null);
+  assert.equal(hooked.calls.length, 1, 'the call went to the call hook once');
+  assert.deepEqual([hooked.calls[0].e.side, hooked.calls[0].o.floor, hooked.calls[0].o.paper, hooked.calls[0].o.level], ['YES', 0.9, false, '90% target']);
   assert.equal(r.graded, 0);
   // Near-certain keeps its own record: Kalshi's 90c bid agrees with it too, so it made its own call
   assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 1);
   await b.tick(NOW + 8 * 60000); // the round settled YES
   r = b.record();
   assert.equal(r.graded, 1); assert.equal(r.wins, 1);
+  assert.equal(hooked.settled.length, 1); assert.equal(hooked.settled[0].e.result, 'yes'); assert.deepEqual([hooked.settled[0].s.graded, hooked.settled[0].s.wins], [1, 1], 'with the record so far');
   assert.deepEqual(r.streak, { kind: 'W', n: 1 });
   await b.saveRecord();
   assert.equal(JSON.parse(await readFile(join(file, '..', 'record.json'), 'utf8')).length, 1, 'kept on disk');
