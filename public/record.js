@@ -7,10 +7,10 @@ import { confBucket } from './analysis.js';
 const MAX = 500;
 
 // One entry per call (a switch to the other side is a new call). Returns true if it was added.
-export function logCall(log, { ticker, side, price, conf, hold = null, at, closeTime, n = 1, feat = null, lv = null, fl = null }, max = MAX) {
+export function logCall(log, { ticker, side, price, conf, hold = null, at, closeTime, n = 1, feat = null, lv = null, fl = null, lane = null }, max = MAX) {
   if (!ticker || !side || !(price > 0 && price < 1)) return false;
   if (log.some((e) => e.ticker === ticker && e.side === side && e.n === n)) return false;
-  log.push({ ticker, side, price, conf: conf ?? null, hold, at, closeTime, n, result: null, ...(feat ? { feat } : {}), ...(lv ? { lv } : {}), ...(fl != null ? { fl } : {}) }); // lv: the level, fl: the 90% target's floor then
+  log.push({ ticker, side, price, conf: conf ?? null, hold, at, closeTime, n, result: null, ...(feat ? { feat } : {}), ...(lv ? { lv } : {}), ...(fl != null ? { fl } : {}), ...(lane ? { lane } : {}) }); // lv: the level, fl: the 90% target's floor then, lane: 'late' (the late lane)
   if (log.length > max) log.splice(0, log.length - max);
   return true;
 }

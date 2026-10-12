@@ -10,6 +10,7 @@ import { fakeBrowser, fakePushService } from './helpers.js';
 const NOW = Math.floor(Date.now() / 60000) * 60000 + 20000;
 const quotes = { yes_bid: 38, yes_ask: 40 };
 let nextWindow = false; // flip to serve the following 15-minute window
+let tape = 100000; // where the fake candles hover (the live price is 100,060)
 
 // Fake Kalshi + Coinbase: quiet tape near 100,000, BTC 60 above a 100,000 strike, 6 minutes left.
 const upstream = http.createServer((req, res) => {
@@ -17,7 +18,7 @@ const upstream = http.createServer((req, res) => {
   if (req.url.startsWith('/products/BTC-USD/candles')) {
     const rows = [];
     for (let i = 120; i >= 1; i--) {
-      const t = NOW - (NOW % 60000) - i * 60000, o = 100000 + Math.sin(i) * 10, c = 100000 + Math.sin(i - 1) * 10;
+      const t = NOW - (NOW % 60000) - i * 60000, o = tape + Math.sin(i) * 10, c = tape + Math.sin(i - 1) * 10;
       rows.push([t / 1000, Math.min(o, c) - 3, Math.max(o, c) + 3, o, c, 1]);
     }
     return res.end(JSON.stringify(rows.reverse()));
@@ -202,6 +203,7 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
 
 test('official bot record: the server bot calls on its own (90% target) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
+  tape = 100050; // a calm market: the tape ends near the live price
   const file = join(await mkdtemp(join(tmpdir(), 'shot-rec-')), 'data.json');
   const hooked = { calls: [], settled: [] };
   const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet,
@@ -216,10 +218,12 @@ test('official bot record: the server bot calls on its own (90% target) and grad
   let r = b.record();
   assert.equal(r.calls.length, 1, 'one locked call for the round');
   assert.equal(r.calls[0].side, 'YES'); assert.equal(r.calls[0].lv, 'target90'); assert.equal(r.calls[0].fl, 0.9);
+  assert.equal(r.calls[0].lane, undefined, 'made by the normal rules (just before the late lane\'s 5 minutes)');
+  assert.equal(r.late.calls, 0); assert.equal(r.late.profitGuard.paused, false);
   assert.equal(r.level, '90% target');
   assert.equal(r.guard.floor, 0.9); assert.equal(r.before, null);
   assert.equal(hooked.calls.length, 1, 'the call went to the call hook once');
-  assert.deepEqual([hooked.calls[0].e.side, hooked.calls[0].o.floor, hooked.calls[0].o.paper, hooked.calls[0].o.level], ['YES', 0.9, false, '90% target']);
+  assert.deepEqual([hooked.calls[0].e.side, hooked.calls[0].o.floor, hooked.calls[0].o.paper, hooked.calls[0].o.level, hooked.calls[0].o.late], ['YES', 0.9, false, '90% target', false]);
   assert.equal(r.graded, 0);
   // Near-certain keeps its own record: Kalshi's 90c bid agrees with it too, so it made its own call
   assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 1);
@@ -230,5 +234,5 @@ test('official bot record: the server bot calls on its own (90% target) and grad
   assert.deepEqual(r.streak, { kind: 'W', n: 1 });
   await b.saveRecord();
   assert.equal(JSON.parse(await readFile(join(file, '..', 'record.json'), 'utf8')).length, 1, 'kept on disk');
-  b.stop();
+  b.stop(); tape = 100000;
 });

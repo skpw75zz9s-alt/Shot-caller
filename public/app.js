@@ -28,7 +28,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '147'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '148'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -151,6 +151,12 @@ if (store.get('settingsVersion', 1) < 12) {
   const freshBug = Math.abs(settings.minEdge - 0.06) < 1e-9 && settings.minConfidence === 95 && !settings.bigEdgeOverride;
   if (riskLevelOf(settings) === 'balanced' || freshBug) { Object.assign(settings, riskSettings('steady')); if (store.get('settings', null) != null) store.set('steadyNote', true); } // (a brand-new phone just starts on Steady: no note)
   store.set('settings', settings); store.set('settingsVersion', 12);
+}
+
+// v13.15: phones on the 90% target level get the late lane (the last 5 minutes' stress-tested calls)
+if (store.get('settingsVersion', 1) < 13) {
+  if (riskLevelOf(settings) === 'target90' && settings.lateMin == null) settings.lateMin = RISK_LEVELS.target90.lateMin;
+  store.set('settings', settings); store.set('settingsVersion', 13);
 }
 
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
@@ -365,7 +371,7 @@ const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
-  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0;
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; // the late lane's own guard (the server's record)
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -1395,6 +1401,7 @@ function render() {
     setText($('reason'), call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
       : call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
+      : call && sig.lane === 'late' ? `Late lane (last ${settings.lateMin ?? 5} min): even with ${settings.lateVol ?? 1.35}× volatility and fat tails it wins ${sig.late?.p != null ? (sig.late.p * 100).toFixed(1) : '97+'}% by the bot's math. Half size: a win this late pays a few cents, a loss costs the stake.`
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
       : sig.cooldown ? `Just sold on this market. A fresh call can come in ${sig.cooldown}s if the gap is still there.`
       : sig.called && sig.stance === 'holding' ? `Called ${sideName(sig.called)} earlier. That edge has faded, so no new buy; if you're in, the position card says when to sell.`
@@ -1402,6 +1409,7 @@ function render() {
       : ev.side && settings.doubleRejRule !== false && live.rej?.double && live.rej.double.dir !== (ev.side === 'YES' ? 1 : -1) ? `${sideName(ev.side)} looks cheap, but not calling it: ${live.rej.double.label}`
       : sig.watchHold ? `Market watch has new calls on hold until ${clock(sig.watchHold.until)}: ${sig.watchHold.why}`
       : sig.gated ? `Confidence ${sig.deep?.score ?? '—'}, but the call filter skipped it: calls like this have won ${Math.round(sig.gated.pWin * 100)}% in the bot's record, and at ${Math.round((sig.gated.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) * 100)}¢ it needs ${Math.round(sig.gated.need * 100)}% to pay.`
+      : sig.late?.on && !sig.called && sig.late.why ? `Late lane (last ${settings.lateMin ?? 5} min): only stress-tested calls now. Not yet: ${sig.late.why}.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.holdOk ? `Confidence ${sig.deep.score}, but it stays above ${Math.round(settings.holdFloor * 100)} to the end in only ${sig.hold == null ? '—' : Math.round(sig.hold * 100)}% of simulated paths (Steady needs ${Math.round(settings.minHold * 100)}%). Waiting for a call that holds.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.steadyOk ? `Confidence ${sig.deep.score}: making sure it holds for ${sig.steadyNeed ?? settings.steadySec}s before calling (one good tick isn't enough${sig.stability?.level === 'stable' ? '; market 👍 so the wait is shorter' : sig.stability?.level === 'unstable' ? '; market unstable so the wait is longer' : ''}).`
       : ev.side && !sig.robust ? `Low price, but the gap drops to ${sig.robustEdge == null ? '—' : (sig.robustEdge * 100).toFixed(1)} pts if volatility is a bit off (need ${(sig.edgeNeed * 100).toFixed(0)})`
@@ -1410,9 +1418,9 @@ function render() {
 
     // Call + entry timing
     const waiting = call && !buyNow && settings.waitForDip;
-    setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
+    setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.lane === 'late' ? 'LATE CALL · BUY THE LOW' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
-      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
+      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
     if (setText(callEl, call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
     setClass(callEl, `call ${(call ?? 'pass').toLowerCase()}`);
@@ -1462,7 +1470,7 @@ function render() {
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
-      if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN })) store.set('callLog', state.callLog);
+      if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN, lane: sig.lane })) store.set('callLog', state.callLog);
       const key = `${m.ticker}:${call}:${sig.callN}`;
       if (!state.alerted[key] && !block) {
         state.alerted[key] = true;

@@ -47,9 +47,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const OFFICIAL_LEVEL = 'target90', OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
   const currentRecord = () => record.filter((e) => e.lv === OFFICIAL_LEVEL);
   let guardCache = null; // refreshed every 5 s (it scans the record)
-  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord) }).g);
+  const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord), pgL: profitGuard(currentRecord().filter((e) => e.lane === 'late')) }).g);
   // The profit guard (public/profitguard.js) for a level the server keeps a record of: the 90% target (official) and Near-certain
   const profitNow = (level, now = Date.now()) => { guardNow(now); return level === OFFICIAL_LEVEL ? guardCache.pg : level === 'certain' ? guardCache.pgC : null; };
+  // The late lane's own profit guard (its calls only): once they lose money after fees, the lane is off for everyone
+  const lateOffNow = (now = Date.now()) => { guardNow(now); return !!guardCache.pgL.paused; };
   // Why a phone's buy alerts are paused: its daily loss limit (synced from the phone) or its level's profit guard
   const buyBlocked = (s, now) => (s.lossStopUntil > now ? 'loss' : profitNow(riskLevelOf(s), now)?.paused ? 'profit' : null);
   const recordFile = dataFile.replace(/[^/\\]+$/, 'record.json');
@@ -81,6 +83,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         else if (d.settings.minConfidence != null) d.settings.minConfidence = Math.min(95, Math.round(d.settings.minConfidence * 2));
       }
       if (d.settings) d.confOdds = true;
+      if (d.settings && d.settings.lateMin == null && riskLevelOf(d.settings) === 'target90') d.settings.lateMin = RISK_LEVELS.target90.lateMin; // v13.15: the late lane
       devices.set(d.endpoint, d);
     }
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
@@ -296,7 +299,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[s.series] ||= {});
         const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts });
-        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now);
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -391,6 +394,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
+    snap.lateOff = lateOffNow(now);
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
@@ -400,9 +404,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
-      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor }, 20000)) {
+      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor, ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
         recordDirty = true; saveRecord();
-        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
+        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late' }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
       }
     }
     // Near-certain's own calls (graded like the official ones; never traded, never fed to the call filter)
@@ -425,7 +429,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
   function officialRecord() {
     const cur = currentRecord(), before = record.filter((e) => e.lv !== OFFICIAL_LEVEL);
+    const late = cur.filter((e) => e.lane === 'late');
     return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: guardStats(cur), profitGuard: profitGuard(cur),
+      late: { ...callStats(late), profitGuard: profitGuard(late) }, // the late lane's own calls (last 5 minutes)
       before: before.length ? { level: 'Steady', since: before[0].at, until: before.at(-1).at, ...callStats(before) } : null,
       certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100), profitGuard: profitGuard(certainRecord) } };
   }

@@ -25,6 +25,13 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
     if (c) add('certain', 'Near-certain calls', c.graded || 0, (c.usd ?? 0) > 0 ? 'good' : 'bad', c.graded ? `won ${c.wins} of ${c.graded} (${pct(c.wins / c.graded)})` : 'none yet (rare by design)',
       c.graded ? `${usd(c.usd ?? 0)} at $10 a call: priced 90¢+, so one loss erases many wins` : 'kept on every round, never traded', { graded: c.graded || 0, wins: c.wins ?? 0, usd: c.usd ?? 0 });
   }
+  // the late lane's calls (last 5 minutes, v13.15): judged on profit like the official calls; it switches itself off
+  // while they lose money
+  const lt = bot?.late;
+  if (lt) add('late', 'Late calls (last 5 min)', lt.graded || 0, lt.profitGuard?.paused ? 'bad' : (lt.usd ?? 0) > 0 ? 'good' : 'bad',
+    lt.graded ? `won ${lt.wins} of ${lt.graded} (${pct(lt.wins / lt.graded)})` : 'none yet: only stress-tested calls are made this late',
+    lt.profitGuard?.paused ? 'OFF: its calls lost money after fees; back on when they recover' : lt.graded ? `${usd(lt.usd ?? 0)} at $10 a call after fees · half size` : 'switches itself off if its calls lose money after fees',
+    { graded: lt.graded || 0, wins: lt.wins ?? 0, usd: lt.usd ?? 0, paused: !!lt.profitGuard?.paused });
   // the prediction engine, walk-forward on the server's history
   if (predictor?.n) {
     const t90 = predictor.thresholds?.find((t) => t.t === 0.9);

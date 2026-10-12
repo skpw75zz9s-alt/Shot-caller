@@ -1,6 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
-import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, holdOdds, maxPay, evaluate, exitSignal, momentum, orderFee, probYes, quote, realizedVol } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, feeEach, holdOdds, maxPay, evaluate, exitSignal, momentum, orderFee, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
@@ -179,8 +179,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   // Fast lane (90% target): an overwhelming lead, the bot fastConf+ sure and Kalshi's ask fastAsk+, waits fastSec instead
   const fastLane = (side) => s.fastSec > 0 && ev.pYes != null && (side === 'YES' ? ev.pYes : 1 - ev.pYes) * 100 >= s.fastConf - 1e-9
     && (side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) >= s.fastAsk - 1e-9;
-  const steady = (side) => {
-    const need = fastLane(side) ? Math.min(steadyNeed, s.fastSec) : steadyNeed;
+  const steady = (side, secs = null) => {
+    const need = secs ?? (fastLane(side) ? Math.min(steadyNeed, s.fastSec) : steadyNeed);
     if (!(need > 0)) return true;
     const log = snap.quoteLog?.[row.m.ticker] || [], since = now - need * 1000;
     if (!log.length || log[0].t > since + 2500) return false;
@@ -213,6 +213,40 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     }
     return true;
   };
+  // Late lane (v13.15): in the round's last lateMin minutes a new call has to pass this instead of the normal edge
+  // bar (it replaces it there; it isn't an extra way in). Late, Kalshi already prices the leader at 90-98c, so a win
+  // pays a few cents and a loss costs the whole stake: the only thing that matters is not being wrong in the tails.
+  //   stress    the side still wins lateConf+ (and beats the ask plus its fee by lateMargin) with volatility lateVol x
+  //             what the bot measured, fat tails lateTails, and any momentum against the call kept (none that helps)
+  //   price     Kalshi's ask lateMaxAsk at most (above it a win pays almost nothing) and its bid lateBid+ (it agrees)
+  //   calm      the last minutes' volatility at most lateCalm x the 2-hour level, and no jump of lateJump+ in the
+  //             side's ask over the last 30 s
+  //   steady    the bot's odds for the side at the confidence bar for lateSteady s
+  //   guard     its own record: once its last 40 calls lose money after fees (20+), it switches off (snap.lateOff)
+  // Simulated with the vol wrong, jumps and a lagging Kalshi price: 98.4-99.8% won and still in profit at harshness
+  // where the normal rules lost money late (the stress test is what does it: without it, it lost money too)
+  const inLate = s.lateMin > 0 && ev.minutesLeft <= s.lateMin;
+  let lateWhy = null, lateP = null;
+  const lateOk = (a) => {
+    const side = a.side, ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk, bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid;
+    const no = (why) => { lateWhy = why; return false; };
+    if (snap.lateOff) return no('its own record is losing money after fees: off until it recovers');
+    if (!ev.open || ask == null) return no('no price to buy at');
+    if (ask > s.lateMaxAsk + 1e-9) return no(`Kalshi's ask ${Math.round(ask * 100)}¢ is over ${Math.round(s.lateMaxAsk * 100)}¢: a win would pay almost nothing`);
+    if (!(bid >= s.lateBid - 1e-9)) return no(`Kalshi's bid isn't at ${Math.round(s.lateBid * 100)}¢+ (it doesn't agree yet)`);
+    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('BTC is moving faster than usual');
+    const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
+    if (log.some((e) => e.t >= now - 30000 && e[key] != null && Math.abs(e[key] - ask) >= s.lateJump - 1e-9)) return no('Kalshi\'s price just jumped');
+    const dir = side === 'YES' ? 1 : -1, drift = (snap.driftMin || 0) * (snap.momentumWeight ?? s.momentumWeight);
+    const q = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * s.lateVol, ev.minutesLeft, drift * dir > 0 ? 0 : drift, row.settleAvg, Math.max(s.lateTails, snap.volTails ?? 0));
+    if (q == null) return no('no price model');
+    lateP = side === 'YES' ? q : 1 - q;
+    const bar = Math.max(s.lateConf, ask + feeEach(ask, 10) + s.lateMargin);
+    if (lateP < bar - 1e-9) return no(`stress test: ${(lateP * 100).toFixed(1)}% with ${s.lateVol}× volatility and fat tails, needs ${(bar * 100).toFixed(1)}%`);
+    if (!steady(side, s.lateSteady)) return no(`waiting for ${s.lateSteady} s at the confidence bar`);
+    lateWhy = null;
+    return true;
+  };
   const passes = (a, edgeNeed, confNeed, persist = false) => ev.open && a.price != null && a.point != null && a.point >= edgeNeed - 1e-9 && a.point <= s.maxEdge &&
     a.robustEdge != null && a.robustEdge >= edgeNeed - 1e-9 && !!a.deep && (a.score >= confNeed || bigGap(a)) && (!persist || persisted(a.side, edgeNeed));
 
@@ -230,19 +264,20 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (passes(a, ...need.holding)) pick = a;
     if (lean && lean !== called) {
       const b = assess(lean);
-      if (!s.lockCall && passes(b, ...need.switching, true) && entryOk(lean) && holds(b) && steady(lean) && watchOk() && gateOk(b)) { pick = b; stance = 'switching'; }
+      if (!s.lockCall && (inLate ? lateOk(b) : passes(b, ...need.switching, true) && steady(lean)) && entryOk(lean) && holds(b) && watchOk() && gateOk(b)) { pick = b; stance = 'switching'; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
   } else if (lean) {
     shown = assess(lean);
-    if (passes(shown, ...need.new, true) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && steady(lean) && watchOk() && gateOk(shown)) pick = shown;
+    if ((inLate ? lateOk(shown) : passes(shown, ...need.new, true) && steady(lean)) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && watchOk() && gateOk(shown)) pick = shown;
   }
   const a = pick ?? shown;
   const [edgeNeed, confNeed] = need[stance];
   const callSide = pick?.side ?? null;
   const prob = callSide ? (callSide === 'YES' ? ev.pYes : 1 - ev.pYes) : null;
   const firstOnly = s.scaleIn && callSide && callSide !== called; // a brand-new scaled call starts small
-  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5) * (firstOnly ? s.firstSize : 1))) : 0;
+  const late = !!callSide && callSide !== called && inLate; // a new call made by the late lane (half size: see lateSize)
+  const contracts = callSide ? Math.max(1, Math.floor(contractsFor(prob, pick.price, s) * (pick.deep ? pick.deep.sizeMult : 0.5) * (firstOnly ? s.firstSize : 1) * (late ? s.lateSize : 1))) : 0;
   const buyNow = !!callSide && pick.timing.state === 'NOW';
   // fire = a new call worth an alert (first call, or a real switch); holding the same call doesn't re-alert
   const fire = !!callSide && callSide !== called && (buyNow || !s.waitForDip);
@@ -261,7 +296,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const pc = called === 'YES' ? ev.pYes : 1 - ev.pYes;
     if (pc < bailBelow) mem.bail = { side: called, at: now, p: pc, bid: called === 'YES' ? ev.quote.yesBid : ev.quote.noBid, entry: mem.price ?? null };
   }
-  if (fire) { mem.side = callSide; mem.at = now; mem.price = pick.price; mem.n = (mem.n || 0) + 1; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
+  if (fire) { mem.side = callSide; mem.at = now; mem.price = pick.price; mem.n = (mem.n || 0) + 1; mem.late = late; mem.tier = Math.max(0, Math.min(reached(pick.point), reached(pick.robustEdge))); }
   else if (callSide && callSide === called && tiers.length > 1 && pick.deep && (pick.score >= s.minConfidence || bigGap(pick))) {
     const next = (mem.tier ?? 0) + 1;
     if (next < tiers.length && Math.min(reached(pick.point), reached(pick.robustEdge)) >= next) { add = true; mem.tier = Math.min(reached(pick.point), reached(pick.robustEdge)); }
@@ -277,6 +312,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     stance: callSide ? (callSide === called || !called ? (called ? 'holding' : 'new') : 'switching') : stance, called, calledAt: mem.at ?? null, edgeNeed, confNeed,
     // the bot already called a side and is sticking with it while the other side wiggles
     sticking: !!called && !!lean && lean !== called && callSide !== lean,
+    // the late lane: on in the last lateMin minutes; lane 'late' on a call it made; why it's holding off; its stress-test odds
+    late: inLate ? { on: true, why: callSide ? null : lateWhy, p: lateP, made: callSide ? (callSide === called ? !!mem.late : late) : false } : null, lane: callSide && (callSide === called ? mem.late : late) ? 'late' : null,
   };
 }
 
