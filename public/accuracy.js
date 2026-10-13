@@ -32,6 +32,12 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
     lt.graded ? `won ${lt.wins} of ${lt.graded} (${pct(lt.wins / lt.graded)})` : 'none yet: only stress-tested calls are made this late',
     lt.profitGuard?.paused ? 'OFF: its calls lost money after fees; back on when they recover' : lt.graded ? `${usd(lt.usd ?? 0)} at $10 a call after fees · half size` : 'switches itself off if its calls lose money after fees',
     { graded: lt.graded || 0, wins: lt.wins ?? 0, usd: lt.usd ?? 0, paused: !!lt.profitGuard?.paused });
+  // flip calls (v13.19): the locked call switched sides on clear evidence; judged on profit, off while losing
+  const fc = bot?.flip;
+  if (fc) add('flipcalls', 'Flip calls (switched sides)', fc.graded || 0, fc.profitGuard?.paused ? 'bad' : (fc.usd ?? 0) > 0 ? 'good' : 'bad',
+    fc.graded ? `won ${fc.wins} of ${fc.graded} (${pct(fc.wins / fc.graded)})` : 'none yet: only on clear evidence of a flip',
+    fc.profitGuard?.paused ? 'OFF: flip calls lost money after fees; back on when they recover' : fc.graded ? `${usd(fc.usd ?? 0)} at $10 a call after fees · half size` : 'switch once a round, at half size, when the bot is 90%+ sure of the other side',
+    { graded: fc.graded || 0, wins: fc.wins ?? 0, usd: fc.usd ?? 0, paused: !!fc.profitGuard?.paused });
   // the early lane (v13.16): live unless its recent calls lose money after fees (then test calls until they recover)
   const er = bot?.early;
   if (er) add('early', `Early calls (10–5 min left)${er.live ? '' : ', paused'}`, er.n || 0, er.paused ? 'bad' : (er.usd ?? 0) > 0 ? 'good' : 'bad',

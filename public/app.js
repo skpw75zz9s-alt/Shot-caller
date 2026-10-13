@@ -28,7 +28,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '152'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '153'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -157,6 +157,11 @@ if (store.get('settingsVersion', 1) < 12) {
 if (store.get('settingsVersion', 1) < 13) {
   if (riskLevelOf(settings) === 'target90' && settings.lateMin == null) settings.lateMin = RISK_LEVELS.target90.lateMin;
   store.set('settings', settings); store.set('settingsVersion', 13);
+}
+// v13.19: the 90% target level can flip a locked call on clear evidence
+if (store.get('settingsVersion', 1) < 16) {
+  if (riskLevelOf(settings) === 'target90' && settings.flipCalls == null) settings.flipCalls = RISK_LEVELS.target90.flipCalls;
+  store.set('settings', settings); store.set('settingsVersion', 16);
 }
 // v13.17: the 90% target level makes no new calls in the last 5 minutes (the late lane is off)
 if (store.get('settingsVersion', 1) < 15) {
@@ -381,7 +386,7 @@ const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
-  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; // the late lane's own guard and the early lane's proof (the server's records)
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; // the late lane's own guard and the early lane's proof (the server's records)
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -1414,9 +1419,10 @@ function render() {
     }
     const otherSide = sig.called === 'YES' ? 'NO' : 'YES';
     const sticking = sig.stance === 'holding' && now - (sig.calledAt ?? now) > 60000; // the first minute of a call is just the call
-    setText($('reason'), call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
+    setText($('reason'), call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.${sig.flip?.why && sig.flip.why !== 'off' ? ` It flips only on clear evidence; not yet: ${sig.flip.why}.` : ''}`
       : call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
+      : call && sig.lane === 'flip' ? `FLIP: the round turned. The bot switched from its earlier ${sig.flip?.from ? sideName(sig.flip.from) : ''} call because it's now 90%+ sure of ${sideName(call)} even in its worst case, the other side cleared the full bar for a call, and it held steady. Half size; if you hold the earlier side, its bail alert says when to sell.`
       : call && sig.lane === 'early' ? `Early lane: called while Kalshi asked ${Math.round((sig.price ?? 0) * 100)}¢, with the bot clearly surer even in its worst case. Half size: earlier means more can still change, and wins here are bigger but losses more likely than at 90¢+.${earlyStatus()}`
       : call && sig.lane === 'late' ? `Late lane (last ${settings.lateMin ?? 5} min): even with ${settings.lateVol ?? 1.35}× volatility and fat tails it wins ${sig.late?.p != null ? (sig.late.p * 100).toFixed(1) : '97+'}% by the bot's math. Half size: a win this late pays a few cents, a loss costs the stake.`
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
@@ -1437,7 +1443,7 @@ function render() {
 
     // Call + entry timing
     const waiting = call && !buyNow && settings.waitForDip;
-    setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.lane === 'late' ? 'LATE CALL · BUY THE LOW' : sig.lane === 'early' ? 'EARLY CALL · BUY THE LOW' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
+    setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.lane === 'late' ? 'LATE CALL · BUY THE LOW' : sig.lane === 'early' ? 'EARLY CALL · BUY THE LOW' : sig.lane === 'flip' ? 'FLIP CALL · BUY THE LOW' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `Last ${settings.noCallLastMin} minutes · no new calls` : sig.early?.would && !sig.early.live ? 'Early read · paused, not a call' : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');

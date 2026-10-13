@@ -70,6 +70,8 @@ export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Numb
     const live = snap?.live;
     if (live && sig) {
       const t = live.m.ticker, r = round(t), ev = live.ev;
+      // a flip call starts a fresh watch on the new side
+      if (sig.flip?.from && !r.flipped) { r.flipped = true; r.bail = false; r.flip = false; }
       // the official call going bad
       if (sig.called && ev.pYes != null) {
         const p = sig.called === 'YES' ? ev.pYes : 1 - ev.pYes;
