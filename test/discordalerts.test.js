@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ALERT_KINDS, alertKinds, createAlertWatcher } from '../discordalerts.js';
+import { ALERT_KINDS, DEFAULT_ALERTS, alertKinds, createAlertWatcher } from '../discordalerts.js';
 import { createDiscord } from '../discord.js';
 
 const T0 = 1_700_000_000_000, K = 100000;
@@ -8,8 +8,12 @@ const watcher = (o = {}) => { const posts = []; const w = createAlertWatcher({ p
 const bars = (closes) => closes.map((c, i) => ({ t: T0 + i * 60000, o: c, h: c, l: c, c }));
 const snapAt = ({ spot = K + 50, pYes = 0.9, mins = 8, ticker = 'R1', b = [], hold = null } = {}) => ({ spot, bars: b, watchHold: hold, live: { m: { ticker, close_time: new Date(T0 + mins * 60000).toISOString() }, strike: K, ev: { pYes, minutesLeft: mins } } });
 
-test('DISCORD_ALERTS: all by default, none, or a list', () => {
-  assert.deepEqual([...alertKinds(undefined)], ALERT_KINDS);
+test('DISCORD_ALERTS: every kind but the sit-out notes by default, all, none, or a list', () => {
+  assert.deepEqual([...alertKinds(undefined)], DEFAULT_ALERTS);
+  assert.ok(!alertKinds(undefined).has('sitout') && alertKinds(undefined).has('bail'), 'no "no call" note every round by default');
+  assert.deepEqual([...alertKinds('all')], ALERT_KINDS);
+  const quiet = createAlertWatcher({ post: () => assert.fail('posted'), kinds: alertKinds(undefined) });
+  assert.equal(quiet.settled({ ticker: 'Y', result: 'no', called: false, now: T0 }), false, 'a no-call round posts nothing by default');
   assert.equal(alertKinds('none').size, 0);
   assert.deepEqual([...alertKinds('bail, whale,bogus')], ['bail', 'whale']);
   const { w, posts } = watcher({ kinds: alertKinds('whale') });

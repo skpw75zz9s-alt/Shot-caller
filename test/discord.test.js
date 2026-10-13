@@ -16,8 +16,9 @@ test('only Discord\'s own webhook addresses are accepted', () => {
 test('the call and result messages: side, price, confidence, the close in each reader\'s own time, the record, the disclaimer', () => {
   const m = callMessage(call, { strike: 100050, floor: 0.9 }), e = m.embeds[0];
   assert.match(e.title, /🐂 UP call/); assert.match(e.description, /above \$100,050/);
-  assert.deepEqual(e.fields.map((f) => f.name), ['Price', 'Confidence', 'Closes', 'Price floor', 'Market']);
-  assert.equal(e.fields[0].value, '92¢'); assert.equal(e.fields[2].value, `<t:${Date.UTC(2026, 9, 12, 15, 15) / 1000}:t>`);
+  assert.deepEqual(e.fields.map((f) => f.name), ['Price', 'If it wins', 'Confidence', 'Closes', 'Price floor', 'Market']);
+  assert.equal(e.fields[1].value, '+8¢ a contract (+9%)');
+  assert.equal(e.fields[0].value, '92¢'); assert.equal(e.fields[3].value, `<t:${Date.UTC(2026, 9, 12, 15, 15) / 1000}:t>`);
   assert.match(e.footer.text, /Not financial advice/);
   const paper = callMessage(call, { paper: true }).embeds[0];
   assert.match(paper.title, /PAPER/); assert.match(paper.description, /profit guard/);
@@ -61,4 +62,16 @@ test('branding: posts come from Shot Caller with the app icon and an Official ca
   const d = createDiscord({ url: HOOK, base, sleep: async () => {}, fetchImpl: async (u, o) => { hits.push(JSON.parse(o.body)); return { status: 204, ok: true }; } });
   d.call(call); await new Promise((res) => setTimeout(res, 10));
   assert.equal(hits[0].avatar_url, `${base}/icon-512.png?v=3`); assert.equal(d.status().branded, true);
+});
+
+test('calls are never crowded out by alerts: they go first and the alerts are the ones dropped', async () => {
+  const hits = []; let release; const gate = new Promise((r) => { release = r; });
+  const d = createDiscord({ url: HOOK, base: null, log: { warn() {} }, sleep: async () => {}, fetchImpl: async (u, o) => { await gate; hits.push(JSON.parse(o.body)); return { status: 204, ok: true }; } });
+  d.alert({ title: 'first alert' }); // in flight while the rest queue up
+  for (let i = 0; i < 40; i++) d.alert({ title: `alert ${i}` });
+  d.call(call, { strike: 100050 });
+  release(); await new Promise((r) => setTimeout(r, 30));
+  assert.match(hits[1].embeds[0].title, /UP call/, 'the call went out right after the one in flight');
+  assert.ok(hits.length <= 32, `the alert backlog was trimmed (${hits.length} sent)`);
+  assert.ok(hits.some((h) => h.embeds[0].title === 'alert 39') && !hits.some((h) => h.embeds[0].title === 'alert 0'), 'oldest alerts dropped first');
 });

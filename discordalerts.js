@@ -10,16 +10,19 @@
 //   early    the early lane's test read while it's paused (clearly labelled: a test, not a call)
 //   sitout   a round closed with no official call, and how it closed
 //   status   the profit guard paused or resumed, the early lane went live or back to testing, the guard's floor moved
-// DISCORD_ALERTS picks which: 'all' (default), 'none', or a comma list (e.g. bail,flip,whale). Besides each kind's
+// DISCORD_ALERTS picks which: unset = every kind but the sit-out notes (v13.20.1: so the channel is about the calls, not
+// a 'no call' every round), 'all' (sit-outs too), 'none', or a comma list (e.g. bail,flip,whale). Besides each kind's
 // spacing, at most 30 alerts an hour go out (status changes always do).
 import { ema } from './public/indicators.js';
 
 export const ALERT_KINDS = ['bail', 'flip', 'cross', 'trend', 'whale', 'hold', 'early', 'sitout', 'status'];
 export const ALERT_LIMITS = { perHour: 30, crossPerRound: 3, crossGapMs: 60000, trendGapMs: 10 * 60000, whaleGapMs: 2 * 60000, whaleMin: 250000 };
 
+export const DEFAULT_ALERTS = ALERT_KINDS.filter((k) => k !== 'sitout');
 export function alertKinds(raw = process.env.DISCORD_ALERTS) {
-  const v = String(raw ?? 'all').trim().toLowerCase();
-  if (!v || v === 'all') return new Set(ALERT_KINDS);
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (!v || v === 'default') return new Set(DEFAULT_ALERTS);
+  if (v === 'all') return new Set(ALERT_KINDS);
   if (v === 'none' || v === 'off') return new Set();
   return new Set(v.split(/[\s,]+/).filter((k) => ALERT_KINDS.includes(k)));
 }

@@ -43,6 +43,7 @@ export function callMessage(e, { strike = null, floor = null, paper = false, lev
       color: paper ? 0x5d6880 : up ? 0x2ee6a6 : 0xff4d6d,
       fields: [
         { name: 'Price', value: cents(e.price), inline: true },
+        ...(e.price > 0 && e.price < 1 ? [{ name: 'If it wins', value: `+${cents(1 - e.price)} a contract (+${Math.round(((1 - e.price) / e.price) * 100)}%)`, inline: true }] : []),
         { name: 'Confidence', value: e.conf != null ? `${Math.round(e.conf)}` : '—', inline: true },
         { name: 'Closes', value: ts(Date.parse(e.closeTime)), inline: true },
         ...(floor != null ? [{ name: 'Price floor', value: `${cents(floor)} (win-rate guard)`, inline: true }] : []),
@@ -78,14 +79,15 @@ export function alertMessage(embed, base = null) {
   return { ...sender, embeds: [{ author, ...embed, footer: { text: embed.footer?.text ? `${embed.footer.text} · ${DISCLAIMER}` : DISCLAIMER } }] };
 }
 
-// One webhook's queue: one message at a time, 1.2 s apart, Discord's 429 waited out (3 tries)
+// One webhook's queue: one message at a time, 1.2 s apart, Discord's 429 waited out (3 tries). Calls and results go
+// ahead of the market alerts and are never the ones dropped when the queue backs up (alerts are, oldest first)
 function poster(hook, { fetchImpl, sleep, log }) {
-  const queue = []; let busy = false; const n = { sent: 0, failed: 0 };
+  const hi = [], lo = []; let busy = false; const n = { sent: 0, failed: 0 };
   async function drain() {
     if (busy) return;
     busy = true;
-    while (queue.length) {
-      const body = queue.shift();
+    while (hi.length || lo.length) {
+      const body = hi.length ? hi.shift() : lo.shift();
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const res = await fetchImpl(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -98,7 +100,11 @@ function poster(hook, { fetchImpl, sleep, log }) {
     }
     busy = false;
   }
-  return { post: (body) => { queue.push(body); if (queue.length > 50) queue.shift(); drain(); return true; }, n, queued: () => queue.length };
+  const post = (body, urgent = true) => {
+    if (urgent) { hi.push(body); if (hi.length > 200) hi.shift(); } else { lo.push(body); if (lo.length > 30) lo.shift(); }
+    drain(); return true;
+  };
+  return { post, n, queued: () => hi.length + lo.length };
 }
 
 // alertsUrl (DISCORD_ALERTS_WEBHOOK_URL, optional): a second channel's webhook for the market alerts, so the calls
@@ -116,7 +122,7 @@ export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, alertsUrl
     on,
     call: (e, opts) => on && main.post(callMessage(e, { ...opts, base })),
     result: (e, stats) => on && main.post(resultMessage(e, stats, base)),
-    alert: (embed) => alertsOn && side.post(alertMessage(embed, base)),
+    alert: (embed) => alertsOn && side.post(alertMessage(embed, base), false),
     status: () => ({ on, why, sent: main.n.sent + (aOwn ? side.n.sent : 0), failed: main.n.failed + (aOwn ? side.n.failed : 0), queued: main.queued() + (aOwn ? side.queued() : 0), branded: !!base, alerts: !alertsOn ? 'off' : aOwn ? 'own channel' : 'calls channel' }),
   };
 }
