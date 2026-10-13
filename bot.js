@@ -2,7 +2,7 @@
 // to subscribed phones, so alerts arrive even when the app is closed.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
+import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
@@ -41,10 +41,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
   const LEARN_SERIES = 'KXBTC15M';
   // The official bot record: every call the server's own bot makes, around the clock, graded against Kalshi's result.
-  // Kept in record.json next to the data file; the same for every user. From v13.5 it's made on the 90% target level
-  // (calls tagged lv: 'target90'), with the win-rate guard raising its price floor if the record slips
-  // (public/winguard.js); the Steady calls before it stay in the file as the earlier record.
-  const OFFICIAL_LEVEL = 'target90', OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
+  // Kept in record.json next to the data file; the same for every user. Made on OFFICIAL_LEVEL (public/model.js; calls
+  // tagged lv): Profit since v13.20 (calls priced 60-90c with a big worst-case gap); the 90% target level's calls
+  // (v13.5-v13.19) and the Steady ones before them stay in the file as the earlier record.
+  const OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
+  const HAS_FLOOR = !!RISK_LEVELS[OFFICIAL_LEVEL].winFloor; // the win-rate guard's price floor (the 90% target level only)
   const currentRecord = () => record.filter((e) => e.lv === OFFICIAL_LEVEL);
   let guardCache = null; // refreshed every 5 s (it scans the record)
   const guardNow = (now = Date.now()) => (guardCache && now - guardCache.at < 5000 ? guardCache.g : (guardCache = { at: now, g: guardStats(currentRecord()), pg: profitGuard(currentRecord()), pgC: profitGuard(certainRecord), pgL: profitGuard(currentRecord().filter((e) => e.lane === 'late')), pgF: profitGuard(currentRecord().filter((e) => e.lane === 'flip')), early: earlyProof(earlyRecord) }).g);
@@ -94,6 +95,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings) d.confOdds = true;
       if (d.settings && d.settings.lateMin == null && riskLevelOf(d.settings) === 'target90') d.settings.lateMin = RISK_LEVELS.target90.lateMin; // v13.15: the late lane
       if (d.settings && d.settings.earlyMin == null && riskLevelOf(d.settings) === 'target90') d.settings.earlyMin = RISK_LEVELS.target90.earlyMin; // v13.16: the early lane
+      if (d.settings && riskLevelOf(d.settings) === 'target90' && !d.profitLevel) Object.assign(d.settings, riskSettings('profit')); // v13.20: the 90% target level's phones move to Profit (the official level)
+      if (d.settings) d.profitLevel = true;
       if (d.settings && d.settings.flipCalls == null && riskLevelOf(d.settings) === 'target90') d.settings.flipCalls = RISK_LEVELS.target90.flipCalls; // v13.19: flip calls
       if (d.settings && d.settings.noCallLastMin == null && riskLevelOf(d.settings) === 'target90') Object.assign(d.settings, { lateMin: RISK_LEVELS.target90.lateMin, noCallLastMin: RISK_LEVELS.target90.noCallLastMin }); // v13.17: no new calls in the last 5 minutes
       devices.set(d.endpoint, d);
@@ -414,15 +417,15 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const sigTrade = sig && profitNow(OFFICIAL_LEVEL, now)?.paused ? { ...sig, fire: false, callSide: null, profitPaused: true } : sig;
     try { onObserve?.({ snap, sig: sigTrade, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
     // the official bot's state each tick, for the Discord market alerts (discordalerts.js)
-    try { onTick({ snap, sig, now, status: { profitPaused: !!profitNow(OFFICIAL_LEVEL, now)?.paused, earlyLive: earlyLiveNow(now), floor: guard.floor } }); } catch (e) { log.error('tick hook failed', e.message); }
+    try { onTick({ snap, sig, now, status: { profitPaused: !!profitNow(OFFICIAL_LEVEL, now)?.paused, earlyLive: earlyLiveNow(now), floor: HAS_FLOOR ? guard.floor : null } }); } catch (e) { log.error('tick hook failed', e.message); }
     if (snap.live) roundsSeen.set(snap.live.m.ticker, { closeTime: Date.parse(snap.live.m.close_time), strike: snap.live.strike });
     if (snap.live) {
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
-      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, fl: guard.floor, ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
+      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, ...(HAS_FLOOR ? { fl: guard.floor } : {}), ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
         recordDirty = true; saveRecord();
-        try { onCall(record.at(-1), { strike: snap.live.strike, floor: guard.floor, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late', early: sig.lane === 'early', flip: sig.lane === 'flip' ? { from: sig.flip?.from ?? null } : null }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
+        try { onCall(record.at(-1), { strike: snap.live.strike, floor: HAS_FLOOR ? guard.floor : null, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late', early: sig.lane === 'early', flip: sig.lane === 'flip' ? { from: sig.flip?.from ?? null } : null }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
       }
     }
     // The early lane's calls, test or live, once per round (its record decides whether it goes live)
@@ -453,11 +456,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   function officialRecord() {
     const cur = currentRecord(), before = record.filter((e) => e.lv !== OFFICIAL_LEVEL);
     const late = cur.filter((e) => e.lane === 'late'), flips = cur.filter((e) => e.lane === 'flip');
-    return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: guardStats(cur), profitGuard: profitGuard(cur),
+    return { level: RISK_LEVELS[OFFICIAL_LEVEL].label, since: cur[0]?.at ?? null, ...callStats(cur), ...streaks(cur), calls: cur.slice(-400), guard: HAS_FLOOR ? guardStats(cur) : null, profitGuard: profitGuard(cur),
       late: { ...callStats(late), profitGuard: profitGuard(late) }, // the late lane's own calls (last 5 minutes)
       flip: { ...callStats(flips), profitGuard: profitGuard(flips) }, // flip calls: the locked call switched sides on clear evidence
       early: { ...earlyProof(earlyRecord), ...callStats(earlyRecord), calls: earlyRecord.slice(-50) }, // the early lane: test calls until proven
-      before: before.length ? { level: 'Steady', since: before[0].at, until: before.at(-1).at, ...callStats(before) } : null,
+      before: before.length ? { level: [...new Set(before.map((e) => RISK_LEVELS[e.lv]?.label ?? 'Steady'))].join(', '), since: before[0].at, until: before.at(-1).at, ...callStats(before) } : null,
       certain: { level: 'Near-certain', since: certainRecord[0]?.at ?? null, ...callStats(certainRecord), ...streaks(certainRecord), calls: certainRecord.slice(-100), profitGuard: profitGuard(certainRecord) } };
   }
   function learnFrom(t) {

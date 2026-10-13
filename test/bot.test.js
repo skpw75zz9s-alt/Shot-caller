@@ -201,62 +201,41 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
   assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
 });
 
-test('the early lane: at 85c with ~6 minutes left the server makes an early call (live from the start) and grades it', async () => {
-  Object.assign(quotes, { yes_bid: 84, yes_ask: 85 }); nextWindow = false; tape = 100050;
-  const file = join(await mkdtemp(join(tmpdir(), 'shot-early-')), 'data.json'), calls = [], ticks = [], rounds = [];
-  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onCall: (e) => calls.push(e), onTick: (o) => ticks.push(o), onRound: (r) => rounds.push(r) });
-  await b.load();
-  const p = fakeBrowser();
-  b.sync({ subscription: { endpoint: `${svc.base}/push/early`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
-  for (let s = 0; s <= 57; s += 3) await b.tick(NOW + s * 1000); // 6 to 5 minutes left: the early lane's window
-  let r = b.record();
-  assert.equal(r.calls.length, 1, 'an official call at 85c through the early lane');
-  assert.deepEqual([r.calls[0].side, r.calls[0].price, r.calls[0].lane], ['YES', 0.85, 'early']);
-  assert.equal(calls.length, 1, 'posted (Discord)');
-  assert.equal(r.early.calls.length, 1, 'and in the early lane\'s own record'); assert.equal(r.early.calls[0].lane, 'early');
-  assert.equal(r.early.live, true);
-  await b.tick(NOW + 8 * 60000); // the round settled YES
-  r = b.record();
-  assert.deepEqual([r.early.n, r.early.wins], [1, 1], 'graded like the official calls');
-  // the Discord alert hooks: the official bot's state every tick, and the settled round (no official call: a sit-out)
-  assert.ok(ticks.length >= 20 && ticks.some((o) => o.sig?.early?.would?.side === 'YES'), 'the tick hook sees the early read');
-  assert.deepEqual(ticks[0].status, { profitPaused: false, earlyLive: true, floor: 0.9 });
-  assert.deepEqual(rounds.map((x) => [x.ticker, x.result, x.called]), [['KXBTC15M-T1', 'yes', true]]);
-  assert.equal(JSON.parse(await readFile(join(file, '..', 'record-early.json'), 'utf8')).length, 1, 'kept on disk');
-  b.stop(); tape = 100000;
-});
-
-test('official bot record: the server bot calls on its own (90% target) and grades the call', async () => {
+test('official bot record: the server bot calls on its own (Profit: 60-90c with a big gap) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   tape = 100050; // a calm market: the tape ends near the live price
   const file = join(await mkdtemp(join(tmpdir(), 'shot-rec-')), 'data.json');
-  const hooked = { calls: [], settled: [] };
+  const hooked = { calls: [], settled: [] }, ticks = [], rounds = [];
   const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet,
-    onCall: (e, o) => hooked.calls.push({ e, o }), onSettle: (e, s) => hooked.settled.push({ e, s }) }); // (the Discord posts: discord.js)
+    onCall: (e, o) => hooked.calls.push({ e, o }), onSettle: (e, s) => hooked.settled.push({ e, s }), onTick: (o) => ticks.push(o), onRound: (r) => rounds.push(r) }); // (the Discord posts and alerts)
   await b.load();
   const p = fakeBrowser();
   b.sync({ subscription: { endpoint: `${svc.base}/push/rec`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
-  for (let s = 0; s <= 36; s += 3) await b.tick(NOW + s * 1000);
-  assert.equal(b.record().calls.length, 0, 'Kalshi gives YES only 40%: below the 90% target\'s floor, however sure the bot is');
-  Object.assign(quotes, { yes_bid: 90, yes_ask: 91 }); // now Kalshi agrees: 91c
-  for (let s = 39; s <= 180; s += 3) await b.tick(NOW + s * 1000); // the bot re-reads Kalshi, then a minute of steady odds
+  // (8.5 to 6 minutes left: before the last 5 minutes, when Profit makes no new calls)
+  for (let s = -150; s <= -114; s += 3) await b.tick(NOW + s * 1000);
+  assert.equal(b.record().calls.length, 0, 'Kalshi gives YES only 40%: under Profit\'s 60c band, however sure the bot is');
+  Object.assign(quotes, { yes_bid: 98, yes_ask: 99 }); // 99c: a win would pay 1c
+  for (let s = -111; s <= -60; s += 3) await b.tick(NOW + s * 1000);
+  assert.equal(b.record().calls.length, 0, 'over Profit\'s 90c cap: no call, a win would pay almost nothing');
+  Object.assign(quotes, { yes_bid: 80, yes_ask: 81 }); // 81c: a win pays 19c, and the bot is far surer than that
+  for (let s = -57; s <= 30; s += 3) await b.tick(NOW + s * 1000); // the bot re-reads Kalshi, then a minute of steady odds
   let r = b.record();
   assert.equal(r.calls.length, 1, 'one locked call for the round');
-  assert.equal(r.calls[0].side, 'YES'); assert.equal(r.calls[0].lv, 'target90'); assert.equal(r.calls[0].fl, 0.9);
-  assert.equal(r.calls[0].lane, undefined, 'made by the normal rules (just before the late lane\'s 5 minutes)');
-  assert.equal(r.late.calls, 0); assert.equal(r.late.profitGuard.paused, false);
-  assert.equal(r.level, '90% target');
-  assert.equal(r.guard.floor, 0.9); assert.equal(r.before, null);
+  assert.deepEqual([r.calls[0].side, r.calls[0].price, r.calls[0].lv, r.calls[0].fl, r.calls[0].lane], ['YES', 0.81, 'profit', undefined, undefined]);
+  assert.equal(r.level, 'Profit');
+  assert.equal(r.guard, null, 'no win-rate floor on Profit: it\'s judged on profit'); assert.equal(r.before, null);
   assert.equal(hooked.calls.length, 1, 'the call went to the call hook once');
-  assert.deepEqual([hooked.calls[0].e.side, hooked.calls[0].o.floor, hooked.calls[0].o.paper, hooked.calls[0].o.level, hooked.calls[0].o.late], ['YES', 0.9, false, '90% target', false]);
+  assert.deepEqual([hooked.calls[0].e.side, hooked.calls[0].o.floor, hooked.calls[0].o.paper, hooked.calls[0].o.level], ['YES', null, false, 'Profit']);
+  assert.deepEqual(ticks.at(-1).status, { profitPaused: false, earlyLive: true, floor: null });
   assert.equal(r.graded, 0);
-  // Near-certain keeps its own record: Kalshi's 90c bid agrees with it too, so it made its own call
-  assert.equal(r.certain.level, 'Near-certain'); assert.equal(r.certain.calls.length, 1);
+  // Near-certain keeps its own record: Kalshi's bid has to reach 85c for it, and at 80c it doesn't
+  assert.equal(r.certain.level, 'Near-certain');
   await b.tick(NOW + 8 * 60000); // the round settled YES
   r = b.record();
   assert.equal(r.graded, 1); assert.equal(r.wins, 1);
   assert.equal(hooked.settled.length, 1); assert.equal(hooked.settled[0].e.result, 'yes'); assert.deepEqual([hooked.settled[0].s.graded, hooked.settled[0].s.wins], [1, 1], 'with the record so far');
   assert.deepEqual(r.streak, { kind: 'W', n: 1 });
+  assert.deepEqual(rounds.map((x) => [x.ticker, x.result, x.called]), [['KXBTC15M-T1', 'yes', true]], 'the round hook (Discord sit-out notes) knows it was called');
   await b.saveRecord();
   assert.equal(JSON.parse(await readFile(join(file, '..', 'record.json'), 'utf8')).length, 1, 'kept on disk');
   b.stop(); tape = 100000;

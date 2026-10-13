@@ -28,7 +28,7 @@
       tr.insertCell().textContent = `${Math.round(c.price * 100)}¢`;
       const res = tr.insertCell(), pill = document.createElement('span'); pill.className = `pill ${c.won ? 'w' : 'l'}`; pill.textContent = c.won ? 'WIN' : 'LOSS'; res.append(pill);
     }
-    if (rec.since) set('rNote', `${rec.level ? `${rec.level} level, ` : ''}graded since ${new Date(rec.since).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. Calls are priced high (around 90¢), so each win pays a little and a loss costs a lot: that's why profit after fees is shown next to the win rate.`);
+    if (rec.since) set('rNote', `${rec.level ? `${rec.level} level, ` : ''}graded since ${new Date(rec.since).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. Calls are priced 60–90¢, so a fair win rate is about the price paid (an 80¢ call should win about 80%): profit after fees is the real score.`);
   }).catch(() => {
     const body = $('rCalls');
     if (body) body.innerHTML = '<tr><td colspan="4" class="note">The record couldn\'t load right now. Try again in a minute.</td></tr>';

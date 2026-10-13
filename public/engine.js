@@ -201,6 +201,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
     if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
+    // the price band (Profit: 60-90c): above it a win pays too little, under it Kalshi doubts the side too much
+    { const ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk; if (s.maxAsk > 0 && !(ask <= s.maxAsk + 1e-9)) return false; if (s.minAsk > 0 && !(ask >= s.minAsk - 1e-9)) return false; }
     // Near-certain: Kalshi's own price has to agree (its bid for the side at kalshiAgree or more)
     if (s.kalshiAgree > 0) { const bid = side === 'YES' ? ev.quote.yesBid : ev.quote.noBid; if (!(bid >= s.kalshiAgree - 1e-9)) return false; }
     // 90% target: Kalshi's own ask for the side at the floor or more (public/winguard.js)

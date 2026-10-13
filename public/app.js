@@ -1,4 +1,4 @@
-import { DEFAULTS, EXIT_DEFAULTS, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
+import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, dipLimit, kalshiFee, quote, riskLevelOf, riskSettings, setFeeRates } from './model.js';
 import { patterns } from './candles.js';
 import { addMessage, buyMessage, buySignal, leanSide, parseCandles, positionCheck, releaseCall, sellMessage, sideName, snapshot } from './engine.js';
 import { TIMEFRAMES, aggregate, floorCeiling } from './indicators.js';
@@ -28,7 +28,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '153'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '154'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -157,6 +157,11 @@ if (store.get('settingsVersion', 1) < 12) {
 if (store.get('settingsVersion', 1) < 13) {
   if (riskLevelOf(settings) === 'target90' && settings.lateMin == null) settings.lateMin = RISK_LEVELS.target90.lateMin;
   store.set('settings', settings); store.set('settingsVersion', 13);
+}
+// v13.20: phones on the 90% target level move to Profit, the official level (calls priced 60-90c that pay)
+if (store.get('settingsVersion', 1) < 17) {
+  if (riskLevelOf(settings) === 'target90') Object.assign(settings, riskSettings('profit'));
+  store.set('settings', settings); store.set('settingsVersion', 17);
 }
 // v13.19: the 90% target level can flip a locked call on clear evidence
 if (store.get('settingsVersion', 1) < 16) {
@@ -1324,7 +1329,7 @@ function earlyStatus() {
 }
 function levelCalls() {
   const lvl = riskLevelOf(settings);
-  return lvl === 'target90' ? state.botRecord?.calls : lvl === 'certain' ? state.botRecord?.certain?.calls : state.callLog;
+  return lvl === OFFICIAL_LEVEL ? state.botRecord?.calls : lvl === 'certain' ? state.botRecord?.certain?.calls : state.callLog;
 }
 function buyBlock(now = Date.now()) {
   const dl = dailyLoss(state.trades, settings.dailyLossLimit, now), until = dl.hit ? dl.until : 0;
