@@ -79,8 +79,8 @@ test('leader edge: the leading exchange has just moved above the pack', () => {
 
 test('features point toward YES, flipped for "below the target" markets', () => {
   const sc = { features: { flow: 0.5, agree: 1, momentum: 0, big: -1, absorb: 0.2, leader: 0 } };
-  assert.deepEqual(featureVector(sc, 'greater'), [0.5, 1, 0, -1, 0.2, 0, 0, 0, 0, 0, 0, 0], 'futures and global reads are 0 when absent');
-  assert.deepEqual(featureVector(sc, 'less'), [-0.5, -1, -0, 1, -0.2, -0, -0, -0, -0, -0, -0, -0]);
+  assert.deepEqual(featureVector(sc, 'greater'), [0.5, 1, 0, -1, 0.2, 0, 0, 0, 0, 0, 0, 0, 0], 'futures, global and liquidation reads are 0 when absent');
+  assert.deepEqual(featureVector(sc, 'less'), [-0.5, -1, -0, 1, -0.2, -0, -0, -0, -0, -0, -0, -0, -0]);
   assert.equal(checkpointFor(12), 10); assert.equal(checkpointFor(6), 6); assert.equal(checkpointFor(2), 3);
 });
 

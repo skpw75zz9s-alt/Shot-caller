@@ -6,6 +6,8 @@
 //   cross    BTC crossed the round's target (at most 3 a round, a minute apart)
 //   trend    the 1-minute chart's trend turned (EMA 9 crossed EMA 21; 10 minutes apart)
 //   whale    one trade of DISCORD_WHALE_MIN dollars or more on a USD exchange (default $250,000; 2 minutes apart)
+//   liquidation  a liquidation cascade: DISCORD_LIQ_MIN dollars (default $2,000,000) of longs or of shorts force-closed
+//            on the futures exchanges within a minute (public/liquidations.js; 10 minutes apart)
 //   hold     Market watch put new calls on hold (bad data, an untradeable book or a violent jump)
 //   early    the early lane's test read while it's paused (clearly labelled: a test, not a call)
 //   sitout   a round closed with no official call, and how it closed
@@ -15,8 +17,8 @@
 // spacing, at most 30 alerts an hour go out (status changes always do).
 import { ema } from './public/indicators.js';
 
-export const ALERT_KINDS = ['bail', 'flip', 'cross', 'trend', 'whale', 'hold', 'early', 'sitout', 'status'];
-export const ALERT_LIMITS = { perHour: 30, crossPerRound: 3, crossGapMs: 60000, trendGapMs: 10 * 60000, whaleGapMs: 2 * 60000, whaleMin: 250000 };
+export const ALERT_KINDS = ['bail', 'flip', 'cross', 'trend', 'whale', 'liquidation', 'hold', 'early', 'sitout', 'status'];
+export const ALERT_LIMITS = { perHour: 30, crossPerRound: 3, crossGapMs: 60000, trendGapMs: 10 * 60000, whaleGapMs: 2 * 60000, whaleMin: 250000, liqMin: 2000000, liqGapMs: 10 * 60000 };
 
 export const DEFAULT_ALERTS = ALERT_KINDS.filter((k) => k !== 'sitout');
 export function alertKinds(raw = process.env.DISCORD_ALERTS) {
@@ -46,6 +48,8 @@ export const alertEmbeds = {
     description: `EMA 9 crossed ${bull ? 'above' : 'below'} EMA 21 on the 1-minute chart (BTC ${money(price)}). A trend read, not a call.` }),
   whale: ({ x }) => ({ title: `🐋 Whale ${x.side === 'buy' ? 'buy' : 'sell'}: ${money(x.price * x.size)}`, color: x.side === 'buy' ? COLORS.up : COLORS.down,
     description: `${x.size.toFixed(2)} BTC at ${money(x.price)} on ${x.ex}.` }),
+  liquidation: ({ side, usd, n }) => ({ title: `💥 Liquidation cascade: ${money(usd)} of ${side === 'long' ? 'longs' : 'shorts'} force-closed`, color: side === 'long' ? COLORS.down : COLORS.up,
+    description: `${n} liquidations in the last minute on the futures exchanges: forced ${side === 'long' ? 'selling' : 'buying'}, which often pushes BTC ${side === 'long' ? 'down' : 'up'} for a few minutes. A read, not a call.` }),
   hold: ({ h }) => ({ title: '⚠️ Market watch: new calls on hold', color: COLORS.warn, description: `${h.why}\nOn hold until ${ts(h.until)}.` }),
   early: ({ w, ticker, closeTime }) => ({ title: `🧪 Early read (TEST, not a call) · ${side(w.side)} at ${cents(w.price)}`, color: COLORS.grey,
     description: `The early lane would call ${side(w.side)} here (the bot's worst case ${pc(w.p)}), but it's paused after its recent calls lost money after fees: this is logged and graded, not a call to buy.`,
@@ -56,10 +60,11 @@ export const alertEmbeds = {
 };
 
 // The watcher: fed the official bot's every tick (bot.js onTick), each settled round (onRound) and big trades (whale)
-export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, limits = ALERT_LIMITS } = {}) {
+export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS } = {}) {
   const rounds = new Map(); // ticker -> what's been posted this round
   const sent = []; // times of the last hour's alerts
-  let trendBull = null, trendAt = 0, whaleAt = 0, prev = null;
+  let trendBull = null, trendAt = 0, whaleAt = 0, prev = null, liqAt = 0;
+  const liqs = []; // the last minute's liquidations
   const send = (kind, args, now, always = false) => {
     if (!kinds.has(kind)) return false;
     while (sent.length && sent[0] < now - 3600000) sent.shift();
@@ -123,5 +128,15 @@ export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Numb
     whaleAt = now;
     return send('whale', { x }, now);
   }
-  return { tick, settled, whale, kinds: () => [...kinds] };
+  // a liquidation (public/liquidations.js): one side's last minute adding up to a cascade
+  function liquidation(x, now = Date.now()) {
+    if (!(x?.usd > 0)) return false;
+    liqs.push(x);
+    while (liqs.length && liqs[0].t < now - 60000) liqs.shift();
+    const side = x.liq, mine = liqs.filter((l) => l.liq === side), usd = mine.reduce((a, l) => a + l.usd, 0);
+    if (usd < liqMin || now - liqAt < limits.liqGapMs) return false;
+    liqAt = now;
+    return send('liquidation', { side, usd, n: mine.length }, now);
+  }
+  return { tick, settled, whale, liquidation, kinds: () => [...kinds] };
 }

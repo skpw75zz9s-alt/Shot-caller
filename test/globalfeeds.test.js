@@ -71,5 +71,5 @@ test('the Round scan reads the global markets as two more inputs, leaving the US
   assert.ok(both.global.edge > 50 && both.features.gLead > 0.3, `futures ahead: $${both.global.edge}, lead ${both.features.gLead}`);
   assert.equal(both.global.live, GLOBAL_SCAN.length);
   assert.ok(both.parts.some((p) => p.name === 'Global flow' && p.pts > 0) && both.parts.some((p) => p.name === 'Global lead' && p.pts > 0));
-  assert.deepEqual(FEATURES.slice(-2), ['gFlow', 'gLead'], 'appended: older graded samples read them as 0');
+  assert.deepEqual(FEATURES.slice(-3), ['gFlow', 'gLead', 'liq'], 'appended: older graded samples read them as 0');
 });

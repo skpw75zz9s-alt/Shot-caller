@@ -54,7 +54,7 @@ export const futures = createFutures();
 // market alerts (discordalerts.js: DISCORD_ALERTS picks which, DISCORD_ALERTS_WEBHOOK_URL gives them their own channel)
 export const discord = createDiscord();
 export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
-export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => discordAlerts.whale(x, now) });
+export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => discordAlerts.whale(x, now), onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)

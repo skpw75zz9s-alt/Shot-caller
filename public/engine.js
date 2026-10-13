@@ -193,7 +193,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   let gated = null;
   const gateOk = (a) => {
     const q = ev.quote, spread = q.yesAsk != null && q.yesBid != null ? q.yesAsk - q.yesBid : null;
-    const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1, spread, ev60: snap.watchEvents60 ?? 0 }, a.price);
+    const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1, spread, ev60: snap.watchEvents60 ?? 0, at: now }, a.price);
     if (g?.skip) { gated = { side: a.side, ...g }; return false; }
     return true;
   };

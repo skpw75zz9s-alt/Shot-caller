@@ -20,15 +20,16 @@
 // the bot's odds) and only moves once enough rounds show the reads actually predict something. The server takes a
 // sample at 10, 6 and 3 minutes left in every round, grades it after Kalshi settles, and scores it against the bot
 // alone and Kalshi's own price, out of sample (each sample is scored with the weights from before its result was known).
+import { liqRead } from './liquidations.js';
 import { GLOBAL_EXCHANGES } from './feeds.js';
 
 export const SCAN_EXCHANGES = ['Coinbase', 'Kraken', 'Bitstamp', 'Gemini', 'Binance.US'];
 // The global markets (v13.10; public/feeds.js, prices aligned to USD spot): read separately, as two more learnable
 // inputs, so the five USD exchanges' reads (and the record the scan has already earned on them) mean what they did
 export const GLOBAL_SCAN = GLOBAL_EXCHANGES.map((e) => e.name);
-export const FEATURES = ['flow', 'agree', 'momentum', 'big', 'absorb', 'leader', 'fLead', 'fFlow', 'fOi', 'fPremium', 'gFlow', 'gLead'];
+export const FEATURES = ['flow', 'agree', 'momentum', 'big', 'absorb', 'leader', 'fLead', 'fFlow', 'fOi', 'fPremium', 'gFlow', 'gLead', 'liq'];
 export const FEATURE_NAMES = { flow: 'Flow', agree: 'Agreement', momentum: 'Momentum', big: 'Big prints', absorb: 'Absorption', leader: 'Leader',
-  fLead: 'Futures lead', fFlow: 'Futures flow', fOi: 'Futures open interest', fPremium: 'Futures premium', gFlow: 'Global flow', gLead: 'Global futures lead' };
+  fLead: 'Futures lead', fFlow: 'Futures flow', fOi: 'Futures open interest', fPremium: 'Futures premium', gFlow: 'Global flow', gLead: 'Global futures lead', liq: 'Liquidations' };
 export const CHECKPOINTS = [10, 6, 3]; // minutes left when a sample is taken
 export const MIN_SAMPLES = 150; // per checkpoint, before learned weights are used
 const BIG = 25000;
@@ -40,7 +41,8 @@ const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.lengt
 // trades: [{ t, ex, side ('buy' = taker bought), price, size }] since the round opened (any order)
 // sigmaMin: BTC's volatility per minute (log), from the bot; estimated from the trades if missing
 // extra: { fLead, fFlow, fOi, fPremium } the futures reads (futures.js, server only), learned like the rest
-export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 100000, sigmaMin = null, extra = null } = {}) {
+// liqs: futures liquidations (public/liquidations.js), for the 'liq' input: shorts force-closed push up, longs down
+export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 100000, sigmaMin = null, extra = null, liqs = null } = {}) {
   const all = trades.filter((x) => x.t >= openTime && x.t <= now && x.price > 0 && x.size > 0 && (x.side === 'buy' || x.side === 'sell')).sort((a, b) => a.t - b.t);
   const ts = all.filter((x) => USD_SET.has(x.ex)), gts = all.filter((x) => GLOBAL_SET.has(x.ex)); // the USD reads only ever see the USD exchanges
   const per = Object.fromEntries(SCAN_EXCHANGES.map((ex) => [ex, { ex, n: 0, buyUsd: 0, sellUsd: 0, pv: 0, vol: 0, first: null, last: null, whales: 0, big: 0, lastMinNet: 0 }]));
@@ -115,6 +117,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
 
   // the global markets: their flow, and how far the perpetual futures have run ahead of USD spot
   const glob = globalRead(gts, ts, { now, sigma, mid });
+  const liq = liqRead(liqs, now);
 
   // the verdict: flow (recent minutes weighted more), agreement, price moves, momentum, big prints, absorption, leader
   const buyShare = buyUsd / totalUsd, recentShare = wAll > 0 ? wBuy / wAll : buyShare;
@@ -129,6 +132,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
     leader: leaderZ,
     fLead: extra?.fLead ?? 0, fFlow: extra?.fFlow ?? 0, fOi: extra?.fOi ?? 0, fPremium: extra?.fPremium ?? 0,
     gFlow: glob.flow, gLead: glob.lead,
+    liq: liq.push,
   };
   const parts = [
     ['Flow', features.flow * 40, `${Math.round(recentShare * 100)}% buyers lately (${Math.round(buyShare * 100)}% of $${fmtK(totalUsd)} all round)`],
@@ -139,6 +143,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
     ['Absorption', absorb * 12, absorb > 0.05 ? `sellers hit it for $${fmtK(-net3)} in 3 min but price held: buyers absorbing` : absorb < -0.05 ? `buyers lifted it for $${fmtK(net3)} in 3 min but price didn't rise: sellers absorbing` : 'price is following the flow'],
     ['Global flow', glob.flow * 10, glob.live ? `${Math.round(glob.buyShare * 100)}% buyers lately across ${glob.live} global market${glob.live === 1 ? '' : 's'} ($${fmtK(glob.usd)} this round)` : 'no global markets streaming'],
     ['Global lead', glob.lead * 8, glob.edge != null && Math.abs(glob.lead) > 0.1 ? `futures ran $${Math.abs(glob.edge).toFixed(0)} ${glob.edge > 0 ? 'above' : 'below'} USD spot in 30 s: spot usually follows` : glob.edge != null ? 'futures in step with spot' : 'no futures streaming'],
+    ['Liquidations', liq.push * 8, liq.n ? `$${fmtK(liq.long)} of longs and $${fmtK(liq.short)} of shorts force-closed in 2 min${Math.abs(liq.push) > 0.3 ? `: forced ${liq.push > 0 ? 'buying' : 'selling'}` : ''}` : liqs ? 'no liquidations in 2 min' : 'no liquidation feed'],
     ['Leader', leaderZ * 8, leader?.edge != null && Math.abs(leaderZ) > 0.1 ? `${leader.ex} is $${Math.abs(leader.edge).toFixed(0)} ${leader.edge > 0 ? 'above' : 'below'} the pack: the rest usually follow` : leader ? `${leader.ex} leads, in step with the rest` : 'no clear leader'],
   ].map(([name, pts, why]) => ({ name, pts: Math.round(pts), why }));
   const score = clamp(parts.reduce((a, p) => a + p.pts, 0), -100, 100);
@@ -146,7 +151,7 @@ export function scanRound(trades, { openTime, now = Date.now(), whaleMin = 10000
   const verdict = score >= 40 ? 'Strong buyers' : score >= 15 ? 'Leans up' : score <= -40 ? 'Strong sellers' : score <= -15 ? 'Leans down' : 'Mixed';
   return {
     ready: true, rows, exchanges: live.length, trades: ts.length, totalUsd, buyUsd, net, buyShare, recentShare, flowAgree,
-    upPrice, downPrice, dispersion, mid, cbPremium, momentum, leader, absorption, bigBuy, bigSell, parts, score, verdict, features, futures: extra?.live ? extra : null, global: glob,
+    upPrice, downPrice, dispersion, mid, cbPremium, momentum, leader, absorption, bigBuy, bigSell, parts, score, verdict, features, futures: extra?.live ? extra : null, global: glob, liq,
     lean: score >= 15 ? 'YES' : score <= -15 ? 'NO' : null,
   };
 }

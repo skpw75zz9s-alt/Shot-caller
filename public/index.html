@@ -55,6 +55,7 @@
   <link rel="modulepreload" href="roundscan.js">
   <link rel="modulepreload" href="predict.js">
   <link rel="modulepreload" href="radar.js">
+  <link rel="modulepreload" href="liquidations.js">
   <link rel="modulepreload" href="accuracy.js">
   <link rel="modulepreload" href="winguard.js">
   <link rel="modulepreload" href="profitguard.js">
@@ -488,7 +489,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.20.1 · Profit level</p>
+      <p class="fine" id="version">Shot Caller v13.21 · Liquidations + time of day</p>
     </section>
   </main>
 
@@ -506,7 +507,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '155';
+    window.SC_BUILD = '156';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

@@ -8,18 +8,21 @@ import { dirname } from 'node:path';
 import { EXCHANGES, GLOBAL_EXCHANGES, createAligner, parseCoinbase } from './public/feeds.js';
 import { quote } from './public/model.js';
 import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
+import { LIQ_FEEDS } from './public/liquidations.js';
 
 const COINBASE = { name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['matches'] }], parse: parseCoinbase };
 const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
 const MAX_SAMPLES = 6000;
 
 // futures: futures.js (Hyperliquid's BTC perpetual), its reads become extra scan inputs
-// onTrade: each USD exchange trade as it arrives (the Discord whale alerts: discordalerts.js)
-export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null, onTrade = null } = {}) {
+// onTrade: each USD exchange trade as it arrives (the Discord whale alerts: discordalerts.js); onLiq: each futures
+// liquidation (public/liquidations.js: the scan's 'liq' input and the Discord cascade alert)
+export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null, onTrade = null, onLiq = null } = {}) {
   let data = { samples: [], models: {} };
   // trades: the five USD exchanges (the bot's price, Market watch, the micro model); gtrades: the global markets (v13.10),
   // kept apart and level-aligned to USD spot, read only by the scan's global inputs (Binance and Bybit block US servers:
   // whatever connects is used)
+  let liqs = []; // futures liquidations, the last 30 minutes
   let trades = [], gtrades = [], roundOpen = null, last = null, lastScanAt = 0, saveTimer = null;
   const align = createAligner(), globalNames = new Set(GLOBAL_EXCHANGES.map((e) => e.name));
   const socks = {}, status = {}, retry = {};
@@ -52,6 +55,12 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     if (trades.length > MAX_TRADES) trades.splice(0, trades.length - MAX_TRADES);
     if (gtrades.length > MAX_GLOBAL) gtrades.splice(0, gtrades.length - MAX_GLOBAL);
   }
+  function addLiq(list) {
+    const now = clock();
+    for (const x of list) { liqs.push(x); if (onLiq) try { onLiq(x, now); } catch { /* an alert never breaks the feed */ } }
+    while (liqs.length && liqs[0].t < now - 30 * 60000) liqs.shift();
+    if (liqs.length > 5000) liqs.splice(0, liqs.length - 5000);
+  }
   function open(ex) {
     if (stopped || socks[ex.name] || typeof WS !== 'function') return;
     let ws;
@@ -71,7 +80,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
       const r = ex.reply?.(m);
       if (r) send(r); // heartbeat answers (Crypto.com)
       const got = ex.parse(m).filter(Boolean);
-      if (got.length) add(got);
+      if (got.length) (ex.onData || add)(got);
     };
     ws.onclose = () => {
       clearInterval(pinger);
@@ -81,7 +90,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     };
     ws.onerror = () => { try { ws.close(); } catch { /* already closed */ } };
   }
-  function start() { stopped = false; [COINBASE, ...EXCHANGES, ...GLOBAL_EXCHANGES].forEach(open); }
+  function start() { stopped = false; [COINBASE, ...EXCHANGES, ...GLOBAL_EXCHANGES, ...LIQ_FEEDS.map((f) => ({ ...f, name: `${f.name} liquidations`, onData: addLiq }))].forEach(open); }
   function stop() { stopped = true; clearTimeout(saveTimer); for (const [n, ws] of Object.entries(socks)) { ws.onclose = null; try { ws.close(); } catch { /* */ } delete socks[n]; } }
   // The latest BTC price from the trade feeds: the median of each exchange's last trade in the past 10 seconds (null
   // with fewer than 2 exchanges streaming). The bot moves its price with this every second (bot.js liveSpot).
@@ -110,6 +119,8 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
   // takers' buy share of the dollars since t, as -1 (all selling) .. +1 (all buying); null with no trades
   function imbalance(since) { let b = 0, all = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > since; i--) { const u = trades[i].price * trades[i].size; all += u; if (trades[i].side === 'buy') b += u; } return all > 0 ? (b / all - 0.5) * 2 : null; }
   function flowSince(t) { let usd = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > t; i--) usd += trades[i].price * trades[i].size; return usd; }
+  // a liquidation feed is live if it connected (liquidations come in bursts: quiet minutes are normal)
+  const liveLiq = (now) => LIQ_FEEDS.some((f) => status[`${f.name} liquidations`]?.state === 'live') || liqs.some((x) => x.t > now - 30 * 60000);
   const liveFeeds = (now) => Object.entries(status).filter(([k, s]) => usdNames.has(k) && s.lastAt > now - 60000).length;
 
   // Every bot tick (bot.js onObserve): scan the live round, take checkpoint samples, grade settled ones
@@ -125,7 +136,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     lastScanAt = now;
     const f = futures?.features({ now, spotAt, sigmaMin: snap.sigmaMin || undefined });
     const extra = f?.live ? { fLead: f.lead, fFlow: f.flow, fOi: f.oi, fPremium: f.premium, live: true, funding: f.funding, oiChange: f.oiChange } : null;
-    const sc = scanRound(gtrades.length ? trades.concat(gtrades) : trades, { openTime: openT, now, sigmaMin: snap.sigmaMin, extra });
+    const sc = scanRound(gtrades.length ? trades.concat(gtrades) : trades, { openTime: openT, now, sigmaMin: snap.sigmaMin, extra, liqs: liveLiq(now) ? liqs : null });
     const q = quote(live.m), kalshi = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
     const mLeft = live.ev.minutesLeft, pModel = live.pPre ?? live.ev.pYes; // the odds before the scan's own nudge
     const x = sc.ready ? featureVector(sc, live.m.strike_type) : null;
