@@ -1,0 +1,117 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: #05070d; font-family: 'Liberation Sans', 'DejaVu Sans', sans-serif; color: #e8ecf3; }
+  #bg { position: absolute; inset: 0; background: radial-gradient(120% 55% at 50% -5%, #13254a 0%, #05070d 62%); }
+  #glow { position: absolute; width: 900px; height: 900px; left: 90px; top: 520px; border-radius: 50%; background: radial-gradient(circle, #f7931a22, transparent 65%); }
+  .top { position: absolute; left: 60px; right: 60px; top: 58px; display: flex; align-items: center; gap: 18px; }
+  .top img { width: 64px; height: 64px; border-radius: 16px; }
+  .top b { font-size: 34px; letter-spacing: .5px; }
+  .pill { margin-left: auto; font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 2px; color: #f7931a; border: 2px solid #f7931a66; border-radius: 999px; padding: 8px 18px; text-transform: uppercase; }
+  #title { position: absolute; left: 60px; right: 60px; top: 160px; font-weight: 700; font-size: 62px; letter-spacing: -1px; line-height: 1.05; }
+  #phone { position: absolute; left: 220px; top: 290px; width: 640px; height: 1385px; border-radius: 56px; overflow: hidden; background: #000; box-shadow: 0 0 0 10px #1a2236, 0 0 0 12px #2c3a5a, 0 40px 90px #000c; }
+  #stage { position: absolute; left: 0; top: 0; width: 1170px; height: 2532px; transform-origin: 0 0; }
+  #shot { width: 1170px; height: 2532px; display: block; }
+  .hl { position: absolute; border: 8px solid #f7931a; border-radius: 26px; box-shadow: 0 0 0 6px #f7931a33, 0 0 50px #f7931aaa; }
+  #cap { position: absolute; left: 70px; right: 70px; top: 1712px; height: 150px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 44px; line-height: 1.25; font-weight: 700; text-shadow: 0 3px 12px #000; }
+  #note { position: absolute; left: 0; right: 0; top: 1688px; text-align: center; font: 20px 'DejaVu Sans Mono', monospace; color: #6b7690; letter-spacing: 1px; }
+  #bar { position: absolute; left: 60px; right: 60px; bottom: 34px; height: 8px; border-radius: 4px; background: #16203a; }
+  #bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #f7931a, #fbbf24); }
+  /* disclaimer cards */
+  #card { position: absolute; left: 70px; right: 70px; top: 330px; display: none; flex-direction: column; align-items: center; text-align: center; }
+  #icon { width: 260px; height: 260px; border-radius: 50%; display: grid; place-items: center; font: 700 120px 'DejaVu Sans', sans-serif; color: #1a0f00; background: radial-gradient(circle at 40% 32%, #ffb84d, #f7931a 60%, #d8740a); box-shadow: 0 0 0 10px #f7931a22, 0 30px 80px #f7931a44; }
+  #ctitle { margin-top: 70px; font-size: 74px; font-weight: 700; letter-spacing: -1.5px; line-height: 1.05; }
+  #cbody { margin-top: 48px; font-size: 46px; line-height: 1.38; color: #c9d1e0; }
+  #end { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 28px; }
+  #end img { width: 300px; height: 300px; border-radius: 64px; box-shadow: 0 30px 90px #f7931a55; }
+  #end h2 { font-size: 80px; letter-spacing: -1px; }
+  #end p { font-size: 40px; color: #c9d1e0; max-width: 900px; line-height: 1.35; }
+  #end small { font: 26px 'DejaVu Sans Mono', monospace; color: #8b95a7; }
+</style></head>
+<body>
+<div id="bg"></div><div id="glow"></div>
+<div class="top"><img src="../public/icon-512.png" id="logo"><b>Shot Caller</b><span class="pill" id="pill">Tutorial</span></div>
+<div id="title"></div>
+<div id="phone"><div id="stage"><img id="shot"></div></div>
+<div id="note">SAMPLE MARKET DATA · FOR ILLUSTRATION</div>
+<div id="card"><div id="icon"></div><div id="ctitle"></div><div id="cbody"></div></div>
+<div id="cap"></div>
+<div id="end"><img src="" id="endlogo"><h2>Shot Caller</h2><p id="endtext"></p><small>shot-caller-production-ae90.up.railway.app</small></div>
+<div id="bar"><i id="prog"></i></div>
+<script>
+const KIND = new URLSearchParams(location.search).get('kind') || 'tutorial';
+const ICON = '../public/icon-512.png';
+document.getElementById('logo').src = ICON; document.getElementById('endlogo').src = ICON;
+const $ = (id) => document.getElementById(id);
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+let scenes = [], boxes = {}, timeline = [], END = 3.2, LEAD = 0.25, PAD = 0.75;
+(async () => {
+  const S = await (await fetch('script.json')).json();
+  boxes = await (await fetch('shots/boxes.json')).json();
+  scenes = S[KIND];
+  let t = 0.4;
+  for (const sc of scenes) { const d = sc.dur + PAD + LEAD; timeline.push({ sc, start: t, end: t + d, audio: t + LEAD, chunks: chunk(sc.say, sc.dur) }); t += d; }
+  window.DURATION = t + END;
+  window.AUDIO = timeline.map((x) => ({ id: x.sc.id, at: x.audio }));
+  $('pill').textContent = KIND === 'tutorial' ? 'Tutorial' : 'Disclaimer';
+  $('endtext').textContent = KIND === 'tutorial' ? 'Signals, not guarantees. Trade small, follow the bail alerts, set a daily loss limit.' : 'Signals only. Not financial advice. Every call can lose. 1-800-GAMBLER';
+  // preload every screenshot
+  await Promise.all([...new Set(scenes.filter((s) => s.shot).map((s) => s.shot))].map((n) => new Promise((r) => { const i = new Image(); i.onload = r; i.onerror = r; i.src = `shots/${n}.jpg`; })));
+  window.ready = true;
+})();
+// captions: chunks of about 9 words, timed by their share of the characters
+function chunk(text, dur) {
+  const words = text.split(' '), out = []; let cur = [];
+  for (const w of words) { cur.push(w); if (cur.length >= 9 || /[.:?!]$/.test(w) && cur.length >= 4) { out.push(cur.join(' ')); cur = []; } }
+  if (cur.length) out.push(cur.join(' '));
+  const total = out.reduce((a, c) => a + c.length, 0); let acc = 0;
+  return out.map((c) => { const s = acc / total * dur; acc += c.length; return { text: c, s, e: acc / total * dur }; });
+}
+let shown = null;
+window.render = (t) => {
+  $('prog').style.width = `${Math.min(100, t / window.DURATION * 100)}%`;
+  const cur = timeline.find((x) => t >= x.start && t < x.end) || (t < (timeline[0]?.start ?? 0) ? timeline[0] : null);
+  const ending = !cur;
+  $('end').style.display = ending ? 'flex' : 'none';
+  for (const id of ['title', 'cap', 'note', 'phone', 'card']) $(id).style.opacity = ending ? 0 : 1;
+  if (ending) { const k = ease((t - timeline.at(-1).end) / 0.6); $('end').style.opacity = k; $('end').style.transform = `scale(${0.96 + 0.04 * k})`; return; }
+  const { sc } = cur, local = t - cur.start, dur = cur.end - cur.start;
+  const fade = Math.min(ease(local / 0.35), ease((dur - local) / 0.3));
+  $('title').textContent = sc.title; $('title').style.opacity = fade; $('title').style.transform = `translateY(${(1 - ease(local / 0.45)) * 24}px)`;
+  const said = t - cur.audio, ch = cur.chunks.find((c) => said >= c.s && said < c.e) || (said < 0 ? cur.chunks[0] : cur.chunks.at(-1));
+  $('cap').textContent = ch?.text ?? ''; $('cap').style.opacity = fade;
+  if (KIND === 'tutorial') {
+    $('card').style.display = 'none'; $('phone').style.display = 'block'; $('note').style.display = /^site|^paywall/.test(sc.shot) ? 'none' : 'block';
+    if (shown !== sc.id) {
+      shown = sc.id; $('shot').src = `shots/${sc.shot}.jpg`;
+      for (const h of document.querySelectorAll('.hl')) h.remove();
+      for (const sel of sc.hl || []) { const b = boxes[sc.shot]?.[sel]; if (!b) continue; const d = document.createElement('div'); d.className = 'hl'; Object.assign(d.style, { left: `${b[0] - 14}px`, top: `${Math.max(4, b[1] - 14)}px`, width: `${b[2] + 28}px`, height: `${Math.min(b[3] + 28, 2524 - Math.max(4, b[1] - 14))}px` }); $('stage').append(d); }
+    }
+    // zoom toward the highlighted area (union of boxes), gently over the scene
+    const bs = (sc.hl || []).map((s) => boxes[sc.shot]?.[s]).filter(Boolean);
+    const base = 640 / 1170;
+    let zoom = 1, cx = 585, cy = 1266;
+    if (bs.length) {
+      const x0 = Math.min(...bs.map((b) => b[0])), y0 = Math.min(...bs.map((b) => b[1])), x1 = Math.max(...bs.map((b) => b[0] + b[2])), y1 = Math.max(...bs.map((b) => Math.min(2532, b[1] + b[3])));
+      const fit = Math.min(1170 / (x1 - x0 + 160), 2532 / (y1 - y0 + 260));
+      zoom = 1 + (Math.min(sc.maxZoom ?? 1.45, Math.max(1, fit)) - 1) * ease((local - 0.6) / 1.6);
+      cx = 585 + ((x0 + x1) / 2 - 585) * ease((local - 0.6) / 1.6); cy = 1266 + ((y0 + y1) / 2 - 1266) * ease((local - 0.6) / 1.6);
+    }
+    const s = base * zoom;
+    let tx = 320 - cx * s, ty = 692.5 - cy * s;
+    tx = Math.min(0, Math.max(640 - 1170 * s, tx)); ty = Math.min(0, Math.max(1385 - 2532 * s, ty));
+    $('stage').style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+    $('phone').style.opacity = fade;
+    const pulse = 0.6 + 0.4 * Math.sin(local * 5);
+    for (const h of document.querySelectorAll('.hl')) h.style.opacity = ease((local - 1.0) / 0.4) * pulse * fade;
+  } else {
+    $('phone').style.display = 'none'; $('note').style.display = 'none'; $('card').style.display = 'flex';
+    $('icon').textContent = sc.icon; $('ctitle').textContent = sc.title; $('cbody').textContent = sc.text ?? sc.say; $('title').style.opacity = 0;
+    $('card').style.opacity = fade; $('card').style.transform = `translateY(${(1 - ease(local / 0.5)) * 30}px)`;
+    $('icon').style.transform = `scale(${0.9 + 0.1 * ease(local / 0.5)})`;
+    $('cap').style.display = 'none';
+  }
+};
+</script>
+</body></html>

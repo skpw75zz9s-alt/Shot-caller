@@ -1,0 +1,5 @@
+vo/
+*.mp4
+*-audio.wav
+*-audio.json
+prev-*.png
