@@ -28,7 +28,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '151'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '152'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1315,7 +1315,7 @@ function renderRadar(rd, spot) {
 function earlyStatus() {
   const e = state.botRecord?.early;
   if (!e) return '';
-  return e.n ? ` (${int(e.n)} of 50 graded so far: won ${Math.round(e.wins / e.n * 100)}%, needs ${Math.round((e.need ?? 0) * 100)}%+)` : ' (none graded yet)';
+  return e.n ? ` (${int(e.n)} graded: won ${Math.round(e.wins / e.n * 100)}%, break-even ${Math.round((e.need ?? 0) * 100)}%)` : '';
 }
 function levelCalls() {
   const lvl = riskLevelOf(settings);
@@ -1417,7 +1417,7 @@ function render() {
     setText($('reason'), call && sig.sticking && sig.locked ? `Steady: the call is locked for this round. Confidence now ${sig.deep?.score ?? '—'}${sig.hold != null ? `, stays above ${Math.round(settings.holdFloor * 100)} to the end in ${Math.round(sig.hold * 100)}% of paths` : ''}.`
       : call && sig.sticking ? `${sideName(otherSide)} looks a little better this tick, but not by enough to drop the call. Sticking with it.`
       : call && sticking ? 'Called earlier and still a buy: one tick of movement isn\'t a reason to change.'
-      : call && sig.lane === 'early' ? `Early lane: called while Kalshi asked ${Math.round((sig.price ?? 0) * 100)}¢, with the bot clearly surer even in its worst case. Early calls went live after beating Kalshi's prices on real rounds. Half size: earlier means more can still change.`
+      : call && sig.lane === 'early' ? `Early lane: called while Kalshi asked ${Math.round((sig.price ?? 0) * 100)}¢, with the bot clearly surer even in its worst case. Half size: earlier means more can still change, and wins here are bigger but losses more likely than at 90¢+.${earlyStatus()}`
       : call && sig.lane === 'late' ? `Late lane (last ${settings.lateMin ?? 5} min): even with ${settings.lateVol ?? 1.35}× volatility and fat tails it wins ${sig.late?.p != null ? (sig.late.p * 100).toFixed(1) : '97+'}% by the bot's math. Half size: a win this late pays a few cents, a loss costs the stake.`
       : call ? '' : waitingToCall ? `Calls start in ${mmss((ev.callsAt - now) / 60000)} (bot watches the first ${settings.waitMinutes} min)`
       : sig.cooldown ? `Just sold on this market. A fresh call can come in ${sig.cooldown}s if the gap is still there.`
@@ -1427,7 +1427,7 @@ function render() {
       : sig.watchHold ? `Market watch has new calls on hold until ${clock(sig.watchHold.until)}: ${sig.watchHold.why}`
       : sig.gated ? `Confidence ${sig.deep?.score ?? '—'}, but the call filter skipped it: calls like this have won ${Math.round(sig.gated.pWin * 100)}% in the bot's record, and at ${Math.round((sig.gated.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) * 100)}¢ it needs ${Math.round(sig.gated.need * 100)}% to pay.`
       : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `No new calls in the last ${settings.noCallLastMin} minutes: by now the outcome is mostly priced in, so a win pays only a few cents.`
-      : sig.early?.would && !sig.early.live ? `Early read (testing, not a call): ${sideName(sig.early.would.side)} at ${Math.round(sig.early.would.price * 100)}¢, the bot's worst case ${Math.round(sig.early.would.p * 100)}%. Early calls go live only after their test calls beat Kalshi's prices on real rounds${earlyStatus()}.`
+      : sig.early?.would && !sig.early.live ? `Early read (paused, not a call): ${sideName(sig.early.would.side)} at ${Math.round(sig.early.would.price * 100)}¢, the bot's worst case ${Math.round(sig.early.would.p * 100)}%. Early calls are paused because their recent calls lost money after fees; they come back once their test calls are profitable again${earlyStatus()}.`
       : sig.late?.on && !sig.called && sig.late.why ? `Late lane (last ${settings.lateMin ?? 5} min): only stress-tested calls now. Not yet: ${sig.late.why}.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.holdOk ? `Confidence ${sig.deep.score}, but it stays above ${Math.round(settings.holdFloor * 100)} to the end in only ${sig.hold == null ? '—' : Math.round(sig.hold * 100)}% of simulated paths (Steady needs ${Math.round(settings.minHold * 100)}%). Waiting for a call that holds.`
       : ev.side && sig.robust && sig.deep && sig.deep.score >= sig.confNeed && !sig.steadyOk ? `Confidence ${sig.deep.score}: making sure it holds for ${sig.steadyNeed ?? settings.steadySec}s before calling (one good tick isn't enough${sig.stability?.level === 'stable' ? '; market 👍 so the wait is shorter' : sig.stability?.level === 'unstable' ? '; market unstable so the wait is longer' : ''}).`
@@ -1439,7 +1439,7 @@ function render() {
     const waiting = call && !buyNow && settings.waitForDip;
     setText($('callLabel'), call ? (waiting ? 'Low price, waiting for candle dip' : sig.lane === 'late' ? 'LATE CALL · BUY THE LOW' : sig.lane === 'early' ? 'EARLY CALL · BUY THE LOW' : sig.stance === 'switching' ? 'SWITCH · BUY THE LOW' : sticking ? 'BUY THE LOW · sticking with it' : 'BUY THE LOW')
       : sig.called ? `Called ${sig.called} earlier · no new buy`
-      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `Last ${settings.noCallLastMin} minutes · no new calls` : sig.early?.would && !sig.early.live ? 'Early read · testing, not a call' : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
+      : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `Last ${settings.noCallLastMin} minutes · no new calls` : sig.early?.would && !sig.early.live ? 'Early read · paused, not a call' : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
     if (setText(callEl, call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
     setClass(callEl, `call ${(call ?? 'pass').toLowerCase()}`);

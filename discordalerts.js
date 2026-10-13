@@ -7,7 +7,7 @@
 //   trend    the 1-minute chart's trend turned (EMA 9 crossed EMA 21; 10 minutes apart)
 //   whale    one trade of DISCORD_WHALE_MIN dollars or more on a USD exchange (default $250,000; 2 minutes apart)
 //   hold     Market watch put new calls on hold (bad data, an untradeable book or a violent jump)
-//   early    the early lane's test read (clearly labelled: a test, not a call)
+//   early    the early lane's test read while it's paused (clearly labelled: a test, not a call)
 //   sitout   a round closed with no official call, and how it closed
 //   status   the profit guard paused or resumed, the early lane went live or back to testing, the guard's floor moved
 // DISCORD_ALERTS picks which: 'all' (default), 'none', or a comma list (e.g. bail,flip,whale). Besides each kind's
@@ -45,7 +45,7 @@ export const alertEmbeds = {
     description: `${x.size.toFixed(2)} BTC at ${money(x.price)} on ${x.ex}.` }),
   hold: ({ h }) => ({ title: '⚠️ Market watch: new calls on hold', color: COLORS.warn, description: `${h.why}\nOn hold until ${ts(h.until)}.` }),
   early: ({ w, ticker, closeTime }) => ({ title: `🧪 Early read (TEST, not a call) · ${side(w.side)} at ${cents(w.price)}`, color: COLORS.grey,
-    description: `The early lane would call ${side(w.side)} here (the bot's worst case ${pc(w.p)}). It's still proving itself on real rounds, so this is logged and graded, not a call to buy.`,
+    description: `The early lane would call ${side(w.side)} here (the bot's worst case ${pc(w.p)}), but it's paused after its recent calls lost money after fees: this is logged and graded, not a call to buy.`,
     fields: [{ name: 'Closes', value: ts(Date.parse(closeTime)), inline: true }, { name: 'Market', value: `\`${ticker}\``, inline: true }] }),
   sitout: ({ result, ticker, value, strike }) => ({ title: `😴 No call · the round closed ${result === 'yes' ? 'UP' : 'DOWN'}`, color: COLORS.grey,
     description: `Nothing cleared the bar this round${value && strike ? `: BTC settled ${money(value)} vs the target ${money(strike)}` : ''}.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
@@ -103,7 +103,7 @@ export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Numb
     const cur = { paused: !!status.profitPaused, earlyLive: !!status.earlyLive, floor: status.floor ?? null, holdUntil: h?.until ?? 0 };
     if (prev) {
       if (cur.paused !== prev.paused) send('status', { good: !cur.paused, text: cur.paused ? 'The profit guard paused buy alerts: the official level\'s recent calls lost money after fees. Calls keep being logged as paper calls until it\'s making money again.' : 'The profit guard resumed buy alerts: the official level is making money after fees again.' }, now, true);
-      if (cur.earlyLive !== prev.earlyLive) send('status', { good: cur.earlyLive, text: cur.earlyLive ? 'The early lane is LIVE: its test calls beat Kalshi\'s prices on real rounds, so early calls (10 to 5 minutes left) now go out, at half size.' : 'The early lane is back to testing: its recent calls lost money after fees.' }, now, true);
+      if (cur.earlyLive !== prev.earlyLive) send('status', { good: cur.earlyLive, text: cur.earlyLive ? 'Early calls are back on: their test calls are profitable again, so early calls (10 to 5 minutes left) go out again, at half size.' : 'Early calls are paused: their recent calls lost money after fees. Test calls until they recover.' }, now, true);
       if (cur.floor != null && prev.floor != null && Math.abs(cur.floor - prev.floor) > 1e-9) send('status', { good: cur.floor < prev.floor, text: `The win-rate guard moved the price floor from ${cents(prev.floor)} to ${cents(cur.floor)}${cur.floor > prev.floor ? ': the record slipped, so calls need Kalshi surer first' : ': the record recovered'}.` }, now, true);
     }
     prev = cur;

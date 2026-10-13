@@ -23,9 +23,9 @@ test('the early lane: 10 to 5 minutes left on the 90% target level', () => {
   assert.equal(sig({ yb: 84, ya: 85, mins: 12 }).early, null, '12 minutes left: not yet');
 });
 
-test('until it has proven itself it only makes test calls; once live, real calls at half size', () => {
+test('paused, it only makes test calls; live (the default), real calls at half size', () => {
   const t = sig({ yb: 84, ya: 85 });
-  assert.equal(t.fire, false, 'Kalshi at 85c is under the 90% floor and the lane isn\'t live: no call');
+  assert.equal(t.fire, false, 'Kalshi at 85c is under the 90% floor and the lane is paused: no call');
   assert.deepEqual([t.early.would?.side, t.early.would?.price, t.early.live], ['YES', 0.85, false], JSON.stringify(t.early));
   const l = sig({ yb: 84, ya: 85, live: true });
   assert.ok(l.fire && l.callSide === 'YES' && l.lane === 'early', JSON.stringify(l.early));
@@ -45,15 +45,15 @@ test('what keeps it out: too much doubt, the floor, a thin lead, Kalshi disagree
   assert.match(sig({ yb: 84, ya: 85, lead: 120 }, { ...t90, winFloor: 0.97 }).early.why, /worst-case odds|needs 97%/);
 });
 
-test('the proof: 50+ graded test calls whose win rate is clearly above what their prices need, and a profit', () => {
+test('live from the start; paused when its last 40 lose money; the stricter proof shown alongside', () => {
   const calls = (n, wins, price = 0.85) => Array.from({ length: n }, (_, i) => ({ side: 'YES', price, result: i < wins ? 'yes' : 'no' }));
-  assert.equal(EARLY.min, 50);
+  assert.deepEqual([EARLY.min, EARLY.requireProof], [50, false]);
+  assert.equal(earlyProof([]).live, true, 'no record yet: live (the owner chose more calls)');
   const good = earlyProof(calls(60, 58));
-  assert.equal(good.live, true, JSON.stringify(good));
+  assert.deepEqual([good.live, good.proven], [true, true], JSON.stringify(good));
   assert.ok(good.need > 0.85 && good.need < 0.87, `85c plus the fee: ${good.need}`);
-  assert.equal(earlyProof(calls(49, 49)).live, false, 'not enough calls yet');
-  const thin = earlyProof(calls(60, 54));
-  assert.equal(thin.live, false, `90% won at 85c: profitable but not clearly above break-even (low ${thin.low.toFixed(3)})`);
+  const thin = earlyProof(Array.from({ length: 60 }, (_, i) => ({ side: 'YES', price: 0.85, result: i % 10 === 9 ? 'no' : 'yes' }))); // 90% won, losses spread out
+  assert.deepEqual([thin.live, thin.proven], [true, false], `90% won at 85c: still live, not clearly above break-even (low ${thin.low.toFixed(3)})`);
   const slip = earlyProof([...calls(60, 60), ...calls(25, 18)]);
   assert.deepEqual([slip.paused, slip.live], [true, false], 'the last 40 lose money: back to testing');
   assert.equal(earlyProof([{ side: 'YES', price: 0.85, result: null }]).n, 0, 'unsettled calls don\'t count');
@@ -61,10 +61,10 @@ test('the proof: 50+ graded test calls whose win rate is clearly above what thei
 
 test('the early lane on the accuracy card and in the Discord post', () => {
   const row = (early) => accuracyRows({ bot: { graded: 10, wins: 10, usd: 1, early } }).find((r) => r.key === 'early');
-  const testing = row({ n: 12, wins: 11, usd: 3, need: 0.86, live: false });
-  assert.equal(testing.verdict, 'wait'); assert.match(testing.name, /testing/); assert.match(testing.vs, /12 so far/);
-  const live = row({ n: 60, wins: 58, usd: 40, need: 0.86, live: true });
-  assert.equal(live.verdict, 'good'); assert.match(live.vs, /LIVE/);
+  const paused = row({ n: 45, wins: 36, usd: -20, need: 0.86, live: false, paused: true });
+  assert.equal(paused.verdict, 'bad'); assert.match(paused.name, /paused/); assert.match(paused.vs, /PAUSED/);
+  const live = row({ n: 60, wins: 58, usd: 40, need: 0.86, live: true, proven: true });
+  assert.equal(live.verdict, 'good'); assert.match(live.vs, /clearly beating/);
   const call = { ticker: 'T', side: 'YES', price: 0.85, conf: 95, at: NOW, closeTime: new Date(NOW + 480000).toISOString() };
   const e = callMessage(call, { early: true }).embeds[0];
   assert.match(e.title, /EARLY/); assert.ok(e.fields.some((f) => f.name === 'Early lane'));
