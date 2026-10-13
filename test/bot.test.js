@@ -203,8 +203,8 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
 
 test('the early lane: at 85c with ~6 minutes left the server logs a test call (no official call) and grades it', async () => {
   Object.assign(quotes, { yes_bid: 84, yes_ask: 85 }); nextWindow = false; tape = 100050;
-  const file = join(await mkdtemp(join(tmpdir(), 'shot-early-')), 'data.json'), calls = [];
-  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onCall: (e) => calls.push(e) });
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-early-')), 'data.json'), calls = [], ticks = [], rounds = [];
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onCall: (e) => calls.push(e), onTick: (o) => ticks.push(o), onRound: (r) => rounds.push(r) });
   await b.load();
   const p = fakeBrowser();
   b.sync({ subscription: { endpoint: `${svc.base}/push/early`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
@@ -218,6 +218,10 @@ test('the early lane: at 85c with ~6 minutes left the server logs a test call (n
   await b.tick(NOW + 8 * 60000); // the round settled YES
   r = b.record();
   assert.deepEqual([r.early.n, r.early.wins], [1, 1], 'graded like the official calls');
+  // the Discord alert hooks: the official bot's state every tick, and the settled round (no official call: a sit-out)
+  assert.ok(ticks.length >= 20 && ticks.some((o) => o.sig?.early?.would?.side === 'YES'), 'the tick hook sees the early read');
+  assert.deepEqual(ticks[0].status, { profitPaused: false, earlyLive: false, floor: 0.9 });
+  assert.deepEqual(rounds.map((x) => [x.ticker, x.result, x.called]), [['KXBTC15M-T1', 'yes', false]]);
   assert.equal(JSON.parse(await readFile(join(file, '..', 'record-early.json'), 'utf8')).length, 1, 'kept on disk');
   b.stop(); tape = 100000;
 });

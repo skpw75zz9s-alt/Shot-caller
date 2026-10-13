@@ -41,7 +41,7 @@ test('posting: off without a valid address; one at a time; waits out Discord\'s 
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(hits.length, 3, 'the rate-limited call retried, then the result');
   assert.equal(hits[0].url, HOOK); assert.match(hits[2].body.embeds[0].title, /WIN/);
-  assert.deepEqual(d.status(), { on: true, why: null, sent: 2, failed: 0, queued: 0, branded: false });
+  assert.deepEqual(d.status(), { on: true, why: null, sent: 2, failed: 0, queued: 0, branded: false, alerts: 'calls channel' });
 });
 
 test('branding: posts come from Shot Caller with the app icon and an Official calls header linking to the app', async () => {

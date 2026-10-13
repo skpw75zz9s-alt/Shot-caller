@@ -28,7 +28,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, onCall = () => {}, onSettle = () => {} }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {} }) {
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
@@ -66,6 +66,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   // The early lane's record (v13.16): every early call the official level would make, test or live, graded the same way
   const earlyFile = dataFile.replace(/[^/\\]+$/, 'record-early.json');
   let earlyRecord = [], earlyDirty = false;
+  // the rounds the official bot watched, until Kalshi settles them (onRound: the Discord sit-out note)
+  const roundsSeen = new Map();
   const certainMem = {};
   const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
   const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
@@ -408,6 +410,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
     const sigTrade = sig && profitNow(OFFICIAL_LEVEL, now)?.paused ? { ...sig, fire: false, callSide: null, profitPaused: true } : sig;
     try { onObserve?.({ snap, sig: sigTrade, known: results }); } catch (e) { log.error('auto-trader step failed', e.message); }
+    // the official bot's state each tick, for the Discord market alerts (discordalerts.js)
+    try { onTick({ snap, sig, now, status: { profitPaused: !!profitNow(OFFICIAL_LEVEL, now)?.paused, earlyLive: earlyLiveNow(now), floor: guard.floor } }); } catch (e) { log.error('tick hook failed', e.message); }
+    if (snap.live) roundsSeen.set(snap.live.m.ticker, { closeTime: Date.parse(snap.live.m.close_time), strike: snap.live.strike });
     if (snap.live) {
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
@@ -503,6 +508,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     for (const e of unsettledCalls(record, now)) pending.add(e.ticker);
     for (const e of unsettledCalls(certainRecord, now)) pending.add(e.ticker);
     for (const e of unsettledCalls(earlyRecord, now)) pending.add(e.ticker);
+    for (const [t, r] of roundsSeen) if (r.closeTime < now - 60000) pending.add(t);
     for (const t of [...pending].filter((x) => !results.has(x)).slice(0, 3)) {
       try {
         const { market: mk } = await getJSON(`${kalshi}/markets/${encodeURIComponent(t)}`);
@@ -531,6 +537,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; earlyDirty = true; }
     }
     if (earlyDirty) saveEarly();
+    for (const [t, r] of roundsSeen) {
+      if (results.has(t)) {
+        roundsSeen.delete(t);
+        try { onRound({ ticker: t, result: results.get(t), called: record.some((e) => e.ticker === t && e.lv === OFFICIAL_LEVEL), value: settledValue.get(t) ?? null, strike: r.strike ?? null, now }); } catch (e) { log.error('round hook failed', e.message); }
+      } else if (r.closeTime < now - 6 * 3600000) roundsSeen.delete(t);
+    }
     if (certainDirty) saveCertain();
     if (recordDirty) saveRecord();
     if (gateDirty || !learned.callGate) { gateDirty = false; learned.callGate = learnGate(record); learnDirty = true; } // relearn the call filter after each settle

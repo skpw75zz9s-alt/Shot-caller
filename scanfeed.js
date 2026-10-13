@@ -14,7 +14,8 @@ const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
 const MAX_SAMPLES = 6000;
 
 // futures: futures.js (Hyperliquid's BTC perpetual), its reads become extra scan inputs
-export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null } = {}) {
+// onTrade: each USD exchange trade as it arrives (the Discord whale alerts: discordalerts.js)
+export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null, onTrade = null } = {}) {
   let data = { samples: [], models: {} };
   // trades: the five USD exchanges (the bot's price, Market watch, the micro model); gtrades: the global markets (v13.10),
   // kept apart and level-aligned to USD spot, read only by the scan's global inputs (Binance and Bybit block US servers:
@@ -46,6 +47,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
       if (!x) continue;
       (status[x.ex] ||= { state: 'live' }).lastAt = now;
       if (roundOpen == null || x.t >= roundOpen) (globalNames.has(x.ex) ? gtrades : trades).push(x);
+      if (onTrade && !globalNames.has(x.ex)) try { onTrade(x, now); } catch { /* an alert never breaks the feed */ }
     }
     if (trades.length > MAX_TRADES) trades.splice(0, trades.length - MAX_TRADES);
     if (gtrades.length > MAX_GLOBAL) gtrades.splice(0, gtrades.length - MAX_GLOBAL);

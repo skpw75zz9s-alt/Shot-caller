@@ -17,6 +17,7 @@ import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
+import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
 
 const PORT = Number(process.env.PORT || 8080);
@@ -49,7 +50,11 @@ const mergeShifts = (...all) => { const out = {}; for (const m of all) for (cons
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
 // BTC futures as a leading signal (futures.js): extra Round scan inputs and Market watch events
 export const futures = createFutures();
-export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures });
+// Discord auto-posts of the official calls and their results (discord.js; set DISCORD_WEBHOOK_URL to turn on), and the
+// market alerts (discordalerts.js: DISCORD_ALERTS picks which, DISCORD_ALERTS_WEBHOOK_URL gives them their own channel)
+export const discord = createDiscord();
+export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
+export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => discordAlerts.whale(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
@@ -64,8 +69,6 @@ export const tuneFeed = createTuneFeed({ playbook });
 // Volatility tuning: which volatility settings (and how fat the tails) have described BTC's moves best, walk-forward
 // (voltunefeed.js, public/voltune.js). Once proven, the bot's odds use them
 export const volTuneFeed = createVolTuneFeed({ playbook });
-// Discord auto-posts of the official calls and their results (discord.js; set DISCORD_WEBHOOK_URL to turn on)
-export const discord = createDiscord();
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
@@ -87,6 +90,8 @@ export const bot = createBot({
   volTune: () => volTuneFeed.live(),
   onCall: (e, o) => discord.call(e, o),
   onSettle: (e, stats) => discord.result(e, stats),
+  onTick: (o) => discordAlerts.tick(o),
+  onRound: (r) => discordAlerts.settled(r),
 });
 setInterval(() => access.prune(), 3600000).unref();
 
@@ -326,7 +331,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded, discordAlerts: discord.status().alerts === 'off' ? [] : discordAlerts.kinds(), discordAlertsTo: discord.status().alerts } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     // the official website and its public numbers, for everyone
     if (req.method === 'GET' && (path === '/site' || path === '/site.html')) return serveSite(req, res);

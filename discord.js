@@ -71,12 +71,15 @@ export function resultMessage(e, stats = null, base = null) {
   };
 }
 
-export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, base = appUrl(), fetchImpl = (...a) => fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = console } = {}) {
-  const hook = cleanWebhook(url), on = HOOK.test(hook);
-  // why it's off, for /healthz (never the address itself)
-  const why = on ? null : !url ? 'DISCORD_WEBHOOK_URL is not set' : 'DISCORD_WEBHOOK_URL is set but is not a Discord webhook address (https://discord.com/api/webhooks/...)';
-  if (url && !on) log.warn?.(`${why}: Discord posts are off`);
-  const queue = []; let busy = false, sent = 0, failed = 0;
+// An alert (discordalerts.js): the embed gets the sender, the header and the disclaimer like the calls
+export function alertMessage(embed, base = null) {
+  const { author, ...sender } = brand(base);
+  return { ...sender, embeds: [{ author, ...embed, footer: { text: embed.footer?.text ? `${embed.footer.text} · ${DISCLAIMER}` : DISCLAIMER } }] };
+}
+
+// One webhook's queue: one message at a time, 1.2 s apart, Discord's 429 waited out (3 tries)
+function poster(hook, { fetchImpl, sleep, log }) {
+  const queue = []; let busy = false; const n = { sent: 0, failed: 0 };
   async function drain() {
     if (busy) return;
     busy = true;
@@ -86,19 +89,33 @@ export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, base = ap
         try {
           const res = await fetchImpl(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
           if (res.status === 429) { const j = await res.json().catch(() => ({})); await sleep(Math.min(30, Number(j.retry_after) || 2) * 1000); continue; }
-          if (res.ok) sent++; else { failed++; log.warn?.(`Discord post refused (${res.status})`); }
+          if (res.ok) n.sent++; else { n.failed++; log.warn?.(`Discord post refused (${res.status})`); }
           break;
-        } catch (err) { if (attempt === 2) { failed++; log.warn?.('Discord post failed', err.message); } else await sleep(2000); }
+        } catch (err) { if (attempt === 2) { n.failed++; log.warn?.('Discord post failed', err.message); } else await sleep(2000); }
       }
       await sleep(1200);
     }
     busy = false;
   }
-  const post = (body) => { if (!on) return false; queue.push(body); if (queue.length > 50) queue.shift(); drain(); return true; };
+  return { post: (body) => { queue.push(body); if (queue.length > 50) queue.shift(); drain(); return true; }, n, queued: () => queue.length };
+}
+
+// alertsUrl (DISCORD_ALERTS_WEBHOOK_URL, optional): a second channel's webhook for the market alerts, so the calls
+// channel stays calls-only; without it the alerts go to the calls channel too
+export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, alertsUrl = process.env.DISCORD_ALERTS_WEBHOOK_URL, base = appUrl(), fetchImpl = (...a) => fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = console } = {}) {
+  const hook = cleanWebhook(url), on = HOOK.test(hook);
+  // why it's off, for /healthz (never the address itself)
+  const why = on ? null : !url ? 'DISCORD_WEBHOOK_URL is not set' : 'DISCORD_WEBHOOK_URL is set but is not a Discord webhook address (https://discord.com/api/webhooks/...)';
+  if (url && !on) log.warn?.(`${why}: Discord posts are off`);
+  const aHook = cleanWebhook(alertsUrl), aOwn = HOOK.test(aHook) && aHook !== hook;
+  if (alertsUrl && !HOOK.test(aHook)) log.warn?.('DISCORD_ALERTS_WEBHOOK_URL is not a Discord webhook address: alerts go to the calls channel');
+  const main = poster(hook, { fetchImpl, sleep, log }), side = aOwn ? poster(aHook, { fetchImpl, sleep, log }) : main;
+  const alertsOn = on || aOwn;
   return {
     on,
-    call: (e, opts) => post(callMessage(e, { ...opts, base })),
-    result: (e, stats) => post(resultMessage(e, stats, base)),
-    status: () => ({ on, why, sent, failed, queued: queue.length, branded: !!base }),
+    call: (e, opts) => on && main.post(callMessage(e, { ...opts, base })),
+    result: (e, stats) => on && main.post(resultMessage(e, stats, base)),
+    alert: (embed) => alertsOn && side.post(alertMessage(embed, base)),
+    status: () => ({ on, why, sent: main.n.sent + (aOwn ? side.n.sent : 0), failed: main.n.failed + (aOwn ? side.n.failed : 0), queued: main.queued() + (aOwn ? side.queued() : 0), branded: !!base, alerts: !alertsOn ? 'off' : aOwn ? 'own channel' : 'calls channel' }),
   };
 }
