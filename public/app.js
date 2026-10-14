@@ -23,13 +23,14 @@ import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
 import { dailyLoss, profitGuard } from './profitguard.js';
 import { successMap } from './success.js';
+import { MARKETS, isHome, marketOf, roundName, storeKey } from './markets.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '163'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '164'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -62,7 +63,6 @@ const store = {
 };
 
 const SETTINGS_META = [
-  ['series', 'Kalshi series', 'Series ticker for 15-min BTC markets', 'text'],
   ['minEdge', 'Min gap (pts)', 'How far Kalshi\'s price must be below the bot\'s odds, after fees, even if volatility is 20% off either way, to call BUY THE LOW', 'cents'],
   ['minConfidence', 'Min confidence (0-100)', 'Win odds a call needs before BUY THE LOW fires (80 = wins about 8 times in 10)', 'num'],
   ['kalshiAgree', 'Kalshi must agree (pts)', 'A new call needs Kalshi\'s own price for that side at least this high (85 on Near-certain; 0 = off). When the bot is sure and the market isn\'t, the bot is usually the one that\'s wrong', 'cents'],
@@ -97,6 +97,9 @@ const SETTINGS_META = [
 // phone's confidence bar to 95). Only the latest step (default risk level) runs.
 if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
 const settings = { series: 'KXBTC15M', refreshSec: 3, multiFeeds: true, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
+if (!MARKETS.some((m) => m.series === settings.series)) settings.series = 'KXBTC15M'; // the old free-text series box: only markets the bot has a price for
+const MKT = marketOf(settings.series), HOME = isHome(settings.series); // the market picked (public/markets.js); HOME = Bitcoin, the official bot's
+const LK = (k) => storeKey(k, settings.series); // each market keeps its own logs, so one coin's predictions are never graded on another's prices
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
 // v1.6: Kalshi prices refresh every 3s (was 5s)
@@ -183,13 +186,13 @@ if (store.get('settingsVersion', 1) < 14) {
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
-  calls: store.get('calls', {}),
-  ruleLog: store.get('ruleLog', []), // scorecard for the two-rejections rule
-  callLog: store.get('callLog', []), // every call the bot makes, graded at settlement (public/record.js)
-  flipLog: store.get('flipLog', []), // predicted turns (frozen a minute before), graded on whether a V really formed
-  coneLog: store.get('coneLog', []), // each round's cone at 5 min left (close band, chance above the target), graded at the close
-  pcLog: store.get('pcLog', []), // each minute's prediction candle as it stood when the minute began, graded at its close
-  predLog: store.get('predLog', []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
+  calls: store.get(LK('calls'), {}),
+  ruleLog: store.get(LK('ruleLog'), []), // scorecard for the two-rejections rule
+  callLog: store.get(LK('callLog'), []), // every call the bot makes, graded at settlement (public/record.js)
+  flipLog: store.get(LK('flipLog'), []), // predicted turns (frozen a minute before), graded on whether a V really formed
+  coneLog: store.get(LK('coneLog'), []), // each round's cone at 5 min left (close band, chance above the target), graded at the close
+  pcLog: store.get(LK('pcLog'), []), // each minute's prediction candle as it stood when the minute began, graded at its close
+  predLog: store.get(LK('predLog'), []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
   memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
@@ -219,7 +222,7 @@ async function getJSON(path) {
 // ---------- data ----------
 async function refreshCandles() {
   // Coinbase rows: [time, low, high, open, close, volume], newest first
-  state.candles = parseCandles(await getJSON('coinbase/products/BTC-USD/candles?granularity=60'));
+  state.candles = parseCandles(await getJSON(`coinbase/products/${MKT.product}/candles?granularity=60`));
   state.candlesAt = Date.now();
 }
 
@@ -238,12 +241,13 @@ async function refreshMemory() {
 }
 
 async function refreshIndex() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   const ix = await getJSON('index');
   state.index = ix.index ? { offset: ix.offset || 0, used: ix.used || [], at: Date.now() } : null;
 }
 
 async function refreshSpot() {
-  const t = await getJSON('coinbase/products/BTC-USD/ticker');
+  const t = await getJSON(`coinbase/products/${MKT.product}/ticker`);
   state.spot = Number(t.price); state.spotAt = Date.now();
   if (Date.now() - (state.spotSavedAt || 0) > 10000) { state.spotSavedAt = Date.now(); store.set('lastSpot', { p: state.spot, t: Date.now() }); }
 }
@@ -287,7 +291,7 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
   state.trades = state.trades.slice(0, 500);
   if (contracts < pos.contracts - 1e-9) pos.contracts -= contracts;
   else state.positions = state.positions.filter((p) => p.id !== pos.id);
-  if (how === 'sold') { releaseCall(state.calls, pos.ticker, at, settings); store.set('calls', state.calls); } // re-entry: a new call can fire after the cooldown
+  if (how === 'sold') { releaseCall(state.calls, pos.ticker, at, settings); store.set(LK('calls'), state.calls); } // re-entry: a new call can fire after the cooldown
   store.set('trades', state.trades);
   savePositions();
   pushSyncSoon();
@@ -369,7 +373,7 @@ async function alert({ tag, title, body }, kind = 'buy', extra = {}) {
 }
 
 // ---------- render helpers ----------
-const usd = (v, d = 2) => v == null ? '—' : `$${(USD_FMT[d] ||= new Intl.NumberFormat(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })).format(v)}`;
+const usd = (v, d = 2) => { if (v == null) return '—'; if (d === 0 && MKT.digits && Math.abs(v) < 1000) d = MKT.digits; return `$${(USD_FMT[d] ||= new Intl.NumberFormat(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })).format(v)}`; };
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
 const pc = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
 const dollars = (v) => `$${v.toFixed(2)}`;
@@ -380,7 +384,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 // The price the bot prices with: live Coinbase shifted onto the server's multi-exchange index estimate (index.js),
 // when that's fresh and sane. Kalshi settles on an index of several exchanges, not Coinbase alone.
-const indexFresh = () => !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
+const indexFresh = () => HOME && !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
 const compute = () => {
   // the server's proven nudges to the odds: the Round scan, the micro model, tuned indicators and the reversal checklist (added per market)
@@ -389,7 +393,7 @@ const compute = () => {
     state.playbook?.inCalls && Date.now() - (state.playbookAt || 0) < 30000 ? state.playbook.inCalls : null];
   let shifts = null;
   for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
-  const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts });
+  const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: HOME ? state.memory?.learned ?? null : null, shifts: HOME ? shifts : null }); // the server learned on Bitcoin
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
   snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; // the late lane's own guard and the early lane's proof (the server's records)
@@ -505,7 +509,7 @@ function handleTrades(trades) {
   if (tape.big.length > 4000 || (tape.big[0] && tape.big[0].t < Date.now() - 6 * 3600000)) tape.big = tape.big.filter((x) => x.t >= Date.now() - 6 * 3600000).slice(-3000);
 }
 const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; } });
-function feedsOn() { if (settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); }
+function feedsOn() { if (HOME && settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); } // the exchange feeds stream BTC
 
 // Kalshi's own tape for the live contract (public, through the server's market-data proxy)
 async function pollKalshiTrades() {
@@ -608,7 +612,7 @@ function renderStability(st, now) {
 function renderScan(live, snap, now) {
   if (!live || now - (state.scanAt || 0) < 3000) return;
   state.scanAt = now;
-  if (now - (state.scanFetchAt || 0) > 10000) { state.scanFetchAt = now; getJSON('scan').then((d) => { state.scanSrv = d; }).catch(() => {}); }
+  if (HOME && now - (state.scanFetchAt || 0) > 10000) { state.scanFetchAt = now; getJSON('scan').then((d) => { state.scanSrv = d; }).catch(() => {}); }
   const srv = state.scanSrv, open = Date.parse(live.m.open_time), tk = live.m.ticker;
   let sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin, sigmaMin: snap.sigmaMin }), fromServer = false;
   if (!sc.ready && srv?.live?.ticker === tk && srv.live.sc?.ready) { sc = srv.live.sc; fromServer = true; }
@@ -685,7 +689,7 @@ function renderDeck(snap, live, sig, now) {
   setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS.length} trade feeds · ${ix}`);
   setTile('stClock', clock(now - (state.skewMs || 0)), '',
     state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
-  setTile('stContract', live ? live.m.ticker.replace(/^KXBTC15M-/, '') : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
+  setTile('stContract', live ? roundName(live.m.ticker) : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
   const br = state.botRecord, st = br?.graded ? br : callStats(state.callLog);
   setTile('stRecord', st.graded ? `${st.wins}–${st.graded - st.wins}` : 'no calls yet', st.graded ? (st.wins / st.graded >= 0.8 ? 'ok' : 'warn') : '',
     st.graded ? `${Math.round((st.wins / st.graded) * 100)}% won${br?.graded ? ` · ${br.streak ? `${br.streak.kind}${br.streak.n} streak` : 'bot record'}` : ' on this phone'}` : 'graded at settlement');
@@ -753,7 +757,7 @@ function renderDeck(snap, live, sig, now) {
     if (state.deckTicker && state.deckTicker !== tk) {
       const prev = state.deckTicker;
       if (!state.callLog.some((e) => e.ticker === prev)) alerts.event('sitout', 'Sat out last round', `${prev}: no call met the bar`, `sit:${prev}`);
-      addNote('info', `New round ${tk.replace(/^KXBTC15M-/, '')} · target ${usd(live.strike, 0)}`);
+      addNote('info', `New round ${roundName(tk)} · target ${usd(live.strike, 0)}`);
     }
     state.deckTicker = tk;
     const above = ms && live.strike ? ms > live.strike : null;
@@ -782,7 +786,7 @@ function renderDeck(snap, live, sig, now) {
   }
 
   // Live notes
-  const head = live && sig?.deep ? `BTC ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
+  const head = live && sig?.deep ? `${MKT.key} ${usd(Math.abs((ms || 0) - live.strike), 0)} ${(ms || 0) >= live.strike ? 'above' : 'below'} target · bot leans ${leanSide(live.ev) === 'YES' ? 'UP' : 'DOWN'} · confidence ${sig.deep.score}${hold != null ? ` · flip risk ${Math.round((1 - hold) * 100)}/100` : ''}${buy != null ? ` · ${buy >= 0.5 ? 'buyers' : 'sellers'} ${(Math.max(buy, 1 - buy) * 100).toFixed(0)}% of flow` : ''}` : '';
   setText($('notesWhen'), `updated ${clock(now)}`);
   setHTML($('notes'), (head ? `<li><time>now</time><span>${esc(head)}</span></li>` : '') +
     state.notes.slice(0, 12).map((n) => `<li class="${noteClass(n.key)}"><time>${clock(n.t)}</time><span>${esc(n.text)}</span></li>`).join(''));
@@ -837,7 +841,7 @@ async function chartBars(tf) {
   if (c && Date.now() - c.at < 60000) return c.bars;
   if (!chartState.loading) {
     chartState.loading = true;
-    getJSON(`coinbase/products/BTC-USD/candles?granularity=${T.gran}`).then((rows) => {
+    getJSON(`coinbase/products/${MKT.product}/candles?granularity=${T.gran}`).then((rows) => {
       const bars = parseCandles(rows);
       chartState.cache[tf] = { at: Date.now(), bars: T.combine > 1 ? aggregate(bars, (T.gran / 60) * T.combine) : bars };
       drawChartTab(true);
@@ -880,6 +884,7 @@ async function drawChartTab(force = false) {
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
   try { state.watch = await getJSON('watch'); state.watchAt = Date.now(); renderWatch(); } catch { /* next time */ }
 }
@@ -897,6 +902,7 @@ function renderWatch() {
 
 // ---------- the micro model (server: microfeed.js, public/micro.js): small details' push on the next 5 minutes ----------
 async function refreshMicro() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
   try { state.micro = await getJSON('micro'); renderMicro(); } catch { /* next time */ }
 }
@@ -915,6 +921,7 @@ function renderMicro() {
 
 // ---------- the playbook check (server: playbookfeed.js, public/playbook.js) ----------
 async function refreshPlaybook() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
   try { state.playbook = await getJSON('playbook'); state.playbookAt = Date.now(); renderPlaybook(); } catch { /* next time */ }
 }
@@ -936,6 +943,7 @@ function renderPlaybook() {
 
 // ---------- indicator tuning (server: tunefeed.js, public/tune.js): which settings have really predicted the rounds ----------
 async function refreshTune() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
   try { state.tune = await getJSON('tune'); state.tuneAt = Date.now(); renderTune(); } catch { /* next time */ }
 }
@@ -1079,7 +1087,7 @@ function reversalReport(rv) {
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
-state.whyLog = store.get('whyLog', []).filter((n) => n.t > Date.now() - 6 * 3600000);
+state.whyLog = store.get(LK('whyLog'), []).filter((n) => n.t > Date.now() - 6 * 3600000);
 function runWhy() {
   if (document.hidden) return;
   const now = Date.now(), live = state.markets.find((m) => Date.parse(m.close_time) > now);
@@ -1087,7 +1095,7 @@ function runWhy() {
   if (note) {
     state.whyLog.unshift(note);
     if (state.whyLog.length > 40) state.whyLog.length = 40;
-    store.set('whyLog', state.whyLog);
+    store.set(LK('whyLog'), state.whyLog);
     drawChartTab(true);
   }
   renderWhy(now);
@@ -1201,10 +1209,10 @@ function trackPredictions(snap, live, now) {
       if (cs) {
         state.coneLog.unshift({ ticker: live.m.ticker, closeTime: live.m.close_time, at: now, off: Math.round((modelSpot() - state.spot) * 100) / 100, mid: cs.mid, a: cs.a, b: cs.b, strike: live.strike, pAbove: cs.pAbove, kAbove: mid == null ? null : /^less/.test(live.m.strike_type || '') ? 1 - mid : mid, actual: null });
         if (state.coneLog.length > 300) state.coneLog.length = 300;
-        store.set('coneLog', state.coneLog);
+        store.set(LK('coneLog'), state.coneLog);
       }
     }
-    store.set('predLog', state.predLog);
+    store.set(LK('predLog'), state.predLog);
   }
   let coneChanged = false;
   for (const e of state.coneLog) {
@@ -1214,7 +1222,7 @@ function trackPredictions(snap, live, now) {
     const bar = snap.bars.find((b) => b.t === close - 60000);
     if (bar) { e.actual = bar.c + (e.off || 0); coneChanged = true; } else if (now > close + 3 * 3600000) { e.gone = true; coneChanged = true; }
   }
-  if (coneChanged) { state.coneLog = state.coneLog.filter((e) => !e.gone); store.set('coneLog', state.coneLog); }
+  if (coneChanged) { state.coneLog = state.coneLog.filter((e) => !e.gone); store.set(LK('coneLog'), state.coneLog); }
   let changed = false;
   for (const e of state.predLog) {
     if (e.actual != null) continue;
@@ -1223,7 +1231,7 @@ function trackPredictions(snap, live, now) {
     const bar = snap.bars.find((b) => b.t === close - 60000);
     if (bar) { e.actual = bar.c + (e.off || 0); changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
   }
-  if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set('predLog', state.predLog); }
+  if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set(LK('predLog'), state.predLog); }
   // the expected path: keep the next minute as it stands just before that minute begins; grade it at its close
   if (live) {
     const next = Math.floor(now / 60000) * 60000 + 60000;
@@ -1242,7 +1250,7 @@ function trackPredictions(snap, live, now) {
     const bar = snap.bars.find((b) => b.t === e.t);
     if (bar) { e.open = bar.o + (e.off || 0); e.actual = bar.c + (e.off || 0); pcChanged = true; } // on the index scale the path is priced in else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
   }
-  if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
+  if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set(LK('pcLog'), state.pcLog); }
   // flips: keep each predicted turn until a minute before it (then it's frozen); grade it two minutes after
   if (live && now - (state.flipAt || 0) > 5000) {
     state.flipAt = now;
@@ -1255,7 +1263,7 @@ function trackPredictions(snap, live, now) {
     if (state.flipLog.length !== before) changed = true;
     for (const x of turns) if (x.t - now >= 60000 && !state.flipLog.some((e) => e.t === x.t && e.dir === x.dir)) { state.flipLog.unshift({ t: x.t, dir: x.dir, at: now, need: 0.5 * flip.sd1, score: flip.score, frozen: false, hit: null }); changed = true; }
     for (const e of state.flipLog) if (e.frozen && e.hit == null && now > e.t + 190000) { const h = turnHappened(snap.bars, e.t, e.dir, e.need); if (h != null) { e.hit = h; changed = true; } else if (now > e.t + 3600000) { e.hit = 'gone'; changed = true; } }
-    if (changed) { state.flipLog = state.flipLog.filter((e) => e.hit !== 'gone').slice(0, 400); store.set('flipLog', state.flipLog); }
+    if (changed) { state.flipLog = state.flipLog.filter((e) => e.hit !== 'gone').slice(0, 400); store.set(LK('flipLog'), state.flipLog); }
   }
   const fr = flipRecord(state.flipLog, state.flipBase), f = state.flipNow;
   setHTML($('flipInfo'), (f ? `<b>Flip watch:</b> ${f.v0 >= 0 ? 'rising' : 'falling'} ${Math.abs(f.v0) < 1 ? '(barely)' : `$${Math.abs(f.v0).toFixed(0)}/min`} · ${f.dir === 'up' ? 'bounce' : 'pullback'} odds <b>${Math.round(f.score * 100)}%</b>${f.parts.length ? `: ${f.parts.map((p) => esc(p.why)).join(' · ')}` : ': no turn signs'}. ` : '')
@@ -1394,7 +1402,7 @@ function render() {
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
   const sig = live && state.spotAt ? buySignal(live, snap, withGuard(settings, state.botRecord?.guard?.floor), now, state.calls) : null; // never call off the cached price from last visit (90% target: the server's guard floor)
-  if (sig?.fire) store.set('calls', state.calls);
+  if (sig?.fire) store.set(LK('calls'), state.calls);
   const block = buyBlock(now); // the daily loss limit or the profit guard: calls still show as paused, no buy alerts
   trackRule(snap, live, now);
   renderDeep(live, sig);
@@ -1459,7 +1467,7 @@ function render() {
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
     if (setText(callEl, call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
     setClass(callEl, `call ${(call ?? 'pass').toLowerCase()}`);
-    setText($('callSub'), call && strike ? `BTC ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
+    setText($('callSub'), call && strike ? `${MKT.key} ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
     if (call) cardCls.push(call.toLowerCase());
     if (waiting) cardCls.push('waiting');
     // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
@@ -1505,7 +1513,7 @@ function render() {
 
     // Record + alert: right away, or only on a confirmed low when waiting for the dip
     if (sig.fire) {
-      if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN, lane: sig.lane })) store.set('callLog', state.callLog);
+      if (logCall(state.callLog, { ticker: m.ticker, side: call, price: sig.price, conf: sig.deep?.score, at: now, closeTime: m.close_time, n: sig.callN, lane: sig.lane })) store.set(LK('callLog'), state.callLog);
       const key = `${m.ticker}:${call}:${sig.callN}`;
       if (!state.alerted[key] && !block) {
         state.alerted[key] = true;
@@ -1516,7 +1524,7 @@ function render() {
     }
     // Aggressive scale-in: tell people who hold the call that the gap grew
     if (sig.add) {
-      store.set('calls', state.calls);
+      store.set(LK('calls'), state.calls);
       const key = `add:${m.ticker}:${sig.tier}`;
       if (state.positions.some((p) => p.ticker === m.ticker && p.side === call) && !state.alerted[key]) {
         state.alerted[key] = true;
@@ -1713,6 +1721,7 @@ function renderCertain(r) {
 
 // ---------- the 10-minute pick (server: bot.js, public/pick.js): every round's side, locked at 10:00 left ----------
 async function refreshPick() {
+  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
   try { state.pick = await getJSON('pick'); state.pickAt = Date.now(); renderPick(); } catch { /* next time */ }
 }
@@ -1855,7 +1864,7 @@ function liveConnect() {
   try { ws = new WebSocket(LIVE_WS); } catch { ws = null; return; }
   ws.onopen = () => {
     wsRetry = 0;
-    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker', 'heartbeat', 'matches'] }));
+    ws.send(JSON.stringify({ type: 'subscribe', product_ids: [MKT.product], channels: ['ticker', 'heartbeat', 'matches'] }));
   };
   ws.onmessage = (e) => {
     let m;
@@ -1889,11 +1898,11 @@ let priceTween = null;
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function tweenPrice(el, from, to) {
   if (priceTween) cancelAnimationFrame(priceTween.raf);
-  if (reduceMotion() || document.hidden) { priceTween = null; setText(el, `BTC ${usd(to)}`); return; }
+  if (reduceMotion() || document.hidden) { priceTween = null; setText(el, `${MKT.key} ${usd(to, Math.max(2, MKT.digits))}`); return; }
   const start = performance.now(), dur = 450;
   const step = (t) => {
     const k = Math.min(1, (t - start) / dur), e = 1 - (1 - k) ** 3;
-    setText(el, `BTC ${usd(from + (to - from) * e)}`);
+    setText(el, `${MKT.key} ${usd(from + (to - from) * e, Math.max(2, MKT.digits))}`);
     if (k < 1) priceTween.raf = requestAnimationFrame(step); else priceTween = null;
   };
   priceTween = { raf: requestAnimationFrame(step) };
@@ -1902,7 +1911,7 @@ function renderTicker(strike) {
   const live = isLive(), spot = state.spot;
   setText($('liveBadge'), live ? 'LIVE' : spot ? 'DELAYED' : '…');
   setClass($('liveBadge'), `tk-badge ${live ? 'live' : ''}`);
-  if (!priceTween && !(spot && shownSpot && spot !== shownSpot)) setText($('livePrice'), spot ? `BTC ${usd(spot)}` : 'BTC —');
+  if (!priceTween && !(spot && shownSpot && spot !== shownSpot)) setText($('livePrice'), spot ? `${MKT.key} ${usd(spot, Math.max(2, MKT.digits))}` : `${MKT.key} —`);
   if (spot && shownSpot && spot !== shownSpot) {
     const el = $('ticker'), up = spot > shownSpot;
     el.classList.remove('up', 'down');
@@ -2099,12 +2108,38 @@ function buildSettings() {
     }
     store.set('settings', settings);
     pushSyncSoon();
-    if (k === 'series') { state.marketsAt = 0; state.markets = []; }
     if (k === 'refreshSec') schedule();
     if (k === 'multiFeeds') feedsOn();
     render();
   });
 }
+
+// ---------- the market picker (public/markets.js): which Kalshi 15-minute round the bot calls ----------
+// The header's coin tag is the picker. Kalshi's open markets are checked by the server; one it hasn't listed or has paused
+// shows as closed. Switching saves the choice (the server's alerts follow it) and reloads, so every price, chart and log
+// starts clean on the new coin.
+(function marketPicker() {
+  const sel = $('mktPick');
+  if (!sel) return;
+  const draw = (open = null) => {
+    sel.innerHTML = MARKETS.map((m) => { const o = open?.find((x) => x.series === m.series), closed = o && o.checked && !o.open;
+      return `<option value="${m.series}"${m.series === settings.series ? ' selected' : ''}${closed && m.series !== settings.series ? ' disabled' : ''}>${m.key} · 15m${closed ? ' (closed)' : ''}</option>`; }).join('');
+  };
+  draw();
+  getJSON('markets').then((d) => draw(d.markets)).catch(() => {});
+  sel.addEventListener('change', async () => {
+    const next = sel.value;
+    if (next === settings.series || !MARKETS.some((m) => m.series === next)) return;
+    settings.series = next; store.set('settings', settings);
+    toast(`Switching to ${marketOf(next).name}…`);
+    try { await Promise.race([pushSync(), new Promise((r) => setTimeout(r, 2500))]); } catch { /* the next sync carries it */ }
+    location.reload();
+  });
+  document.body.classList.toggle('alt-market', !HOME);
+  if (!HOME) setText($('stRecordLabel'), 'Official record · BTC');
+  const note = $('altNote');
+  if (note) { setHidden(note, HOME); setText(note, `${MKT.name}: the bot's odds, calls, chart and alerts are on ${MKT.key}. The official record, the 10-minute pick, Discord and the Bitcoin-only readers (Round scan, Market watch, forecasts, exchange feeds) stay on Bitcoin, so they're hidden here.`); }
+})();
 
 // ---------- loop ----------
 let timer;
@@ -2488,11 +2523,11 @@ function trackRule(snap, live, now) {
   if (d && snap.spot && !log.some((e) => e.ticker === live.m.ticker && e.at === d.at)) {
     log.push({ ticker: live.m.ticker, dir: d.dir, level: Math.round(d.price), at: d.at, seenAt: now, spot0: snap.spot, closeTime: live.m.close_time, spot5: null, result: null });
     if (log.length > 300) log.splice(0, log.length - 300);
-    store.set('ruleLog', log);
+    store.set(LK('ruleLog'), log);
   }
   let changed = false;
   for (const e of log) if (e.spot5 == null && snap.spot && now - e.seenAt >= 5 * 60000 && now - e.seenAt < 7 * 60000) { e.spot5 = snap.spot; changed = true; }
-  if (changed) store.set('ruleLog', log);
+  if (changed) store.set(LK('ruleLog'), log);
 }
 // Kalshi results for the scorecards (two-rejections rule and the call record), a few markets per pass
 async function settleLogs() {
@@ -2513,7 +2548,7 @@ async function settleLogs() {
         const won = e.side.toLowerCase() === result;
         alerts.event(won ? 'win' : 'loss', `Call ${won ? 'WON' : 'lost'}: ${e.side === 'YES' ? 'UP' : 'DOWN'}`, `${ticker} settled ${result.toUpperCase()} · bot said ${e.conf ?? '—'}`, `${won ? 'win' : 'loss'}:${ticker}`);
       }
-      store.set('ruleLog', state.ruleLog); store.set('callLog', state.callLog);
+      store.set(LK('ruleLog'), state.ruleLog); store.set(LK('callLog'), state.callLog);
     } catch { /* next time */ }
   }
 }

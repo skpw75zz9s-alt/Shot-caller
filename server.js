@@ -19,6 +19,7 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
+import { MARKETS } from './public/markets.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -96,12 +97,27 @@ export const bot = createBot({
 });
 setInterval(() => access.prune(), 3600000).unref();
 
+// Which of the bot's markets Kalshi has open right now (public/markets.js), checked live and kept a minute
+let marketsCache = { at: 0, body: null };
+async function openMarkets(now = Date.now()) {
+  if (marketsCache.body && now - marketsCache.at < 60000) return marketsCache.body;
+  const rows = await Promise.all(MARKETS.map(async (m) => {
+    try {
+      const r = await fetch(`${KALSHI}/markets?series_ticker=${m.series}&status=open&limit=5`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6000) });
+      const d = r.ok ? await r.json() : null, ms = d?.markets || [];
+      return { key: m.key, series: m.series, name: m.name, open: ms.length, next: ms.map((x) => x.close_time).sort()[0] ?? null, checked: !!d };
+    } catch { return { key: m.key, series: m.series, name: m.name, open: 0, next: null, checked: false }; }
+  }));
+  marketsCache = { at: now, body: { markets: rows, at: now } };
+  return marketsCache.body;
+}
+
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
 const ROUTES = [
   { prefix: '/api/kalshi/', upstream: KALSHI, allow: KALSHI_PUBLIC },
   { prefix: '/api/kalshi-demo/', upstream: KALSHI_DEMO, allow: KALSHI_PUBLIC },
-  { prefix: '/api/coinbase/', upstream: COINBASE, allow: /^products\/BTC-USD\/(ticker|candles)$/ },
+  { prefix: '/api/coinbase/', upstream: COINBASE, allow: new RegExp(`^products/(${MARKETS.map((m) => m.product).join('|')})/(ticker|candles)$`) }, // each market's coin (public/markets.js)
 ];
 
 const TYPES = {
@@ -367,6 +383,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/record') return send(res, 200, bot.record());
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
     if (path === '/api/pick') return send(res, 200, bot.pick());
+    if (path === '/api/markets') return send(res, 200, await openMarkets());
     // The Round scan: live read, learned weights and the graded record
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
     if (path === '/api/watch') return send(res, 200, marketWatch.api());

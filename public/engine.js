@@ -1,5 +1,6 @@
 // Decision logic shared by the phone app and the server's push bot, so both
 // make the same calls from the same data.
+import { marketOf } from './markets.js';
 import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, feeEach, holdOdds, maxPay, evaluate, exitSignal, momentum, orderFee, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
@@ -248,7 +249,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (!ev.open || ask == null) return no('no price to buy at');
     if (ask > s.lateMaxAsk + 1e-9) return no(`Kalshi's ask ${Math.round(ask * 100)}¢ is over ${Math.round(s.lateMaxAsk * 100)}¢: a win would pay almost nothing`);
     if (!(bid >= s.lateBid - 1e-9)) return no(`Kalshi's bid isn't at ${Math.round(s.lateBid * 100)}¢+ (it doesn't agree yet)`);
-    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('BTC is moving faster than usual');
+    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('the price is moving faster than usual');
     const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
     if (log.some((e) => e.t >= now - 30000 && e[key] != null && Math.abs(e[key] - ask) >= s.lateJump - 1e-9)) return no('Kalshi\'s price just jumped');
     const dir = side === 'YES' ? 1 : -1, drift = (snap.driftMin || 0) * (snap.momentumWeight ?? s.momentumWeight);
@@ -279,7 +280,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const bar = Math.max(s.earlyConf, s.winFloor || 0);
     if (a.winProb < bar - 1e-9) return no(`worst-case odds ${(a.winProb * 100).toFixed(1)}%, needs ${(bar * 100).toFixed(0)}%`);
     if (a.robustEdge < s.earlyEdge - 1e-9) return no(`worst-case gap ${(a.robustEdge * 100).toFixed(1)} pts over Kalshi, needs ${(s.earlyEdge * 100).toFixed(0)}`);
-    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('BTC is moving faster than usual');
+    if (snap.sigmaMin && snap.sigmaLong && snap.sigmaMin / snap.sigmaLong > s.lateCalm) return no('the price is moving faster than usual');
     const log = snap.quoteLog?.[row.m.ticker] || [], key = side === 'YES' ? 'yesAsk' : 'noAsk';
     if (log.some((e) => e.t >= now - 30000 && e[key] != null && Math.abs(e[key] - ask) >= s.lateJump - 1e-9)) return no('Kalshi\'s price just jumped');
     if (!holds(a)) return no(`its confidence holds to the end in only ${a.hold == null ? '—' : Math.round(a.hold * 100)}% of paths`);
@@ -437,7 +438,10 @@ const pc = (v) => `${(v * 100).toFixed(0)}%`;
 const dollars = (v) => `$${v.toFixed(2)}`;
 export const sideName = (side) => (side === 'YES' ? 'YES · Above' : 'NO · Below');
 
-const btc = (spot) => (spot ? ` · BTC $${Math.round(spot).toLocaleString('en-US')}` : '');
+// the round's coin (public/markets.js) and its prices at that coin's precision ($100,250 for BTC, $2.5123 for XRP)
+const coinOf = (ticker) => marketOf(String(ticker || '').split('-')[0]);
+const px = (v, mk) => `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: mk.digits, maximumFractionDigits: mk.digits })}`;
+const btc = (spot, ticker) => { const mk = coinOf(ticker); return spot ? ` · ${mk.key} ${px(spot, mk)}` : ''; };
 
 // The bot's own call went bad: bail out (sig.bail from buySignal)
 export function bailMessage(row, sig) {
@@ -450,12 +454,12 @@ export function buyMessage(row, sig, spot) {
   const { m, ev, strike } = row;
   const side = sig.callSide ?? ev.side, price = sig.price ?? ev.price;
   const bot = side === 'YES' ? ev.pYes : 1 - ev.pYes;
-  const where = strike ? ` (BTC ${side === 'YES' ? 'above' : 'below'} $${Math.round(strike).toLocaleString('en-US')})` : '';
+  const mk = coinOf(m.ticker), where = strike ? ` (${mk.key} ${side === 'YES' ? 'above' : 'below'} ${px(strike, mk)})` : '';
   return {
     tag: `buy-${m.ticker}`,
     title: `${sig.stance === 'switching' ? 'Switch: buy' : (sig.deep?.score ?? 0) >= 90 && (sig.hold ?? 0) >= 0.9 ? 'Confident buy:' : 'Buy the low:'} ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
     body: `${sig.limit ? `Act now: buy only at ${pc(sig.limit)} or less, skip if it's higher. ` : ''}Kalshi ${pc(price)} vs bot ${pc(bot)} · buy ${dollars(sig.contracts * price)}${where}` +
-      `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.hold != null ? ` · holds ${Math.round(sig.hold * 100)}%` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot)}`,
+      `${sig.deep ? ` · confidence ${sig.deep.score}${sig.bigGap ? ' · big-gap exception' : ''}` : ''}${sig.hold != null ? ` · holds ${Math.round(sig.hold * 100)}%` : ''}${sig.buyNow ? ' · candle dip too' : ''}${btc(spot, m.ticker)}`,
   };
 }
 
@@ -469,7 +473,7 @@ function hm(t, tz) {
 export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
   const { m, ev, strike } = row;
   const open = Date.parse(m.open_time), close = Date.parse(m.close_time);
-  const usd = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+  const mk = coinOf(m.ticker), usd = (v) => px(v, mk);
   const parts = [];
   if (prev) {
     const money = `${prev.paperUsd >= 0 ? '+' : '-'}$${Math.abs(prev.paperUsd).toFixed(2)}`;
@@ -479,7 +483,7 @@ export function updateMessage({ prev, row, sig, spot, tz, now = Date.now() }) {
   const lean = ev.pYes >= 0.5 ? `YES ${pc(ev.pYes)}` : `NO ${pc(1 - ev.pYes)}`;
   const diff = spot && strike ? ` (${spot >= strike ? '+' : '-'}${usd(Math.abs(spot - strike))})` : '';
   const startsLater = ev.callsAt && now < ev.callsAt ? ` · calls start ${hm(ev.callsAt, tz)}` : '';
-  parts.push(`Now BTC ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.callSide ? ` · BUY THE LOW ${sideName(sig.callSide)} at ${pc(sig.price)}` : startsLater}.`);
+  parts.push(`Now ${mk.key} ${spot ? usd(spot) : '—'}${diff} · bot leans ${lean}${sig?.callSide ? ` · BUY THE LOW ${sideName(sig.callSide)} at ${pc(sig.price)}` : startsLater}.`);
   return {
     tag: 'window-update',
     title: `🕒 ${hm(open, tz)}–${hm(close, tz)}${tz ? '' : ' UTC'} window · target ${strike ? usd(strike) : '—'}`,
@@ -495,7 +499,7 @@ export function addMessage(row, sig, spot) {
   return {
     tag: `add-${m.ticker}`,
     title: `Add: ${sideName(side)} at ${pc(price)}${sig.limit ? ` · max ${pc(sig.limit)}` : ''}`,
-    body: `The gap grew to ${(sig.edge * 100).toFixed(0)} pts (Kalshi ${pc(price)} vs bot ${pc(bot)}) · add ${dollars(sig.contracts * price)}${btc(spot)}`,
+    body: `The gap grew to ${(sig.edge * 100).toFixed(0)} pts (Kalshi ${pc(price)} vs bot ${pc(bot)}) · add ${dollars(sig.contracts * price)}${btc(spot, m.ticker)}`,
   };
 }
 
@@ -503,5 +507,5 @@ export function sellMessage(pos, check, spot) {
   const { ex, bid } = check;
   const money = `${ex.pnl >= 0 ? '+' : '-'}$${Math.abs(ex.pnl).toFixed(2)}`;
   const cashOut = ex.net != null ? ` · cash out ${dollars(ex.net * pos.contracts)}` : '';
-  return { tag: `sell-${pos.id}`, title: `${ex.kind === 'take' ? 'SELL HIGH' : ex.kind === 'cut' ? 'BAIL' : ex.kind === 'bail' ? 'BAIL OUT' : 'SELL NOW'}: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot)}` };
+  return { tag: `sell-${pos.id}`, title: `${ex.kind === 'take' ? 'SELL HIGH' : ex.kind === 'cut' ? 'BAIL' : ex.kind === 'bail' ? 'BAIL OUT' : 'SELL NOW'}: ${sideName(pos.side)} at ${pc(bid)}${cashOut} (${money})`, body: `${ex.why}${btc(spot, pos.ticker)}` };
 }

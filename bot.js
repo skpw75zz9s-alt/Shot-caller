@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
 import { PICK, pickMix, pickNow, pickScore } from './public/pick.js';
+import { MARKETS, isHome, marketOf } from './public/markets.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
@@ -34,7 +35,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
   const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
-  const market = { spot: null, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, lastTick: 0, lastError: null };
+  const market = { spot: null, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, alt: {}, lastTick: 0, lastError: null };
   const learnFile = dataFile.replace(/[^/\\]+$/, 'learned.json');
   let learned = newLearned(), learnDirty = false, learnSavedAt = 0, backfilling = false, backfillStop = false;
   let learnedShifts = null, gateDirty = false, watchNow = null; // this tick's proven nudges (shifts())
@@ -190,6 +191,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       const v = s[k];
       if (typeof def === 'number' && Number.isFinite(Number(v))) out[k] = Number(v);
       else if (typeof def === 'boolean' && typeof v === 'boolean') out[k] = v;
+      else if (k === 'series') out[k] = MARKETS.some((m) => m.series === v) ? v : def; // only markets the bot has a price for
       else if (typeof def === 'string' && typeof v === 'string' && /^[A-Z0-9_-]{1,40}$/.test(v)) out[k] = v;
       else out[k] = def;
     }
@@ -288,6 +290,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     if (now - market.candlesAt > 20000) {
       jobs.push(getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`).then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
     }
+    // other coins (a phone set to another market, public/markets.js): Coinbase's price every tick, candles every 20 s
+    for (const s of series) {
+      if (isHome(s)) continue;
+      const pr = marketOf(s).product, a = (market.alt[pr] ||= { spot: null, candles: [], candlesAt: 0 });
+      jobs.push(getJSON(`${coinbase}/products/${pr}/ticker`).then((t) => { const p = Number(t.price); if (p > 0) { a.spot = p; a.spotAt = now; } }).catch(() => {}));
+      if (now - a.candlesAt > 20000) jobs.push(getJSON(`${coinbase}/products/${pr}/candles?granularity=60`).then((rows) => { a.candles = parseCandles(rows); a.candlesAt = now; }).catch(() => {}));
+    }
     for (const s of series) {
       jobs.push(getJSON(`${kalshi}/markets?series_ticker=${encodeURIComponent(s)}&status=open&limit=50`).then((d) => {
         market.markets[s] = (d.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time));
@@ -305,7 +314,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       // the price every second (5 minutes kept): if a market ever comes without Kalshi's strike, its target is the
       // 60-second average before the open, the way Kalshi settles (instead of the first candle's open)
       if (market.spot) { (market.spotRing ||= []).push({ t: now, p: market.spot }); while (market.spotRing[0].t < now - 300000) market.spotRing.shift(); }
-      for (const ms of Object.values(market.markets)) for (const m of ms) {
+      for (const ms of [market.markets[LEARN_SERIES] || []]) for (const m of ms) { // the price ring is Bitcoin's
         if (m.floor_strike != null || m.cap_strike != null || market.strikes[m.ticker]) continue;
         const open = Date.parse(m.open_time), xs = (market.spotRing || []).filter((x) => x.t >= open - 60000 && x.t < open);
         if (now >= open && xs.length >= 30) market.strikes[m.ticker] = xs.reduce((a, x) => a + x.p, 0) / xs.length;
@@ -318,8 +327,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       for (const d of devices.values()) {
         if (!canNotify(d)) continue; // paywall: no access, no bot
         const s = d.settings;
-        const quoteLog = (market.quoteLogs[s.series] ||= {});
-        const snap = snapshot({ markets: market.markets[s.series] || [], candles: market.candles, spot: market.spot, settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts });
+        const quoteLog = (market.quoteLogs[s.series] ||= {}), home = isHome(s.series), alt = home ? null : market.alt[marketOf(s.series).product];
+        if (!home && !(alt?.spot > 0 && alt.spotAt > now - 30000 && alt.candles.length)) continue; // no fresh price for that coin yet: no alerts rather than wrong ones
+        // another coin: its own price and candles, and none of what the server learned on Bitcoin
+        const snap = snapshot({ markets: market.markets[s.series] || [], candles: home ? market.candles : alt.candles, spot: home ? market.spot : alt.spot, settings: s, strikes: home ? market.strikes : {}, quoteLog, learned: home ? learnedNow() : null, now, shifts: home ? learnedShifts : null });
         snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now);
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
@@ -334,23 +345,23 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const sig = buySignal(snap.live, snap, withGuard(s, guardNow().floor), now, d.calls);
           d.tracker ||= newTracker();
           if (trackWindow(d.tracker, snap, snap.live, sig, s, now)) dirty = true;
-          if (s.notifyBuy && sig.fire && !buyBlocked(s, now)) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, market.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
+          if (s.notifyBuy && sig.fire && !buyBlocked(s, now)) fire(`buy:${snap.live.m.ticker}:${sig.callSide}:${sig.callN}`, buyMessage(snap.live, sig, snap.spot), 45, 'buy', { ticker: snap.live.m.ticker }); // a buy call is stale within a minute: never deliver it late
           // The bot's call went bad: bail out (phones tracking a position on it get the position's own sell alert)
           if (s.notifySell && sig.bail && !d.positions.some((p) => p.ticker === snap.live.m.ticker)) fire(`bail:${snap.live.m.ticker}`, bailMessage(snap.live, sig), 120, 'sell', { ticker: snap.live.m.ticker, posId: `bail:${snap.live.m.ticker}` });
           // Aggressive scale-in: only phones holding that call hear about the add
           if (s.notifyBuy && sig.add && d.positions.some((p) => p.ticker === snap.live.m.ticker && p.side === sig.callSide)) {
-            fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, market.spot), 45, 'add', { ticker: snap.live.m.ticker });
+            fire(`add:${snap.live.m.ticker}:${sig.tier}`, addMessage(snap.live, sig, snap.spot), 45, 'add', { ticker: snap.live.m.ticker });
           }
           if (windowUpdate(d, snap, sig, now) && s.notifyUpdates && hourlyWindow(Date.parse(snap.live.m.open_time), s.updateMinutes)) { // hourly unless set to every window
             const open = Date.parse(snap.live.m.open_time);
             const prev = d.tracker.reports.find((r) => r.closeTime === open) ?? null;
-            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: market.spot, tz: d.tz, now }), 300, 'update', { ticker: snap.live.m.ticker });
+            fire(`update:${snap.live.m.ticker}`, updateMessage({ prev, row: snap.live, sig, spot: snap.spot, tz: d.tz, now }), 300, 'update', { ticker: snap.live.m.ticker });
           }
         }
         for (const pos of d.positions) {
           const check = positionCheck(pos, snap, s, now);
           if (check.ex.action === 'SELL') {
-            if (s.notifySell) fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, market.spot), 300, 'sell', { posId: pos.id });
+            if (s.notifySell) fire(`sell:${pos.id}:${check.ex.kind}`, sellMessage(pos, check, snap.spot), 300, 'sell', { posId: pos.id });
             releaseCall(d.calls, pos.ticker, now, s); // after the sell call, a fresh buy call on this market can fire again
           }
         }
