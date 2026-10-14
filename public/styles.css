@@ -818,3 +818,18 @@ body.split .pane-body { padding: 4px 6px 8px; }
 .rev-list { list-style: none; margin: 0 0 6px; padding: 0; } .rev-list li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line-2); font-size: 12px; }
 .rev-list li i { font-style: normal; color: var(--muted); } .rev-list li.ok i { color: var(--yes); } .rev-list li em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; } .rev-list li span { color: var(--muted); } .rev-list li.ok span { color: var(--text); }
 .pb-row { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-2); } .pb-row b { font-size: 12px; } .pb-row span { color: var(--muted); }
+
+/* ---------- the 10-minute pick (v13.23) ---------- */
+.pick-card { padding: 12px 14px; }
+.pick-head { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px var(--mono); letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.pick-head span { white-space: nowrap; }
+.pick-head b { color: var(--text); font-size: 12px; letter-spacing: .5px; text-align: right; }
+.pick-body { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.pick-side { font: 800 30px var(--mono); letter-spacing: 1px; color: var(--dim); min-width: 92px; }
+.pick-side.up { color: var(--yes); text-shadow: 0 0 16px #2ee6a655; } .pick-side.down { color: var(--no); text-shadow: 0 0 16px #ff4d6d55; }
+.pick-txt { display: flex; flex-direction: column; gap: 2px; flex: 1; font-size: 13px; }
+.pick-txt small { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.pick-buy { font: 700 11px var(--mono); letter-spacing: .8px; padding: 5px 9px; border-radius: 8px; white-space: nowrap; }
+.pick-buy.yes { color: #04140d; background: var(--yes); } .pick-buy.no { color: var(--muted); border: 1px solid var(--line-2); }
+.pick-buy:empty { display: none; }
+.pick-rec { display: block; margin-top: 8px; color: var(--dim); font-size: 11px; }

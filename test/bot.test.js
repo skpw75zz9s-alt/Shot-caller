@@ -201,6 +201,30 @@ test('v4.1 migration: saved confidence bars double once (risk levels get their n
   assert.deepEqual(conf(b2), [80, 90, 95], 'not doubled again on restart');
 });
 
+test('the 10-minute pick: locked once as the round crosses 10:00 left, posted, graded at the close', async () => {
+  Object.assign(quotes, { yes_bid: 80, yes_ask: 81 }); nextWindow = false; tape = 100050;
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-pick-')), 'data.json'), picks = [];
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onPick: (e, o) => picks.push({ e, o }) });
+  await b.load();
+  const p = fakeBrowser();
+  b.sync({ subscription: { endpoint: `${svc.base}/push/pick`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
+  for (let s = -270; s <= -246; s += 3) await b.tick(NOW + s * 1000); // 10.5 to 10.1 minutes left: not yet
+  assert.equal(picks.length, 0);
+  assert.equal(b.pick(NOW - 246000).live, null);
+  for (let s = -237; s <= -150; s += 3) await b.tick(NOW + s * 1000); // through 10:00 left
+  assert.equal(picks.length, 1, 'locked exactly once');
+  const e = picks[0].e;
+  assert.deepEqual([e.side, e.price, e.lane, e.ticker], ['YES', 0.81, 'pick', 'KXBTC15M-T1']);
+  assert.ok(e.p > 0.5 && e.worst <= e.p); assert.equal(picks[0].o.prev, null, 'no earlier pick to report');
+  const api = b.pick(NOW - 150000);
+  assert.equal(api.live.ticker, 'KXBTC15M-T1'); assert.equal(api.locksAt, Date.parse(api.closeTime) - 600000);
+  await b.tick(NOW + 8 * 60000); // the round settled YES
+  const r = b.record();
+  assert.deepEqual([r.pick.graded, r.pick.wins], [1, 1]);
+  assert.equal(JSON.parse(await readFile(join(file, '..', 'record-pick.json'), 'utf8')).length, 1, 'kept on disk');
+  b.stop(); tape = 100000;
+});
+
 test('official bot record: the server bot calls on its own (Profit: 60-90c with a big gap) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   tape = 100050; // a calm market: the tape ends near the live price

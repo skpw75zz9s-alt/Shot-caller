@@ -73,6 +73,28 @@ export function resultMessage(e, stats = null, base = null) {
   };
 }
 
+// The 10-minute pick (public/pick.js): every round's side, locked by the math at 10:00 left, with the last pick's result
+// in the same post (one message a round, not two)
+export function pickMessage(e, { prev = null, stats = null, base = null } = {}) {
+  const { author, ...sender } = brand(base), up = e.side === 'YES';
+  const pc = (x) => `${Math.round(x * 100)}%`, last = prev ? `${prev.side.toLowerCase() === prev.result ? '✅ won' : '❌ lost'} (${sideName(prev.side)} at ${cents(prev.price)})` : null;
+  return {
+    ...sender,
+    embeds: [{
+      author,
+      title: `🔒 10-MIN PICK · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
+      description: `BTC ${up ? 'above' : 'below'} ${e.strike ? `$${Math.round(e.strike).toLocaleString('en-US')}` : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}`,
+      color: e.buy ? (up ? 0x2ee6a6 : 0xff4d6d) : 0x5d6880,
+      fields: [
+        { name: 'Kalshi', value: cents(e.price), inline: true },
+        { name: 'Closes', value: ts(Date.parse(e.closeTime)), inline: true },
+        ...(last ? [{ name: 'Last pick', value: last, inline: true }] : []),
+        ...(stats?.graded ? [{ name: 'Picks so far', value: `${stats.wins}–${stats.graded - stats.wins} (${Math.round(stats.wins / stats.graded * 100)}%)`, inline: true }] : []),
+      ],
+      footer: { text: `Locked at 10:00 left · ${DISCLAIMER}` },
+    }],
+  };
+}
 // An alert (discordalerts.js): the embed gets the sender, the header and the disclaimer like the calls
 export function alertMessage(embed, base = null) {
   const { author, ...sender } = brand(base);
@@ -123,6 +145,7 @@ export function createDiscord({ url = process.env.DISCORD_WEBHOOK_URL, alertsUrl
     call: (e, opts) => on && main.post(callMessage(e, { ...opts, base })),
     result: (e, stats) => on && main.post(resultMessage(e, stats, base)),
     alert: (embed) => alertsOn && side.post(alertMessage(embed, base), false),
+    pick: (e, o = {}) => on && main.post(pickMessage(e, { ...o, base })),
     status: () => ({ on, why, sent: main.n.sent + (aOwn ? side.n.sent : 0), failed: main.n.failed + (aOwn ? side.n.failed : 0), queued: main.queued() + (aOwn ? side.queued() : 0), branded: !!base, alerts: !alertsOn ? 'off' : aOwn ? 'own channel' : 'calls channel' }),
   };
 }

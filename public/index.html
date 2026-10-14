@@ -106,6 +106,12 @@
         <ul id="sugList" class="sug-list"></ul>
       </div>
       <div id="positions"></div>
+      <!-- the 10-minute pick (v13.23): every round's side, locked by the math at 10:00 left -->
+      <div class="card pick-card" id="pickCard" hidden>
+        <div class="pick-head"><span>🔒 10-minute pick</span><b id="pickWhen"></b></div>
+        <div class="pick-body"><b id="pickSide" class="pick-side">—</b><div class="pick-txt"><span id="pickOdds"></span><small id="pickWhy"></small></div><span id="pickBuy" class="pick-buy"></span></div>
+        <small class="pick-rec" id="pickRecord"></small>
+      </div>
       <div class="card call-card" id="callCard">
         <div class="market-title" id="marketTitle">Loading markets…</div>
         <div class="countdown" id="countdown">--:--</div>
@@ -494,7 +500,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.22 · Smoother chart + Radar tab</p>
+      <p class="fine" id="version">Shot Caller v13.23 · 10-minute pick</p>
     </section>
   </main>
 
@@ -513,7 +519,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '157';
+    window.SC_BUILD = '158';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

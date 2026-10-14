@@ -28,7 +28,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '157'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '158'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1706,6 +1706,39 @@ function renderCertain(r) {
   }).join(''));
 }
 
+// ---------- the 10-minute pick (server: bot.js, public/pick.js): every round's side, locked at 10:00 left ----------
+async function refreshPick() {
+  if (document.hidden) return;
+  try { state.pick = await getJSON('pick'); state.pickAt = Date.now(); renderPick(); } catch { /* next time */ }
+}
+setInterval(refreshPick, 5000);
+setTimeout(refreshPick, 1200);
+function renderPick(now = Date.now()) {
+  const k = state.pick, card = $('pickCard');
+  if (!card) return;
+  setHidden(card, !k || !k.closeTime);
+  if (!k?.closeTime) return;
+  const e = k.live, pc = (x) => `${Math.round(x * 100)}%`;
+  if (!e) {
+    const left = (k.locksAt ?? 0) - now;
+    setText($('pickWhen'), left > 0 ? `locks in ${mmss(left / 60000)}` : 'locking…');
+    setText($('pickSide'), '—'); setClass($('pickSide'), 'pick-side');
+    setText($('pickOdds'), left > 0 ? 'The bot locks its side for this round at 10:00 left, by the math' : 'Locking this round\'s side…');
+    setText($('pickWhy'), ''); setText($('pickBuy'), '');
+  } else {
+    const up = e.side === 'YES';
+    setText($('pickWhen'), `locked · closes ${new Date(Date.parse(e.closeTime)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+    setText($('pickSide'), up ? 'UP' : 'DOWN'); setClass($('pickSide'), `pick-side ${up ? 'up' : 'down'}`);
+    setText($('pickOdds'), `Math ${pc(e.p)}${e.worst != null ? ` · worst case ${pc(e.worst)}` : ''} · Kalshi ${Math.round(e.price * 100)}¢`);
+    setText($('pickWhy'), e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : '');
+    setText($('pickBuy'), e.buy ? 'BUY ✓' : 'PICK ONLY'); setClass($('pickBuy'), `pick-buy ${e.buy ? 'yes' : 'no'}`);
+  }
+  const st = k.stats, last = k.last;
+  setText($('pickRecord'), [last ? `Last pick ${last.side.toLowerCase() === last.result ? 'won' : 'lost'}` : null,
+    st?.graded ? `picks ${st.wins}–${st.graded - st.wins} (${Math.round(st.wins / st.graded * 100)}%), the math said ${st.avgP != null ? pc(st.avgP) : '—'} on average` : 'no graded picks yet',
+    st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null].filter(Boolean).join(' · '));
+}
+
 // ---------- the official bot record (server: every call it made, around the clock) ----------
 async function refreshBotRecord() {
   try { state.botRecord = await getJSON('record'); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
@@ -2145,6 +2178,7 @@ function roundBar(close, now = Date.now()) {
   el.parentElement.classList.toggle('late', close != null && close - now < 120000);
 }
 function tickClocks() {
+  if (state.pick && !state.pick.live) renderPick(); // the countdown to the 10-minute pick
   const now = Date.now(), c = state.clock;
   if (!document.hidden && now - bootAt > 20000 && healthDue(state.health?.at, now)) runHealth();
   if (now - (state.renderedAt || 0) > 2900 || (c?.callsAt && now >= c.callsAt) || (c && now >= c.close)) return render();

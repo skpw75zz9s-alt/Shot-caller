@@ -32,6 +32,16 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
     lt.graded ? `won ${lt.wins} of ${lt.graded} (${pct(lt.wins / lt.graded)})` : 'none yet: only stress-tested calls are made this late',
     lt.profitGuard?.paused ? 'OFF: its calls lost money after fees; back on when they recover' : lt.graded ? `${usd(lt.usd ?? 0)} at $10 a call after fees · half size` : 'switches itself off if its calls lose money after fees',
     { graded: lt.graded || 0, wins: lt.wins ?? 0, usd: lt.usd ?? 0, paused: !!lt.profitGuard?.paused });
+  // the 10-minute picks (v13.23): every round's side by the math; good when they win at least as often as the math said
+  // (calibrated) and the ones marked BUY make money after fees
+  const pk = bot?.pick;
+  if (pk) {
+    const rate = pk.graded ? pk.wins / pk.graded : null, b = pk.buys;
+    add('pick10', '10-minute picks (every round)', pk.graded || 0, !pk.graded ? 'wait' : (b?.graded >= 20 ? b.usd > 0 : rate >= (pk.avgP ?? 0.5) - 0.03) ? 'good' : 'bad',
+      pk.graded ? `won ${pk.wins} of ${pk.graded} (${pct(rate)}) · the math said ${pct(pk.avgP)} on average` : 'none graded yet: one locks every round at 10:00 left',
+      b?.graded ? `BUY picks: ${b.wins} of ${b.graded} won, ${usd(b.usd)} at $10 each after fees` : 'picks marked BUY are judged on profit after fees',
+      { graded: pk.graded || 0, wins: pk.wins ?? 0, avgP: pk.avgP ?? null, buys: b ? { graded: b.graded, wins: b.wins, usd: b.usd } : null });
+  }
   // flip calls (v13.19): the locked call switched sides on clear evidence; judged on profit, off while losing
   const fc = bot?.flip;
   if (fc) add('flipcalls', 'Flip calls (switched sides)', fc.graded || 0, fc.profitGuard?.paused ? 'bad' : (fc.usd ?? 0) > 0 ? 'good' : 'bad',

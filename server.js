@@ -92,6 +92,7 @@ export const bot = createBot({
   onSettle: (e, stats) => discord.result(e, stats),
   onTick: (o) => discordAlerts.tick(o),
   onRound: (r) => discordAlerts.settled(r),
+  onPick: (e, o) => discord.pick(e, o),
 });
 setInterval(() => access.prune(), 3600000).unref();
 
@@ -364,6 +365,8 @@ export const server = http.createServer(async (req, res) => {
     // What the server has learned about the market (the phone prices with it too)
     // The official bot record (every call the server's bot made, graded against Kalshi's result)
     if (path === '/api/record') return send(res, 200, bot.record());
+    // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
+    if (path === '/api/pick') return send(res, 200, bot.pick());
     // The Round scan: live read, learned weights and the graded record
     if (path === '/api/scan') return send(res, 200, scanFeed.api());
     if (path === '/api/watch') return send(res, 200, marketWatch.api());
