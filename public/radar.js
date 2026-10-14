@@ -17,7 +17,7 @@
 // logged and graded at the close, so the record shows whether 90% really held.
 import { BLEND, blendBand } from './predict.js';
 
-export const RADAR = { level: 0.9, own: 30 };
+export const RADAR = { level: 0.9, own: 30, levels: [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98], replayMin: 20 };
 const Z = { one: 1.2815515655446004, two: 1.6448536269514722 }; // the normal curve's one- and two-sided 90% points
 
 // The conformal threshold: the ceil((n+1) x level)-th smallest score, or null when n is too small for it to exist
@@ -34,14 +34,51 @@ export function closeScores(log) {
 // Past scores of the expected path's next minute (pcLog entries carry the 1-minute move from v13.2)
 const minuteScores = (pcLog) => (pcLog || []).filter((e) => e.actual != null && e.sd > 0 && Number.isFinite(e.c)).map((e) => Math.abs(e.actual - e.c) / e.sd);
 
+// The level each kind of call is set at (v13.27). Conformal's 90% assumes the coming rounds behave like the past ones;
+// BTC's rounds come in calm and wild stretches, so the misses bunch up and a straight 90% threshold can hold less. The
+// radar replays its own history walk-forward: for each past round (oldest first), the threshold from the rounds before
+// it only, exactly as it would have been set live, and whether that round's closes stayed inside. It then uses the lowest
+// level whose replay held 90%+ (from 20 replayed rounds; up to 98%), so the bands widen until the record says they hold.
+const rounds = (log) => [...(log || [])].filter((e) => e.actual != null && e.cps).sort((a, b) => Date.parse(a.closeTime) - Date.parse(b.closeTime))
+  .map((e) => Object.entries(e.cps).filter(([, c]) => c.sd > 0 && Number.isFinite(c.blend)).map(([m, c]) => ({ m: +m, d: (e.actual - c.blend) / c.sd })));
+const insert = (arr, v) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] < v) lo = mid + 1; else hi = mid; } arr.splice(lo, 0, v); };
+const KINDS = { floor: (s) => -s.d, ceil: (s) => s.d, range: (s) => Math.abs(s.d) };
+let levelMemo = null;
+export function radarLevels(log) {
+  const rs = rounds(log), key = `${rs.length}:${log?.[0]?.closeTime ?? ''}:${log?.length ?? 0}`;
+  if (levelMemo?.key === key) return levelMemo.out;
+  const bandOf = (m) => BLEND.bands.findIndex(([a, b]) => m >= a && m <= b);
+  const out = {};
+  for (const [kind, f] of Object.entries(KINDS)) {
+    const all = [], own = BLEND.bands.map(() => []), held = RADAR.levels.map(() => ({ n: 0, hit: 0 }));
+    let replayed = 0;
+    for (const r of rs) {
+      if (all.length >= 9) {
+        replayed++;
+        for (const sc of r) {
+          const b = bandOf(sc.m), use = b >= 0 && own[b].length >= RADAR.own ? own[b] : all, v = f(sc);
+          RADAR.levels.forEach((L, i) => { const k = Math.ceil((use.length + 1) * L - 1e-9), q = k <= use.length ? use[k - 1] : Infinity; held[i].n++; if (v <= q) held[i].hit++; });
+        }
+      }
+      for (const sc of r) { const v = f(sc), b = bandOf(sc.m); insert(all, v); if (b >= 0) insert(own[b], v); }
+    }
+    const rate = (h) => (h.n ? h.hit / h.n : null), found = held.findIndex((h) => h.n && h.hit / h.n >= RADAR.level - 1e-9);
+    const i = replayed < RADAR.replayMin ? 0 : found < 0 ? held.length - 1 : found;
+    out[kind] = { level: RADAR.levels[i], replayed, held: rate(held[i]), straight: rate(held[0]) }; // straight: what plain 90% would have held
+  }
+  levelMemo = { key, out };
+  return out;
+}
+
 // The radar's read now. expected: the blend's expected close; sd: a typical move to the close; next: { c, sd } for the
 // next minute's expected close and 1-minute move
 export function radarRead({ log, pcLog = [], expected, sd, mins, target, next = null }) {
   if (!Number.isFinite(expected) || !(sd > 0)) return null;
   const all = closeScores(log), [a, b] = BLEND.bands[blendBand(mins)], own = all.filter((s) => s.m >= a && s.m <= b);
   const use = own.length >= RADAR.own ? own : all;
-  const q = (f, z) => { const v = conformal(use.map(f)); return v == null ? { q: z, sure: false } : { q: v, sure: true }; };
-  const F = q((s) => -s.d, Z.one), C = q((s) => s.d, Z.one), R = q((s) => Math.abs(s.d), Z.two);
+  const lv = radarLevels(log);
+  const q = (f, z, L) => { const v = conformal(use.map(f), L); return v == null ? { q: z, sure: false } : { q: v, sure: true }; };
+  const F = q(KINDS.floor, Z.one, lv.floor.level), C = q(KINDS.ceil, Z.one, lv.ceil.level), R = q(KINDS.range, Z.two, lv.range.level);
   const floor = expected - F.q * sd, ceil = expected + C.q * sd, lo = expected - R.q * sd, hi = expected + R.q * sd;
   const dir = target > 0 ? (floor > target ? 'UP' : ceil < target ? 'DOWN' : null) : null;
   const need = dir || !(target > 0) ? 0 : expected >= target ? target - floor : ceil - target;
@@ -50,7 +87,7 @@ export function radarRead({ log, pcLog = [], expected, sd, mins, target, next = 
     const v = conformal(minuteScores(pcLog)), w = (v ?? Z.two) * next.sd;
     nx = { t: next.t, lo: next.c - w, hi: next.c + w, sure: v != null };
   }
-  return { expected, floor, ceil, lo, hi, dir, need, target, sure: F.sure && C.sure && R.sure, n: use.length, stretch: use === own, next: nx };
+  return { expected, floor, ceil, lo, hi, dir, need, target, sure: F.sure && C.sure && R.sure, n: use.length, stretch: use === own, next: nx, levels: lv };
 }
 
 // The record: how often each kind of call came true (graded against the round's close, the close of Coinbase's last

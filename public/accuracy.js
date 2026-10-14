@@ -9,7 +9,7 @@ const usd = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(x).toFixed(2)}`;
 const dol = (x) => `$${Math.round(x).toLocaleString('en-US')}`;
 
 export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null, guard = null, trades = null } = {}) {
-  const rows = [], add = (key, name, n, verdict, metric, vs, data) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' ? 'wait' : verdict, metric, vs, data });
+  const rows = [], add = (key, name, n, verdict, metric, vs, data, sure = false) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' && !sure ? 'wait' : verdict, metric, vs, data }); // sure: already statistically clear
   // the official calls and Near-certain: their win rates mean little alone (a 90¢ call should win 90%), so the bar is
   // profit after fees at $10 a call
   if (bot) {
@@ -87,7 +87,7 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
       radar.dir?.n ? `direction calls right ${radar.dir.hit} of ${radar.dir.n}` : 'no 90% direction calls graded yet', Object.fromEntries(Object.entries(radar).map(([k, x]) => [k, { n: x.n, hit: x.hit }])));
   }
   if (flip) add('flips', 'Turn predictions (↺)', flip.n || 0, flip.n && flip.base != null && flip.rate > flip.base ? 'good' : 'bad',
-    flip.n ? `caught ${flip.hits} of ${flip.n} (${pct(flip.rate)})` : 'each predicted turn checked afterwards', flip.base != null ? `vs ${pct(flip.base)} for a random minute` : '', flip.n ? { n: flip.n, hits: flip.hits, base: flip.base } : null);
+    flip.n ? `caught ${flip.hits} of ${flip.n} (${pct(flip.rate)})${flip.worse ? ` · clearly worse than chance, so the shape is cut to ×${flip.amp.toFixed(2)}` : ''}` : 'each predicted turn checked afterwards', flip.base != null ? `vs ${pct(flip.base)} for a random minute` : '', flip.n ? { n: flip.n, hits: flip.hits, base: flip.base, amp: flip.amp } : null, !!flip.worse);
   // the profit guard on your level, and your own trades against your daily limit
   if (guard) add('profit', `Profit guard (${guard.level})`, Math.max(guard.n, ACC.min), guard.paused ? 'bad' : guard.n >= 20 ? 'good' : 'off',
     guard.paused ? 'buy alerts PAUSED: this level is losing money' : guard.n >= 20 ? 'buy alerts on: this level is making money' : `watching (${guard.n} of 20 graded calls)`,

@@ -433,12 +433,14 @@ export function pathRecord(log) {
   const moved = done.filter((e) => e.actual !== e.open && e.c !== e.o);
   const right = moved.filter((e) => Math.sign(e.c - e.o) === Math.sign(e.actual - e.open)).length;
   const avg = (f) => done.reduce((a, e) => a + Math.abs(f(e) - e.actual), 0) / done.length;
+  // judged on the move it predicted, from the minute's real open, next to "no change" from that same open (v13.27: it
+  // used to be its absolute level, set 15 s before the minute began, against an open "no change" only knew afterwards)
   // beta from the raw (unscaled) moves each minute was predicted with
   const rawMove = (e) => (e.c - e.o) / (e.beta || 1);
   let sxy = 0, sxx = 0;
   for (const e of done) { const m = rawMove(e), a = e.actual - e.open; sxy += m * a; sxx += m * m; }
   const fit = sxx > 0 ? sxy / sxx : 1, beta = Math.min(1.5, Math.max(0, (done.length * fit + BETA_PRIOR) / (done.length + BETA_PRIOR)));
-  return { n: done.length, called: moved.length, right, miss: avg((e) => e.c), still: avg((e) => e.open), beta };
+  return { n: done.length, called: moved.length, right, miss: avg((e) => e.open + (e.c - e.o)), still: avg((e) => e.open), beta };
 }
 
 // The turns on the expected path (where it bottoms or tops out by at least a fifth of a typical minute), with the last 3

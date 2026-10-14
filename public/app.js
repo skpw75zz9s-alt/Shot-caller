@@ -29,7 +29,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '161'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '162'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1184,6 +1184,7 @@ function trackPredictions(snap, live, now) {
   if (lines.length) {
     if (!pe) { pe = { ticker: live.m.ticker, closeTime: live.m.close_time, actual: null, cps: {} }; state.predLog.unshift(pe); if (state.predLog.length > 300) state.predLog.length = 300; }
     if (cpDue) {
+      pe.off = Math.round((modelSpot() - state.spot) * 100) / 100; // the index offset the predictions are priced in (added to Coinbase's close when grading)
       const cents = (v) => Math.round(v * 100) / 100, c = { sd: cents(modelSpot() * (live.sigma ?? snap.sigmaMin) * Math.sqrt(ml)) };
       for (const l of lines) c[l.key] = cents(l.end);
       const pcs = pathNow(live, snap, now, lines), rd = radarNow(live, snap, now, pcs);
@@ -1198,7 +1199,7 @@ function trackPredictions(snap, live, now) {
       const cs = coneNow(live, snap, now, pathNow(live, snap, now, lines).path).summary, q = live.ev.quote;
       const mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
       if (cs) {
-        state.coneLog.unshift({ ticker: live.m.ticker, closeTime: live.m.close_time, at: now, mid: cs.mid, a: cs.a, b: cs.b, strike: live.strike, pAbove: cs.pAbove, kAbove: mid == null ? null : /^less/.test(live.m.strike_type || '') ? 1 - mid : mid, actual: null });
+        state.coneLog.unshift({ ticker: live.m.ticker, closeTime: live.m.close_time, at: now, off: Math.round((modelSpot() - state.spot) * 100) / 100, mid: cs.mid, a: cs.a, b: cs.b, strike: live.strike, pAbove: cs.pAbove, kAbove: mid == null ? null : /^less/.test(live.m.strike_type || '') ? 1 - mid : mid, actual: null });
         if (state.coneLog.length > 300) state.coneLog.length = 300;
         store.set('coneLog', state.coneLog);
       }
@@ -1211,7 +1212,7 @@ function trackPredictions(snap, live, now) {
     const close = Date.parse(e.closeTime);
     if (now < close + 70000) continue;
     const bar = snap.bars.find((b) => b.t === close - 60000);
-    if (bar) { e.actual = bar.c; coneChanged = true; } else if (now > close + 3 * 3600000) { e.gone = true; coneChanged = true; }
+    if (bar) { e.actual = bar.c + (e.off || 0); coneChanged = true; } else if (now > close + 3 * 3600000) { e.gone = true; coneChanged = true; }
   }
   if (coneChanged) { state.coneLog = state.coneLog.filter((e) => !e.gone); store.set('coneLog', state.coneLog); }
   let changed = false;
@@ -1220,7 +1221,7 @@ function trackPredictions(snap, live, now) {
     const close = Date.parse(e.closeTime);
     if (now < close + 70000) continue;
     const bar = snap.bars.find((b) => b.t === close - 60000);
-    if (bar) { e.actual = bar.c; changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
+    if (bar) { e.actual = bar.c + (e.off || 0); changed = true; } else if (now > close + 3 * 3600000) { e.actual = undefined; e.gone = true; changed = true; }
   }
   if (changed) { state.predLog = state.predLog.filter((e) => !e.gone); store.set('predLog', state.predLog); }
   // the expected path: keep the next minute as it stands just before that minute begins; grade it at its close
@@ -1230,7 +1231,7 @@ function trackPredictions(snap, live, now) {
       const pcs = pathNow(live, snap, now), c = pcs.minutes[0];
       if (c && c.t === next) {
         const e = state.pcLog.find((x) => x.t === next), rn = radarNow(live, snap, now, pcs)?.next;
-        const beta = pathRecord(state.pcLog).beta, rec = { o: c.o, c: c.c, beta, sd: modelSpot() * (live.sigma ?? snap.sigmaMin), ...(rn && rn.t === next ? { lo: rn.lo, hi: rn.hi } : {}) };
+        const beta = pathRecord(state.pcLog).beta, rec = { o: c.o, c: c.c, beta, off: Math.round((modelSpot() - state.spot) * 100) / 100, sd: modelSpot() * (live.sigma ?? snap.sigmaMin), ...(rn && rn.t === next ? { lo: rn.lo, hi: rn.hi } : {}) };
         if (e) Object.assign(e, rec); else { state.pcLog.unshift({ t: next, ...rec, open: null, actual: null }); if (state.pcLog.length > 500) state.pcLog.length = 500; }
       }
     }
@@ -1239,7 +1240,7 @@ function trackPredictions(snap, live, now) {
   for (const e of state.pcLog) {
     if (e.actual != null || now < e.t + 70000) continue;
     const bar = snap.bars.find((b) => b.t === e.t);
-    if (bar) { e.open = bar.o; e.actual = bar.c; pcChanged = true; } else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
+    if (bar) { e.open = bar.o + (e.off || 0); e.actual = bar.c + (e.off || 0); pcChanged = true; } // on the index scale the path is priced in else if (now > e.t + 3600000) { e.gone = true; pcChanged = true; }
   }
   if (pcChanged) { state.pcLog = state.pcLog.filter((e) => !e.gone); store.set('pcLog', state.pcLog); }
   // flips: keep each predicted turn until a minute before it (then it's frozen); grade it two minutes after
@@ -1310,7 +1311,8 @@ function renderRadar(rd, spot) {
     setHTML($('radarScope'), scopeIdle()); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), ''); setHTML($('radarVenues'), '');
   } else {
     setHTML($('radarScope'), scopeSvg(rd, spot, ven, { phase: beamPhase() }));
-    setText($('radarState'), rd.sure ? `90%+ by its own record: ${int(rd.n)} past minutes${rd.stretch ? ' at this stage of the round' : ''}` : `Learning: normal-curve 90% until 9 graded minutes (${int(rd.n)} so far)`);
+    const wide = rd.levels ? Math.max(rd.levels.floor.level, rd.levels.ceil.level, rd.levels.range.level) : 0.9;
+    setText($('radarState'), rd.sure ? `90%+ by its own record: ${int(rd.n)} past minutes${rd.stretch ? ' at this stage of the round' : ''}${wide > 0.9 + 1e-9 ? ` · bands set up to ${Math.round(wide * 100)}% so they still hold 90% when BTC's moods change` : ''}` : `Learning: normal-curve 90% until 9 graded minutes (${int(rd.n)} so far)`);
     setHTML($('radarDir'), !(rd.target > 0) ? '' : rd.dir ? `<b class="${rd.dir === 'UP' ? 'pos' : 'neg'}">${rd.dir}</b>, 90%+: even the 90% ${rd.dir === 'UP' ? `floor (${$$(rd.floor)}) is above` : `ceiling (${$$(rd.ceil)}) is below`} the target (${$$(rd.target)})`
       : `<b>No 90% direction call</b>: the expected close (${$$(rd.expected)}) is ${$$(rd.need)} short of a 90% margin from the target (${$$(rd.target)}). It comes when BTC moves further from the target or the time left runs down`);
     setHTML($('radarCalls'), [`Closes above <b>${$$(rd.floor)}</b>`, `Closes below <b>${$$(rd.ceil)}</b>`, `Closes between <b>${$$(rd.lo)}</b> and <b>${$$(rd.hi)}</b>`, rd.next ? `Next minute closes between <b>${$$(rd.next.lo)}</b> and <b>${$$(rd.next.hi)}</b>` : null]

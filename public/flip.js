@@ -13,6 +13,7 @@
 // 3) The record: every predicted turn is checked afterwards: did price make a V (or an upside-down V) there? Its hit
 //    rate is shown next to how often a random minute looks like a turn, and the shape's strength (amp) follows the
 //    record, so it fades away if it isn't catching turns. Pure functions; app.js and tvchart.js use them.
+import { wilsonLow } from './winguard.js';
 import { rsi } from './candles.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -96,10 +97,13 @@ export function turnBaseRate(bars, need) {
   return n ? hit / n : null;
 }
 // The flip record: calls graded, caught, and the strength the shape earns from it (1 until 20 graded calls; then the
-// hit rate over the base rate, kept between 0.3 and 1.3)
+// hit rate over the base rate, kept between 0.3 and 1.3). Sooner (v13.27) when the record is already clearly worse than
+// a random minute: from 8 graded calls, once even the 95% upper bound of the hit rate (Wilson) is under the base rate,
+// the strength drops to that bound over the base (a shape proven to miss shouldn't keep bending the expected path).
 export function flipRecord(log, base) {
-  const graded = log.filter((e) => e.hit === true || e.hit === false);
-  const hits = graded.filter((e) => e.hit).length, rate = graded.length ? hits / graded.length : null;
-  const amp = graded.length >= 20 && base > 0 ? clamp(rate / base, 0.3, 1.3) : 1;
-  return { n: graded.length, hits, rate, base, amp };
+  const graded = log.filter((e) => e.hit === true || e.hit === false), n = graded.length;
+  const hits = graded.filter((e) => e.hit).length, rate = n ? hits / n : null;
+  const up = n ? 1 - wilsonLow(n - hits, n, 1.959963984540054) : null, worse = n >= 8 && base > 0 && up < base;
+  const amp = worse ? clamp(up / base, 0.3, 1) : n >= 20 && base > 0 ? clamp(rate / base, 0.3, 1.3) : 1;
+  return { n, hits, rate, base, amp, worse };
 }

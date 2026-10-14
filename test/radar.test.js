@@ -85,3 +85,31 @@ test('the radar screen: prices run up the screen around the expected close, ever
   assert.match(scopeSvg(rd, 100060, [{ ex: '<x>', price: 100000, net: 0 }]), /&#60;x&#62;/, 'names are escaped');
   assert.match(scopeIdle(), /WAITING FOR A LIVE ROUND/);
 });
+
+test('the radar widens its bands until a walk-forward replay of its own rounds holds 90% (v13.27)', async () => {
+  const { radarLevels, conformal, RADAR } = await import('../public/radar.js');
+  let seed = 99; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32;
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd());
+  // BTC getting steadily wilder than the bot's volatility says: each round's misses share one shock
+  const T0 = Date.UTC(2026, 9, 1), log = [];
+  for (let i = 0; i < 300; i++) {
+    const v = 1 + i / 150, z = gauss(), cps = {};
+    for (let m = 1; m <= 14; m++) cps[m] = { sd: 1, blend: -v * (z + 0.3 * gauss()) };
+    log.unshift({ closeTime: new Date(T0 + i * 900000).toISOString(), actual: 0, cps });
+  }
+  const held = { plain: [0, 0], leveled: [0, 0] };
+  for (let i = 150; i < 300; i++) {
+    const past = log.slice(300 - i), round = log[299 - i];
+    const scores = past.flatMap((e) => Object.values(e.cps).map((c) => (e.actual - c.blend) / c.sd)), L = radarLevels(past).floor.level;
+    const qp = conformal(scores.map((d) => -d)), ql = conformal(scores.map((d) => -d), L);
+    for (const c of Object.values(round.cps)) { const d = (round.actual - c.blend) / c.sd; held.plain[1]++; held.leveled[1]++; if (-d <= qp) held.plain[0]++; if (-d <= ql) held.leveled[0]++; }
+  }
+  const plain = held.plain[0] / held.plain[1], leveled = held.leveled[0] / held.leveled[1];
+  assert.ok(plain < 0.88, `a plain 90% threshold falls short here (${plain.toFixed(3)})`);
+  assert.ok(leveled > plain + 0.02 && leveled >= 0.88, `the replayed level holds far better (${leveled.toFixed(3)} vs ${plain.toFixed(3)})`);
+  // a calm, steady market keeps the plain 90%
+  const calm = [];
+  for (let i = 0; i < 120; i++) { const z = gauss(), cps = {}; for (let m = 1; m <= 14; m++) cps[m] = { sd: 1, blend: -(z + 0.3 * gauss()) }; calm.unshift({ closeTime: new Date(T0 + i * 900000).toISOString(), actual: 0, cps }); }
+  assert.ok(radarLevels(calm).range.level <= 0.92, 'no widening where 90% already holds');
+  assert.equal(radarLevels(calm.slice(0, 15)).floor.level, RADAR.level, 'too few rounds to replay: plain 90%');
+});

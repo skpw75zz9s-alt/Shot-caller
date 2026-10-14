@@ -58,7 +58,19 @@ test('turn grading: a real V counts, a straight line does not; base rate and str
   assert.equal(turnBaseRate(V, 15), 1 / 2, 'the one complete minute: up yes, down no');
   assert.deepEqual(turnPoints([{ t: 1, v: 5 }, { t: 2, v: 3 }, { t: 3, v: 6 }]).map((x) => x.dir), ['up']);
   const log = Array.from({ length: 20 }, (_, i) => ({ hit: i < 8 }));
-  assert.deepEqual(flipRecord(log, 0.2), { n: 20, hits: 8, rate: 0.4, base: 0.2, amp: 1.3 }, 'twice the base rate: full strength (capped)');
+  assert.deepEqual(flipRecord(log, 0.2), { n: 20, hits: 8, rate: 0.4, base: 0.2, amp: 1.3, worse: false }, 'twice the base rate: full strength (capped)');
   assert.equal(flipRecord(log.map((e, i) => ({ hit: i < 1 })), 0.2).amp, 0.3, 'worse than random: shrinks');
   assert.equal(flipRecord(log.slice(0, 5), 0.2).amp, 1, 'under 20 graded: unchanged');
+});
+
+test('a turn shape that is clearly worse than chance is cut before 20 graded calls (v13.27)', async () => {
+  const { flipRecord } = await import('../public/flip.js');
+  const { accuracyRows } = await import('../public/accuracy.js');
+  const miss = (n, hits = 0) => Array.from({ length: n }, (_, i) => ({ hit: i < hits }));
+  const r = flipRecord(miss(13), 0.57);
+  assert.equal(r.worse, true); assert.ok(r.amp < 0.5 && r.amp >= 0.3, String(r.amp));
+  assert.equal(flipRecord(miss(13, 7), 0.57).worse, false, '7 of 13 is in line with chance'); assert.equal(flipRecord(miss(13, 7), 0.57).amp, 1);
+  assert.equal(flipRecord(miss(5), 0.57).worse, false, 'under 8 graded: too early');
+  const row = accuracyRows({ flip: { ...r, base: 0.57 } }).find((x) => x.key === 'flips');
+  assert.equal(row.verdict, 'bad'); assert.match(row.metric, /clearly worse than chance/);
 });

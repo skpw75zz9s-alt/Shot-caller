@@ -293,3 +293,11 @@ test('the blend\'s own scale: averaging lines each shrunk on their own is too ti
   assert.equal(expectedPath({ lines, spot: 100, now: 0, final: 1.5 })(60000), 115);
   assert.equal(expectedPath({ lines, spot: 100, now: 0, final: 1.5, beta: 0.5 })(60000), 107.5);
 });
+
+test('the path is judged on the move it predicted from the real open, next to "no change" from that open (v13.27)', async () => {
+  const { pathRecord } = await import('../public/predict.js');
+  // the path was priced $30 above where the minute really opened (set 15 s early): the level gap isn't its move's error
+  const log = [{ o: 100030, c: 100040, open: 100000, actual: 100010, beta: 1 }, { o: 99970, c: 99960, open: 100000, actual: 99990, beta: 1 }];
+  const r = pathRecord(log);
+  assert.equal(r.miss, 0, 'both moves were exactly right'); assert.equal(r.still, 10); assert.equal(r.right, 2);
+});
