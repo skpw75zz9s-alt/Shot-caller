@@ -22,13 +22,14 @@ import { radarRead, radarRecord, scopeIdle, scopeSvg, SCOPE } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
 import { dailyLoss, profitGuard } from './profitguard.js';
+import { successMap } from './success.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '158'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '159'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1739,6 +1740,47 @@ function renderPick(now = Date.now()) {
     st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null].filter(Boolean).join(' · '));
 }
 
+// ---------- Map to success (public/success.js): live stats, the road with a tip per step, the coach ----------
+function renderSuccess(now = Date.now()) {
+  if (!$('view-success')?.classList.contains('active') && !shownViews.has('success')) return;
+  const m = successMap({ trades: state.trades, positions: state.positions, settings, level: riskLevelOf(settings), pushOn: !!state.pushOn, seen: callStats(state.callLog), record: state.botRecord, pick: state.pick, now });
+  const y = m.you, pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+  setText($('mapPnl'), y.n ? money(y.pnl) : '$0.00'); setClass($('mapPnl'), y.n ? (y.pnl > 0 ? 'pos' : y.pnl < 0 ? 'neg' : '') : '');
+  setText($('mapPnlSub'), y.n ? `over ${int(y.n)} tracked trade${y.n > 1 ? 's' : ''}${state.positions.length ? ` · ${state.positions.length} open` : ''}` : 'Tap "I bought it" on a call to start tracking');
+  // running P&L: one line, the zero line dashed (no legend: the label above names it)
+  const c = y.curve.length > 1 ? y.curve : null;
+  if (c) {
+    const lo = Math.min(0, ...c), hi = Math.max(0, ...c), span = hi - lo || 1, X = (i) => (i / (c.length - 1)) * 300, Y = (v) => 52 - ((v - lo) / span) * 48;
+    setHTML($('mapSpark'), `<line x1="0" x2="300" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="z"/><polyline class="${c.at(-1) >= 0 ? 'up' : 'dn'}" points="${c.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}"/><circle r="3" cx="300" cy="${Y(c.at(-1)).toFixed(1)}" class="${c.at(-1) >= 0 ? 'up' : 'dn'}"/>`);
+  } else setHTML($('mapSpark'), '<line x1="0" x2="300" y1="28" y2="28" class="z"/>');
+  const t = y.today, lim = settings.dailyLossLimit > 0 ? settings.dailyLossLimit : 0, used = lim ? Math.min(1, Math.max(0, -t.pnl) / lim) : 0;
+  setText($('mapToday'), t.trades ? money(t.pnl) : '$0.00'); setClass($('mapToday'), t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : '');
+  const meter = $('mapTodayMeter'); if (meter) { meter.firstChild.style.width = `${(used * 100).toFixed(1)}%`; setClass(meter, `map-meter ${t.hit ? 'crit' : used >= 0.6 ? 'warn' : 'ok'}`); }
+  setText($('mapTodaySub'), !lim ? 'no daily limit set' : t.hit ? '⛔ limit hit, done for today' : `${used >= 0.6 ? '⚠ ' : ''}$${Math.max(0, lim + Math.min(0, t.pnl)).toFixed(2)} left of $${lim.toFixed(2)}`);
+  setText($('mapRate'), pct(y.rate)); setText($('mapRateSub'), y.breakEven != null ? `break-even ${pct(y.breakEven)}` : 'after your first trade');
+  setClass($('mapRate'), y.n >= 15 && y.rate != null && y.breakEven != null ? (y.rate >= y.breakEven ? 'pos' : 'neg') : '');
+  const b = m.bot;
+  setText($('mapBot'), b ? `${b.wins}–${b.graded - b.wins}` : '—');
+  setText($('mapBotSub'), b ? (b.graded ? `${money(b.usd)} at $10 a call${b.paused ? ' · paused' : ''}` : `${b.level}: no graded calls yet`) : 'loading…');
+  const k = m.pick;
+  setText($('mapPick'), !k ? '—' : k.locked ? `${k.side === 'YES' ? 'UP' : 'DOWN'}${k.buy ? ' ✓' : ''}` : k.locksAt > now ? mmss((k.locksAt - now) / 60000) : 'locking');
+  setClass($('mapPick'), k?.locked ? (k.side === 'YES' ? 'pos' : 'neg') : '');
+  setText($('mapPickSub'), !k ? 'waiting for the next round' : [k.locked ? (k.buy ? `BUY at ${Math.round(k.price * 100)}¢` : 'pick only') : 'until it locks', k.last ? `last ${k.last}` : null, k.graded ? `${pct(k.wins / k.graded)} of ${int(k.graded)}` : null].filter(Boolean).join(' · '));
+  const icon = { warn: '⚠', good: '✓', info: 'ℹ', tip: '★' };
+  setHTML($('mapCoach'), m.coach.map((x) => `<li class="${x.kind}"><i aria-hidden="true">${icon[x.kind]}</i><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span></li>`).join(''));
+  setText($('mapDone'), `${m.done} of ${m.steps.length} done`);
+  const ov = $('mapOverall'); if (ov) ov.firstChild.style.width = `${((m.done / m.steps.length) * 100).toFixed(1)}%`;
+  setHTML($('mapSteps'), m.steps.map((s, i) => {
+    const st = s.done ? 'done' : i === m.at ? 'now' : 'todo';
+    const tip = `<p class="map-tip"><b>Tip</b> ${esc(s.tip)}</p>`;
+    return `<li class="${st}"><span class="map-node" aria-hidden="true">${s.done ? '✓' : i + 1}</span><div class="map-body">` +
+      `<div class="map-title"><b>${esc(s.title)}</b><em>${s.done ? 'done' : i === m.at ? 'you are here' : ''}</em></div><small>${esc(s.goal)}</small>` +
+      `<div class="map-meter ${s.done ? 'ok' : ''}"><i style="width:${(Math.max(0, Math.min(1, s.progress)) * 100).toFixed(1)}%"></i></div><small class="map-val">${esc(s.value)}</small>` +
+      `${st === 'now' ? tip : `<details><summary>Tip</summary>${tip}</details>`}</div></li>`;
+  }).join(''));
+}
+setInterval(() => { if (!document.hidden) renderSuccess(); }, 1000);
+
 // ---------- the official bot record (server: every call it made, around the clock) ----------
 async function refreshBotRecord() {
   try { state.botRecord = await getJSON('record'); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
@@ -2093,6 +2135,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'chart') requestAnimationFrame(() => drawChartTab(true)); // after the layout, so it has its width
     if (v === 'alerts') alerts.render();
     if (v === 'history') refreshBotRecord();
+    if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
   }
   shownViews.clear(); for (const v of views) shownViews.add(v);
   adminPolling(views.includes('settings'));

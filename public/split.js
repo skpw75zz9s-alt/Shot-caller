@@ -1,9 +1,9 @@
 // Split screen (computers only: Windows, Mac, Linux or ChromeOS, touchscreen laptops included; phones and tablets
-// always get one screen and don't see the button. ?split=1 in the address forces it on, ?split=0 off): show up to four of the app's screens at once (Deck, Chart, Alerts, Record, Learn, Settings).
+// always get one screen and don't see the button. ?split=1 in the address forces it on, ?split=0 off): show up to four of the app's screens at once (Deck, Chart, Radar, Alerts, Record, Map, Learn, Settings).
 // Each pane has its own picker and scrolls on its own; tapping a pane focuses it, and the bottom bar then changes what
 // the focused pane shows. Picking a screen another pane already shows swaps the two. On a narrow screen the panes'
 // contents shrink to fit (CSS zoom), so every card still lays out as it does full screen. The layout is remembered.
-export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['radar', 'Radar'], ['alerts', 'Alerts'], ['history', 'Record'], ['learn', 'Learn'], ['settings', 'Settings']];
+export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['radar', 'Radar'], ['alerts', 'Alerts'], ['history', 'Record'], ['success', 'Map'], ['learn', 'Learn'], ['settings', 'Settings']];
 const DEFAULT_PANES = ['live', 'chart', 'alerts', 'history'];
 // A computer: a desktop system (Windows, Mac, Linux, ChromeOS), whatever its screen size, touchscreen or trackpad.
 // Phones and tablets say so in their user agent; iPads in desktop mode say "Macintosh" but have touch points.

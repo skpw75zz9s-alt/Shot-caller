@@ -26,6 +26,7 @@
   <link rel="modulepreload" href="notify.js">
   <link rel="modulepreload" href="health.js">
   <link rel="modulepreload" href="record.js">
+  <link rel="modulepreload" href="success.js">
   <link rel="modulepreload" href="learner.js">
   <link rel="modulepreload" href="indicators.js">
   <link rel="modulepreload" href="chart.js">
@@ -423,6 +424,31 @@
       <ul id="memCal" class="history"></ul>
     </section>
 
+    <!-- Map to success (v13.24): live stats, the road of milestones with a tip each, and a coach reading your trades -->
+    <section id="view-success" class="view">
+      <div class="card map-hero">
+        <div class="deep-head"><span>Map to success</span><b id="mapLive" class="map-live">● live</b></div>
+        <div class="map-big"><small>Your profit after fees</small><b id="mapPnl">$0.00</b><span id="mapPnlSub" class="muted"></span></div>
+        <svg id="mapSpark" class="map-spark" viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Running profit after fees over your recent tracked trades"></svg>
+        <div class="map-kpis">
+          <div class="map-kpi"><label>Today</label><b id="mapToday">—</b><div class="map-meter" id="mapTodayMeter"><i></i></div><small id="mapTodaySub"></small></div>
+          <div class="map-kpi"><label>Win rate</label><b id="mapRate">—</b><small id="mapRateSub"></small></div>
+          <div class="map-kpi"><label>Official bot</label><b id="mapBot">—</b><small id="mapBotSub"></small></div>
+          <div class="map-kpi"><label>10-min pick</label><b id="mapPick">—</b><small id="mapPickSub"></small></div>
+        </div>
+      </div>
+      <div class="card map-coach">
+        <div class="deep-head"><span>Coach</span><small class="muted">tips from your own trades</small></div>
+        <ul id="mapCoach" class="map-tips"></ul>
+      </div>
+      <div class="card map-road">
+        <div class="deep-head"><span>The road</span><b id="mapDone">—</b></div>
+        <div class="map-meter map-overall" id="mapOverall"><i></i></div>
+        <ol id="mapSteps" class="map-steps"></ol>
+      </div>
+      <p class="fine-left map-note">Success here means a process that holds up: small steady stakes, calls bought where they pay, the daily stop respected, and a profit after fees over enough trades that it isn't luck. No map makes trading safe. Every call can lose, and the bot can't beat a market that's as smart as it is. Trade only what you can afford to lose.</p>
+    </section>
+
     <section id="view-settings" class="view">
       <div class="card access-card">
         <div class="deep-head"><span>Your access</span><span><button id="adminLogin" class="link" hidden>Admin code</button> <button id="signOut" class="link">Sign out</button></span></div>
@@ -500,7 +526,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.23 · 10-minute pick</p>
+      <p class="fine" id="version">Shot Caller v13.24 · Map to success</p>
     </section>
   </main>
 
@@ -512,6 +538,7 @@
     <button data-view="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
+    <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
     <button data-view="learn"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
@@ -519,7 +546,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '158';
+    window.SC_BUILD = '159';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
