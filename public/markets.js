@@ -24,12 +24,38 @@ export const ASSETS = [
     sym: { kraken: 'XRP/USD', krakenRest: 'XRPUSD', bitstamp: 'xrpusd', gemini: 'XRPUSD', binanceUs: 'xrpusd', binance: 'xrpusdt', bybit: 'XRPUSDT', okx: 'XRP-USDT-SWAP', okxCt: 100, deribit: null, bitfinex: 'tXRPUSD', cryptocom: 'XRP_USD', paxos: null, hyper: 'XRP' } },
   { key: 'DOGE', name: 'Dogecoin', kind: 'crypto', settle: 'avg60', digits: 5, product: 'DOGE-USD', match: /^KXDOGE|dogecoin|\bdoge\b/i,
     sym: { kraken: 'DOGE/USD', krakenRest: 'XDGUSD', bitstamp: 'dogeusd', gemini: 'DOGEUSD', binanceUs: 'dogeusd', binance: 'dogeusdt', bybit: 'DOGEUSDT', okx: 'DOGE-USDT-SWAP', okxCt: 1000, deribit: null, bitfinex: 'tDOGE:USD', cryptocom: 'DOGE_USD', paxos: null, hyper: 'DOGE' } },
-  { key: 'SPX', name: 'S&P 500', kind: 'index', settle: 'spot', digits: 2, yahoo: '^GSPC', match: /^KXINX|s&p ?500|\bspx\b/i },
-  { key: 'NDX', name: 'Nasdaq-100', kind: 'index', settle: 'spot', digits: 2, yahoo: '^NDX', match: /^KXNASDAQ|nasdaq/i },
-  { key: 'DJI', name: 'Dow Jones', kind: 'index', settle: 'spot', digits: 2, yahoo: '^DJI', match: /^KXDOW|\bdow\b/i },
-  { key: 'GOLD', name: 'Gold', kind: 'commodity', settle: 'spot', digits: 2, yahoo: 'GC=F', match: /^KXGOLD|\bgold\b/i },
-  { key: 'OIL', name: 'WTI crude oil', kind: 'commodity', settle: 'spot', digits: 2, yahoo: 'CL=F', match: /^KX(WTI|OIL)|\bwti\b|crude|\boil\b/i },
+  { key: 'SPX', name: 'S&P 500', kind: 'index', settle: 'spot', digits: 2, yahoo: '^GSPC', match: /^KXINX|s&p ?500|\bspx\b/i,
+    drivers: { macro: ['US10Y', 'DXY', 'OIL'], sector: ['NDX', 'DJI'], own: 'S&P-only moves (its own news and big orders)' } },
+  { key: 'NDX', name: 'Nasdaq-100', kind: 'index', settle: 'spot', digits: 2, yahoo: '^NDX', match: /^KXNASDAQ|nasdaq/i,
+    drivers: { macro: ['US10Y', 'DXY', 'OIL'], sector: ['SPX', 'DJI'], own: 'Nasdaq-only moves (tech news and big orders)' } },
+  { key: 'DJI', name: 'Dow Jones', kind: 'index', settle: 'spot', digits: 2, yahoo: '^DJI', match: /^KXDOW|\bdow\b/i,
+    drivers: { macro: ['US10Y', 'DXY', 'OIL'], sector: ['SPX', 'NDX'], own: 'Dow-only moves (its own news and big orders)' } },
+  { key: 'GOLD', name: 'Gold', kind: 'commodity', settle: 'spot', digits: 2, yahoo: 'GC=F', match: /^KXGOLD|\bgold\b/i,
+    drivers: { macro: ['DXY', 'US10Y', 'SPX', 'OIL'], sector: ['SILVER', 'PLAT', 'COPPER'], own: 'Gold-only moves (gold buying and selling, its own news)' } },
+  { key: 'SILVER', name: 'Silver', kind: 'commodity', settle: 'spot', digits: 3, yahoo: 'SI=F', match: /^KXSILVER|\bsilver\b/i,
+    drivers: { macro: ['DXY', 'US10Y', 'SPX', 'OIL'], sector: ['GOLD', 'PLAT', 'COPPER'], own: 'Silver-only moves (silver buying and selling, its own news)' } },
+  { key: 'OIL', name: 'WTI crude oil', kind: 'commodity', settle: 'spot', digits: 2, yahoo: 'CL=F', match: /^KX(WTI|OIL)|\bwti\b|crude|\boil\b/i,
+    drivers: { macro: ['DXY', 'US10Y', 'SPX'], sector: ['BRENT', 'GASOLINE', 'HEATOIL', 'NATGAS'], own: 'US-crude-only moves (US supply, inventories, big orders)' } },
 ];
+
+// What moves the markets without exchange trade feeds (v13.34, public/drivers.js): Yahoo's public 1-minute charts of
+// the dollar, Treasury yields, other metals and energy. Each market above lists its drivers in two groups:
+//   macro   the big forces on everything priced in dollars: the dollar, rates, stocks (and oil for the metals)
+//   sector  the rest of its own market (other metals for gold, Brent and fuels for US crude), minus the macro part:
+//           a move they share is sector-wide buying or selling, not news about this one
+// and what's left is its own: this market's own buyers and sellers and news.
+export const DRIVERS = [
+  { key: 'DXY', name: 'US dollar', short: 'Dollar', yahoo: 'DX-Y.NYB', unit: 'pct', why: 'gold and oil are priced in dollars: a stronger dollar usually pushes them down' },
+  { key: 'US10Y', name: '10-year Treasury yield', short: 'Yields', yahoo: '^TNX', unit: 'yield', why: 'higher yields make gold (which pays nothing) less attractive and tighten money for everything' },
+  { key: 'PLAT', name: 'Platinum', short: 'Platinum', yahoo: 'PL=F', unit: 'pct', why: 'the other precious metals: a move they share is metals-wide buying' },
+  { key: 'COPPER', name: 'Copper', short: 'Copper', yahoo: 'HG=F', unit: 'pct', why: 'the industrial metal: a read on factory demand and China' },
+  { key: 'BRENT', name: 'Brent crude', short: 'Brent', yahoo: 'BZ=F', unit: 'pct', why: 'the world oil price: a move it shares is global supply and demand, not US-only' },
+  { key: 'GASOLINE', name: 'Gasoline futures', short: 'Gasoline', yahoo: 'RB=F', unit: 'pct', why: 'what refiners sell: strong gasoline prices pull crude up' },
+  { key: 'HEATOIL', name: 'Heating oil / diesel', short: 'Diesel', yahoo: 'HO=F', unit: 'pct', why: 'diesel demand from trucking, farming and heating' },
+  { key: 'NATGAS', name: 'Natural gas', short: 'Nat gas', yahoo: 'NG=F', unit: 'pct', why: 'the other big energy market: weather and power demand' },
+];
+// A market or driver by key (an asset's fields, or a driver's)
+export const seriesOf = (key) => ASSETS.find((a) => a.key === key) ?? DRIVERS.find((d) => d.key === key) ?? null;
 export const HOME_ASSET = ASSETS[0];
 
 // The 15-minute up/down series known before discovery (Bitcoin's is the official bot's). Discovery adds every other

@@ -930,3 +930,38 @@ details.how .fine-left { margin-top: 4px; font-size: 11px; color: var(--muted); 
 .cr-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .cr-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; } .cr-bar i.neg { background: var(--violet); }
 .cr-move { display: flex; flex-direction: column; align-items: flex-end; } .cr-move b { font: 700 12.5px var(--mono); }
 .cross-model { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+/* ---------- Why it's moving (v13.34): gold, silver, oil, the indexes ---------- */
+body:not(.no-feeds) [data-alt-only] { display: none !important; } /* crypto has the tape, the scan and the tug instead */
+.drv-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.drv-tabs button { flex: 1; min-height: 32px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); border-radius: 8px; font: 600 12px var(--mono); cursor: pointer; }
+.drv-tabs button.on { color: var(--text); border-color: var(--accent); background: #22d3ee14; }
+.drv-say { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: var(--text); }
+.drv-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.drv-legend span { display: inline-flex; align-items: center; gap: 5px; } .drv-legend small { color: var(--dim); }
+.drv-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--text); }
+.drv-legend i.k-drv { border-top: 2px dashed var(--accent); } .drv-legend i.k-own { height: 9px; border: 0; background: #a78bfa40; border-radius: 2px; }
+.drv-legend i.k-vol { width: 8px; height: 9px; border: 0; background: var(--line-2); border-radius: 1px; }
+.drv-chart { position: relative; touch-action: pan-y; cursor: crosshair; }
+.dv-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.dv-grid { stroke: var(--line); stroke-width: 1; } .dv-zero { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.dv-ax { fill: var(--dim); font: 9px var(--mono); }
+.dv-act { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.dv-actd { fill: var(--text); stroke: var(--panel); stroke-width: 2; }
+.dv-drv { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; stroke-linejoin: round; }
+.dv-own { fill: #a78bfa33; stroke: none; }
+.dv-ev { stroke: var(--amber); stroke-width: 1; stroke-dasharray: 2 2; } .dv-evl { fill: var(--amber); font: 600 9px var(--sans); }
+.dv-vol { fill: var(--line-2); } .dv-vol.hot { fill: var(--amber); }
+.dv-cross { stroke: var(--muted); stroke-width: 1; }
+.drv-tip { position: absolute; top: 4px; z-index: 2; display: grid; gap: 1px; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; font: 11px var(--mono); color: var(--muted); pointer-events: none; white-space: nowrap; }
+.drv-tip b { color: var(--text); }
+.drv-parts { list-style: none; margin: 8px 0 0; padding: 0; }
+.drv-parts li.drv-h { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); padding: 8px 0 2px; }
+.drv-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(70px, 1fr) 72px; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.drv-row.own { border-top-color: var(--line-2); }
+.drv-name { display: grid; min-width: 0; } .drv-name b { font-size: 13px; } .drv-name small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.drv-bar { position: relative; height: 10px; } .drv-bar::before { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line-2); }
+.drv-bar i { position: absolute; top: 0; bottom: 0; min-width: 1px; background: var(--yes); border-radius: 0 4px 4px 0; } .drv-bar i.neg { background: var(--no); border-radius: 4px 0 0 4px; }
+.drv-row.own .drv-bar i { background-image: repeating-linear-gradient(45deg, #0000 0 3px, #0006 3px 5px); }
+.drv-usd { font: 700 13px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.drv-fit { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45; }

@@ -26,12 +26,13 @@ import { dailyLoss, profitGuard } from './profitguard.js';
 import { successMap } from './success.js';
 import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, listed, marketOf, roundName, storeKey } from './markets.js';
 import { structureRead } from './structure.js';
+import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '169'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '170'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1780,6 +1781,68 @@ function renderCross() {
     : m.proven ? `Model proven: ${(m.gain * 100).toFixed(1)}% less error than "no change" on ${int(m.n)} test minutes (z ${m.z.toFixed(1)}). It expects ${pct(m.expected5)} in the next 5 minutes${c.inCalls ? ' and is nudging the odds now' : ''}.`
     : `Model learning: ${m.n ? `${m.gain == null ? '—' : `${(m.gain * 100).toFixed(1)}%`} vs "no change" on ${int(m.n)} test minutes (needs ${int(m.need.minTest)}+, ${(m.need.minGain * 100).toFixed(1)}%+ and z ${m.need.z}+)` : `${int(m.rows || 0)} minutes so far`}. Shown here, not used in calls until it proves itself.`);
 }
+
+// ---------- Why it's moving (server: crossfeed.js, public/drivers.js): gold, silver, oil and the indexes ----------
+let drvW = DRV.windows.includes(+store.get('drvW', 60)) ? +store.get('drvW', 60) : 60;
+async function refreshDrivers() {
+  if (CRYPTO || document.hidden) return;
+  try { state.drv = await getJSON(api(`drivers?w=${drvW}`)); renderDrivers(); } catch { /* next time */ }
+}
+if (!CRYPTO) { setInterval(refreshDrivers, 20000); setTimeout(refreshDrivers, 2000); }
+$('drvTabs')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-w]'); if (!b) return;
+  drvW = +b.dataset.w; store.set('drvW', drvW); state.drv = null; renderDrivers(); refreshDrivers();
+});
+if (!CRYPTO) renderDrivers();
+function renderDrivers() {
+  if (CRYPTO) return;
+  for (const b of document.querySelectorAll('#drvTabs button')) { b.classList.toggle('on', +b.dataset.w === drvW); b.setAttribute('aria-selected', String(+b.dataset.w === drvW)); }
+  const d = state.drv, dg = Math.max(2, MKT.digits ?? 2), usd = (v) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toFixed(dg)}`;
+  setText($('drvTitle'), `Why ${MKT.name || MKT.key} is moving`);
+  if (!d || !d.supported || !d.parts) {
+    setText($('drvWhen'), d?.backfilled === false ? 'reading history…' : '');
+    setText($('drvSay'), !d ? 'Reading the dollar, yields and the rest of its market…' : !d.supported ? 'Not available for this market.'
+      : d.fit && !d.fit.ready ? `Learning how ${MKT.name} moves with its drivers: ${int(d.fit.n)} of ${int(d.fit.need)} minutes so far.` : 'Waiting for prices (the market may be closed).');
+    setHTML($('drvSvg'), ''); setHTML($('drvParts'), ''); setText($('drvFit'), d?.drivers?.length ? `Drivers: ${d.drivers.map((x) => `${x.name}${x.minutes ? '' : ' (no data yet)'}`).join(', ')}.` : '');
+    return;
+  }
+  setText($('drvWhen'), usd(d.move)); setClass($('drvWhen'), d.move > 0 ? 'pos' : d.move < 0 ? 'neg' : '');
+  setText($('drvSay'), explainDrivers(d, { name: MKT.name, w: d.w, digits: dg, r2: d.fit?.r2All }));
+  const c = chartSvg(d, { vol: d.vol, evs: d.events, digits: dg });
+  state.drvXs = c.xs;
+  setHTML($('drvSvg'), c.svg);
+  const max = Math.max(...d.parts.map((p) => Math.abs(p.usd)), 1e-9);
+  const head = { macro: 'Macro · dollar, rates, stocks', sector: 'Its market (beyond the macro)', own: 'Its own' };
+  let last = null;
+  setHTML($('drvParts'), d.parts.map((p) => {
+    const w = (Math.abs(p.usd) / max * 50).toFixed(1), h = p.group !== last ? `<li class="drv-h">${head[p.group]}</li>` : ''; last = p.group;
+    const sub = p.group === 'own' ? esc(p.name) : `${esc(p.short === p.name ? '' : `${p.name} `)}${moveText(p)}${p.per1 != null && p.unit !== 'yield' && p.group === 'macro' ? ` · ${esc(MKT.name)} ${p.per1 >= 0 ? '+' : '−'}${Math.abs(p.per1).toFixed(2)}% per +1%` : ''}`;
+    return `${h}<li class="drv-row${p.group === 'own' ? ' own' : ''}" title="${esc(p.why || '')}"><span class="drv-name"><b>${esc(p.short)}</b><small>${sub}</small></span>`
+      + `<span class="drv-bar"><i class="${p.usd < 0 ? 'neg' : 'pos'}" style="${p.usd < 0 ? `right:50%` : `left:50%`};width:${w}%"></i></span>`
+      + `<b class="drv-usd ${p.usd > 0 ? 'pos' : p.usd < 0 ? 'neg' : ''}">${usd(p.usd)}</b></li>`;
+  }).join(''));
+  const f = d.fit;
+  setText($('drvFit'), f?.ready ? `Fitted on ${int(f.n)} one-minute moves over the last 3 days: the macro explains ${Math.round(f.r2Macro * 100)}% of ${MKT.name}'s moves, macro plus its market ${Math.round(f.r2All * 100)}%. The rest is its own.` : '');
+}
+// the hover layer: the time, the actual move, the drivers' part and its own at the nearest point
+(() => {
+  const box = $('drvChart'), tip = $('drvTip');
+  if (!box || !tip) return;
+  const hide = () => { tip.hidden = true; box.querySelector('.dv-cross')?.setAttribute('visibility', 'hidden'); };
+  box.addEventListener('pointermove', (e) => {
+    const d = state.drv, xs = state.drvXs, svg = box.querySelector('svg');
+    if (!d?.series?.length || !xs?.length || !svg) return hide();
+    const r = svg.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width;
+    let i = 0; for (let k = 1; k < xs.length; k++) if (Math.abs(xs[k] - fx) < Math.abs(xs[i] - fx)) i = k;
+    const p = d.series[i], dg = Math.max(2, MKT.digits ?? 2), usd = (v) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toFixed(dg)}`, vb = svg.viewBox.baseVal;
+    const ln = svg.querySelector('.dv-cross'); ln.setAttribute('x1', xs[i] * vb.width); ln.setAttribute('x2', xs[i] * vb.width); ln.setAttribute('visibility', 'visible');
+    setHTML(tip, `<b>${new Date(p.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</b><span>Actual <b>${usd(p.actual)}</b></span><span>Drivers <b>${usd(p.drivers)}</b></span><span>Its own <b>${usd(p.actual - p.drivers)}</b></span>`);
+    tip.hidden = false;
+    const bx = box.getBoundingClientRect(), left = Math.min(bx.width - tip.offsetWidth - 4, Math.max(4, e.clientX - bx.left + 10));
+    tip.style.left = `${left}px`;
+  });
+  box.addEventListener('pointerleave', hide);
+})();
 
 // ---------- Map to success (public/success.js): live stats, the road with a tip per step, the coach ----------
 function renderSuccess(now = Date.now()) {

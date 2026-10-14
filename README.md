@@ -271,6 +271,22 @@ Security:
 
 ## Version notes (newest first)
 
+### Why it's moving (v13.34)
+
+Gold, silver, oil and the stock indexes get a **Why it's moving** card on the Deck (crypto keeps its trade tape and
+scan instead). It splits the move over the last 15 minutes, hour, 4 hours or day into:
+
+- **Macro**: the US dollar, the 10-year Treasury yield, stocks (and oil for the metals).
+- **Its market**: silver, platinum and copper for gold; Brent, gasoline, diesel and natural gas for US crude. Only
+  the part the macro doesn't already explain counts here, so nothing is counted twice.
+- **Its own**: what's left, which is this market's own buying, selling and news.
+
+The parts add up to the actual move. The chart shows the actual move against the part its drivers explain (the
+shaded gap is its own part), the futures volume underneath (amber when it's 3× usual), and the EIA's weekly oil
+inventory report on oil. The fit comes from the last 3 days of 1-minute moves and says how much of the market it
+covers. It explains moves; it doesn't predict them. The drivers come from Yahoo's public charts (`YAHOO_API`
+overrides the host, for tests). Silver is listed too, in case Kalshi opens 15-minute silver rounds.
+
 ### Related markets (v13.33)
 
 Every market now reads every other market, not just its own price. The Deck's **Related markets** card shows, for

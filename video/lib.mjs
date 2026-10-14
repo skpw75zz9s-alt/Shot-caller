@@ -8,7 +8,7 @@ const { riskSettings } = await import(ROOT + '/public/model.js');
 export const MOCK = 8811, APP = 8812;
 export async function start({ paywall = false } = {}) {
   const mock = spawn('node', ['mock.mjs', String(MOCK)], { cwd: process.cwd(), stdio: 'ignore' });
-  const srv = spawn('node', ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(APP), PAYWALL: paywall ? '' : 'off', KALSHI_API: `http://127.0.0.1:${MOCK}`, COINBASE_API: `http://127.0.0.1:${MOCK}`, DATA_DIR: mkdtempSync(join(tmpdir(), 'tut-')), LEARN: process.env.TUT_LEARN || 'off' }, stdio: 'ignore' });
+  const srv = spawn('node', ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(APP), PAYWALL: paywall ? '' : 'off', KALSHI_API: `http://127.0.0.1:${MOCK}`, COINBASE_API: `http://127.0.0.1:${MOCK}`, YAHOO_API: `http://127.0.0.1:${MOCK}`, DATA_DIR: mkdtempSync(join(tmpdir(), 'tut-')), LEARN: process.env.TUT_LEARN || 'off' }, stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 3500));
   const b = await chromium.launch(process.env.PLAYWRIGHT_BROWSERS_PATH ? { executablePath: '/opt/pw-browsers/chromium' } : {});
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });

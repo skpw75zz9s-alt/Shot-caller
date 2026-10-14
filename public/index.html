@@ -62,6 +62,8 @@
   <link rel="modulepreload" href="winguard.js">
   <link rel="modulepreload" href="profitguard.js">
   <link rel="modulepreload" href="tvchart.js">
+  <link rel="modulepreload" href="drivers.js">
+  <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
     // Start the first data requests now, while the code above is still loading; app.js picks these up instead of
@@ -168,6 +170,16 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small></details>
       </div>
       <!-- Related markets (v13.33, public/cross.js): what moves this market, and the model that reads them -->
+      <div data-alt-only class="card drv" id="drvCard">
+        <div class="deep-head"><span id="drvTitle">Why it's moving</span><b id="drvWhen"></b></div>
+        <div class="drv-tabs" id="drvTabs" role="tablist" aria-label="Time window"><button type="button" data-w="15">15m</button><button type="button" data-w="60">1h</button><button type="button" data-w="240">4h</button><button type="button" data-w="1440">1 day</button></div>
+        <p class="drv-say" id="drvSay">Reading the dollar, yields and the rest of its market…</p>
+        <div class="drv-legend" aria-hidden="true"><span><i class="k-act"></i>Actual move</span><span><i class="k-drv"></i>From its drivers</span><span><i class="k-own"></i>Its own</span><span><i class="k-vol"></i>Volume <small>(amber: 3× usual)</small></span></div>
+        <div class="drv-chart" id="drvChart"><div class="drv-svg" id="drvSvg"></div><div class="drv-tip" id="drvTip" hidden></div></div>
+        <ul class="drv-parts" id="drvParts"></ul>
+        <p class="drv-fit" id="drvFit"></p>
+        <details class="how"><summary>How it works</summary><small class="fine-left">Gold, silver and oil are traded as futures, so their price is set by people buying and selling, but most of that trading reacts to a few things. <b>Macro</b>: the US dollar (they're priced in dollars, so a stronger dollar usually pushes them down), the 10-year Treasury yield (higher rates make gold, which pays nothing, less attractive) and stocks. <b>Its market</b>: the rest of its own market (silver, platinum and copper for gold; Brent, gasoline, diesel and natural gas for US crude), minus what the macro already explains, so a move they share is sector-wide buying. <b>Its own</b>: whatever's left, its own buyers and sellers and news (for US crude: inventories, US supply, big orders). Fitted on the last 3 days of 1-minute moves; over any window the parts add up to the actual move. Volume underneath shows when trading was heavy (Yahoo's futures volume). It explains moves, it doesn't predict them, and a market moving together isn't proof one caused the other.</small></details>
+      </div>
       <div class="card cross" id="crossCard">
         <div class="deep-head"><span id="crossTitle">Related markets</span><b id="crossWhen"></b></div>
         <div class="cross-own" id="crossOwn">Reading every market's last few days…</div>
@@ -538,7 +550,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.33 · Related markets</p>
+      <p class="fine" id="version">Shot Caller v13.34 · Why it's moving</p>
     </section>
   </main>
 
@@ -558,7 +570,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '169';
+    window.SC_BUILD = '170';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

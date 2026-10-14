@@ -15,9 +15,32 @@ const spot = () => K + state.lead + Math.sin(Date.now() / 7000) * 9 + Math.sin(D
 const market = () => ({ ticker: 'KXBTC15M-26OCT131715-15', event_ticker: 'KXBTC15M-26OCT131715', title: 'Bitcoin price up in next 15 mins?', subtitle: 'Target $100,000.00', strike_type: 'greater_or_equal', floor_strike: K,
   open_time: new Date(open).toISOString(), close_time: new Date(close).toISOString(), expiration_time: new Date(close).toISOString(), status: 'active',
   yes_bid: state.yb, yes_ask: state.ya, no_bid: 100 - state.ya, no_ask: 100 - state.yb, last_price: state.ya, volume: 18450, open_interest: 9200, liquidity: 250000 });
+// Yahoo's 1-minute charts for the indexes, metals, oil and their drivers: 3 days, gold and oil built from the dollar,
+// yields and their sector so "Why it's moving" has something to explain
+const YSYM = { 'DX-Y.NYB': 104, '^TNX': 4.1, '^GSPC': 6700, '^NDX': 24000, '^DJI': 46000, 'GC=F': 2400, 'SI=F': 30, 'PL=F': 1000, 'HG=F': 4.5, 'CL=F': 70, 'BZ=F': 74, 'RB=F': 2.2, 'HO=F': 2.4, 'NG=F': 3 };
+const YDATA = (() => {
+  const lv = { ...YSYM }, out = Object.fromEntries(Object.keys(YSYM).map((k) => [k, []])), n = 3 * 1440, end = Math.floor(T0 / MIN) * MIN;
+  for (let i = 0; i < n; i++) {
+    const t = end - (n - 1 - i) * MIN, dx = 0.00025 * gauss(), ry = 0.0008 * gauss(), eq = 0.0004 * gauss(), metals = 0.0005 * gauss(), crude = 0.0007 * gauss(), late = i > n - 90;
+    const mv = { 'DX-Y.NYB': dx - (late ? 0.00012 : 0), '^TNX': ry, '^GSPC': eq, '^NDX': eq * 1.3 + 0.0002 * gauss(), '^DJI': eq * 0.8 + 0.0002 * gauss(),
+      'SI=F': metals * 1.4 - 0.4 * dx + 0.0003 * gauss(), 'PL=F': metals + 0.0004 * gauss(), 'HG=F': 0.3 * eq + 0.0005 * gauss(),
+      'BZ=F': crude + 0.0002 * gauss(), 'RB=F': 0.8 * crude + 0.0005 * gauss(), 'HO=F': 0.7 * crude + 0.0005 * gauss(), 'NG=F': 0.0012 * gauss() };
+    mv['GC=F'] = -0.5 * mv['DX-Y.NYB'] - 0.1 * ry + 0.9 * metals + 0.00025 * gauss() + (late ? 0.0001 : 0);
+    mv['CL=F'] = 1.02 * crude - 0.3 * dx + 0.2 * eq + 0.0003 * gauss() + (i > n - 40 ? -0.0002 : 0);
+    for (const k of Object.keys(lv)) { const o = lv[k]; lv[k] *= Math.exp(mv[k]); out[k].push([t / 1000, o, lv[k], Math.round(50 + 400 * rnd() * (k === 'CL=F' && i > n - 40 ? 4 : 1))]); }
+  }
+  return out;
+})();
+const yahooChart = (sym, q) => {
+  const rows = YDATA[sym]; if (!rows) return null;
+  const a = +q.get('period1') || 0, b = +q.get('period2') || Infinity, sel = rows.filter((r) => r[0] >= a && r[0] <= b), last = rows.at(-1);
+  return { chart: { result: [{ meta: { regularMarketPrice: last[2], regularMarketTime: Math.floor(Date.now() / 1000) - 5 }, timestamp: sel.map((r) => r[0]),
+    indicators: { quote: [{ open: sel.map((r) => r[1]), close: sel.map((r) => r[2]), high: sel.map((r) => Math.max(r[1], r[2])), low: sel.map((r) => Math.min(r[1], r[2])), volume: sel.map((r) => r[3]) }] } }] } };
+};
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); res.setHeader('content-type', 'application/json');
   if (u.pathname === '/__set') { for (const k of ['yb', 'ya', 'lead']) if (u.searchParams.has(k)) state[k] = +u.searchParams.get(k); return res.end(JSON.stringify(state)); }
+  if (u.pathname.startsWith('/v8/finance/chart/')) { const b = yahooChart(decodeURIComponent(u.pathname.slice(18)), u.searchParams); if (b) return res.end(JSON.stringify(b)); }
   if (u.pathname.endsWith('/candles')) {
     const g = +u.searchParams.get('granularity') || 60, rows = [];
     if (g === 60) { for (const r of HIST) rows.push(r); const t = Math.floor(Date.now() / MIN) * MIN, c = spot(); rows.push([t / 1000, c - 8, c + 8, closes.at(-1)[1], c, 2]); }

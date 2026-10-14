@@ -105,7 +105,7 @@ setInterval(() => access.prune(), 3600000).unref();
 // Every other Kalshi market (v13.30): discovered live, each with its own copy of the bot and its asset's readers
 // (discovery.js, stacks.js, prices.js). MARKETS=off: Bitcoin's 15-minute market only.
 const fetchJSONs = async (u) => { const r = await fetch(u, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(`${u.split('?')[0]}: HTTP ${r.status}`); return r.json(); };
-export const prices = createPrices({ coinbase: COINBASE, fetchJSON: fetchJSONs });
+export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHOO_API || undefined, fetchJSON: fetchJSONs });
 // Related markets (crossfeed.js): every asset's 1-minute closes, how each market moves with the others, and a model per
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
@@ -398,6 +398,7 @@ export const server = http.createServer(async (req, res) => {
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
     if (path === '/api/pick') return send(res, 200, mb.pick());
     if (path === '/api/cross') return send(res, 200, crossFeed.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC'));
+    if (path === '/api/drivers') return send(res, 200, crossFeed.why(mq ? marketOf(mq, discovery.list()).asset : 'BTC', Number(url.searchParams.get('w')) || 60)); // why it's moving (public/drivers.js)
     if (path === '/api/markets') return send(res, 200, { markets: discovery.list().map((m) => ({ ...m, name: marketOf(m.series, discovery.list()).name, kind: marketOf(m.series, discovery.list()).kind, running: stacks.has(m.series) })), at: discovery.at() });
     // the price of an asset without a Coinbase product (stock indexes, gold, oil: prices.js), in Coinbase's shapes
     const pr = path.match(/^\/api\/price\/([A-Z]+)\/(ticker|candles)$/), pa = pr && ASSETS.find((a) => a.key === pr[1]);

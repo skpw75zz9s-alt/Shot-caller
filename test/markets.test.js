@@ -17,7 +17,7 @@ import { createStacks, nullScan } from '../stacks.js';
 import { callMessage, pickMessage, resultMessage } from '../discord.js';
 
 test('the asset catalog: every coin plus stock indexes, gold and oil, and which Kalshi series each one prices', () => {
-  assert.deepEqual(ASSETS.map((a) => a.key), ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'SPX', 'NDX', 'DJI', 'GOLD', 'OIL']);
+  assert.deepEqual(ASSETS.map((a) => a.key), ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'SPX', 'NDX', 'DJI', 'GOLD', 'SILVER', 'OIL']);
   for (const a of ASSETS) assert.ok(a.kind === 'crypto' ? a.product && a.sym : a.yahoo, a.key);
   assert.equal(assetFor({ series: 'KXBTCD' }).key, 'BTC'); assert.equal(assetFor({ series: 'KXETH15M' }).key, 'ETH');
   assert.equal(assetFor({ series: 'KXINXU' }).key, 'SPX'); assert.equal(assetFor({ series: 'KXNASDAQ100U' }).key, 'NDX');
