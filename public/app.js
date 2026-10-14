@@ -31,7 +31,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '168'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '169'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1752,6 +1752,33 @@ function renderPick(now = Date.now()) {
     st?.graded ? `picks ${st.wins}–${st.graded - st.wins} (${Math.round(st.wins / st.graded * 100)}%), the math said ${st.avgP != null ? pc(st.avgP) : '—'} on average` : 'no graded picks yet',
     st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null,
     st?.score?.vs >= 10 ? `odds ${st.score.brierPick <= st.score.brierKalshi ? 'match or beat' : 'behind'} Kalshi's (Brier ${st.score.brierPick.toFixed(3)} vs ${st.score.brierKalshi.toFixed(3)})` : null].filter(Boolean).join(' · '));
+}
+
+// ---------- Related markets (server: crossfeed.js, public/cross.js): what moves this market ----------
+async function refreshCross() {
+  if (document.hidden) return;
+  try { state.cross = await getJSON(api('cross')); renderCross(); } catch { /* next time */ }
+}
+setInterval(refreshCross, 15000);
+setTimeout(refreshCross, 2500);
+function renderCross() {
+  const c = state.cross;
+  if (!c) return;
+  const pct = (v) => (v == null ? '—' : Math.abs(v) < 0.00005 ? '0.00%' : `${v > 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(2)}%`), cls = (v) => (v == null || Math.abs(v) < 0.00005 ? '' : v > 0 ? 'pos' : 'neg');
+  setText($('crossTitle'), `Related markets · what moves ${MKT.key}`);
+  setText($('crossWhen'), c.backfilled ? `${int(c.minutes)} minutes read` : 'reading history…');
+  setHTML($('crossOwn'), `${esc(MKT.key)} itself: <b class="${cls(c.own?.m5)}">${pct(c.own?.m5)}</b> in 5 min · <b class="${cls(c.own?.m15)}">${pct(c.own?.m15)}</b> in 15`);
+  setHTML($('crossList'), (c.related || []).slice(0, 8).map((r) => {
+    const rho = r.rho == null ? null : Math.max(-1, Math.min(1, r.rho));
+    return `<li><span class="cr-name"><b>${esc(r.name)}</b><small>${r.rho == null ? 'not enough overlap yet' : `ρ ${rho.toFixed(2)} · β ${r.beta.toFixed(2)}`}</small></span>`
+      + `<span class="cr-bar" title="how closely it moves with ${esc(MKT.key)}"><i class="${rho != null && rho < 0 ? 'neg' : ''}" style="width:${rho == null ? 0 : Math.abs(rho) * 100}%"></i></span>`
+      + `<span class="cr-move"><b class="${cls(r.m5)}">${pct(r.m5)}</b><small>5 min</small></span>`
+      + `<span class="cr-move"><b class="${cls(r.catchup)}">${r.catchup == null ? '—' : pct(r.catchup)}</b><small>catch-up</small></span></li>`;
+  }).join('') || '<li class="empty">Reading the other markets…</li>');
+  const m = c.model;
+  setText($('crossModel'), !m ? 'The model starts once the history is in.'
+    : m.proven ? `Model proven: ${(m.gain * 100).toFixed(1)}% less error than "no change" on ${int(m.n)} test minutes (z ${m.z.toFixed(1)}). It expects ${pct(m.expected5)} in the next 5 minutes${c.inCalls ? ' and is nudging the odds now' : ''}.`
+    : `Model learning: ${m.n ? `${m.gain == null ? '—' : `${(m.gain * 100).toFixed(1)}%`} vs "no change" on ${int(m.n)} test minutes (needs ${int(m.need.minTest)}+, ${(m.need.minGain * 100).toFixed(1)}%+ and z ${m.need.z}+)` : `${int(m.rows || 0)} minutes so far`}. Shown here, not used in calls until it proves itself.`);
 }
 
 // ---------- Map to success (public/success.js): live stats, the road with a tip per step, the coach ----------

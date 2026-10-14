@@ -271,6 +271,19 @@ Security:
 
 ## Version notes (newest first)
 
+### Related markets (v13.33)
+
+Every market now reads every other market, not just its own price. The Deck's **Related markets** card shows, for
+the market you're on, each other asset (crypto, S&P 500, Nasdaq, Dow, gold, oil) sorted by how closely it moves with
+this one: correlation and beta on 1-minute moves over the last 3 days, its last 5- and 15-minute move, and the
+catch-up it implies (how far this market has lagged what moves it).
+
+Behind it, a model of each market's next 5 minutes from every asset's recent moves is refitted every 30 minutes and
+scored on minutes it never trained on. It nudges the calls (at most 5 points) only once proven: 1,500+ test minutes,
+at least 0.5% less squared error than "no change", z 2.5+. Until then it's shown, never used. Lead-lag between liquid
+markets is small, so it may stay unproven, and that's the honest outcome. The index, gold and oil rows need Yahoo to
+be reachable from the server. Set `CROSS=off` to turn it off.
+
 ### 15-minute markets only (v13.31)
 
 The market picker and the server list and run only Kalshi's 15-minute rounds, for every asset Kalshi offers them on

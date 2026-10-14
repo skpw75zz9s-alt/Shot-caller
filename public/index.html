@@ -167,6 +167,14 @@
         <ul class="watch-list" id="watchList"></ul>
         <details class="how"><summary>How it works</summary><small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small></details>
       </div>
+      <!-- Related markets (v13.33, public/cross.js): what moves this market, and the model that reads them -->
+      <div class="card cross" id="crossCard">
+        <div class="deep-head"><span id="crossTitle">Related markets</span><b id="crossWhen"></b></div>
+        <div class="cross-own" id="crossOwn">Reading every market's last few days…</div>
+        <ul class="cross-list" id="crossList"></ul>
+        <p class="cross-model" id="crossModel"></p>
+        <details class="how"><summary>How it works</summary><small class="fine-left">Every market is read next to the others that move with it: Bitcoin drags the other coins, crypto often follows the Nasdaq and S&amp;P 500 in US hours, gold and oil move on the same news. ρ is how closely each one has moved with this market minute by minute over the last few days (1 = in lockstep), β how much this market has moved per 1% of it, and catch-up is how far this market has lagged what the others just did (β × their 5-minute move − this market's). A model of the next 5 minutes from all of them is refitted every 30 minutes and scored on data it never trained on against "no change"; it only nudges the bot's odds (±5 points at most) once it proves itself.</small></details>
+      </div>
       <div class="card gd" id="engCard">
         <div class="deep-head"><span>Live forecast · this round</span><b id="enWhen"></b></div>
         <div class="en-thr" id="enThr"></div>
@@ -530,7 +538,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.32.1 · Radar fits every market</p>
+      <p class="fine" id="version">Shot Caller v13.33 · Related markets</p>
     </section>
   </main>
 
@@ -550,7 +558,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '168';
+    window.SC_BUILD = '169';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

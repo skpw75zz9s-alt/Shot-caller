@@ -919,3 +919,14 @@ details.how .fine-left { margin-top: 4px; font-size: 11px; color: var(--muted); 
 .mkt-pick { max-width: 150px; text-overflow: ellipsis; }
 .no-feeds [data-crypto-only] { display: none !important; } /* stock indexes, gold, oil: no exchange trade feeds */
 .alt-note { margin: 10px 0 0; padding: 9px 12px; border-radius: 10px; border: 1px solid #a78bfa44; background: #a78bfa12; color: var(--text); font-size: 12px; line-height: 1.45; }
+
+/* related markets (v13.33) */
+.cross-own { font-size: 13px; color: var(--muted); margin-bottom: 8px; } .cross-own b { font-family: var(--mono); }
+.cross-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cross-list li { display: grid; grid-template-columns: minmax(0, 1.4fr) 54px 70px 74px; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
+.cross-list li:first-child { border-top: 0; }
+.cr-name { display: flex; flex-direction: column; min-width: 0; } .cr-name b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cr-name small, .cr-move small { color: var(--muted); font-size: 10.5px; }
+.cr-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .cr-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; } .cr-bar i.neg { background: var(--violet); }
+.cr-move { display: flex; flex-direction: column; align-items: flex-end; } .cr-move b { font: 700 12.5px var(--mono); }
+.cross-model { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45; }

@@ -23,6 +23,7 @@ import { ASSETS, HOME, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
 import { createStacks } from './stacks.js';
+import { createCrossFeed } from './crossfeed.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -49,6 +50,7 @@ export const access = createAccess({
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
+export let crossFeed = null; // made below, with the price layer (the home bot's hooks read it once it exists)
 // add up proven nudges to the odds per market ({ ticker: points } each, or null)
 const mergeShifts = (...all) => { const out = {}; for (const m of all) for (const [k, v] of Object.entries(m || {})) out[k] = (out[k] || 0) + v; return Object.keys(out).length ? out : null; };
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
@@ -84,12 +86,13 @@ export const bot = createBot({
     try { tuneFeed.observe(o); } catch (e) { console.error('indicator tuning step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
+    try { crossFeed?.observe('BTC', o); } catch (e) { console.error('related markets step failed', e.message); }
     autotrade?.step(o);
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
-  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
-  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live() }),
+  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts(), crossFeed?.shifts('BTC')), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live(), cross: !!crossFeed?.shifts('BTC') }),
   watch: () => marketWatch.status(),
   volTune: () => volTuneFeed.live(),
   onCall: (e, o) => discord.call(e, o),
@@ -103,8 +106,11 @@ setInterval(() => access.prune(), 3600000).unref();
 // (discovery.js, stacks.js, prices.js). MARKETS=off: Bitcoin's 15-minute market only.
 const fetchJSONs = async (u) => { const r = await fetch(u, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(`${u.split('?')[0]}: HTTP ${r.status}`); return r.json(); };
 export const prices = createPrices({ coinbase: COINBASE, fetchJSON: fetchJSONs });
+// Related markets (crossfeed.js): every asset's 1-minute closes, how each market moves with the others, and a model per
+// market that nudges its calls once proven. CROSS=off turns it off.
+crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord,
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed,
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -391,6 +397,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/record') return send(res, 200, mb.record());
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
     if (path === '/api/pick') return send(res, 200, mb.pick());
+    if (path === '/api/cross') return send(res, 200, crossFeed.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC'));
     if (path === '/api/markets') return send(res, 200, { markets: discovery.list().map((m) => ({ ...m, name: marketOf(m.series, discovery.list()).name, kind: marketOf(m.series, discovery.list()).kind, running: stacks.has(m.series) })), at: discovery.at() });
     // the price of an asset without a Coinbase product (stock indexes, gold, oil: prices.js), in Coinbase's shapes
     const pr = path.match(/^\/api\/price\/([A-Z]+)\/(ticker|candles)$/), pa = pr && ASSETS.find((a) => a.key === pr[1]);
@@ -426,4 +433,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.env.PLAYBOOK !== 'off') ready.then(() => playbook.start()); // PLAYBOOK=off: no candle history or strategy check
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
   if (process.env.MARKETS !== 'off') ready.then(() => stacks.begin()); // every other Kalshi market (stacks.js)
+  if (process.env.CROSS !== 'off') crossFeed.start(); // related markets (crossfeed.js)
 }

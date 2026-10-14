@@ -1,0 +1,97 @@
+// Related markets on the server (v13.33, public/cross.js): one reader for every asset's 1-minute closes, shared by
+// every market's bot. On start it reads about a week of history (Coinbase for crypto, Yahoo's 5 days for the indexes,
+// gold and oil), then the latest candles every 30 seconds; every 30 minutes it refits each market's model and scores
+// it walk-forward. Each bot hands it its snapshot (observe) and gets back its nudges once proven (shifts).
+import { ASSETS } from './public/markets.js';
+import { CROSS, closeMap, crossShift, dataset, evaluate, features, moveOver, predict, relation, ridgeFit } from './public/cross.js';
+import { parseCandles } from './public/engine.js';
+
+export function createCrossFeed({ prices, assets = ASSETS, clock = () => Date.now(), log = console, refreshMs = 30000, refitMs = 1800000, keepDays = 7,
+  sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }) } = {}) {
+  const maps = Object.fromEntries(assets.map((a) => [a.key, new Map()]));
+  const models = {}, snaps = {}, relCache = {};
+  let timer = null, refitAt = 0, busy = false, backfilled = false;
+  const others = (k) => assets.map((a) => a.key).filter((x) => x !== k);
+
+  function merge(key, candles) {
+    const m = maps[key]; if (!m) return;
+    for (const [t, c] of closeMap(candles)) m.set(t, c);
+    const cut = clock() - keepDays * 86400000;
+    if (m.size > keepDays * 1440 + 600) for (const t of [...m.keys()]) if (t < cut) m.delete(t);
+  }
+  async function backfill(now = clock()) {
+    for (const a of assets) {
+      const days = a.product ? keepDays : 5, step = 300 * 60000;
+      if (a.product) {
+        for (let s = now - days * 86400000; s < now; s += step) {
+          try { merge(a.key, parseCandles(await prices.candleRows(a, { gran: 60, start: s, end: Math.min(now, s + step) }))); } catch { /* a gap */ }
+          await sleep(350);
+        }
+      } else {
+        try { merge(a.key, parseCandles(await prices.candleRows(a, { gran: 60, start: now - days * 86400000, end: now }))); } catch (e) { log.warn?.(`related markets: ${a.key} history`, e.message); }
+      }
+    }
+    backfilled = true;
+    refit();
+  }
+  async function poll() {
+    if (busy) return; busy = true;
+    try {
+      for (const a of assets) { try { merge(a.key, parseCandles(await prices.candleRows(a, { gran: 60 }))); } catch { /* next time */ } }
+      if (clock() - refitAt >= refitMs) refit();
+    } finally { busy = false; }
+  }
+  function refit(now = clock()) {
+    refitAt = now;
+    for (const a of assets) {
+      try {
+        const o = others(a.key), { X, y } = dataset(maps, a.key, o);
+        if (X.length < 300) { models[a.key] = { n: 0, rows: X.length, proven: false, at: now, model: null, others: o }; continue; }
+        models[a.key] = { ...evaluate(X, y), rows: X.length, model: ridgeFit(X, y), at: now, others: o };
+      } catch (e) { log.warn?.(`related markets: ${a.key} model`, e.message); }
+    }
+  }
+  // this market's expected move over the next 5 minutes from what moves it (a log return), or null
+  function expected(key, now = clock()) {
+    const m = models[key];
+    return m?.model ? predict(m.model, features(maps, key, m.others, Math.floor(now / 60000) * 60000)) : null;
+  }
+  function observe(key, { snap } = {}, now = clock()) {
+    if (!snap) return;
+    snaps[key] = { at: now, rows: snap.rows.filter((r) => r.ev?.minutesLeft > 0 && (r.pPre ?? r.ev.pYes) != null).map((r) => ({ ticker: r.m.ticker, pYes: r.pPre ?? r.ev.pYes, sigma: r.sigma ?? snap.sigmaMin, minutesLeft: r.ev.minutesLeft, strikeType: r.m.strike_type || 'greater' })) };
+  }
+  // proven nudges for this market's open rounds: { ticker: points }
+  function shifts(key, now = clock()) {
+    const m = models[key], s = snaps[key];
+    if (!m?.proven || !s || now - s.at > 20000) return null;
+    const mu5 = expected(key, now);
+    if (mu5 == null) return null;
+    const out = {};
+    for (const r of s.rows) { const v = crossShift({ pYes: r.pYes, mu5, sigmaMin: r.sigma, minutesLeft: r.minutesLeft, strikeType: r.strikeType }); if (v) out[r.ticker] = v; }
+    return Object.keys(out).length ? out : null;
+  }
+  function api(key, now = clock()) {
+    const a = assets.find((x) => x.key === key);
+    if (!a) return null;
+    if (!relCache[key] || now - relCache[key].at > 60000) {
+      const own5 = moveOver(maps[key], now, 5), own15 = moveOver(maps[key], now, 15);
+      const related = others(key).map((k) => {
+        const b = assets.find((x) => x.key === k), rel = relation(maps, key, k, now), m5 = moveOver(maps[k], now, 5), m15 = moveOver(maps[k], now, 15);
+        const last = maps[k].size ? maps[k].get([...maps[k].keys()].reduce((p, t) => (t > p ? t : p), 0)) : null;
+        return { key: k, name: b.name, kind: b.kind, price: last, m5, m15, rho: rel.rho, beta: rel.beta, n: rel.n,
+          catchup: rel.beta != null && m5 != null && own5 != null ? rel.beta * m5 - own5 : null };
+      }).sort((x, y) => Math.abs(y.rho ?? 0) - Math.abs(x.rho ?? 0));
+      relCache[key] = { at: now, own: { m5: own5, m15: own15 }, related };
+    }
+    const m = models[key];
+    return { key, name: a.name, ...relCache[key], backfilled, minutes: maps[key].size,
+      model: m ? { proven: m.proven, n: m.n, rows: m.rows, gain: m.gain, z: m.z, at: m.at, expected5: expected(key, now), need: { minTest: CROSS.minTest, minGain: CROSS.minGain, z: CROSS.z } } : null,
+      inCalls: shifts(key, now) };
+  }
+  return {
+    // the last 5 hours of every market first (the card fills in seconds), then the week behind them
+    start() { if (timer) return; poll().then(() => { refit(); return backfill(); }).catch((e) => log.warn?.('related markets backfill failed', e.message)); timer = setInterval(() => poll(), refreshMs); timer.unref?.(); },
+    stop() { clearInterval(timer); timer = null; },
+    merge, refit, poll, backfill, observe, shifts, expected, api, maps: () => maps, models: () => models,
+  };
+}
