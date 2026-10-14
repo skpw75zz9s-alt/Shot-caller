@@ -1,0 +1,31 @@
+// Screens for the ad (video/ad.html): the real app against sample market data (mock.mjs), never real prices
+import { start } from './lib.mjs';
+const OUT = 'ad';
+const { page, ctx, stop, errs, url } = await start();
+const now = Date.now(), H = 3600000;
+const trades = Array.from({ length: 26 }, (_, i) => {
+  const won = ![2, 7, 11, 19].includes(i), price = [0.72, 0.81, 0.66, 0.78, 0.7, 0.75][i % 6], contracts = 6;
+  const closedAt = now - (i < 2 ? i * 0.5 * H : (i - 1) * 7 * H);
+  return { ticker: 'KXBTC15M-SAMPLE', side: i % 3 ? 'YES' : 'NO', price, contracts, at: closedAt - 600000, closedAt, how: 'settled', exit: won ? 1 : 0, pnl: won ? (1 - price) * contracts - 0.1 : -price * contracts - 0.1 };
+});
+await ctx.addInitScript((t) => { if (!localStorage.getItem('trades')) localStorage.setItem('trades', JSON.stringify(t)); localStorage.setItem('nudgeDismissed', 'true'); }, trades);
+await page.goto(url, { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(16000);
+const hideNav = () => page.addStyleTag({ content: '.toast{display:none!important}' });
+await hideNav();
+await page.screenshot({ path: `${OUT}/deck-btc.png` });
+const box = await (await page.$('#pickCard')).boundingBox();
+const navOff = await page.addStyleTag({ content: 'nav{display:none!important}' });
+await page.screenshot({ path: `${OUT}/pick.png`, fullPage: true, clip: { x: 0, y: Math.max(0, box.y - 70), width: 390, height: 844 } });
+await navOff.evaluate((el) => el.remove());
+await page.click('nav button[data-view=success]'); await page.waitForTimeout(2500);
+await page.screenshot({ path: `${OUT}/map.png` });
+await page.click('nav button[data-view=chart]'); await page.waitForTimeout(3500);
+await page.screenshot({ path: `${OUT}/chart.png` });
+await page.click('nav button[data-view=live]'); await page.waitForTimeout(800);
+await page.selectOption('#mktPick', 'KXETH15M');
+await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(9000);
+await hideNav();
+await page.screenshot({ path: `${OUT}/deck-eth.png` });
+console.log(JSON.stringify({ errs, pick: box }));
+await stop();

@@ -1,0 +1,233 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../public/styles.css">
+<style>
+  /* the ad: 1280x720, every frame drawn by render(t) so the recording is exact */
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 720px; overflow: hidden; background: #04060c !important; padding: 0 !important; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #e8ecf3; }
+  #bg { position: absolute; inset: 0; background: radial-gradient(90% 80% at 75% 20%, #0f2346 0%, #04060c 60%); }
+  #grid { position: absolute; inset: -80px; background-image: linear-gradient(#22d3ee10 1px, transparent 1px), linear-gradient(90deg, #22d3ee10 1px, transparent 1px); background-size: 48px 48px; }
+  #glow { position: absolute; width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, #22d3ee22, transparent 62%); left: 640px; top: -120px; }
+  .scene { position: absolute; inset: 0; opacity: 0; }
+  .eyebrow { font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #22d3ee; text-transform: uppercase; }
+  .h { font-weight: 800; font-size: 56px; line-height: 1.04; letter-spacing: -1.5px; }
+  .h em { font-style: normal; color: #22d3ee; text-shadow: 0 0 24px #22d3ee66; }
+  .sub { font-size: 22px; line-height: 1.4; color: #b7c1d3; }
+  .left { position: absolute; left: 80px; top: 150px; width: 640px; display: flex; flex-direction: column; gap: 18px; }
+  .phone { position: absolute; width: 300px; height: 650px; border-radius: 40px; overflow: hidden; background: #000; box-shadow: 0 0 0 7px #1a2236, 0 0 0 9px #2c3a5a, 0 30px 80px #000c, 0 0 80px #22d3ee22; }
+  .phone img { width: 300px; display: block; }
+  .ring { position: absolute; border: 4px solid #f7931a; border-radius: 16px; box-shadow: 0 0 0 4px #f7931a33, 0 0 30px #f7931aaa; }
+  /* intro */
+  #logo { position: absolute; left: 50%; top: 200px; width: 150px; height: 150px; margin-left: -75px; border-radius: 34px; box-shadow: 0 0 0 2px #22d3ee55, 0 20px 80px #22d3ee55; }
+  .burst { position: absolute; left: 50%; top: 275px; width: 10px; height: 10px; border-radius: 50%; border: 3px solid #22d3ee; transform: translate(-50%, -50%); }
+  #brand { position: absolute; width: 100%; top: 385px; text-align: center; font-weight: 800; font-size: 64px; letter-spacing: 10px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #tag { position: absolute; width: 100%; top: 475px; text-align: center; font-size: 26px; color: #b7c1d3; }
+  #ver { position: absolute; left: 50%; top: 530px; transform: translateX(-50%); font: 700 16px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #22d3ee; border: 2px solid #22d3ee66; border-radius: 999px; padding: 6px 18px; }
+  /* markets */
+  .chips { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 16px; background: #0b1426; border: 2px solid #22d3ee44; font: 800 24px 'DejaVu Sans Mono', monospace; }
+  .chip i { font-style: normal; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 19px; color: #06101c; }
+  .more { font: 700 18px 'DejaVu Sans Mono', monospace; color: #8b95a7; align-self: center; }
+  /* tiles */
+  .tiles { position: absolute; left: 80px; top: 300px; width: 1120px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .tile { padding: 18px 18px; border-radius: 18px; background: linear-gradient(180deg, #0e1830, #0a1222); border: 1px solid #22d3ee33; display: flex; gap: 14px; align-items: center; font-size: 20px; font-weight: 700; }
+  .tile span { font-size: 30px; }
+  /* radar */
+  .scopes { position: absolute; left: 60px; top: 250px; width: 1160px; display: flex; justify-content: space-between; }
+  .scope { width: 360px; text-align: center; }
+  .scope .wrap { position: relative; width: 340px; height: 340px; margin: 0 auto; }
+  .scope svg { width: 340px; height: 340px; display: block; }
+  .scope .beam { position: absolute; left: 50%; top: 50%; width: 312px; height: 312px; margin: -156px 0 0 -156px; border-radius: 50%; background: conic-gradient(from 0deg, #2ee6a600 0deg, #2ee6a600 300deg, #2ee6a640 350deg, #7dffd0aa 359deg, #2ee6a600 360deg); mix-blend-mode: screen; }
+  .scope b { display: block; margin-top: 10px; font: 800 24px 'DejaVu Sans Mono', monospace; }
+  .scope small { font: 15px 'DejaVu Sans Mono', monospace; color: #8b95a7; }
+  .rs-blip { animation: none !important; opacity: 1 !important; }
+  /* pick */
+  .formula { display: flex; align-items: center; gap: 14px; margin-top: 10px; font: 800 26px 'DejaVu Sans Mono', monospace; }
+  .formula div { padding: 12px 16px; border-radius: 14px; background: #0b1426; border: 2px solid #22d3ee44; text-align: center; }
+  .formula small { display: block; font: 700 12px 'DejaVu Sans Mono', monospace; letter-spacing: 2px; color: #8b95a7; }
+  .formula .eq { color: #22d3ee; border-color: #22d3ee; box-shadow: 0 0 24px #22d3ee44; }
+  /* stats */
+  .stats { display: flex; flex-direction: column; gap: 22px; margin-top: 18px; }
+  .ad-stat { display: flex; align-items: baseline; gap: 18px; }
+  .ad-stat b { font: 800 44px 'DejaVu Sans Mono', monospace; color: #2ee6a6; min-width: 250px; text-align: right; text-shadow: 0 0 20px #2ee6a644; }
+  .ad-stat span { font-size: 22px; color: #c9d1e0; }
+  /* outro */
+  #o-logo { position: absolute; left: 50%; top: 150px; width: 120px; height: 120px; margin-left: -60px; border-radius: 28px; box-shadow: 0 20px 70px #22d3ee55; }
+  #o-h { position: absolute; width: 100%; top: 300px; text-align: center; }
+  #o-sub { position: absolute; width: 100%; top: 380px; text-align: center; }
+  #o-cta { position: absolute; left: 50%; top: 450px; transform: translateX(-50%); padding: 16px 34px; border-radius: 16px; background: #22d3ee; color: #04121a; font: 800 24px 'DejaVu Sans', sans-serif; letter-spacing: 1px; box-shadow: 0 0 40px #22d3ee66; }
+  #o-fine { position: absolute; left: 140px; right: 140px; bottom: 50px; text-align: center; font-size: 15px; line-height: 1.5; color: #7b8598; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); }
+  #note { position: absolute; right: 20px; bottom: 12px; font: 11px 'DejaVu Sans Mono', monospace; color: #4a5468; letter-spacing: 1px; }
+</style></head>
+<body>
+<div id="bg"></div><div id="grid"></div><div id="glow"></div>
+
+<section class="scene" id="s0">
+  <div class="burst" id="b1"></div><div class="burst" id="b2"></div>
+  <img id="logo" src="../public/icon-512.png">
+  <div id="brand">SHOT<em>CALLER</em></div>
+  <div id="tag">The biggest update yet</div>
+  <div id="ver">v13.32</div>
+</section>
+
+<section class="scene" id="s1">
+  <div class="left">
+    <div class="eyebrow a">New · market picker</div>
+    <div class="h a">Every Kalshi<br><em>15-minute</em> market.</div>
+    <div class="sub a">Tap the coin tag at the top to switch. Every market Kalshi runs 15-minute rounds on, found live.</div>
+    <div class="chips">
+      <div class="chip c"><i style="background:#f7931a">₿</i>BTC</div>
+      <div class="chip c"><i style="background:#8c8cff">Ξ</i>ETH</div>
+      <div class="chip c"><i style="background:#2ee6a6">◎</i>SOL</div>
+      <div class="chip c"><i style="background:#e8ecf3">✕</i>XRP</div>
+      <div class="more c">+ new ones as Kalshi lists them</div>
+    </div>
+  </div>
+  <div class="phone" id="p1" style="left:880px;top:35px"><img id="p1a" src="ad/deck-btc.png"><img id="p1b" src="ad/deck-eth.png" style="position:absolute;left:0;top:0;opacity:0"></div>
+  <div class="ring" id="r1" style="left:976px;top:38px;width:84px;height:25px;border-radius:10px"></div>
+</section>
+
+<section class="scene" id="s2">
+  <div class="left" style="top:110px;width:1100px">
+    <div class="eyebrow a">Every market gets</div>
+    <div class="h a">A full copy of the bot.</div>
+  </div>
+  <div class="tiles">
+    <div class="tile t"><span>🎯</span>Its own odds &amp; calls</div>
+    <div class="tile t"><span>🔔</span>Push alerts</div>
+    <div class="tile t"><span>🧠</span>Its own learning</div>
+    <div class="tile t"><span>📈</span>Official record</div>
+    <div class="tile t"><span>🔒</span>10-minute pick</div>
+    <div class="tile t"><span>💬</span>Discord posts</div>
+    <div class="tile t"><span>🛰️</span>Round scan</div>
+    <div class="tile t"><span>👁️</span>Market watch</div>
+  </div>
+</section>
+
+<section class="scene" id="s3">
+  <div class="left" style="top:70px;width:1100px">
+    <div class="eyebrow a">Rebuilt</div>
+    <div class="h a">A radar that <em>fits every market</em>.</div>
+  </div>
+  <div class="scopes" id="scopes"></div>
+</section>
+
+<section class="scene" id="s4">
+  <div class="left">
+    <div class="eyebrow a">Sharper</div>
+    <div class="h a">The 10-minute pick,<br><em>bot + market</em>.</div>
+    <div class="sub a">The bot's math and Kalshi's own price, combined. It learns the most accurate mix from its own graded picks.</div>
+    <div class="formula a"><div><small>BOT</small>97%</div>+<div><small>KALSHI</small>98%</div>=<div class="eq"><small>PICK</small>97%</div></div>
+  </div>
+  <div class="phone" id="p4" style="left:880px;top:35px"><img src="ad/pick.png"></div>
+</section>
+
+<section class="scene" id="s5">
+  <div class="left">
+    <div class="eyebrow a">New tab</div>
+    <div class="h a"><em>Map</em> to success.</div>
+    <div class="sub a">Live stats, nine milestones with a tip for each, and a coach that reads your own trades.</div>
+  </div>
+  <div class="phone" id="p5" style="left:880px;top:35px"><img id="p5i" src="ad/map.png"></div>
+</section>
+
+<section class="scene" id="s6">
+  <div class="left" style="top:120px">
+    <div class="eyebrow a">Under the hood</div>
+    <div class="h a">Exact math.<br><em>Fair grading.</em></div>
+    <div class="stats">
+      <div class="ad-stat a"><b id="n1">0</b><span>simulated paths check the odds</span></div>
+      <div class="ad-stat a"><b>90%</b><span>radar bands widen until they hold</span></div>
+      <div class="ad-stat a"><b>Every</b><span>market graded on its own record</span></div>
+    </div>
+  </div>
+  <div class="phone" id="p6" style="left:880px;top:35px"><img src="ad/chart.png"></div>
+</section>
+
+<section class="scene" id="s7">
+  <img id="o-logo" src="../public/icon-512.png">
+  <div id="o-h" class="h">Live <em>now</em>.</div>
+  <div id="o-sub" class="sub">Reopen Shot Caller to get v13.32.</div>
+  <div id="o-cta">Open Shot Caller</div>
+  <div id="o-fine">Signals, not guarantees: every call can lose, and a pick is a lean, not a lock. Not financial advice. Trade only what you can afford to lose. Screens show sample market data.</div>
+</section>
+
+<div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
+<script type="module">
+import { scopeSvg } from '../public/radar.js';
+const $ = (id) => document.getElementById(id);
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };          // ease-out cubic
+const pop = (x) => { x = clamp(x); const c = 1.7; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }; // overshoot
+const SCENES = [['s0', 0, 3.4], ['s1', 3.4, 9.4], ['s2', 9.4, 15.0], ['s3', 15.0, 21.0], ['s4', 21.0, 26.6], ['s5', 26.6, 31.8], ['s6', 31.8, 36.4], ['s7', 36.4, 41.4]];
+window.DURATION = 41.4;
+window.CUTS = SCENES.map((s) => s[1]);
+
+// the three radars: Bitcoin, Ethereum and XRP sized reads (sample numbers)
+const read = (E, sd, tg) => ({ expected: E, floor: E - 1.28 * sd, ceil: E + 1.28 * sd, lo: E - 1.64 * sd, hi: E + 1.64 * sd, target: E - tg * sd, dir: tg > 1.5 ? 'UP' : null, next: { lo: E - 0.3 * sd, hi: E + 0.3 * sd } });
+const venues = (E, sd) => ['Coinbase', 'Kraken', 'Bitstamp', 'Binance', 'OKX perp', 'Bybit perp'].map((ex, i) => ({ ex, price: E + (i - 2.5) * 0.25 * sd, net: i % 2 ? 1 : -1 }));
+const SC = [['BTC', 100250, 62, 0.7, '$100,250'], ['ETH', 4012.5, 3.1, 1.6, '$4,012.50'], ['XRP', 2.5123, 0.0021, 0.6, '$2.5123']];
+$('scopes').innerHTML = SC.map(([k, E, sd, tg, px]) => `<div class="scope"><div class="wrap"><svg class="radar-scope" viewBox="0 0 300 300">${scopeSvg(read(E, sd, tg), E - 0.1 * sd, venues(E, sd))}</svg><div class="beam" data-k="${k}"></div></div><b>${k}</b><small>${px} · 15m</small></div>`).join('');
+
+const els = (id, sel) => [...$(id).querySelectorAll(sel)];
+// enter: fade + rise, staggered; leave: the whole scene fades in its last 0.35 s
+function enter(list, local, start, step = 0.12, dy = 26) {
+  list.forEach((el, i) => { const k = ease((local - start - i * step) / 0.55); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`; });
+}
+window.render = (t) => {
+  $('bar').style.width = `${(t / window.DURATION) * 100}%`;
+  $('grid').style.transform = `translate(${(t * 6) % 48}px, ${(t * 3) % 48}px)`;
+  $('glow').style.transform = `translate(${Math.sin(t / 3) * 60}px, ${Math.cos(t / 4) * 40}px)`;
+  for (const [id, a, b] of SCENES) {
+    const el = $(id), local = t - a, dur = b - a, on = t >= a - 0.01 && t < b + 0.01;
+    el.style.opacity = on ? Math.min(ease(local / 0.35), ease((dur - local) / 0.35)) : 0;
+    el.style.display = on ? 'block' : 'none';
+    if (!on) continue;
+    if (id === 's0') {
+      const k = pop(local / 0.8); $('logo').style.transform = `scale(${0.4 + 0.6 * k})`; $('logo').style.opacity = clamp(local / 0.3);
+      for (const [bid, d] of [['b1', 0.15], ['b2', 0.45]]) { const x = clamp((local - d) / 1.2); const s = 10 + x * 520; Object.assign($(bid).style, { width: `${s}px`, height: `${s}px`, opacity: (1 - x) * 0.8 }); }
+      enter([$('brand'), $('tag'), $('ver')], local, 0.55, 0.18, 20);
+      $('brand').style.letterSpacing = `${10 + (1 - ease((local - 0.55) / 1.2)) * 24}px`;
+    }
+    if (id === 's1') {
+      enter(els(id, '.a'), local, 0.1); enter(els(id, '.c'), local, 0.9, 0.14, 18);
+      const ph = ease(local / 0.7); $('p1').style.transform = `translateX(${(1 - ph) * 360}px) rotate(${(1 - ph) * 6}deg)`;
+      const sw = clamp((local - 3.0) / 0.4); $('p1b').style.opacity = sw;
+      const pulse = 0.55 + 0.45 * Math.sin(local * 6); $('r1').style.opacity = clamp((local - 1.2) / 0.3) * (local < 3.4 ? pulse : 0.35);
+    }
+    if (id === 's2') { enter(els(id, '.a'), local, 0.1); els(id, '.t').forEach((el, i) => { const k = pop((local - 0.6 - i * 0.1) / 0.5); el.style.opacity = clamp((local - 0.6 - i * 0.1) / 0.25); el.style.transform = `scale(${0.7 + 0.3 * k})`; }); }
+    if (id === 's3') {
+      enter(els(id, '.a'), local, 0.1);
+      els(id, '.scope').forEach((el, i) => { const k = ease((local - 0.5 - i * 0.2) / 0.6); el.style.opacity = k; el.style.transform = `scale(${0.85 + 0.15 * k})`; });
+      els(id, '.beam').forEach((b, i) => { b.style.transform = `rotate(${(local * 90 + i * 40) % 360}deg)`; });
+    }
+    if (id === 's4') {
+      enter(els(id, '.a'), local, 0.1);
+      const ph = ease(local / 0.7); $('p4').style.transform = `translateX(${(1 - ph) * 360}px) scale(${1 + 0.06 * ease((local - 1) / 3)})`;
+    }
+    if (id === 's5') {
+      enter(els(id, '.a'), local, 0.1);
+      const ph = ease(local / 0.7); $('p5').style.transform = `translateX(${(1 - ph) * 360}px)`;
+      $('p5i').style.transform = `translateY(${-ease((local - 1.2) / 3.4) * 120}px)`;
+    }
+    if (id === 's6') {
+      enter(els(id, '.a'), local, 0.1, 0.16);
+      $('n1').textContent = Math.round(200000 * ease((local - 0.7) / 1.6)).toLocaleString('en-US');
+      const ph = ease(local / 0.7); $('p6').style.transform = `translateX(${(1 - ph) * 360}px)`; $('p6').style.opacity = 0.55 + 0.45 * ph;
+    }
+    if (id === 's7') {
+      const k = pop(local / 0.7); $('o-logo').style.transform = `scale(${0.5 + 0.5 * k})`;
+      enter([$('o-h'), $('o-sub'), $('o-fine')], local, 0.35, 0.18, 18);
+      const c = pop((local - 0.9) / 0.5); $('o-cta').style.opacity = clamp((local - 0.9) / 0.2); $('o-cta').style.transform = `translateX(-50%) scale(${0.8 + 0.2 * c + 0.03 * Math.sin(local * 5) * clamp(local - 1.5)})`;
+    }
+  }
+  $('note').style.opacity = t > 3.4 && t < 36.4 ? 1 : 0;
+};
+await Promise.all([...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; }))));
+await document.fonts?.ready;
+window.render(0);
+window.ready = true;
+</script>
+</body></html>

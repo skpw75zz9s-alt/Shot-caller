@@ -4,8 +4,18 @@
 #   bash video/make.sh voice      first re-voice every line with ElevenLabs (needs ELEVENLABS_API_KEY and network access
 #                                 to api.elevenlabs.io; VOICE_ID overrides the voice, default yj30vwTGJxSHezdAGsv9)
 #   bash video/make.sh shots      first re-capture the app screenshots (runs the real app against video/mock.mjs)
+#   bash video/make.sh ad         the 41-second ad (video/shot-caller-v13-ad.mp4, 1280x720, under Discord's 10 MB limit)
 set -euo pipefail
 cd "$(dirname "$0")"
+if [ "${1:-}" = ad ]; then
+  TUT_LEARN=on node adcap.mjs
+  (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
+  node adrender.mjs full && python3 admusic.py
+  P=$(mktemp -d)/x264
+  ffmpeg -v error -y -i ad-silent.mp4 -c:v libx264 -preset slow -b:v 1500k -pass 1 -passlogfile "$P" -an -f mp4 /dev/null
+  ffmpeg -v error -y -i ad-silent.mp4 -i ad-music.wav -c:v libx264 -preset slow -b:v 1500k -maxrate 2500k -bufsize 4000k -pass 2 -passlogfile "$P" -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart shot-caller-v13-ad.mp4
+  echo "built video/shot-caller-v13-ad.mp4 ($(du -h shot-caller-v13-ad.mp4 | cut -f1))"; exit 0
+fi
 if [ "${1:-}" = shots ]; then rm -f shots/boxes.json; node capture.mjs app; node capture.mjs buy; node capture.mjs loss; node capture.mjs site; fi
 if [ "${1:-}" = voice ]; then mkdir -p vo; python3 tts_elevenlabs.py; fi
 # the saved narration (video/voice/*.mp3: your ElevenLabs voice) when there's no fresh one in vo/
