@@ -113,3 +113,16 @@ test('the radar widens its bands until a walk-forward replay of its own rounds h
   assert.ok(radarLevels(calm).range.level <= 0.92, 'no widening where 90% already holds');
   assert.equal(radarLevels(calm.slice(0, 15)).floor.level, RADAR.level, 'too few rounds to replay: plain 90%');
 });
+
+test('the radar fits every market: an XRP-sized read fills the screen like a Bitcoin one, with labels at its precision (v13.32)', async () => {
+  const { scopeLayout, scopeSvg, SCOPE } = await import('../public/radar.js');
+  const read = (E, sd) => ({ expected: E, floor: E - 1.28 * sd, ceil: E + 1.28 * sd, lo: E - 1.64 * sd, hi: E + 1.64 * sd, target: E - 0.5 * sd, dir: null, next: { lo: E - 0.3 * sd, hi: E + 0.3 * sd } });
+  const btc = scopeLayout(read(100250, 60), 100240), xrp = scopeLayout(read(2.5123, 0.0021), 2.5119), doge = scopeLayout(read(0.18234, 0.00031), 0.18229);
+  for (const L of [xrp, doge]) assert.ok(Math.abs(L.rr - btc.rr) < 0.5, `the 90% ring is the same size on screen (${L.rr.toFixed(1)} vs ${btc.rr.toFixed(1)} of ${SCOPE.r})`);
+  assert.ok(xrp.rr > SCOPE.r * 0.5, 'not squashed to the centre');
+  const svg = scopeSvg(read(2.5123, 0.0021), 2.5119);
+  assert.match(svg, /CEILING \$2\.5150/); assert.match(svg, /TARGET \$2\.5113/); assert.match(svg, /NOW \$2\.5119/);
+  assert.match(svg, /±\$0\.00\d+/, 'ring distances in fractions of a cent');
+  assert.ok(!/CEILING \$3</.test(svg), 'no whole-dollar labels on a $2.51 market');
+  assert.match(scopeSvg(read(100250, 60), 100240), /CEILING \$100,327/, "Bitcoin's labels as before");
+});

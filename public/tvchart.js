@@ -20,7 +20,7 @@ function baseOptions(height, withTime = true) {
     rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.08, bottom: 0.08 } },
     timeScale: { borderColor: '#16203a', timeVisible: true, secondsVisible: false, visible: withTime, rightOffset: 2, fixLeftEdge: false,
       tickMarkFormatter: (t, type) => (type <= 2 ? DAY.format(t * 1000) : TIME.format(t * 1000)) },
-    localization: { timeFormatter: (t) => `${DAY.format(t * 1000)} ${TIME.format(t * 1000)}`, priceFormatter: (p) => NUM.format(p) },
+    localization: { timeFormatter: (t) => `${DAY.format(t * 1000)} ${TIME.format(t * 1000)}`, priceFormatter: (p) => NUMF.format(p) },
     crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' }, horzLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' } },
     handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
     handleScroll: { horzTouchDrag: true, vertTouchDrag: false, mouseWheel: true, pressedMouseMove: true },
@@ -28,7 +28,12 @@ function baseOptions(height, withTime = true) {
   };
 }
 
-export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
+// digits: the market's price precision (public/markets.js: BTC 0, ETH and SOL 2, XRP 4, DOGE 5). Bitcoin's chart is as it
+// was; smaller-priced markets get their decimals on the axis and candles (whole cents flattened XRP's candles to lines)
+export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 }) {
+  const fine = digits >= 2, PF = fine ? { priceFormat: { type: 'price', precision: digits, minMove: 10 ** -digits } } : {};
+  const MF = fine ? { priceFormat: { type: 'price', precision: digits + 2, minMove: 10 ** -(digits + 2) } } : {}; // MACD, a fraction of the price
+  const NUMF = fine ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : NUM;
   const chart = createChart(main, baseOptions(300));
   const rsiChart = createChart(rsiEl, { ...baseOptions(90, false), rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.1, bottom: 0.1 } }, handleScroll: false, handleScale: false });
   const macdChart = createChart(macdEl, { ...baseOptions(90, false), handleScroll: false, handleScale: false });
@@ -53,12 +58,12 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
     }
     return { priceRange: { minValue: axis.lo, maxValue: axis.hi }, margins: r.margins };
   };
-  const candles = chart.addCandlestickSeries({ upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3', priceLineStyle: LineStyle.Dashed, autoscaleInfoProvider: steadyAxis });
+  const candles = chart.addCandlestickSeries({ ...PF, upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3', priceLineStyle: LineStyle.Dashed, autoscaleInfoProvider: steadyAxis });
   // the expected path (public/predict.js pathMinutes), drawn invisibly: it only carries the flip (↺) and round-close markers
-  const pathLine = chart.addLineSeries({ color: 'rgba(0,0,0,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
+  const pathLine = chart.addLineSeries({ ...PF, color: 'rgba(0,0,0,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
   const volume = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
-  const line = (color, opts = {}) => chart.addLineSeries({ color, lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...opts });
+  const line = (color, opts = {}) => chart.addLineSeries({ ...PF, color, lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...opts });
   const fwd = { autoscaleInfoProvider: () => null }; // the cone and the prediction lines reach the axis through steadyAxis
   const s = {
     ema9: line(C.ema9), ema21: line(C.ema21), rma9: line('#22d3ee88', { lineStyle: LineStyle.Dashed }), rma21: line('#a78bfa88', { lineStyle: LineStyle.Dashed }),
@@ -77,9 +82,9 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn }) {
   const rsi = rsiChart.addLineSeries({ color: '#a78bfa', lineWidth: 1.5, priceLineVisible: false });
   rsi.createPriceLine({ price: 70, color: '#ff4d6d55', lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '' });
   rsi.createPriceLine({ price: 30, color: '#2ee6a655', lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '' });
-  const mHist = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
-  const mLine = macdChart.addLineSeries({ color: '#22d3ee', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
-  const mSig = macdChart.addLineSeries({ color: '#fbbf24', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+  const mHist = macdChart.addHistogramSeries({ ...MF, priceLineVisible: false, lastValueVisible: false });
+  const mLine = macdChart.addLineSeries({ ...MF, color: '#22d3ee', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+  const mSig = macdChart.addLineSeries({ ...MF, color: '#fbbf24', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
 
   // RSI and MACD scroll and zoom with the main chart
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {

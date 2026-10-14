@@ -123,18 +123,24 @@ export function radarRecord(log, pcLog = []) {
 // phase: where the beam is now (ms into its period), so each blip lights up as the beam passes it
 export const SCOPE = { size: 300, r: 132, beam: 138, period: 4000 };
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const money = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+// prices at the precision their size needs ($100,250 for BTC, $152.37 for SOL, $2.5123 for XRP, $0.18234 for DOGE)
+const digitsFor = (ref) => (ref >= 1000 ? 0 : ref >= 10 ? 2 : ref >= 1 ? 4 : 5);
+let scopeRef = 1000; // the price size of the read being drawn (set by scopeSvg)
+const money = (v, ref = scopeRef) => { const d = digitsFor(Math.abs(ref)); return `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`; };
 // Each exchange's tag on its blip (perps marked ·P); anything new falls back to its first three letters
 const TAGS = { Coinbase: 'CB', Kraken: 'KRK', Bitstamp: 'BST', Gemini: 'GEM', 'Binance.US': 'BUS', Binance: 'BIN', 'Binance perp': 'BIN·P', 'Bybit perp': 'BYB·P',
   'OKX perp': 'OKX·P', 'Deribit perp': 'DER·P', Bitfinex: 'BFX', 'Crypto.com': 'CRO' };
 export const blipTag = (ex) => TAGS[ex] ?? String(ex).slice(0, 3).toUpperCase();
-const short = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`);
+const short = (v, ref = scopeRef) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : v >= 10 || ref >= 1000 ? `$${Math.round(v)}`
+  : `$${v.toPrecision(2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')}`); // a ring's distance: $78, or $0.21 / $0.0031 on a small-priced market
 
 export function scopeLayout(rd, spot, venues = []) {
   const { size, r: R } = SCOPE, c = size / 2, E = rd.expected;
   const near = [rd.hi - E, E - rd.lo, Math.abs(rd.floor - E), Math.abs(rd.ceil - E), Number.isFinite(spot) ? Math.abs(spot - E) : 0,
     rd.target > 0 ? Math.abs(rd.target - E) : 0, rd.next ? Math.max(Math.abs(rd.next.hi - E), Math.abs(rd.next.lo - E)) : 0, ...venues.map((v) => Math.abs(v.price - E))];
-  const S = Math.max(1, ...near.filter(Number.isFinite)) * 1.18;
+  // the screen spans the farthest thing to show (+18%), at least a millionth of the price: a $1 floor squashed XRP's and
+  // DOGE's whole radar (ranges of a fraction of a cent) into one flat line at the centre
+  const S = Math.max(Math.abs(E) * 1e-6 || 1e-9, ...near.filter(Number.isFinite)) * 1.18;
   const Y = (p) => c - ((p - E) / S) * R, half = (y, rad = R) => Math.sqrt(Math.max(0, rad * rad - (y - c) ** 2));
   const sorted = [...venues].sort((a, b) => a.ex.localeCompare(b.ex)), per = Math.max(1, Math.ceil(sorted.length / 2) - 1);
   const blips = sorted.map((v, i) => {
@@ -169,6 +175,7 @@ function frame(under = '') {
 export const scopeIdle = (msg = 'WAITING FOR A LIVE ROUND') => frame().join('') + `<text class="rs-corner" x="${SCOPE.size / 2}" y="${SCOPE.size / 2 + SCOPE.r / 2 + 4}" text-anchor="middle">${xmlEsc(msg)}</text>`;
 
 export function scopeSvg(rd, spot, venues = [], { phase = null } = {}) {
+  scopeRef = Math.abs(rd.expected) || 1000;
   const { size, period: P } = SCOPE, L = scopeLayout(rd, spot, venues), { c, R, Y, half, rr } = L, f = (v) => v.toFixed(1);
   const sync = (x, y) => {
     if (phase == null) return '';

@@ -31,7 +31,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '166'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '167'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -860,7 +860,7 @@ async function drawChartTab(force = false) {
   if (!force && now - chartState.drawnAt < 1000) return;
   chartState.drawnAt = now;
   if (!$('tfBtns').children.length) buildChartControls();
-  if (!tv) { if (!$('tvMain').clientWidth) return; tv = createTvChart({ main: $('tvMain'), rsiEl: $('tvRsi'), macdEl: $('tvMacd'), layer: $('orderLayer'), liveBtn: $('chartLive') }); force = true; }
+  if (!tv) { if (!$('tvMain').clientWidth) return; tv = createTvChart({ main: $('tvMain'), rsiEl: $('tvRsi'), macdEl: $('tvMacd'), layer: $('orderLayer'), liveBtn: $('chartLive'), digits: MKT.digits }); force = true; }
   const tf = chartState.tf, T = TIMEFRAMES[tf];
   const snap = compute(), live = snap.live;
   let bars = await chartBars(tf);
@@ -984,7 +984,7 @@ function renderEngine(p) {
   setHTML($('enThr'), `Call at ${[0.6, 0.7, 0.8, 0.9].map((t) => `<button type="button" data-thr="${t}" class="${Math.abs(t - thr) < 1e-9 ? 'on' : ''}">${t * 100}%+</button>`).join('')}`);
   const badge = $('fcBadge');
   if (!e) { $('enCall').className = 'gd-call wait'; setText($('enCall'), !p.report ? `Reading ${MKT.key} history…` : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
-  const c = engineCall(e, rep, thr), t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => `$${Math.round(x).toLocaleString()}`;
+  const c = engineCall(e, rep, thr), t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => usd(x, 0);
   const left = Math.max(0, (e.closeTime - Date.now()) / 60000);
   setText($('enWhen'), `${left.toFixed(1)} min left · read at ${e.checkpoint}-min model`);
   const cls = c.call === 'UP' ? 'up' : c.call === 'DOWN' ? 'down' : 'none';
@@ -1033,7 +1033,7 @@ function engineRecord(r, live) {
 function renderGuide(p) {
   const g = p.guide;
   if (!g) { $('gdCall').className = 'gd-call wait'; setText($('gdCall'), p.backfilling ? `Reading ${MKT.key} history…` : 'Needs about 15 hours of candles first.'); return; }
-  const t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => (x == null ? '—' : `$${Math.round(x).toLocaleString()}`);
+  const t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => (x == null ? '—' : usd(x, 0));
   setText($('gdWhen'), `${t(g.at)} – ${t(g.expiry)} round`);
   const cls = g.call === 'UP' ? 'up' : g.call === 'DOWN' ? 'down' : 'none';
   setHTML($('gdCall'), `<span>${g.call}</span><small>${g.call === 'NO CALL' ? esc(g.reason) : `${g.candidate} candidate confirmed: all four signals agree and history backs it (${int(g.n)} past examples)`}</small>`);
@@ -1276,7 +1276,7 @@ function trackPredictions(snap, live, now) {
   else if (!(now - (state.radarAt || 0) < 5000)) { state.radarAt = now; state.radar = radarNow(live, snap, now); } // every 5 s
   renderRadar(state.radar, modelSpot());
   renderAccuracy(now);
-  const cs = state.coneSum, $$ = (x) => `$${Math.round(x).toLocaleString()}`;
+  const cs = state.coneSum, $$ = (x) => usd(x, 0);
   setHTML($('coneRead'), (cs ? `Cone: most likely close <b>${$$(cs.lo50)}–${$$(cs.hi50)}</b> (50%) · 90%: ${$$(cs.lo90)}–${$$(cs.hi90)} · <b>${Math.round(cs.pAbove * 100)}%</b> chance of finishing above the target${Math.abs(cs.skew.up - cs.skew.dn) > 0.15 ? ` · ${cs.skew.dn > cs.skew.up ? 'downside' : 'upside'} wider (the last hour's ${cs.skew.dn > cs.skew.up ? 'drops' : 'rallies'} were sharper)` : ''}. ` : '')
     + (cr.n ? `Record (${int(cr.n)} rounds, at 5 min left): the 50% band held <b>${Math.round(cr.in50 * 100)}%</b> of closes, the 90% band <b>${Math.round(cr.in90 * 100)}%</b>${Math.abs(cr.fix - 1) > 0.02 ? ` (now ${cr.fix > 1 ? 'widened' : 'narrowed'} ×${cr.fix.toFixed(2)} to match)` : ''}${cr.nKalshi >= 5 ? ` · above-the-target chance scored ${cr.brierSame.toFixed(3)} vs Kalshi's price ${cr.brierKalshi.toFixed(3)} (Brier, lower is better)` : ''}.`
       : 'The cone is graded each round: does the close land inside its 50% and 90% bands, and is its above-the-target chance better than Kalshi\'s price? It recalibrates its width from that record.'));
@@ -1314,7 +1314,7 @@ function beamPhase() {
   try { const t = $('radarBeam')?.getAnimations?.()[0]?.currentTime; return Number.isFinite(t) ? t % SCOPE.period : null; } catch { return null; }
 }
 function renderRadar(rd, spot) {
-  const $$ = (x) => `$${Math.round(x).toLocaleString()}`, rec = radarRecord(state.predLog, state.pcLog), ven = venueRead();
+  const $$ = (x) => usd(x, 0), rec = radarRecord(state.predLog, state.pcLog), ven = venueRead();
   if (!rd) {
     setHTML($('radarScope'), scopeIdle()); setText($('radarState'), ''); setHTML($('radarDir'), 'The radar starts with a live round.'); setHTML($('radarCalls'), ''); setHTML($('radarVenues'), '');
   } else {
