@@ -9,7 +9,7 @@ The tutorial (about 2 min) and disclaimer (about 1 min), vertical 1080×1920 wit
 
 ```
 bash video/make.sh voice     # re-voice with ElevenLabs, then build both videos
-bash video/make.sh           # build with the narration already in video/vo/
+bash video/make.sh           # build with the saved narration (video/voice/: the ElevenLabs voice)
 bash video/make.sh shots     # re-capture the screenshots first (after app changes)
 ```
 

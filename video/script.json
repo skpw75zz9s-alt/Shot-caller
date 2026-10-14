@@ -8,7 +8,7 @@
    ],
    "title": "How to use Shot Caller",
    "say": "Welcome to Shot Caller. This quick guide shows how to use it the right way: what a call means, how to act on it, and how to protect your money.",
-   "dur": 7.24
+   "dur": 7.85
   },
   {
    "id": "t2",
@@ -18,7 +18,7 @@
    ],
    "title": "1 \u00b7 Install",
    "say": "Shot Caller is a web app. Open the website. On iPhone, tap Share, then Add to Home Screen. On Android, tap the menu, then Install app.",
-   "dur": 7.93
+   "dur": 10.38
   },
   {
    "id": "t3",
@@ -28,7 +28,7 @@
    ],
    "title": "2 \u00b7 Get access",
    "say": "Tap Get access to buy a pass. Already paid on another phone? Tap Sign in and enter your code.",
-   "dur": 5.15
+   "dur": 6.48
   },
   {
    "id": "t4",
@@ -39,7 +39,7 @@
    ],
    "title": "3 \u00b7 The Deck",
    "say": "The Deck tab is home. Most of the time it says Sit out. That is normal. The bot only calls when a round clears its bar, and waiting is part of the plan.",
-   "dur": 7.81
+   "dur": 9.88
   },
   {
    "id": "t5",
@@ -51,7 +51,7 @@
    ],
    "title": "4 \u00b7 A call",
    "say": "When it finds one, you see UP or DOWN, the target bitcoin has to beat at the close, and a confidence score. Calls are priced between sixty and ninety cents, so a win pays at least ten cents a dollar.",
-   "dur": 9.87
+   "dur": 12.88
   },
   {
    "id": "t6",
@@ -62,7 +62,7 @@
    ],
    "title": "5 \u00b7 Placing it",
    "say": "The buy box shows the price and the most you should pay. Place the trade yourself on Kalshi, and never pay more than that maximum. Then tap, I bought it, so the app can track your position.",
-   "dur": 9.1
+   "dur": 11.21
   },
   {
    "id": "t7",
@@ -72,7 +72,7 @@
    ],
    "title": "6 \u00b7 Tracking",
    "say": "Your position card shows what it is worth now, what it pays if it wins, and whether to hold or sell.",
-   "dur": 5.65
+   "dur": 6.1
   },
   {
    "id": "t8",
@@ -83,7 +83,7 @@
    ],
    "title": "7 \u00b7 Bail out",
    "say": "If the round turns against the call, you get a bail out alert. Act on it quickly. Selling early keeps part of your money, instead of risking all of it.",
-   "dur": 7.41
+   "dur": 8.68
   },
   {
    "id": "t9",
@@ -93,7 +93,7 @@
    ],
    "title": "8 \u00b7 The radar",
    "say": "The Chart tab has the market radar: the likely range for the close, the target line, and every exchange as a blip. It explains the call. It is not a separate call.",
-   "dur": 9.37
+   "dur": 10.52
   },
   {
    "id": "t10",
@@ -103,7 +103,7 @@
    ],
    "title": "9 \u00b7 Alerts",
    "say": "In Settings, turn on push notifications, so calls and bail alerts reach you even with the app closed.",
-   "dur": 6.42
+   "dur": 6.47
   },
   {
    "id": "t11",
@@ -113,7 +113,7 @@
    ],
    "title": "10 \u00b7 Loss limit",
    "say": "Set a daily loss limit. Once your tracked trades lose that much in a day, buy alerts stop until midnight.",
-   "dur": 5.53,
+   "dur": 7.01,
    "maxZoom": 1.0
   },
   {
@@ -124,7 +124,7 @@
    ],
    "title": "11 \u00b7 The record",
    "say": "The Record tab grades every call against Kalshi's result. Judge it by profit after fees, not win rate. An eighty cent call should win about eighty percent of the time.",
-   "dur": 8.95
+   "dur": 10.36
   },
   {
    "id": "t13",
@@ -132,7 +132,7 @@
    "hl": [],
    "title": "Use it well",
    "say": "Trade small, follow the bail alerts, respect the pauses, and remember: every call can lose. Shot Caller gives signals, not guarantees.",
-   "dur": 8.82
+   "dur": 9.8
   }
  ],
  "disclaimer": [
@@ -141,49 +141,49 @@
    "icon": "!",
    "title": "Important",
    "say": "Important information about Shot Caller. Please read before you trade.",
-   "dur": 3.7
+   "dur": 4.24
   },
   {
    "id": "d2",
    "icon": "i",
    "title": "Not financial advice",
    "say": "Shot Caller gives signals for information only. It is not financial advice, and nobody behind it is a financial adviser.",
-   "dur": 6.84
+   "dur": 7.57
   },
   {
    "id": "d3",
    "icon": "$",
    "title": "You can lose money",
    "say": "Trading event contracts is risky. Every call can lose, and you can lose all the money you put into a trade. Only trade what you can afford to lose.",
-   "dur": 7.19
+   "dur": 9.52
   },
   {
    "id": "d4",
    "icon": "%",
    "title": "No guarantees",
    "say": "Past results do not guarantee future results. Win rates and profits shown in the app are records, not promises.",
-   "dur": 6.41
+   "dur": 6.43
   },
   {
    "id": "d5",
    "icon": "K",
    "title": "Not affiliated with Kalshi",
    "say": "Shot Caller is independent. It is not affiliated with, endorsed by, or sponsored by Kalshi.",
-   "dur": 5.05
+   "dur": 5.82
   },
   {
    "id": "d6",
    "icon": "\u2713",
    "title": "Your trades, your decision",
    "say": "Shot Caller does not place trades for you, unless you turn on the optional Auto-trader with your own Kalshi keys. Every trade is your decision and your responsibility.",
-   "dur": 8.61
+   "dur": 9.6
   },
   {
    "id": "d7",
    "icon": "18",
    "title": "18 and older",
    "say": "Kalshi is for people eighteen and older, where it is available. Check that it is legal where you live.",
-   "dur": 5.18,
+   "dur": 5.53,
    "text": "Kalshi is for people 18 and older, where it is available. Check that it is legal where you live."
   },
   {
@@ -191,7 +191,7 @@
    "icon": "\u2661",
    "title": "Play it safe",
    "say": "If trading stops being fun, step back. Set a daily loss limit in the app. In the US, call or text one eight hundred gambler for free, confidential help.",
-   "dur": 8.35,
+   "dur": 10.02,
    "text": "If trading stops being fun, step back. Set a daily loss limit in the app. In the US, call or text 1-800-GAMBLER for free, confidential help."
   }
  ]

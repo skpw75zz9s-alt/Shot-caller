@@ -8,6 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 if [ "${1:-}" = shots ]; then rm -f shots/boxes.json; node capture.mjs app; node capture.mjs buy; node capture.mjs loss; node capture.mjs site; fi
 if [ "${1:-}" = voice ]; then mkdir -p vo; python3 tts_elevenlabs.py; fi
+# the saved narration (video/voice/*.mp3: your ElevenLabs voice) when there's no fresh one in vo/
+if [ ! -d vo ] && [ -d voice ]; then mkdir -p vo; for f in voice/*.mp3; do ffmpeg -v error -y -i "$f" -ar 44100 -ac 1 "vo/$(basename "$f" .mp3).wav"; done; fi
 [ -d vo ] || { echo "No narration yet: run  bash video/make.sh voice"; exit 1; }
 (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
 for k in disclaimer tutorial; do
