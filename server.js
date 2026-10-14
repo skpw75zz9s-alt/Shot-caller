@@ -266,7 +266,7 @@ function reply(req, res, out) {
 
 // /api/access/* — paywall actions anyone can call
 async function accessApi(req, res, action, token) {
-  if (action === 'status' && req.method === 'GET') return send(res, 200, access.statusBody(token));
+  if (action === 'status' && req.method === 'GET') return send(res, 200, { ...access.statusBody(token), open: !PAYWALL }); // open: no paywall on this server
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);
   const ip = clientIp(req);

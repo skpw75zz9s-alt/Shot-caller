@@ -304,7 +304,7 @@ details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summa
 #rsiChart, #macdChart { margin-top: 6px; }
 /* alerts tab */
 .alerts-card h3, .learn h3, .ev-card h3 { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent); }
-.sw-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; font-weight: 600; }
+.sw-row { display: flex; gap: 10px 18px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; font-weight: 600; }
 .num-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .num-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .num-grid input { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: 600 14px var(--mono); min-width: 0; }
@@ -824,10 +824,10 @@ body.split .pane-body { padding: 4px 6px 8px; }
 .pick-head { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px var(--mono); letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
 .pick-head span { white-space: nowrap; }
 .pick-head b { color: var(--text); font-size: 12px; letter-spacing: .5px; text-align: right; }
-.pick-body { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-.pick-side { font: 800 30px var(--mono); letter-spacing: 1px; color: var(--dim); min-width: 92px; }
+.pick-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; }
+.pick-side { font: 800 30px/1.1 var(--mono); letter-spacing: 1px; color: var(--dim); }
 .pick-side.up { color: var(--yes); text-shadow: 0 0 16px #2ee6a655; } .pick-side.down { color: var(--no); text-shadow: 0 0 16px #ff4d6d55; }
-.pick-txt { display: flex; flex-direction: column; gap: 2px; flex: 1; font-size: 13px; }
+.pick-txt { display: flex; flex-direction: column; gap: 2px; font-size: 13px; margin-top: 2px; }
 .pick-txt small { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 .pick-buy { font: 700 11px var(--mono); letter-spacing: .8px; padding: 5px 9px; border-radius: 8px; white-space: nowrap; }
 .pick-buy.yes { color: #04140d; background: var(--yes); } .pick-buy.no { color: var(--muted); border: 1px solid var(--line-2); }
@@ -884,3 +884,31 @@ body.split .pane-body { padding: 4px 6px 8px; }
 /* eight tabs on a phone: tighter labels so "Settings" still fits */
 nav button { min-width: 0; letter-spacing: .2px; white-space: nowrap; overflow: hidden; }
 @media (max-width: 440px) { nav { gap: 2px; padding-left: 4px; padding-right: 4px; } nav button { font-size: 8.2px; letter-spacing: 0; } }
+
+/* ---------- v13.25 clean-up ---------- */
+/* empty states: one centred line across the whole row, whatever grid the list uses */
+li.empty { display: block !important; grid-column: 1 / -1; text-align: center; color: var(--muted); font: 400 12.5px/1.45 var(--sans); padding: 14px 8px !important; border: 0 !important; background: none !important; }
+/* long card titles wrap instead of running past the card's edge */
+.deep-head > span:first-child { white-space: normal; min-width: 0; }
+.head-links { display: inline-flex; gap: 14px; }
+/* checkboxes keep their size next to long labels */
+.settings input[type=checkbox], .toggle-grid input, .sw-row input, .ev-row input { flex: none; }
+/* waiting / loading headlines read as quiet status, not as a call */
+.gd-call.wait { font: 500 13.5px/1.45 var(--sans); color: var(--muted); }
+/* the timeframe row: room for "Round" */
+.tf-btns button { flex: 1 1 auto; padding: 7px 5px; white-space: nowrap; }
+.file-btn { white-space: nowrap; flex: 0 0 auto; padding: 10px 14px; }
+/* alert rows on a phone: the name on its own line, the switches under it */
+@media (max-width: 480px) {
+  .ev-row:not(.slot) { grid-template-columns: auto auto 1fr; row-gap: 6px; column-gap: 16px; }
+  .ev-row:not(.slot) > span { grid-column: 1 / -1; font-size: 13px; }
+  .ev-row:not(.slot) > button { justify-self: end; }
+}
+/* the long explanations sit behind "How it works" so the live numbers lead */
+details.how { margin-top: 8px; }
+details.how summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 600 11px var(--sans); letter-spacing: .3px; padding: 2px 0; }
+details.how summary::-webkit-details-marker { display: none; }
+details.how summary::before { content: 'i'; display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--line-2); font: 700 9px var(--mono); color: var(--accent); }
+details.how[open] summary { color: var(--text); }
+details.how .fine-left { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.odds-row.fair .status { color: var(--muted); }

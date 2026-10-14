@@ -85,7 +85,7 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
       kinds.length ? kinds.map(([k, name]) => `${name} ${pct(radar[k].rate)}`).join(' · ') : 'every call graded at the close',
       radar.dir?.n ? `direction calls right ${radar.dir.hit} of ${radar.dir.n}` : 'no 90% direction calls graded yet', Object.fromEntries(Object.entries(radar).map(([k, x]) => [k, { n: x.n, hit: x.hit }])));
   }
-  if (flip) add('flips', 'Flip calls (↺)', flip.n || 0, flip.n && flip.base != null && flip.rate > flip.base ? 'good' : 'bad',
+  if (flip) add('flips', 'Turn predictions (↺)', flip.n || 0, flip.n && flip.base != null && flip.rate > flip.base ? 'good' : 'bad',
     flip.n ? `caught ${flip.hits} of ${flip.n} (${pct(flip.rate)})` : 'each predicted turn checked afterwards', flip.base != null ? `vs ${pct(flip.base)} for a random minute` : '', flip.n ? { n: flip.n, hits: flip.hits, base: flip.base } : null);
   // the profit guard on your level, and your own trades against your daily limit
   if (guard) add('profit', `Profit guard (${guard.level})`, Math.max(guard.n, ACC.min), guard.paused ? 'bad' : guard.n >= 20 ? 'good' : 'off',

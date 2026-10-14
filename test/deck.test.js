@@ -90,3 +90,12 @@ test('trend turns: confirmed after 15s, the first trend is not a turn, flips fir
   assert.equal(trendTurn(st, 'bull', 41000), 'bull', 'held 15s: the bull charges');
   assert.equal(trendTurn(st, 'bull', 60000), null, 'once');
 });
+
+test('the bot leans the way its odds point when neither side has a gap (not the least-overpriced long shot)', async () => {
+  const { leanSide } = await import('../public/engine.js');
+  assert.equal(leanSide({ side: null, pYes: 0.97, evYes: -0.011, evNo: -0.002 }), 'YES', 'UP at 97% while both sides are overpriced');
+  assert.equal(leanSide({ side: null, pYes: 0.2, evYes: -0.03, evNo: -0.01 }), 'NO');
+  assert.equal(leanSide({ side: null, pYes: 0.6, evYes: -0.02, evNo: 0.03 }), 'NO', 'a real gap (even under the bar) still leads');
+  assert.equal(leanSide({ side: 'YES', pYes: 0.4, evYes: 0.1, evNo: -0.1 }), 'YES');
+  assert.equal(leanSide({ side: null, evYes: null, evNo: null }), null);
+});

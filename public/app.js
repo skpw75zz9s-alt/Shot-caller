@@ -29,7 +29,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '159'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '160'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -443,12 +443,14 @@ function oddsRows(ev, minEdge) {
   const row = (side, kalshi, bot, edge, cashOut) => {
     if (kalshi == null) return `<div class="odds-row"><span class="side">${side}</span><span class="muted">no offers${cashOut != null ? ` · cash out ${pc(cashOut)}` : ''}</span></div>`;
     const gap = (bot - kalshi) * 100;
-    const status = edge != null && edge >= minEdge ? ['low', `LOW by ${gap.toFixed(0)} pts`] : gap > 0 ? ['near', `${gap.toFixed(0)} pts low, not enough after fees`] : ['high', `${Math.abs(gap).toFixed(0)} pts high`];
+    const pts = (v) => `${Math.round(Math.abs(v))} pt${Math.round(Math.abs(v)) === 1 ? '' : 's'}`;
+    const status = edge != null && edge >= minEdge ? ['low', `LOW by ${pts(gap)}`] : Math.round(gap) > 0 ? ['near', `${pts(gap)} low, not enough after fees`] : Math.round(gap) < 0 ? ['high', `${pts(gap)} high`] : ['fair', 'priced right at the bot\'s odds'];
+    const n10 = Math.floor(10 / kalshi + 1e-9); // $10 buys whole contracts; selling them pays the bid less one fee on the whole order
     const a = Math.min(kalshi, bot) * 100, b = Math.max(kalshi, bot) * 100;
     return `<div class="odds-row ${status[0]}"><span class="side">${side}</span>` +
       `<span class="nums">Kalshi <b>${(kalshi * 100).toFixed(0)}%</b> · Bot <b>${(bot * 100).toFixed(0)}%</b></span>` +
       `<span class="track"><i class="fill" style="left:${a}%;width:${b - a}%"></i><i class="mk kalshi" style="left:${kalshi * 100}%"></i><i class="mk bot" style="left:${bot * 100}%"></i></span>` +
-      `<span class="status">${status[1]}<em class="cash">Cash out ${cashOut != null ? `<b>${pc(cashOut)}</b>` : '—'}${cashOut != null ? ` · $10 → ${dollars((10 / kalshi) * (cashOut - kalshiFee(cashOut)))} now` : ''}</em></span></div>`;
+      `<span class="status">${status[1]}<em class="cash">Cash out ${cashOut != null ? `<b>${pc(cashOut)}</b>` : '—'}${cashOut != null && n10 > 0 ? ` · $10 → ${dollars(n10 * cashOut - kalshiFee(cashOut, n10))} now` : ''}</em></span></div>`;
   };
   const q = ev.quote;
   return row('YES<small>Above</small>', q.yesAsk, ev.pYes, ev.evYes, q.yesBid) + row('NO<small>Below</small>', q.noAsk, 1 - ev.pYes, ev.evNo, q.noBid) +
@@ -565,7 +567,7 @@ function renderTape(force = false) {
     const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
     if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${int(x.count)} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
     return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${int(x.price)}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
-  }).join('') || `<li><span class="muted">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</span></li>`);
+  }).join('') || `<li class="empty">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</li>`);
 }
 
 function setTile(id, text, cls = '', sub = null) {
@@ -973,7 +975,7 @@ function renderEngine(p) {
   const e = p.predictor, rep = p.report?.predictor, thr = state.enThr;
   setHTML($('enThr'), `Call at ${[0.6, 0.7, 0.8, 0.9].map((t) => `<button type="button" data-thr="${t}" class="${Math.abs(t - thr) < 1e-9 ? 'on' : ''}">${t * 100}%+</button>`).join('')}`);
   const badge = $('fcBadge');
-  if (!e) { setText($('enCall'), !p.report ? 'Reading BTC history…' : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
+  if (!e) { $('enCall').className = 'gd-call wait'; setText($('enCall'), !p.report ? 'Reading BTC history…' : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
   const c = engineCall(e, rep, thr), t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => `$${Math.round(x).toLocaleString()}`;
   const left = Math.max(0, (e.closeTime - Date.now()) / 60000);
   setText($('enWhen'), `${left.toFixed(1)} min left · read at ${e.checkpoint}-min model`);
@@ -1022,7 +1024,7 @@ function engineRecord(r, live) {
 // ---------- the shot-caller guide's forecast (server: playbookfeed.js, public/guide.js) ----------
 function renderGuide(p) {
   const g = p.guide;
-  if (!g) { setText($('gdCall'), p.backfilling ? 'Reading BTC history…' : 'Needs about 15 hours of candles first.'); return; }
+  if (!g) { $('gdCall').className = 'gd-call wait'; setText($('gdCall'), p.backfilling ? 'Reading BTC history…' : 'Needs about 15 hours of candles first.'); return; }
   const t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => (x == null ? '—' : `$${Math.round(x).toLocaleString()}`);
   setText($('gdWhen'), `${t(g.at)} – ${t(g.expiry)} round`);
   const cls = g.call === 'UP' ? 'up' : g.call === 'DOWN' ? 'down' : 'none';
@@ -1631,7 +1633,7 @@ function renderHistory() {
   setHTML($('tradeList'), state.trades.slice(0, 50).map((t) =>
     `<li><span><b>${dollars(t.contracts * t.price)}</b> at ${pc(t.price)} ${sideName(t.side)} → ${t.how === 'settled' ? (t.exit ? 'won at close' : 'lost at close') : `sold at ${pc(t.exit)}`}` +
     `<small>bought ${clock(t.at)} → ${t.how === 'settled' ? 'settled' : 'sold'} ${clock(t.closedAt)} · ${esc(t.ticker)}</small></span><b class="${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}</b></li>`).join('') ||
-    '<li><span class="muted">Tap "I bought it" on a call to track a trade and get sell signals.</span></li>');
+    '<li class="empty">Tap "I bought it" on a call to track a trade and get sell signals.</li>');
   renderRecord();
   renderMemory();
 }
@@ -1821,7 +1823,7 @@ function renderBotRecord() {
     const badge = graded ? (won ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>') : e.result === 'unknown' ? '<span class="badge">VOID</span>' : Date.parse(e.closeTime) > now ? '<span class="badge live">LIVE</span>' : '<span class="badge">SETTLING</span>';
     const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${pc(e.price)}</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}</small></span>${badge}</li>`;
-  }).join('') || '<li><span></span><span class="muted">The first call will show up here.</span><span></span></li>');
+  }).join('') || '<li class="empty">The first call will show up here.</li>');
 }
 
 // The bot's call record: what it claimed (confidence = win odds) next to how often its calls really won
@@ -2015,7 +2017,8 @@ async function loadAccess() {
     rememberAccess(st);
     setText($('accessLine'), st.role === 'admin' ? 'Admin (no expiry)'
       : st.access ? `Active until ${day(st.expires)} · code ${st.code} (use it to unlock your other devices)`
-      : 'No access');
+      : st.open ? 'Open: this server doesn\'t need a sign-in' : 'No access');
+    setHidden($('signOut'), !!st.open && !st.access);
     setHidden($('adminCard'), st.role !== 'admin');
     setHidden($('adminLogin'), st.role === 'admin');
     if (st.role === 'admin') loadAdmin();

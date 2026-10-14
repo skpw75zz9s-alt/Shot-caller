@@ -257,7 +257,7 @@ export function deepDive({ winProb = null, ev, side, rej, timing, sigmaMin, sigm
   const points = clamp(Math.round(score), 0, 100);
   if (winProb == null) return { score: points, points, sizeMult: points < 45 ? 0 : clamp(0.5 + (points - 45) / 60, 0.5, 1), checks };
   const odds = clamp(Math.round(winProb * 100), 0, 100);
-  checks.unshift({ pts: 0, ok: odds >= 50, label: `Wins about ${odds} times in 100 (bot's odds, most cautious volatility guess)` });
+  checks.unshift({ pts: 0, ok: odds >= 50, label: `Wins about ${odds} ${odds === 1 ? 'time' : 'times'} in 100 (bot's odds, most cautious volatility guess)` });
   return { score: odds, points, sizeMult: points < 35 ? 0.5 : 1, checks };
 }
 

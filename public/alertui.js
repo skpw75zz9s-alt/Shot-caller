@@ -83,7 +83,7 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
     const el = $('alertHistory');
     if (!el) return;
     el.innerHTML = log.history.slice(0, 40).map((h) => `<li class="${KIND[h.key] || (h.key === 'call' ? 'call' : '')}"><time>${clock(h.t)}</time><span>${esc(h.text)}</span></li>`).join('') ||
-      '<li><time></time><span class="muted">Nothing yet. Alerts appear here as they happen.</span></li>';
+      '<li class="empty">Nothing yet. Alerts appear here as they happen.</li>';
   }
 
   function render() {

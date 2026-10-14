@@ -102,8 +102,15 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
-export const leanSide = (ev) =>
-  ev.side ?? (ev.evYes == null && ev.evNo == null ? null : (ev.evYes ?? -1) >= (ev.evNo ?? -1) ? 'YES' : 'NO');
+// The side the bot leans: the one with the bigger gap, or, when neither side has any gap (both overpriced), the side
+// its odds favour (it used to lean the least-overpriced side: a 3c long shot shown at "confidence 1" while UP was 97%)
+export const leanSide = (ev) => {
+  if (ev.side) return ev.side;
+  if (ev.evYes == null && ev.evNo == null) return null;
+  const y = ev.evYes ?? -1, n = ev.evNo ?? -1;
+  if (y <= 0 && n <= 0 && ev.pYes != null) return ev.pYes >= 0.5 ? 'YES' : 'NO';
+  return y >= n ? 'YES' : 'NO';
+};
 
 // Edge for `side` priced with `volScale` × the bot's volatility, keeping only drift and rejection tilt
 // that work AGAINST the call (anything that helps it is dropped), so it can only be harder than the real edge.

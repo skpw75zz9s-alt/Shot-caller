@@ -110,7 +110,8 @@
       <!-- the 10-minute pick (v13.23): every round's side, locked by the math at 10:00 left -->
       <div class="card pick-card" id="pickCard" hidden>
         <div class="pick-head"><span>🔒 10-minute pick</span><b id="pickWhen"></b></div>
-        <div class="pick-body"><b id="pickSide" class="pick-side">—</b><div class="pick-txt"><span id="pickOdds"></span><small id="pickWhy"></small></div><span id="pickBuy" class="pick-buy"></span></div>
+        <div class="pick-body"><b id="pickSide" class="pick-side">—</b><span id="pickBuy" class="pick-buy"></span></div>
+        <div class="pick-txt"><span id="pickOdds"></span><small id="pickWhy"></small></div>
         <small class="pick-rec" id="pickRecord"></small>
       </div>
       <div class="card call-card" id="callCard">
@@ -162,7 +163,7 @@
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
-        <small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small></details>
       </div>
       <div class="card gd" id="engCard">
         <div class="deep-head"><span>Live forecast · this round</span><b id="enWhen"></b></div>
@@ -172,7 +173,7 @@
         <ul class="gd-ev" id="enEv"></ul>
         <div class="gd-kalshi" id="enKalshi"></div>
         <div class="gd-kalshi" id="enHist"></div>
-        <small class="fine-left">The prediction engine: a statistical model trained on the 1-minute BTC history, starting from the distance to the target and adding the 1-hour trend, 15-minute EMAs, VWAP, 5-minute RSI, momentum, volume, liquidity sweeps and structure. Every number is tested walk-forward (on rounds the model hadn't seen). It calls only at your confidence level, when that level has held up historically and Kalshi's price plus fees leaves an edge. Nothing is 100%: high-confidence calls come late in the round, when Kalshi already prices them high.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">The prediction engine: a statistical model trained on the 1-minute BTC history, starting from the distance to the target and adding the 1-hour trend, 15-minute EMAs, VWAP, 5-minute RSI, momentum, volume, liquidity sweeps and structure. Every number is tested walk-forward (on rounds the model hadn't seen). It calls only at your confidence level, when that level has held up historically and Kalshi's price plus fees leaves an edge. Nothing is 100%: high-confidence calls come late in the round, when Kalshi already prices them high.</small></details>
       </div>
       <div class="card gd" id="guideCard">
         <div class="deep-head"><span>BTC 15-minute forecast</span><b id="gdWhen"></b></div>
@@ -180,13 +181,13 @@
         <div class="gd-grid" id="gdGrid"></div>
         <ul class="gd-ev" id="gdEv"></ul>
         <div class="gd-kalshi" id="gdKalshi"></div>
-        <small class="fine-left">From the shot-caller guide: UP when price is above VWAP, the 20 EMA above the 50, RSI above 50 and structure bullish (DOWN is the mirror); anything mixed is NO CALL. So is low volatility, an untested setup, or one history doesn't back. The UP probability is how often BTC really finished up after the same evidence, counted walk-forward. Major economic announcements aren't known to the bot: skip those yourself. No strategy is 100% accurate.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">From the shot-caller guide: UP when price is above VWAP, the 20 EMA above the 50, RSI above 50 and structure bullish (DOWN is the mirror); anything mixed is NO CALL. So is low volatility, an untested setup, or one history doesn't back. The UP probability is how often BTC really finished up after the same evidence, counted walk-forward. Major economic announcements aren't known to the bot: skip those yourself. No strategy is 100% accurate.</small></details>
       </div>
       <div class="card rev" id="revCard">
         <div class="deep-head"><span>Reversal watch · 15-min</span><b id="revWhen"></b></div>
         <div class="rev-head" id="revHead">Loading…</div>
         <ul class="rev-list" id="revList"></ul>
-        <small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small></details>
       </div>
       <div class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 12 exchanges</span><b id="scanWhen"></b></div>
@@ -197,7 +198,7 @@
         <div class="scan-table" id="scanTable"></div>
         <div class="scan-facts" id="scanFacts"></div>
         <div class="scan-record" id="scanRecord"></div>
-        <small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Absorption = heavy flow one way that doesn't move the price. Scan chance = the bot's odds nudged by the reads the server has learned to trust from graded rounds. The server scans and grades every round, app open or not. Context only: the bot's calls don't use it.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Absorption = heavy flow one way that doesn't move the price. Scan chance = the bot's odds nudged by the reads the server has learned to trust from graded rounds. The server scans and grades every round, app open or not. Context only: the bot's calls don't use it.</small></details>
       </div>
 
       <div class="card tape-card">
@@ -207,7 +208,7 @@
         <div id="tapeEx" class="ex-table"></div>
         <div id="kalshiFlow" class="kflow" hidden></div>
         <ul id="tape" class="tape-list"></ul>
-        <small class="fine-left">Every executed trade, as it happens: BTC/USD on Coinbase, Kraken, Bitstamp, Gemini and Binance.US (straight from their public feeds), plus trades on the live Kalshi contract. Buy/sell is the aggressor's side. 🐋 = a trade at or above your whale minimum.</small>
+        <details class="how"><summary>How it works</summary><small class="fine-left">Every executed trade, as it happens: BTC/USD on Coinbase, Kraken, Bitstamp, Gemini and Binance.US (straight from their public feeds), plus trades on the live Kalshi contract. Buy/sell is the aggressor's side. 🐋 = a trade at or above your whale minimum.</small></details>
       </div>
 
       <div class="card notes">
@@ -268,7 +269,7 @@
         <p class="pred-record" id="flipInfo"></p>
         <p class="pred-record" id="microInfo"></p>
         <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
-        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
+        <details class="how"><summary>How it works</summary><p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p></details>
       </div>
       <div class="card pulse" id="pulseCard">
         <div class="deep-head"><span>Market pulse</span><b id="pulseWhen"></b></div>
@@ -301,7 +302,7 @@
         <ul class="radar-calls" id="radarCalls"></ul>
         <p class="pred-record" id="radarVenues"></p>
         <p class="pred-record" id="radarRecord"></p>
-        <p class="fine-left">Each call comes true at least 90% of the time if the coming rounds behave like the past ones. That's by construction (split conformal prediction on the bot's own graded minutes), not because BTC is predictable: the radar finds the narrowest answers that still hold 90%. A 90% direction call only shows when even the floor or ceiling clears the target, usually late in a round, when Kalshi prices that side at 90¢ or more too.</p>
+        <details class="how"><summary>How it works</summary><p class="fine-left">Each call comes true at least 90% of the time if the coming rounds behave like the past ones. That's by construction (split conformal prediction on the bot's own graded minutes), not because BTC is predictable: the radar finds the narrowest answers that still hold 90%. A 90% direction call only shows when even the floor or ceiling clears the target, usually late in a round, when Kalshi prices that side at 90¢ or more too.</p></details>
       </div>
     </section>
 
@@ -342,7 +343,8 @@
           <li><b>The bot's odds.</b> From where BTC is, how far it is from the target, how much time is left and how wild BTC has been, the bot works out the chance each side wins. It takes the most cautious of three volatility guesses, so its confidence leans low on purpose.</li>
           <li><b>The gap.</b> A side is only worth buying when Kalshi's price is below the bot's odds by enough to beat Kalshi's fee. That's "buy the low".</li>
           <li><b>Hold odds and flip risk.</b> Confidence moves as BTC moves. The bot simulates the rest of the round 300 ways and counts how often confidence stays above 80 to the end: that's hold odds. Flip risk is the rest. In testing, predicted hold odds came true within a few points.</li>
-          <li><b>Steady and Sniper.</b> Steady (default) calls only when confidence is 85+, has held for a minute, and hold odds are 80%+. Sniper wants 90+, held 90 seconds, hold odds 90%+. Once called, the side is locked for the round.</li>
+          <li><b>The Profit level (official).</b> The bot only calls sides Kalshi prices at 60-90¢, where a win pays at least 10¢ on the dollar, and only when even its most cautious odds beat Kalshi's price plus the fee by 8¢ or more, from 12 to 5 minutes left. Confidence has to hold for a minute and hold odds be 80%+. Once called, the side is locked for the round; it switches once at most, at half size, on clear evidence of a flip.</li>
+          <li><b>The 10-minute pick.</b> Every round at 10:00 left the bot locks the side its math favours. It's marked BUY only when Kalshi's price is in the 60-90¢ band and the worst case still beats it after the fee; otherwise it's a lean, not a buy.</li>
           <li><b>Learning.</b> The server watches every round, around the clock: how wild each half hour of the week usually is, whether its odds came true, and the gap between Coinbase and Kalshi's index.</li>
         </ol>
         <h3>The chart</h3>
@@ -367,7 +369,7 @@
 
     <section id="view-history" class="view">
       <div class="card acc-card" id="accCard">
-        <div class="deep-head"><span>Accuracy: every predictor's real record</span></div>
+        <div class="deep-head"><span>Accuracy: every predictor's record</span></div>
         <p class="push-status">Each one is graded on calls it made before the outcome was known, next to the baseline it has to beat. Green beats its baseline, red is behind it, grey needs more data.</p>
         <div class="acc-list" id="accList"></div>
         <button type="button" id="accCopy">Copy accuracy report</button>
@@ -408,12 +410,12 @@
       <ul id="tradeList" class="history"></ul>
       <h2 class="sec">Playbook check</h2>
       <div class="card playbook">
-        <p class="fine-left">From "The BTC Trader's Playbook": its 15-minute liquidity-sweep strategy, run exactly as written and measured the way it says to (100+ examples, win rate, average reward-to-risk, max drawdown, fees). With the 1-hour trend, a 15-minute candle sweeps yesterday's high or low and closes back inside; a market structure shift on above-average volume confirms; entry on the retest; stop beyond the sweep plus a volatility allowance; target 2R. Its other secrets (sweeps, structure shifts, fair value gaps, order blocks, volume divergence, VWAP, open interest, funding) are inputs the micro model learns from: they sway the candles and calls only once proven.</p>
+        <details class="how"><summary>How it works</summary><p class="fine-left">From "The BTC Trader's Playbook": its 15-minute liquidity-sweep strategy, run exactly as written and measured the way it says to (100+ examples, win rate, average reward-to-risk, max drawdown, fees). With the 1-hour trend, a 15-minute candle sweeps yesterday's high or low and closes back inside; a market structure shift on above-average volume confirms; entry on the retest; stop beyond the sweep plus a volatility allowance; target 2R. Its other secrets (sweeps, structure shifts, fair value gaps, order blocks, volume divergence, VWAP, open interest, funding) are inputs the micro model learns from: they sway the candles and calls only once proven.</p></details>
         <div id="pbReport" class="pb-report">Loading…</div>
       </div>
       <h2 class="sec">Indicator tuning</h2>
       <div class="card tune">
-        <p class="fine-left">Which chart indicators, at which settings, have actually called BTC's 15-minute rounds. EMA and RMA crosses, RSI zones, MACD, Bollinger breaks, VWAP from the round's open and momentum, each at several common settings, tested on up to three weeks of real 1-minute BTC history. Only a setting that keeps working on rounds it was never tuned on nudges the bot's calls (±4 pts max).</p>
+        <details class="how"><summary>How it works</summary><p class="fine-left">Which chart indicators, at which settings, have actually called BTC's 15-minute rounds. EMA and RMA crosses, RSI zones, MACD, Bollinger breaks, VWAP from the round's open and momentum, each at several common settings, tested on up to three weeks of real 1-minute BTC history. Only a setting that keeps working on rounds it was never tuned on nudges the bot's calls (±4 pts max).</p></details>
         <div id="tuneReport" class="pb-report">Loading…</div>
       </div>
       <h2 class="sec">What the bot has learned</h2>
@@ -451,7 +453,7 @@
 
     <section id="view-settings" class="view">
       <div class="card access-card">
-        <div class="deep-head"><span>Your access</span><span><button id="adminLogin" class="link" hidden>Admin code</button> <button id="signOut" class="link">Sign out</button></span></div>
+        <div class="deep-head"><span>Your access</span><span class="head-links"><button id="adminLogin" class="link" hidden>Admin code</button><button id="signOut" class="link">Sign out</button></span></div>
         <p id="accessLine" class="push-status"></p>
       </div>
       <div class="card admin-card" id="adminCard" hidden>
@@ -482,7 +484,7 @@
         <h3>Auto-trader</h3>
         <p id="atStatus" class="push-status">Off.</p>
         <div class="risk-btns at-modes" id="atModes"></div>
-        <p class="fine"><b>Test</b> trades the bot's Steady calls on Kalshi's live prices with pretend money: nothing is sent.
+        <p class="fine"><b>Test</b> trades the bot's official calls (Profit level) on Kalshi's live prices with pretend money: nothing is sent.
           <b>Demo</b> sends real orders to Kalshi's demo exchange (fake money). <b>Live</b> uses real money and unlocks after Test runs clean.
           It buys only the bot's locked calls, sells on its SELL HIGH / BAIL signals, and only uses orders that fill right away or cancel,
           sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. It runs on the server around the clock: close the app and it keeps going.</p>
@@ -526,7 +528,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.24 · Map to success</p>
+      <p class="fine" id="version">Shot Caller v13.25 · Clean-up</p>
     </section>
   </main>
 
@@ -546,7 +548,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '159';
+    window.SC_BUILD = '160';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
