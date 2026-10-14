@@ -344,7 +344,7 @@
           <li><b>The gap.</b> A side is only worth buying when Kalshi's price is below the bot's odds by enough to beat Kalshi's fee. That's "buy the low".</li>
           <li><b>Hold odds and flip risk.</b> Confidence moves as BTC moves. The bot simulates the rest of the round 300 ways and counts how often confidence stays above 80 to the end: that's hold odds. Flip risk is the rest. In testing, predicted hold odds came true within a few points.</li>
           <li><b>The Profit level (official).</b> The bot only calls sides Kalshi prices at 60-90¢, where a win pays at least 10¢ on the dollar, and only when even its most cautious odds beat Kalshi's price plus the fee by 8¢ or more, from 12 to 5 minutes left. Confidence has to hold for a minute and hold odds be 80%+. Once called, the side is locked for the round; it switches once at most, at half size, on clear evidence of a flip.</li>
-          <li><b>The 10-minute pick.</b> Every round at 10:00 left the bot locks the side its math favours. It's marked BUY only when Kalshi's price is in the 60-90¢ band and the worst case still beats it after the fee; otherwise it's a lean, not a buy.</li>
+          <li><b>The 10-minute pick.</b> Every round at 10:00 left the bot locks a side, using its own odds combined with Kalshi's price (half and half at first, then in whatever mix its graded picks show is most accurate). It's marked BUY only when Kalshi's price is in the 60-90¢ band and the worst case still beats it after the fee; otherwise it's a lean, not a buy.</li>
           <li><b>Learning.</b> The server watches every round, around the clock: how wild each half hour of the week usually is, whether its odds came true, and the gap between Coinbase and Kalshi's index.</li>
         </ol>
         <h3>The chart</h3>
@@ -528,7 +528,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.27 · Fair grading</p>
+      <p class="fine" id="version">Shot Caller v13.28 · Sharper 10-minute pick</p>
     </section>
   </main>
 
@@ -548,7 +548,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '162';
+    window.SC_BUILD = '163';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

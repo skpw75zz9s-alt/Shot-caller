@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, evaluate, probYes, riskSettings } from '../public/model.js';
-import { PICK, pickNow, pickScore } from '../public/pick.js';
+import { PICK, mixOdds, pickMix, pickNow, pickScore } from '../public/pick.js';
 import { sideOdds } from '../public/engine.js';
 import { accuracyRows } from '../public/accuracy.js';
 import { pickMessage } from '../discord.js';
@@ -47,13 +47,13 @@ test("exact worst case: the engine's own math, every learned nudge included, and
   const a = setup({ yb: 70, ya: 72, lead: 120, pShift: -0.04 }), pk = pickNow({ ...a, settings: prof });
   assert.equal(pk.side, 'YES');
   const engine = Math.min(...PICK.vols.map((k) => sideOdds(a.row, a.snap, { ...DEFAULTS, ...prof }, 'YES', k)));
-  assert.ok(Math.abs(pk.worst - Math.min(pk.p, engine)) < 1e-12, 'the same number the call engine uses');
-  assert.ok(pk.worst <= pk.p + 1e-12);
+  assert.ok(Math.abs(pk.worstBot - Math.min(pk.pb, engine)) < 1e-12, 'the same number the call engine uses');
+  assert.ok(pk.worstBot <= pk.pb + 1e-12 && pk.worst <= pk.p + 1e-12);
   const raw = probYes(a.row.m, K, K + 120, SIG * 0.8, 10, 0, null, 0);
-  assert.ok(pk.worst < raw - 0.03, 'the nudge against the side is kept');
+  assert.ok(pk.worstBot < raw - 0.03, 'the nudge against the side is kept');
   // a nudge in the side's favour is dropped from the worst case (it can only be harder), but stays in the odds
   const b = pickNow({ ...setup({ yb: 70, ya: 72, lead: 120, pShift: 0.03 }), settings: prof });
-  assert.ok(b.p > pk.p + 0.06); assert.ok(b.worst <= b.p - 0.03 + 1e-9);
+  assert.ok(b.pb > pk.pb + 0.06); assert.ok(b.worstBot <= b.pb - 0.03 + 1e-9);
   for (const lead of [-300, -80, 0, 40, 160, 400]) for (const sh of [-0.05, 0, 0.05]) { const x = pickNow({ ...setup({ yb: 40, ya: 42, lead, pShift: sh }), settings: prof }); assert.ok(x.worst <= x.p + 1e-12, `${lead}/${sh}`); }
 });
 
@@ -99,6 +99,34 @@ test("the scorecard: Brier score against Kalshi's own odds, and calibration by b
   assert.ok(Math.abs(sc.brierBot - (0.04 + 0.36 + 0.01) / 3) < 1e-12);
   assert.ok(Math.abs(sc.brierKalshi - (0.09 + 0.3025 + 0.0225) / 3) < 1e-12);
   const b = sc.bands.find((x) => x.lo === 0.6); assert.equal(b.n, 1); assert.equal(b.won, 0);
-  const row = accuracyRows({ bot: { graded: 0, wins: 0, pick: { graded: 40, wins: 26, avgP: 0.72, score: { vs: 40, brierBot: 0.19, brierKalshi: 0.2 } } } }).find((r) => r.key === 'pick10');
-  assert.equal(row.verdict, 'good', 'beats Kalshi head to head'); assert.match(row.metric, /Brier 0\.190 vs Kalshi's 0\.200/);
+  assert.ok(Math.abs(sc.brierPick - sc.brierBot) < 1e-12, "old picks: the pick's odds were the bot's");
+  const row = accuracyRows({ bot: { graded: 0, wins: 0, pick: { graded: 40, wins: 26, avgP: 0.72, mix: { mix: 0.25, learned: true }, score: { vs: 40, brierPick: 0.19, brierBot: 0.21, brierKalshi: 0.2 } } } }).find((r) => r.key === 'pick10');
+  assert.equal(row.verdict, 'good', 'beats Kalshi head to head'); assert.match(row.metric, /Brier: pick 0\.190, bot alone 0\.210, Kalshi 0\.200/); assert.match(row.metric, /25% bot, 75% Kalshi \(learned\)/);
+});
+
+test("the pick combines the bot's odds with Kalshi's (log odds), half and half until its record says otherwise", () => {
+  assert.ok(Math.abs(mixOdds(0.7, 0.7, 0.5) - 0.7) < 1e-12, 'agreeing forecasts stay put');
+  assert.ok(Math.abs(mixOdds(0.8, 0.2, 0.5) - 0.5) < 1e-12, 'opposite views meet in the middle');
+  assert.equal(mixOdds(0.8, null, 0.5), 0.8, 'no Kalshi price: the bot alone');
+  // the bot says UP 60%, Kalshi prices UP at 25%: combined, DOWN is the side
+  const a = setup({ yb: 24, ya: 26, lead: 30 }), pk = pickNow({ ...a, settings: prof });
+  assert.ok(a.row.ev.pYes > 0.5, String(a.row.ev.pYes)); assert.equal(pk.side, 'NO'); assert.ok(Math.abs(pk.kalshi - 0.75) < 1e-9);
+  assert.ok(pk.p > 0.5 && pk.pb < 0.5, "the pick's odds for DOWN, the bot's alone under half"); assert.ok(pk.worst <= pk.p + 1e-12); assert.equal(pk.mix, 0.5);
+  assert.equal(pickNow({ ...a, settings: prof, mix: 1 }).side, 'YES', 'all bot: the old pick');
+  const wide = pickNow({ ...setup({ yb: 10, ya: 40, lead: 30 }), settings: prof });
+  assert.equal(wide.mix, 1, 'a 30c spread is no real price: left out'); assert.equal(wide.side, 'YES');
+});
+
+test("the mix is learned from the pick's own record from 30 graded picks: Kalshi's share grows when Kalshi was righter", () => {
+  let seed = 5; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32;
+  const make = (kalshiGood) => Array.from({ length: 200 }, () => {
+    const truth = rnd(), won = rnd() < truth, side = 'YES';
+    const k = kalshiGood ? Math.min(0.97, Math.max(0.03, truth + (rnd() - 0.5) * 0.1)) : 0.5 + (rnd() - 0.5) * 0.3;
+    const b = kalshiGood ? Math.min(0.97, Math.max(0.03, 0.5 + (truth - 0.5) * 0.4 + (rnd() - 0.5) * 0.3)) : Math.min(0.97, Math.max(0.03, truth + (rnd() - 0.5) * 0.1));
+    return { side, pb: b, p: b, kalshi: k, result: won ? 'yes' : 'no' };
+  });
+  assert.deepEqual(pickMix(make(true).slice(0, 29)), { mix: PICK.mix, n: 29, learned: false });
+  const good = pickMix(make(true)), noise = pickMix(make(false));
+  assert.equal(good.learned, true); assert.ok(good.mix <= 0.25, `Kalshi righter: mix ${good.mix}`);
+  assert.ok(noise.mix >= 0.75, `Kalshi noise: mix ${noise.mix}`);
 });
