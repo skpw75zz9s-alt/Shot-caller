@@ -1,6 +1,6 @@
-// Alert center: what can alert, whether it beeps and/or shows a banner, and the rules that keep it calm.
-// Pure logic here (tested); app.js plays the sounds and shows the banners.
-//   - only one banner at a time; routine events go to the alert history without a banner
+// Alert center: what can alert, whether it beeps and/or sends a notification, and the rules that keep it calm.
+// Pure logic here (tested); alertui.js plays the sounds and sends the notifications.
+//   - one notification per kind of alert (a new one replaces the last); routine events only go to the history
 //   - the same event can't repeat inside the cooldown
 //   - quiet mode silences everything (history still records), and turning it off restores your choices
 

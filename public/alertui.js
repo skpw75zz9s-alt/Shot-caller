@@ -1,4 +1,4 @@
-// Alert center in the browser: banners (one at a time), sounds (Web Audio: recorded clips for the big moments, tones
+// Alert center in the browser: phone notifications (v13.35, they replaced the pop-up banners), sounds (Web Audio: recorded clips for the big moments, tones
 // for the rest), the Alerts tab and its history. The rules live in alerts.js.
 import { ALERT_DEFAULTS, ALERT_EVENTS, ALERT_GROUPS, SOUND_FILES, TONES, alertPrefs, routeAlert } from './alerts.js';
 
@@ -11,8 +11,7 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
   let prefs = alertPrefs(store.get('alertPrefs', {}));
   const log = { last: {}, history: store.get('alertHistory', []) };
   let audio = null;
-  const queue = [];
-  let showing = false, previewFlip = false, bannerTimer = null;
+  let previewFlip = false, unread = 0;
 
   const save = () => store.set('alertPrefs', prefs);
   const clips = {}; // name -> Promise<AudioBuffer | null>
@@ -55,18 +54,46 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
       t += ms / 1000 + 0.04;
     }
   }
-  function banner(key, title, text) {
-    queue.push({ key, title, text });
-    if (!showing) next();
+  // ---------- notifications (nothing pops up over the app) ----------
+  const canNotify = () => 'Notification' in window && Notification.permission === 'granted';
+  // A phone notification. One per kind of alert: a new whale replaces the last whale's notification instead of
+  // stacking. silent when the app already played its sound. Without permission it only counts on the Alerts tab.
+  async function notify(key, title, text, { silent = false } = {}) {
+    if (canNotify()) {
+      try {
+        const opts = { body: text || '', tag: `alert-${key}`, renotify: true, silent, icon: 'icon-192.png', badge: 'icon-192.png' };
+        const reg = await navigator.serviceWorker?.getRegistration();
+        if (reg) await reg.showNotification(title, opts); else new Notification(title, opts);
+        return true;
+      } catch { /* falls through to the counter */ }
+    }
+    if (!$('view-alerts')?.classList.contains('active')) { unread++; renderBadge(); }
+    return false;
   }
-  function next() {
-    const b = queue.shift();
-    if (!b) { showing = false; $('banner').hidden = true; return; }
-    showing = true;
-    $('banner').className = `banner ${KIND[b.key] || ''}`;
-    $('bannerTitle').textContent = b.title; $('bannerText').textContent = b.text || '';
-    $('banner').hidden = false;
-    bannerTimer = setTimeout(next, Math.max(1, prefs.bannerSec) * 1000);
+  function renderBadge() {
+    const b = document.querySelector('nav button[data-view="alerts"]');
+    if (!b) return;
+    let dot = b.querySelector('.nav-badge');
+    if (!dot) { dot = document.createElement('i'); dot.className = 'nav-badge'; b.appendChild(dot); }
+    dot.textContent = unread > 9 ? '9+' : String(unread);
+    dot.hidden = !unread;
+  }
+  document.querySelector('nav button[data-view="alerts"]')?.addEventListener('click', () => { unread = 0; renderBadge(); });
+  function renderNotify(msg) {
+    const st = $('alNotifyStatus'), btn = $('alNotify');
+    if (!st) return;
+    const has = 'Notification' in window, perm = has ? Notification.permission : 'unsupported';
+    st.textContent = msg || (perm === 'granted' ? 'Notifications are on: alerts arrive as phone notifications, never pop-ups over the app.'
+      : perm === 'denied' ? 'Notifications are blocked for Shot Caller. Allow them in your phone\'s Settings → Notifications, then come back.'
+      : !has ? 'This browser can\'t show notifications. On iPhone: Share → Add to Home Screen, then open Shot Caller from the Home Screen and turn them on here.'
+      : 'Turn on notifications to get alerts as phone notifications. Until then they only go to the history below (and the count on the Alerts tab).');
+    if (btn) btn.hidden = perm !== 'default';
+  }
+  async function askNotify() {
+    if (!('Notification' in window)) return renderNotify();
+    try { await Notification.requestPermission(); } catch { /* old Safari: callback form */ }
+    renderNotify();
+    if (canNotify()) notify('feedUp', 'Notifications are on', 'Alerts will show up here instead of popping up over the app.');
   }
 
   // Fire an event: history always, then sound and/or banner if allowed. dedupe narrows the cooldown key.
@@ -74,7 +101,7 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
     const r = routeAlert(prefs, log, key, `${title}${text ? ` · ${text}` : ''}`, now, dedupe);
     store.set('alertHistory', log.history.slice(0, 60));
     if (r.sound) play(key, clip);
-    if (r.visual) banner(key, title, text);
+    if (r.visual) notify(key, title, text, { silent: !!r.sound });
     onNote?.(key, title, text);
     renderHistory();
   }
@@ -89,15 +116,15 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
   function render() {
     $('alSounds').checked = prefs.sounds; $('alVisuals').checked = prefs.visuals; $('alQuiet').checked = prefs.quiet;
     $('alLockAnim').checked = prefs.lockAnim; $('alTrendAnim').checked = prefs.trendAnim;
-    $('alVolume').value = prefs.volume; $('alBanner').value = prefs.bannerSec; $('alCooldown').value = prefs.cooldownSec;
+    $('alVolume').value = prefs.volume; $('alCooldown').value = prefs.cooldownSec;
     $('alWhale').value = prefs.whaleMin; $('alFlip').value = prefs.flipRisk;
     $('alUnlock').textContent = audio?.state === 'running' ? 'Sound is on for this visit ✓' : 'Tap to enable sound on this phone';
     renderSlots();
     $('alertGroups').innerHTML = ALERT_GROUPS.map((g) => `<div class="card ev-card"><h3>${esc(g.title)}</h3>${g.events.map(([k]) => {
       const e = prefs.events[k];
-      return `<div class="ev-row"><span>${esc(ALERT_EVENTS[k].label)}</span><label><input type="checkbox" data-ev="${k}" data-f="sound" ${e.sound ? 'checked' : ''}>Sound</label><label><input type="checkbox" data-ev="${k}" data-f="visual" ${e.visual ? 'checked' : ''}>Banner</label><button data-preview="${k}">Preview</button></div>`;
+      return `<div class="ev-row"><span>${esc(ALERT_EVENTS[k].label)}</span><label><input type="checkbox" data-ev="${k}" data-f="sound" ${e.sound ? 'checked' : ''}>Sound</label><label><input type="checkbox" data-ev="${k}" data-f="visual" ${e.visual ? 'checked' : ''}>Notify</label><button data-preview="${k}">Preview</button></div>`;
     }).join('')}</div>`).join('');
-    renderHistory();
+    renderHistory(); renderNotify(); renderBadge();
   }
 
   // ---------- your own sounds ----------
@@ -123,13 +150,14 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
 
   // ---------- controls ----------
   const num = (id, key, min, max) => $(id).addEventListener('change', () => { const n = Number($(id).value); if (Number.isFinite(n)) { prefs[key] = Math.min(max, Math.max(min, n)); save(); } render(); });
-  num('alVolume', 'volume', 0, 100); num('alBanner', 'bannerSec', 1, 30); num('alCooldown', 'cooldownSec', 0, 3600); num('alWhale', 'whaleMin', 1000, 1e8); num('alFlip', 'flipRisk', 1, 99);
+  num('alVolume', 'volume', 0, 100); num('alCooldown', 'cooldownSec', 0, 3600); num('alWhale', 'whaleMin', 1000, 1e8); num('alFlip', 'flipRisk', 1, 99);
   $('alSounds').addEventListener('change', () => { prefs.sounds = $('alSounds').checked; if (prefs.sounds) unlock(); save(); render(); });
   $('alVisuals').addEventListener('change', () => { prefs.visuals = $('alVisuals').checked; save(); });
   $('alLockAnim').addEventListener('change', () => { prefs.lockAnim = $('alLockAnim').checked; save(); });
   $('alTrendAnim').addEventListener('change', () => { prefs.trendAnim = $('alTrendAnim').checked; save(); });
   // Quiet mode keeps your switches as they are and only mutes; turning it off restores everything
   $('alQuiet').addEventListener('change', () => { prefs.quiet = $('alQuiet').checked; save(); });
+  $('alNotify')?.addEventListener('click', askNotify);
   $('alUnlock').addEventListener('click', () => { if (unlock()) { prefs.sounds = true; save(); play('call'); } render(); });
   $('alReset').addEventListener('click', () => { if (confirm('Reset all alert settings?')) { prefs = alertPrefs({}); save(); render(); } });
   $('alClear').addEventListener('click', () => { log.history = []; store.set('alertHistory', []); renderHistory(); });
@@ -139,14 +167,15 @@ export function createAlertCenter({ $, store, esc, clock, onNote, custom = null 
     prefs.events[k] = { ...prefs.events[k], [f]: e.target.checked };
     save();
   });
-  // Preview shows the banner and plays the tone even when that event's switches are off
+  // Preview sends the notification and plays the tone even when that event's switches are off
   $('alertGroups').addEventListener('click', (e) => {
     const k = e.target.dataset.preview;
     if (!k) return;
     unlock();
-    queue.length = 0; clearTimeout(bannerTimer); showing = false; // a preview replaces whatever banner is up
     const clip = k === 'call' ? (previewFlip = !previewFlip) ? 'bull' : 'bear' : undefined; // UP and DOWN take turns
-    play(k, clip); banner(k, `Preview: ${ALERT_EVENTS[k].label}`, clip ? `${clip === 'bull' ? 'UP call: the bull' : 'DOWN call: the bear'}` : 'This is how it will look.');
+    play(k, clip);
+    notify(k, `Preview: ${ALERT_EVENTS[k].label}`, clip ? `${clip === 'bull' ? 'UP call: the bull' : 'DOWN call: the bear'}` : 'This is how it will look.', { silent: true })
+      .then((ok) => { if (!ok) renderNotify('Notifications aren\'t on yet, so nothing was shown. Turn them on above.'); });
   });
   // Any first tap unlocks audio if sounds are on (phones need a gesture)
   document.addEventListener('click', () => { if (prefs.sounds && !audio) unlock(); }, { once: true });

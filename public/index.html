@@ -79,7 +79,6 @@
 </head>
 <body>
   <div id="fx" class="fx" hidden aria-live="polite"></div>
-  <div id="banner" class="banner" hidden><b id="bannerTitle"></b><span id="bannerText"></span></div>
   <header>
     <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <select id="mktPick" class="tag mkt-pick" aria-label="Kalshi market"><option>BTC · 15m</option></select></h1>
     <div class="hdr-r"><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
@@ -331,14 +330,15 @@
     <section id="view-alerts" class="view">
       <div class="card alerts-card">
         <h3>Alert center</h3>
-        <p class="push-status">Pick what beeps and what shows a banner. One banner at a time; everything also goes to the history below. Push notifications (Settings) still bring buy and sell calls when the app is closed.</p>
-        <div class="sw-row"><label><input type="checkbox" id="alSounds"> Sounds</label><label><input type="checkbox" id="alVisuals"> Banners</label><label><input type="checkbox" id="alQuiet"> Quiet mode</label></div>
+        <p class="push-status">Pick what beeps and what sends a phone notification. Nothing pops up over the app: alerts arrive as notifications, and everything also goes to the history below. Push notifications (Settings) still bring buy and sell calls when the app is closed.</p>
+        <p class="push-status" id="alNotifyStatus"></p>
+        <button id="alNotify" class="ghost" hidden>Turn on notifications</button>
+        <div class="sw-row"><label><input type="checkbox" id="alSounds"> Sounds</label><label><input type="checkbox" id="alVisuals"> Notifications</label><label><input type="checkbox" id="alQuiet"> Quiet mode</label></div>
         <div class="sw-row"><label><input type="checkbox" id="alLockAnim"> Call lock-in animation</label><label><input type="checkbox" id="alTrendAnim"> Bull / bear charge</label></div>
         <div class="pos-btns"><button id="fxTryLock" class="ghost">Preview lock-in</button><button id="fxTryBull" class="ghost">Preview bull run</button></div>
         <button id="alUnlock" class="ghost">Tap to enable sound on this phone</button>
         <div class="num-grid">
           <label>Volume %<input id="alVolume" inputmode="numeric"></label>
-          <label>Banner seconds<input id="alBanner" inputmode="numeric"></label>
           <label>Repeat cooldown (s)<input id="alCooldown" inputmode="numeric"></label>
           <label>Whale minimum ($)<input id="alWhale" inputmode="numeric"></label>
           <label>High flip risk (of 100)<input id="alFlip" inputmode="numeric"></label>
@@ -550,7 +550,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.34 · Why it's moving</p>
+      <p class="fine" id="version">Shot Caller v13.35 · Alerts as notifications</p>
     </section>
   </main>
 
@@ -570,7 +570,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '170';
+    window.SC_BUILD = '171';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

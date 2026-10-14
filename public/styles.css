@@ -287,11 +287,7 @@ details.card > summary { list-style: none; cursor: pointer; margin-bottom: 0; }
 details.card > summary::-webkit-details-marker { display: none; }
 details.card > summary span::before { content: '▸ '; color: var(--accent); }
 details.card[open] > summary { margin-bottom: 10px; } details.card[open] > summary span::before { content: '▾ '; }
-.banner { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 30; max-width: 536px; margin: 0 auto; padding: 12px 14px; border-radius: 14px; background: #0e1524f5; border: 1px solid var(--accent); box-shadow: 0 0 28px #22d3ee44, 0 12px 30px #000c; display: flex; flex-direction: column; gap: 2px; animation: drop .25s ease-out; }
-.banner b { font-size: 13px; letter-spacing: .4px; } .banner span { font-size: 12px; color: var(--muted); }
-.banner.good { border-color: var(--yes); box-shadow: 0 0 28px #2ee6a644; } .banner.bad { border-color: var(--no); box-shadow: 0 0 28px #ff4d6d44; } .banner.warn { border-color: var(--amber); box-shadow: 0 0 28px #fbbf2444; }
 @keyframes drop { from { transform: translateY(-20px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .banner { animation: none; } }
 /* chart tab */
 .tf-btns { display: flex; gap: 5px; margin-bottom: 8px; }
 .tf-btns button { flex: 1; margin: 0; padding: 7px 0; font-size: 11px; background: var(--bg); color: var(--muted); border: 1px solid var(--line-2); text-transform: none; letter-spacing: 0; }
@@ -965,3 +961,7 @@ body:not(.no-feeds) [data-alt-only] { display: none !important; } /* crypto has 
 .drv-row.own .drv-bar i { background-image: repeating-linear-gradient(45deg, #0000 0 3px, #0006 3px 5px); }
 .drv-usd { font: 700 13px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
 .drv-fit { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+/* the unread count on the Alerts tab when notifications are off (v13.35: no pop-ups over the app) */
+nav button { position: relative; }
+.nav-badge { position: absolute; top: 3px; left: 50%; margin-left: 5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--no); color: #fff; font: 700 9px/15px var(--mono); font-style: normal; letter-spacing: 0; text-align: center; }
