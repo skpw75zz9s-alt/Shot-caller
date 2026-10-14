@@ -247,6 +247,22 @@
     </section>
 
     <section id="view-chart" class="view">
+      <!-- the chart first (v13.22): the cards below it change height as they update, and above it they pushed it up and down -->
+      <div class="card chart-pro">
+        <div class="tf-btns" id="tfBtns"></div>
+        <div class="chart-size" id="chartSize" aria-label="Chart size"></div>
+        <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
+        <div class="pro-wrap"><div id="tvMain" class="tv-main"></div><canvas id="orderLayer" class="order-layer" aria-hidden="true"></canvas><button type="button" id="chartLive" class="chart-live" hidden>⟲ LIVE</button><div id="whyBox" class="why-box" hidden></div><div id="fcBadge" class="fc-badge" hidden></div></div>
+        <div id="tvRsi" class="tv-sub"></div>
+        <div id="tvMacd" class="tv-sub"></div>
+        <p class="pred-record" id="predRecord"></p>
+        <p class="pred-record" id="pcRecord"></p>
+        <p class="pred-record" id="coneRead"></p>
+        <p class="pred-record" id="flipInfo"></p>
+        <p class="pred-record" id="microInfo"></p>
+        <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
+        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
+      </div>
       <div class="card pulse" id="pulseCard">
         <div class="deep-head"><span>Market pulse</span><b id="pulseWhen"></b></div>
         <div class="pulse-stab" id="pulseStab">
@@ -266,21 +282,10 @@
           <img src="bull.svg" alt="" class="beast sm" id="pulseBull">
         </div>
       </div>
-      <div class="card chart-pro">
-        <div class="tf-btns" id="tfBtns"></div>
-        <div class="chart-size" id="chartSize" aria-label="Chart size"></div>
-        <details class="toggles"><summary>Chart tools &amp; indicators</summary><div id="chartToggles" class="toggle-grid"></div></details>
-        <div class="pro-wrap"><div id="tvMain" class="tv-main"></div><canvas id="orderLayer" class="order-layer" aria-hidden="true"></canvas><button type="button" id="chartLive" class="chart-live" hidden>⟲ LIVE</button><div id="whyBox" class="why-box" hidden></div><div id="fcBadge" class="fc-badge" hidden></div></div>
-        <div id="tvRsi" class="tv-sub"></div>
-        <div id="tvMacd" class="tv-sub"></div>
-        <p class="pred-record" id="predRecord"></p>
-        <p class="pred-record" id="pcRecord"></p>
-        <p class="pred-record" id="coneRead"></p>
-        <p class="pred-record" id="flipInfo"></p>
-        <p class="pred-record" id="microInfo"></p>
-        <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
-        <p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. <b>Prediction lines</b>: where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p>
-      </div>
+    </section>
+
+    <!-- The radar (v13.22: its own tab) -->
+    <section id="view-radar" class="view">
       <div class="card radar">
         <div class="radar-head"><b>Market radar</b><small class="muted" id="radarState"></small></div>
         <div class="radar-wrap"><svg id="radarScope" class="radar-scope" viewBox="0 0 300 300" role="img" aria-label="Radar screen: the expected close in the centre, the 90% range ring, the floor and ceiling, the target line, BTC now, and every exchange's price as a blip"></svg><div class="radar-beam" id="radarBeam" aria-hidden="true"></div></div>
@@ -489,7 +494,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.21 · Liquidations + time of day</p>
+      <p class="fine" id="version">Shot Caller v13.22 · Smoother chart + Radar tab</p>
     </section>
   </main>
 
@@ -498,6 +503,7 @@
   <nav>
     <button data-view="live" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Deck</button>
     <button data-view="chart"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-6 4 3 6-8"/></svg>Chart</button>
+    <button data-view="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="learn"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
@@ -507,7 +513,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '156';
+    window.SC_BUILD = '157';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
