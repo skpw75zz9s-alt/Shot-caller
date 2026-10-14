@@ -97,5 +97,6 @@ test('the bot leans the way its odds point when neither side has a gap (not the 
   assert.equal(leanSide({ side: null, pYes: 0.2, evYes: -0.03, evNo: -0.01 }), 'NO');
   assert.equal(leanSide({ side: null, pYes: 0.6, evYes: -0.02, evNo: 0.03 }), 'NO', 'a real gap (even under the bar) still leads');
   assert.equal(leanSide({ side: 'YES', pYes: 0.4, evYes: 0.1, evNo: -0.1 }), 'YES');
+  assert.equal(leanSide({ side: null, pYes: 0.96, evYes: -0.02, evNo: 0.008 }), 'YES', 'a sliver of gap on a 4% long shot does not lead');
   assert.equal(leanSide({ side: null, evYes: null, evNo: null }), null);
 });

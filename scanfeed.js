@@ -5,26 +5,29 @@
 // whether or not anyone has the app open.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { EXCHANGES, GLOBAL_EXCHANGES, createAligner, parseCoinbase } from './public/feeds.js';
+import { createAligner, exchangesFor, globalExchangesFor, parseCoinbase } from './public/feeds.js';
+import { HOME_ASSET } from './public/markets.js';
 import { quote } from './public/model.js';
 import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
-import { LIQ_FEEDS } from './public/liquidations.js';
+import { liqFeedsFor } from './public/liquidations.js';
 
-const COINBASE = { name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['matches'] }], parse: parseCoinbase };
+const coinbaseFeed = (product) => ({ name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: [product], channels: ['matches'] }], parse: parseCoinbase });
 const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
 const MAX_SAMPLES = 6000;
 
 // futures: futures.js (Hyperliquid's BTC perpetual), its reads become extra scan inputs
 // onTrade: each USD exchange trade as it arrives (the Discord whale alerts: discordalerts.js); onLiq: each futures
 // liquidation (public/liquidations.js: the scan's 'liq' input and the Discord cascade alert)
-export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null, onTrade = null, onLiq = null } = {}) {
+// asset: the coin it streams (public/markets.js; v13.30 one Round scan per coin)
+export function createScanFeed({ file, log = console, WS = globalThis.WebSocket, clock = () => Date.now(), futures = null, onTrade = null, onLiq = null, asset = HOME_ASSET } = {}) {
+  const COINBASE = coinbaseFeed(asset.product), EXCHANGES = exchangesFor(asset.sym), GLOBAL_EXCHANGES = globalExchangesFor(asset.sym), LIQ_FEEDS = liqFeedsFor(asset.sym);
   let data = { samples: [], models: {} };
   // trades: the five USD exchanges (the bot's price, Market watch, the micro model); gtrades: the global markets (v13.10),
   // kept apart and level-aligned to USD spot, read only by the scan's global inputs (Binance and Bybit block US servers:
   // whatever connects is used)
   let liqs = []; // futures liquidations, the last 30 minutes
   let trades = [], gtrades = [], roundOpen = null, last = null, lastScanAt = 0, saveTimer = null;
-  const align = createAligner(), globalNames = new Set(GLOBAL_EXCHANGES.map((e) => e.name));
+  const align = createAligner(0.005, asset.sym), globalNames = new Set(GLOBAL_EXCHANGES.map((e) => e.name));
   const socks = {}, status = {}, retry = {};
   let stopped = true;
 

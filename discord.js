@@ -9,6 +9,7 @@
 // Branding (v13.12): every post comes from "Shot Caller" with the app's bitcoin icon as its avatar and an "Official
 // calls" header that links to the app. The address comes from APP_URL, or Railway's own RAILWAY_PUBLIC_DOMAIN; without
 // either the posts still go out, just without the icon and link.
+import { isHome, marketOf } from './public/markets.js';
 const HOOK = /^https:\/\/(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com\/api(?:\/v\d+)?\/webhooks\/\d{5,30}\/[\w-]{20,120}$/;
 const DISCLAIMER = 'Signals only. Not financial advice. Every call can lose.';
 const NAME = 'Shot Caller';
@@ -27,19 +28,24 @@ export const cleanWebhook = (url) => (typeof url === 'string' ? url.trim().repla
 export const validWebhook = (url) => HOOK.test(cleanWebhook(url));
 
 const sideName = (side) => (side === 'YES' ? 'UP' : 'DOWN');
+// the round's market (v13.30: every Kalshi market posts): its coin or index, prices at its precision, and a tag on
+// every market but Bitcoin's 15-minute one so a shared channel stays readable
+const mkOf = (ticker) => marketOf(String(ticker || '').split('-')[0]);
+const px = (v, m) => `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: m.digits, maximumFractionDigits: m.digits })}`;
+const tag = (m) => (isHome(m.series) ? '' : `[${m.key} · ${m.freq}] `);
 const cents = (p) => `${Math.round(p * 100)}¢`;
 const usd = (v) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toFixed(2)}`;
 const ts = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`; // Discord shows it in each reader's own time zone
 
 // The embeds (pure, so they're testable)
 export function callMessage(e, { strike = null, floor = null, paper = false, level = 'official', base = null, late = false, early = false, flip = null } = {}) {
-  const up = e.side === 'YES', { author, ...sender } = brand(base);
+  const up = e.side === 'YES', { author, ...sender } = brand(base), mk = mkOf(e.ticker);
   return {
     ...sender,
     embeds: [{
       author,
-      title: `${paper ? '📝 PAPER · ' : ''}${flip ? '↺ FLIP · ' : ''}${up ? '🐂' : '🐻'} ${sideName(e.side)} call${late ? ' · ⏱ LATE' : early ? ' · ⚡ EARLY' : ''}`,
-      description: paper ? 'The profit guard has buy alerts paused (this level is losing money after fees), so this is logged as a paper call, not a buy.' : `BTC ${up ? 'above' : 'below'} ${strike ? `$${Math.round(strike).toLocaleString('en-US')}` : 'the target'} when the round closes.`,
+      title: `${tag(mk)}${paper ? '📝 PAPER · ' : ''}${flip ? '↺ FLIP · ' : ''}${up ? '🐂' : '🐻'} ${sideName(e.side)} call${late ? ' · ⏱ LATE' : early ? ' · ⚡ EARLY' : ''}`,
+      description: paper ? 'The profit guard has buy alerts paused (this level is losing money after fees), so this is logged as a paper call, not a buy.' : `${mk.key} ${up ? 'above' : 'below'} ${strike ? px(strike, mk) : 'the target'} when the round closes.`,
       color: paper ? 0x5d6880 : up ? 0x2ee6a6 : 0xff4d6d,
       fields: [
         { name: 'Price', value: cents(e.price), inline: true },
@@ -58,14 +64,14 @@ export function callMessage(e, { strike = null, floor = null, paper = false, lev
   };
 }
 export function resultMessage(e, stats = null, base = null) {
-  const { author, ...sender } = brand(base), won = e.side.toLowerCase() === e.result;
+  const { author, ...sender } = brand(base), won = e.side.toLowerCase() === e.result, mk = mkOf(e.ticker);
   const rec = stats?.graded ? `${stats.wins}–${stats.graded - stats.wins} (${Math.round((stats.wins / stats.graded) * 100)}% won) · ${usd(stats.usd ?? 0)} at $10 a call after fees` : null;
   return {
     ...sender,
     embeds: [{
       author,
-      title: `${won ? '✅ WIN' : '❌ LOSS'} · ${sideName(e.side)} at ${cents(e.price)}`,
-      description: `BTC closed ${e.result === 'yes' ? 'above' : 'below'} the target.${rec ? `\n**Record:** ${rec}` : ''}`,
+      title: `${tag(mk)}${won ? '✅ WIN' : '❌ LOSS'} · ${sideName(e.side)} at ${cents(e.price)}`,
+      description: `${mk.key} closed ${e.result === 'yes' ? 'above' : 'below'} the target.${rec ? `\n**Record:** ${rec}` : ''}`,
       color: won ? 0x2ee6a6 : 0xff4d6d,
       fields: [{ name: 'Market', value: `\`${e.ticker}\``, inline: true }, { name: 'Called', value: ts(e.at), inline: true }],
       footer: { text: DISCLAIMER },
@@ -76,14 +82,14 @@ export function resultMessage(e, stats = null, base = null) {
 // The 10-minute pick (public/pick.js): every round's side, locked by the math at 10:00 left, with the last pick's result
 // in the same post (one message a round, not two)
 export function pickMessage(e, { prev = null, stats = null, base = null } = {}) {
-  const { author, ...sender } = brand(base), up = e.side === 'YES';
+  const { author, ...sender } = brand(base), up = e.side === 'YES', mk = mkOf(e.ticker);
   const pc = (x) => `${Math.round(x * 100)}%`, last = prev ? `${prev.side.toLowerCase() === prev.result ? '✅ won' : '❌ lost'} (${sideName(prev.side)} at ${cents(prev.price)})` : null;
   return {
     ...sender,
     embeds: [{
       author,
-      title: `🔒 10-MIN PICK · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
-      description: `BTC ${up ? 'above' : 'below'} ${e.strike ? `$${Math.round(e.strike).toLocaleString('en-US')}` : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}`,
+      title: `${tag(mk)}🔒 10-MIN PICK · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
+      description: `${mk.key} ${up ? 'above' : 'below'} ${e.strike ? px(e.strike, mk) : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}`,
       color: e.buy ? (up ? 0x2ee6a6 : 0xff4d6d) : 0x5d6880,
       fields: [
         { name: 'Kalshi', value: cents(e.price), inline: true },

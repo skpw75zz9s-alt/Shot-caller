@@ -19,7 +19,10 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
-import { MARKETS } from './public/markets.js';
+import { ASSETS, HOME, marketOf } from './public/markets.js';
+import { createDiscovery } from './discovery.js';
+import { createPrices } from './prices.js';
+import { createStacks } from './stacks.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -96,28 +99,20 @@ export const bot = createBot({
   onPick: (e, o) => discord.pick(e, o),
 });
 setInterval(() => access.prune(), 3600000).unref();
-
-// Which of the bot's markets Kalshi has open right now (public/markets.js), checked live and kept a minute
-let marketsCache = { at: 0, body: null };
-async function openMarkets(now = Date.now()) {
-  if (marketsCache.body && now - marketsCache.at < 60000) return marketsCache.body;
-  const rows = await Promise.all(MARKETS.map(async (m) => {
-    try {
-      const r = await fetch(`${KALSHI}/markets?series_ticker=${m.series}&status=open&limit=5`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6000) });
-      const d = r.ok ? await r.json() : null, ms = d?.markets || [];
-      return { key: m.key, series: m.series, name: m.name, open: ms.length, next: ms.map((x) => x.close_time).sort()[0] ?? null, checked: !!d };
-    } catch { return { key: m.key, series: m.series, name: m.name, open: 0, next: null, checked: false }; }
-  }));
-  marketsCache = { at: now, body: { markets: rows, at: now } };
-  return marketsCache.body;
-}
+// Every other Kalshi market (v13.30): discovered live, each with its own copy of the bot and its asset's readers
+// (discovery.js, stacks.js, prices.js). MARKETS=off: Bitcoin's 15-minute market only.
+const fetchJSONs = async (u) => { const r = await fetch(u, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(`${u.split('?')[0]}: HTTP ${r.status}`); return r.json(); };
+export const prices = createPrices({ coinbase: COINBASE, fetchJSON: fetchJSONs });
+export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord,
+  canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
 const ROUTES = [
   { prefix: '/api/kalshi/', upstream: KALSHI, allow: KALSHI_PUBLIC },
   { prefix: '/api/kalshi-demo/', upstream: KALSHI_DEMO, allow: KALSHI_PUBLIC },
-  { prefix: '/api/coinbase/', upstream: COINBASE, allow: new RegExp(`^products/(${MARKETS.map((m) => m.product).join('|')})/(ticker|candles)$`) }, // each market's coin (public/markets.js)
+  { prefix: '/api/coinbase/', upstream: COINBASE, allow: new RegExp(`^products/(${ASSETS.filter((a) => a.product).map((a) => a.product).join('|')})/(ticker|candles)$`) }, // every coin (public/markets.js)
 ];
 
 const TYPES = {
@@ -311,10 +306,20 @@ async function adminApi(req, res, action, token) {
 
 // POST /api/push/{sync,test,unsubscribe,report}
 async function pushApi(req, res, action, token) {
-  const handlers = { sync: bot.sync, test: bot.test, unsubscribe: bot.unsubscribe, report: bot.report };
-  if (!handlers[action]) return send(res, 404, { error: 'not found' });
-  const body = await readBody(req);
-  const out = await handlers[action](body, { token });
+  if (!['sync', 'test', 'unsubscribe', 'report'].includes(action)) return send(res, 404, { error: 'not found' });
+  const body = await readBody(req), endpoint = body?.subscription?.endpoint ?? body?.endpoint;
+  // each phone lives in its market's bot (v13.30); a market that isn't running yet starts now, Bitcoin's covers it meanwhile
+  if (action === 'sync') {
+    const series = typeof body?.settings?.series === 'string' ? body.settings.series : HOME.series;
+    if (!stacks.has(series) && marketOf(series, discovery.list()).series === series) stacks.start(series);
+    const target = stacks.bot(series);
+    for (const [, b] of stacks.bots()) if (b !== target && endpoint && b.devices.has(endpoint)) b.unsubscribe({ endpoint });
+    const out = await target.sync(body, { token });
+    return send(res, out.status, out.body);
+  }
+  if (action === 'unsubscribe') { let out = null; for (const [, b] of stacks.bots()) { const r = await b.unsubscribe(body, { token }); if (!out || b.devices.has?.(endpoint)) out = r; } return send(res, out.status, out.body); }
+  const owner = stacks.bots().map(([, b]) => b).find((b) => endpoint && b.devices.has(endpoint)) ?? bot;
+  const out = await owner[action](body, { token });
   send(res, out.status, out.body);
 }
 
@@ -380,20 +385,29 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/push/key') return send(res, 200, { publicKey: bot.publicKey() });
     // What the server has learned about the market (the phone prices with it too)
     // The official bot record (every call the server's bot made, graded against Kalshi's result)
-    if (path === '/api/record') return send(res, 200, bot.record());
+    // ?m=SERIES picks the market (v13.30); without it, Bitcoin's 15-minute one
+    const mq = url.searchParams.get('m'), mb = mq ? stacks.bot(mq) : bot, ms = mq ? stacks.stack(mq) : null;
+    const mScan = ms?.scanFeed ?? scanFeed, mWatch = ms?.marketWatch ?? marketWatch, mMicro = ms?.microFeed ?? microFeed, mPlay = ms?.playbook ?? playbook, mTune = ms?.tuneFeed ?? tuneFeed, mVol = ms?.volTuneFeed ?? volTuneFeed;
+    if (path === '/api/record') return send(res, 200, mb.record());
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
-    if (path === '/api/pick') return send(res, 200, bot.pick());
-    if (path === '/api/markets') return send(res, 200, await openMarkets());
+    if (path === '/api/pick') return send(res, 200, mb.pick());
+    if (path === '/api/markets') return send(res, 200, { markets: discovery.list().map((m) => ({ ...m, name: marketOf(m.series, discovery.list()).name, kind: marketOf(m.series, discovery.list()).kind, running: stacks.has(m.series) })), at: discovery.at() });
+    // the price of an asset without a Coinbase product (stock indexes, gold, oil: prices.js), in Coinbase's shapes
+    const pr = path.match(/^\/api\/price\/([A-Z]+)\/(ticker|candles)$/), pa = pr && ASSETS.find((a) => a.key === pr[1]);
+    if (pa) {
+      try { return send(res, 200, pr[2] === 'ticker' ? await prices.ticker(pa) : await prices.candleRows(pa, { gran: Number(url.searchParams.get('granularity')) || 60 })); }
+      catch (e) { return send(res, 502, { error: `${pa.name} price: ${e.message}` }); }
+    }
     // The Round scan: live read, learned weights and the graded record
-    if (path === '/api/scan') return send(res, 200, scanFeed.api());
-    if (path === '/api/watch') return send(res, 200, marketWatch.api());
-    if (path === '/api/micro') return send(res, 200, microFeed.api());
-    if (path === '/api/playbook') return send(res, 200, playbook.api());
-    if (path === '/api/tune') return send(res, 200, tuneFeed.api());
-    if (path === '/api/voltune') return send(res, 200, volTuneFeed.api());
-    if (path === '/api/learn') return send(res, 200, { learned: { ...bot.learned(), fees: feeBook.rates(), volTune: volTuneFeed.live() }, status: { ...bot.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } } });
+    if (path === '/api/scan') return send(res, 200, mScan.api());
+    if (path === '/api/watch') return send(res, 200, mWatch.api());
+    if (path === '/api/micro') return send(res, 200, mMicro.api());
+    if (path === '/api/playbook') return send(res, 200, mPlay.api());
+    if (path === '/api/tune') return send(res, 200, mTune.api());
+    if (path === '/api/voltune') return send(res, 200, mVol.api());
+    if (path === '/api/learn') return send(res, 200, { learned: { ...mb.learned(), fees: feeBook.rates(), volTune: mVol.live() }, status: { ...mb.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } }, market: mb.market() });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
-    if (path === '/api/index') { const ix = bot.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
+    if (path === '/api/index') { const ix = mb.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }
     const route = ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) return proxy(route, url, req, res);
     if (rel === '/paywall.html') return serveFile(req, res, '/index.html'); // already paid: go straight to the app
@@ -411,4 +425,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
   if (process.env.PLAYBOOK !== 'off') ready.then(() => playbook.start()); // PLAYBOOK=off: no candle history or strategy check
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
+  if (process.env.MARKETS !== 'off') ready.then(() => stacks.begin()); // every other Kalshi market (stacks.js)
 }

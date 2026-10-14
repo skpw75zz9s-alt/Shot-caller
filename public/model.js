@@ -150,8 +150,14 @@ export function settleVariance(sigmaMin, minutesLeft) {
 
 // P(settlement > K). settleAvg: the average of the prints made so far inside the last minute (when known); without it
 // those prints are taken as today's price.
+// w: the settlement window in minutes: 1 = Kalshi's crypto rule (the average of SETTLE.prints prints over the last
+// minute), 0 = the price at the close itself (stock indexes, gold, oil: v13.30), a log-normal with the same convention
 export function probAbove(S, K, sigmaMin, minutesLeft, driftMin = 0, w = 1, settleAvg = null) {
-  void w; // (the window is SETTLE.w)
+  if (w === 0) {
+    const t = Math.max(minutesLeft, 0);
+    if (!(sigmaMin > 0) || t <= 0) return S > K ? 1 : S < K ? 0 : 0.5;
+    return normCdf((Math.log(S / K) + (driftMin - sigmaMin * sigmaMin / 2) * t) / (sigmaMin * Math.sqrt(t)));
+  }
   const t = Math.max(minutesLeft, 0), { prints: N } = SETTLE;
   if (!(sigmaMin > 0)) { // no volatility: every print is known
     const d = SETTLE.w / N; let sum = 0, n = 0;
@@ -234,7 +240,7 @@ export function probYes(m, strike, S, sigmaMin, minutesLeft, driftMin, settleAvg
   const type = m.strike_type || 'greater';
   const floor = num(m.floor_strike) ?? strike;
   const cap = num(m.cap_strike);
-  const above = (k) => probAbove(S, k, sigmaMin, minutesLeft, driftMin, 1, settleAvg);
+  const above = (k) => probAbove(S, k, sigmaMin, minutesLeft, driftMin, m.settleWin ?? 1, settleAvg); // m.settleWin: 0 for a market settled on the price at the close
   switch (type) {
     case 'greater':
     case 'greater_or_equal':

@@ -1,27 +1,36 @@
-// BTC index estimate. Kalshi settles on CF Benchmarks' BRTI, which is built from several exchanges' order books.
+// The coin's index estimate (BTC's first, v13.30 every coin's). Kalshi settles on CF Benchmarks' BRTI, which is built from several exchanges' order books.
 // Coinbase alone can sit a few dollars off it, and near the target a few dollars decide the call. The server reads
 // the mid price (halfway between best bid and ask) on several of the exchanges BRTI draws from and takes the
 // median, dropping any quote that's stale or far from the rest. What's left between this and Kalshi's settlement
 // is learned as the basis (public/learner.js).
+import { HOME_ASSET } from './public/markets.js';
+
 const mid = (b, a) => { b = Number(b); a = Number(a); return b > 0 && a > 0 && a >= b ? (a + b) / 2 : null; };
 
 // Order books, the way the real index reads them: [[price, size], ...] best first
 const lvl = (rows, pick) => (Array.isArray(rows) ? rows.map(pick).filter(([p, q]) => p > 0 && q > 0) : []);
 const arr = (r) => [Number(r[0]), Number(r[1])], obj = (r) => [Number(r.price), Number(r.amount ?? r.size ?? r.quantity)];
 
-export const defaultSources = (coinbase) => [
-  { name: 'Coinbase', url: `${coinbase}/products/BTC-USD/ticker`, parse: (j) => mid(j.bid, j.ask) ?? (Number(j.price) || null),
-    book: `${coinbase}/products/BTC-USD/book?level=2`, parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
-  { name: 'Kraken', url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD', parse: (j) => { const r = Object.values(j.result || {})[0]; return mid(r?.b?.[0], r?.a?.[0]); },
-    book: 'https://api.kraken.com/0/public/Depth?pair=XBTUSD&count=100', parseBook: (j) => { const r = Object.values(j.result || {})[0] || {}; return { bids: lvl(r.bids, arr), asks: lvl(r.asks, arr) }; } },
-  { name: 'Bitstamp', url: 'https://www.bitstamp.net/api/v2/ticker/btcusd/', parse: (j) => mid(j.bid, j.ask),
-    book: 'https://www.bitstamp.net/api/v2/order_book/btcusd/', parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
-  { name: 'Gemini', url: 'https://api.gemini.com/v1/pubticker/btcusd', parse: (j) => mid(j.bid, j.ask),
-    book: 'https://api.gemini.com/v1/book/btcusd?limit_bids=100&limit_asks=100', parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
-  // itBit (Paxos), one of the venues the CF Benchmarks indexes have drawn from
-  { name: 'itBit', url: 'https://api.paxos.com/v2/markets/BTCUSD/ticker', parse: (j) => mid(j.best_bid?.price, j.best_ask?.price),
-    book: 'https://api.paxos.com/v2/markets/BTCUSD/order-book', parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
-];
+// The exchanges a coin's index is read from (public/markets.js sym; a venue that doesn't list the coin is left out).
+// Stock indexes, gold and oil have no exchange books here: their price comes from prices.js.
+export const sourcesFor = (coinbase, asset = HOME_ASSET) => {
+  const y = asset.sym, low = (v) => String(v).toLowerCase();
+  if (!y) return [];
+  return [
+    { name: 'Coinbase', url: `${coinbase}/products/${asset.product}/ticker`, parse: (j) => mid(j.bid, j.ask) ?? (Number(j.price) || null),
+      book: `${coinbase}/products/${asset.product}/book?level=2`, parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
+    y.krakenRest && { name: 'Kraken', url: `https://api.kraken.com/0/public/Ticker?pair=${y.krakenRest}`, parse: (j) => { const r = Object.values(j.result || {})[0]; return mid(r?.b?.[0], r?.a?.[0]); },
+      book: `https://api.kraken.com/0/public/Depth?pair=${y.krakenRest}&count=100`, parseBook: (j) => { const r = Object.values(j.result || {})[0] || {}; return { bids: lvl(r.bids, arr), asks: lvl(r.asks, arr) }; } },
+    y.bitstamp && { name: 'Bitstamp', url: `https://www.bitstamp.net/api/v2/ticker/${y.bitstamp}/`, parse: (j) => mid(j.bid, j.ask),
+      book: `https://www.bitstamp.net/api/v2/order_book/${y.bitstamp}/`, parseBook: (j) => ({ bids: lvl(j.bids?.slice(0, 200), arr), asks: lvl(j.asks?.slice(0, 200), arr) }) },
+    y.gemini && { name: 'Gemini', url: `https://api.gemini.com/v1/pubticker/${low(y.gemini)}`, parse: (j) => mid(j.bid, j.ask),
+      book: `https://api.gemini.com/v1/book/${low(y.gemini)}?limit_bids=100&limit_asks=100`, parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
+    // itBit (Paxos), one of the venues the CF Benchmarks indexes have drawn from
+    y.paxos && { name: 'itBit', url: `https://api.paxos.com/v2/markets/${y.paxos}/ticker`, parse: (j) => mid(j.best_bid?.price, j.best_ask?.price),
+      book: `https://api.paxos.com/v2/markets/${y.paxos}/order-book`, parseBook: (j) => ({ bids: lvl(j.bids, obj), asks: lvl(j.asks, obj) }) },
+  ].filter(Boolean);
+};
+export const defaultSources = (coinbase) => sourcesFor(coinbase, HOME_ASSET);
 
 // One exchange's mid and depth: the dollars resting within 0.1% of its mid on both sides (how much it can move the
 // consolidated book, the way the index weighs venues by their order books)

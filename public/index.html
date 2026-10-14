@@ -110,7 +110,7 @@
       <div id="positions"></div>
       <!-- the 10-minute pick (v13.23): every round's side, locked by the math at 10:00 left -->
       <p class="alt-note" id="altNote" hidden></p>
-      <div data-btc-only class="card pick-card" id="pickCard" hidden>
+      <div class="card pick-card" id="pickCard" hidden>
         <div class="pick-head"><span>🔒 10-minute pick</span><b id="pickWhen"></b></div>
         <div class="pick-body"><b id="pickSide" class="pick-side">—</b><span id="pickBuy" class="pick-buy"></span></div>
         <div class="pick-txt"><span id="pickOdds"></span><small id="pickWhy"></small></div>
@@ -144,7 +144,7 @@
         <div class="entry" id="entry" hidden></div>
       </div>
 
-      <div class="card tug" id="tugCard">
+      <div data-crypto-only class="card tug" id="tugCard">
         <div class="deep-head"><span>Tug of war · all exchanges</span><b id="tugLead"></b></div>
         <div class="tug-sides">
           <div class="sell" id="tugBear"><img src="bear.svg" alt="" class="beast"><div><label>Sell pressure</label><b id="tugSell">—</b></div></div>
@@ -161,13 +161,13 @@
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
       </div>
 
-      <div data-btc-only class="card watch" id="watchCard">
+      <div class="card watch" id="watchCard">
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
         <details class="how"><summary>How it works</summary><small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small></details>
       </div>
-      <div data-btc-only class="card gd" id="engCard">
+      <div class="card gd" id="engCard">
         <div class="deep-head"><span>Live forecast · this round</span><b id="enWhen"></b></div>
         <div class="en-thr" id="enThr"></div>
         <div class="gd-call" id="enCall">Loading…</div>
@@ -177,21 +177,21 @@
         <div class="gd-kalshi" id="enHist"></div>
         <details class="how"><summary>How it works</summary><small class="fine-left">The prediction engine: a statistical model trained on the 1-minute BTC history, starting from the distance to the target and adding the 1-hour trend, 15-minute EMAs, VWAP, 5-minute RSI, momentum, volume, liquidity sweeps and structure. Every number is tested walk-forward (on rounds the model hadn't seen). It calls only at your confidence level, when that level has held up historically and Kalshi's price plus fees leaves an edge. Nothing is 100%: high-confidence calls come late in the round, when Kalshi already prices them high.</small></details>
       </div>
-      <div data-btc-only class="card gd" id="guideCard">
-        <div class="deep-head"><span>BTC 15-minute forecast</span><b id="gdWhen"></b></div>
+      <div class="card gd" id="guideCard">
+        <div class="deep-head"><span>15-minute forecast</span><b id="gdWhen"></b></div>
         <div class="gd-call" id="gdCall">Loading…</div>
         <div class="gd-grid" id="gdGrid"></div>
         <ul class="gd-ev" id="gdEv"></ul>
         <div class="gd-kalshi" id="gdKalshi"></div>
         <details class="how"><summary>How it works</summary><small class="fine-left">From the shot-caller guide: UP when price is above VWAP, the 20 EMA above the 50, RSI above 50 and structure bullish (DOWN is the mirror); anything mixed is NO CALL. So is low volatility, an untested setup, or one history doesn't back. The UP probability is how often BTC really finished up after the same evidence, counted walk-forward. Major economic announcements aren't known to the bot: skip those yourself. No strategy is 100% accurate.</small></details>
       </div>
-      <div data-btc-only class="card rev" id="revCard">
+      <div class="card rev" id="revCard">
         <div class="deep-head"><span>Reversal watch · 15-min</span><b id="revWhen"></b></div>
         <div class="rev-head" id="revHead">Loading…</div>
         <ul class="rev-list" id="revList"></ul>
         <details class="how"><summary>How it works</summary><small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small></details>
       </div>
-      <div data-btc-only class="card scan" id="scanCard">
+      <div data-crypto-only class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 12 exchanges</span><b id="scanWhen"></b></div>
         <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
         <div class="scan-meter"><i id="scanFill"></i><em></em></div>
@@ -203,10 +203,10 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Absorption = heavy flow one way that doesn't move the price. Scan chance = the bot's odds nudged by the reads the server has learned to trust from graded rounds. The server scans and grades every round, app open or not. Context only: the bot's calls don't use it.</small></details>
       </div>
 
-      <div class="card tape-card">
+      <div data-crypto-only class="card tape-card">
         <div class="deep-head"><span>Live orders · all markets</span><b id="tapeRate"></b></div>
         <div class="feed-chips" id="feedChips"></div>
-        <div class="seg" id="tapeTabs"><button data-tape="all" class="on">All</button><button data-tape="btc">BTC exchanges</button><button data-tape="kalshi">Kalshi contract</button></div>
+        <div class="seg" id="tapeTabs"><button data-tape="all" class="on">All</button><button data-tape="btc">Exchanges</button><button data-tape="kalshi">Kalshi contract</button></div>
         <div id="tapeEx" class="ex-table"></div>
         <div id="kalshiFlow" class="kflow" hidden></div>
         <ul id="tape" class="tape-list"></ul>
@@ -530,7 +530,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.29 · Pick your market</p>
+      <p class="fine" id="version">Shot Caller v13.30 · Every Kalshi price market</p>
     </section>
   </main>
 
@@ -550,7 +550,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '164';
+    window.SC_BUILD = '165';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

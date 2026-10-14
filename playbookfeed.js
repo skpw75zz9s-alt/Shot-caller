@@ -15,7 +15,9 @@ import { PRED, fit, predictNow, predictorReport, predictorShift, series, walkFor
 import { cmFit, cmLive, cmReport, cmWalkForward } from './public/candlemodel.js';
 
 const KEEP = 21 * 86400000;
-export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock = () => Date.now(), log = console, sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }) }) {
+// candleRows (v13.30): any asset's 1-minute candles in Coinbase's shape (prices.js); without it, Bitcoin from Coinbase
+export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock = () => Date.now(), log = console, sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }), candleRows = null }) {
+  const rowsFor = candleRows ?? ((o = {}) => fetchJSON(`${coinbase}/products/BTC-USD/candles?granularity=60${o.start ? `&start=${new Date(o.start).toISOString()}&end=${new Date(o.end).toISOString()}` : ''}`));
   let bars = [], report = null, timer = null, busy = false, backfilling = false, oiFn = () => null, flowFn = () => null, lastLive = null, revNow = null, revAt = 0;
   let guideCal = null, guideCache = null, guideLive = [], guideDirty = false; // the shot-caller guide (public/guide.js)
   const liveFile = file.replace(/[^/\\]+$/, 'guide-live.json');
@@ -48,7 +50,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     try {
       for (let a = from; a < now; a += 300 * 60000) {
         const b = Math.min(now, a + 300 * 60000);
-        try { merge(parseCandles(await fetchJSON(`${coinbase}/products/BTC-USD/candles?granularity=60&start=${new Date(a).toISOString()}&end=${new Date(b).toISOString()}`))); } catch { /* a gap */ }
+        try { merge(parseCandles(await rowsFor({ start: a, end: b }))); } catch { /* a gap */ }
         await sleep(400);
       }
     } finally { backfilling = false; }
@@ -72,7 +74,7 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
     if (busy) return;
     busy = true;
     try {
-      try { merge(parseCandles(await fetchJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`))); } catch { /* next time */ }
+      try { merge(parseCandles(await rowsFor())); } catch { /* next time */ }
       if (!report || clock() - report.at >= 15 * 60000) { rerunMain(); save(); }
       // the candle model on its own beat (a few minutes after the rest), so no single tick carries all the work
       else if (clock() - cmAt >= 15 * 60000 && clock() - report.at >= 3 * 60000) rerunCandles();

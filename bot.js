@@ -5,12 +5,12 @@ import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
 import { PICK, pickMix, pickNow, pickScore } from './public/pick.js';
-import { MARKETS, isHome, marketOf } from './public/markets.js';
+import { ASSETS, HOME, HOME_ASSET } from './public/markets.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
 import { generateVapidKeys, sendPush } from './push.js';
-import { createIndex, defaultSources } from './index.js';
+import { createIndex, sourcesFor } from './index.js';
 import { allowAlert, hourlyWindow } from './public/notify.js';
 import { callStats, logCall, settleCalls, streaks, unsettledCalls } from './public/record.js';
 import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
@@ -30,23 +30,32 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {} }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
+  // the market this bot calls (v13.30: one bot per Kalshi market, public/markets.js); Bitcoin's 15-minute one by default
+  const MK = mk ?? HOME, ASSET = ASSETS.find((a) => a.key === MK.asset) ?? HOME_ASSET, SPOT_SETTLE = ASSET.settle === 'spot';
+  const DEV = { ...DEVICE_DEFAULTS, series: MK.series };
+  // a market settled on the price at the close (stock indexes, gold, oil) carries settleWin 0 for the odds (public/model.js)
+  const tagMarkets = (ms) => (SPOT_SETTLE ? ms.map((x) => ({ ...x, settleWin: 0 })) : ms);
+  // this asset's 1-minute candles in Coinbase's shape: prices.js, or Coinbase's Bitcoin when none is given (tests)
+  const candleRows = (o = {}) => (prices ? prices.candleRows(ASSET, { gran: 60, ...o }) : getJSON(`${coinbase}/products/${ASSET.product || 'BTC-USD'}/candles?granularity=60${o.start ? `&start=${new Date(o.start).toISOString()}&end=${new Date(o.end).toISOString()}` : ''}`));
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
   let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
   const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
-  const market = { spot: null, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, alt: {}, lastTick: 0, lastError: null };
+  const market = { spot: null, delayed: false, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, chosen: {}, lastTick: 0, lastError: null };
+  // the price the bot calls on: none while it's delayed (a stale index or futures print would make confident calls on old news)
+  const liveSpotNow = () => (market.delayed ? null : market.spot);
   const learnFile = dataFile.replace(/[^/\\]+$/, 'learned.json');
   let learned = newLearned(), learnDirty = false, learnSavedAt = 0, backfilling = false, backfillStop = false;
   let learnedShifts = null, gateDirty = false, watchNow = null; // this tick's proven nudges (shifts())
   const lw = {}; // ticker -> { closeTime, samples: [raw P(YES) once a minute], minute, spots: [Coinbase in the last minute] }
   const settledValue = new Map(); // ticker -> Kalshi's settlement index value (expiration_value), when it reports one
-  const LEARN_SERIES = 'KXBTC15M';
+  const LEARN_SERIES = MK.series;
   // The official bot record: every call the server's own bot makes, around the clock, graded against Kalshi's result.
   // Kept in record.json next to the data file; the same for every user. Made on OFFICIAL_LEVEL (public/model.js; calls
   // tagged lv): Profit since v13.20 (calls priced 60-90c with a big worst-case gap); the 90% target level's calls
   // (v13.5-v13.19) and the Steady ones before them stay in the file as the earlier record.
-  const OFFICIAL = { ...DEVICE_DEFAULTS, ...riskSettings(OFFICIAL_LEVEL) };
+  const OFFICIAL = { ...DEV, ...riskSettings(OFFICIAL_LEVEL) };
   const HAS_FLOOR = !!RISK_LEVELS[OFFICIAL_LEVEL].winFloor; // the win-rate guard's price floor (the 90% target level only)
   const currentRecord = () => record.filter((e) => e.lv === OFFICIAL_LEVEL);
   let guardCache = null; // refreshed every 5 s (it scans the record)
@@ -65,7 +74,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   let record = [], recordDirty = false, recordSavedAt = 0;
   const officialMem = {};
   // Near-certain (v11.7): the same engine on the strictest level, with its own graded record next to the official one
-  const CERTAIN = { ...DEVICE_DEFAULTS, ...riskSettings('certain') };
+  const CERTAIN = { ...DEV, ...riskSettings('certain') };
   const certainFile = dataFile.replace(/[^/\\]+$/, 'record-certain.json');
   let certainRecord = [], certainDirty = false;
   // The early lane's record (v13.16): every early call the official level would make, test or live, graded the same way
@@ -77,7 +86,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   // the rounds the official bot watched, until Kalshi settles them (onRound: the Discord sit-out note)
   const roundsSeen = new Map();
   const certainMem = {};
-  const sources = indexSources ?? (env.INDEX === 'off' ? defaultSources(coinbase).slice(0, 1) : defaultSources(coinbase));
+  const sources = indexSources ?? (env.INDEX === 'off' ? sourcesFor(coinbase, ASSET).slice(0, 1) : sourcesFor(coinbase, ASSET));
   const index = createIndex({ sources, fetchJSON: (u) => getJSON(u) });
 
   // ---------- storage ----------
@@ -106,7 +115,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (d.settings && d.settings.noCallLastMin == null && riskLevelOf(d.settings) === 'target90') Object.assign(d.settings, { lateMin: RISK_LEVELS.target90.lateMin, noCallLastMin: RISK_LEVELS.target90.noCallLastMin }); // v13.17: no new calls in the last 5 minutes
       devices.set(d.endpoint, d);
     }
-    if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
+    if (vapidFrom?.()) vapid = { ...vapidFrom() }; // every market's bot pushes with the same keys (a phone subscribes once)
+    else if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
     else if (data.vapid) vapid = data.vapid;
     else {
       vapid = generateVapidKeys();
@@ -145,13 +155,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       for (let a = from; a < now && !backfillStop; a += 300 * 60000) {
         const b = Math.min(now, a + 300 * 60000);
         try {
-          const rows = await getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60&start=${new Date(a - 60000).toISOString()}&end=${new Date(b).toISOString()}`);
+          const rows = await candleRows({ start: a - 60000, end: b });
           if (Array.isArray(rows) && learnCandles(learned, parseCandles(rows))) learnDirty = true;
         } catch { /* a missing chunk just leaves a gap */ }
         await new Promise((r) => { const t = setTimeout(r, 400); t.unref?.(); });
       }
     } finally { backfilling = false; }
-    log.log?.(`learned ${learned.vol.minutes} minutes of BTC history`);
+    log.log?.(`learned ${learned.vol.minutes} minutes of ${ASSET.key} history (${MK.series})`);
     await saveLearned();
   }
   function scheduleSave() {
@@ -187,11 +197,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   function cleanSettings(s = {}) {
     const out = {};
-    for (const [k, def] of Object.entries(DEVICE_DEFAULTS)) {
+    for (const [k, def] of Object.entries(DEV)) {
       const v = s[k];
       if (typeof def === 'number' && Number.isFinite(Number(v))) out[k] = Number(v);
       else if (typeof def === 'boolean' && typeof v === 'boolean') out[k] = v;
-      else if (k === 'series') out[k] = MARKETS.some((m) => m.series === v) ? v : def; // only markets the bot has a price for
+      else if (k === 'series') out[k] = def; // the server routes each phone to its market's bot (server.js)
       else if (typeof def === 'string' && typeof v === 'string' && /^[A-Z0-9_-]{1,40}$/.test(v)) out[k] = v;
       else out[k] = def;
     }
@@ -272,34 +282,38 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
 
   async function refresh(now) {
-    const series = [...new Set([LEARN_SERIES, ...[...devices.values()].map((d) => d.settings.series)])];
-    // BTC: the multi-exchange index estimate, or Coinbase alone if the other exchanges don't answer. Polled every 5
+    // Crypto: the multi-exchange index estimate, or Coinbase alone if the other exchanges don't answer. Polled every 5
     // seconds (the exchanges' rate limits); every second in between, the live trade feeds move it (kept on the
-    // index's level by the offset measured at the last poll).
+    // index's level by the offset measured at the last poll). Stock indexes, gold, oil: the last print (prices.js),
+    // marked delayed when it's over 90 seconds old, and then the bot makes no calls on it.
     const jobs = [];
     const feed = liveSpot();
-    if (now - market.indexAt >= 5000 || !market.spot || !feed) {
+    if (!sources.length) {
+      if (now - market.indexAt >= 5000 || !market.spot) {
+        market.indexAt = now;
+        jobs.push((prices ? prices.ticker(ASSET) : Promise.resolve(null)).then((t) => {
+          if (!t) throw new Error(`no ${ASSET.key} price`);
+          market.spot = t.price; market.delayed = !!t.delayed; market.index = null;
+        }));
+      }
+    } else if (now - market.indexAt >= 5000 || !market.spot || !feed) {
       market.indexAt = now;
       jobs.push(index.poll(now).then((ix) => {
         const p = ix.index ?? ix.coinbase;
-        if (!p) throw new Error('no BTC price from any exchange');
-        market.spot = p; market.index = ix;
+        if (!p) throw new Error(`no ${ASSET.key} price from any exchange`);
+        market.spot = p; market.index = ix; market.delayed = false;
         market.feedOffset = feed ? p - feed : 0;
       }));
     } else market.spot = feed + market.feedOffset;
     if (now - market.candlesAt > 20000) {
-      jobs.push(getJSON(`${coinbase}/products/BTC-USD/candles?granularity=60`).then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
+      jobs.push(candleRows().then((rows) => { market.candles = parseCandles(rows); market.candlesAt = now; }));
     }
-    // other coins (a phone set to another market, public/markets.js): Coinbase's price every tick, candles every 20 s
-    for (const s of series) {
-      if (isHome(s)) continue;
-      const pr = marketOf(s).product, a = (market.alt[pr] ||= { spot: null, candles: [], candlesAt: 0 });
-      jobs.push(getJSON(`${coinbase}/products/${pr}/ticker`).then((t) => { const p = Number(t.price); if (p > 0) { a.spot = p; a.spotAt = now; } }).catch(() => {}));
-      if (now - a.candlesAt > 20000) jobs.push(getJSON(`${coinbase}/products/${pr}/candles?granularity=60`).then((rows) => { a.candles = parseCandles(rows); a.candlesAt = now; }).catch(() => {}));
-    }
-    for (const s of series) {
-      jobs.push(getJSON(`${kalshi}/markets?series_ticker=${encodeURIComponent(s)}&status=open&limit=50`).then((d) => {
-        market.markets[s] = (d.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time));
+    // Kalshi: Bitcoin's 15-minute market every tick, the other 15-minute ones every 2 seconds, hourly and daily ones every
+    // 5 seconds (their prices move slower, and every market's bot shares Kalshi's rate limit)
+    if (now - (market.kalshiAt || 0) >= (MK.series === HOME.series ? 0 : MK.freq === '15m' ? 2000 : 5000)) {
+      market.kalshiAt = now;
+      jobs.push(getJSON(`${kalshi}/markets?series_ticker=${encodeURIComponent(LEARN_SERIES)}&status=open&limit=200`).then((d) => {
+        market.markets[LEARN_SERIES] = tagMarkets((d.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time) || (a.floor_strike ?? 0) - (b.floor_strike ?? 0)));
       }));
     }
     await Promise.all(jobs);
@@ -327,10 +341,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       for (const d of devices.values()) {
         if (!canNotify(d)) continue; // paywall: no access, no bot
         const s = d.settings;
-        const quoteLog = (market.quoteLogs[s.series] ||= {}), home = isHome(s.series), alt = home ? null : market.alt[marketOf(s.series).product];
-        if (!home && !(alt?.spot > 0 && alt.spotAt > now - 30000 && alt.candles.length)) continue; // no fresh price for that coin yet: no alerts rather than wrong ones
-        // another coin: its own price and candles, and none of what the server learned on Bitcoin
-        const snap = snapshot({ markets: market.markets[s.series] || [], candles: home ? market.candles : alt.candles, spot: home ? market.spot : alt.spot, settings: s, strikes: home ? market.strikes : {}, quoteLog, learned: home ? learnedNow() : null, now, shifts: home ? learnedShifts : null });
+        const quoteLog = (market.quoteLogs[LEARN_SERIES] ||= {});
+        const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: liveSpotNow(), settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts, chosen: market.chosen });
         snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now);
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
@@ -403,7 +415,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   // ---------- learning (every window, all day, every day) ----------
   function observe(now) {
     if (!backfilling && learnCandles(learned, market.candles.filter((c) => c.t + 60000 <= now))) learnDirty = true;
-    const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: market.spot, settings: DEVICE_DEFAULTS, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned: learnedNow(), now, shifts: learnedShifts });
+    const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: liveSpotNow(), settings: DEV, strikes: market.strikes, quoteLog: (market.quoteLogs.__learn ||= {}), learned: learnedNow(), now, shifts: learnedShifts, chosen: market.chosen });
     snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0;
     for (const row of snap.rows) {
       const close = Date.parse(row.m.close_time);
@@ -487,7 +499,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
   function pickNowApi(now = Date.now()) {
     const lv = market.markets[LEARN_SERIES]?.find((m) => Date.parse(m.close_time) > now) ?? null;
-    const live = lv ? pickRecord.find((e) => e.ticker === lv.ticker) ?? null : null;
+    const live = lv ? pickRecord.find((e) => e.closeTime === lv.close_time) ?? null : null; // by the round (a market with many strikes picks one of them)
     return { live, locksAt: lv ? Date.parse(lv.close_time) - PICK.at * 60000 : null, closeTime: lv?.close_time ?? null, last: pickRecord.filter((e) => e.result === 'yes' || e.result === 'no').at(-1) ?? null, stats: pickStats() };
   }
   async function saveEarly() {
@@ -620,6 +632,6 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); backfillStop = true; }
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
-  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, devices,
+  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, vapidKeys: () => (vapid ? { publicKey: vapid.publicKey, privateKey: vapid.privateKey } : null), market: () => ({ series: MK.series, asset: ASSET.key, freq: MK.freq, delayed: market.delayed }), devices,
     learned: () => publicLearned(learned), learnStatus, record: officialRecord, pick: pickNowApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
 }

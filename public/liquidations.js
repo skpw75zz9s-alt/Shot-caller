@@ -7,32 +7,36 @@
 //   OKX      liquidation-orders (SWAP): details[].posSide is the liquidated position (long/short); sz in contracts of
 //            0.01 BTC for BTC-USDT-SWAP, at bkPx
 // The Round scan reads them as one input (public/roundscan.js 'liq'), learned and used only once proven like the rest.
-export const LIQ_FEEDS = [
-  {
-    name: 'Binance', url: 'wss://fstream.binance.com/ws/btcusdt@forceOrder', subscribe: [],
+// A coin's liquidation feeds (public/markets.js sym): Binance's USDT perp and OKX's swap, where listed
+import { HOME_ASSET } from './markets.js';
+
+export const liqFeedsFor = (y) => (!y ? [] : [
+  y.binance && {
+    name: 'Binance', url: `wss://fstream.binance.com/ws/${y.binance}@forceOrder`, subscribe: [],
     parse: (m) => {
       const o = m?.e === 'forceOrder' ? m.o : null;
-      if (!o || o.s !== 'BTCUSDT') return [];
+      if (!o || o.s !== y.binance.toUpperCase()) return [];
       const px = Number(o.ap) || Number(o.p), q = Number(o.z) || Number(o.q);
       return px > 0 && q > 0 ? [{ t: Number(o.T) || Number(m.E) || Date.now(), ex: 'Binance', liq: o.S === 'SELL' ? 'long' : 'short', usd: px * q, price: px }] : [];
     },
   },
-  {
+  y.okx && {
     name: 'OKX', url: 'wss://ws.okx.com:8443/ws/v5/public', subscribe: [{ op: 'subscribe', args: [{ channel: 'liquidation-orders', instType: 'SWAP' }] }], ping: [25000, 'ping'],
     parse: (m) => {
       if (m?.arg?.channel !== 'liquidation-orders' || !Array.isArray(m.data)) return [];
       const out = [];
       for (const d of m.data) {
-        if (d.instId !== 'BTC-USDT-SWAP') continue;
+        if (d.instId !== y.okx) continue;
         for (const x of d.details || []) {
-          const px = Number(x.bkPx), btc = Number(x.sz) * 0.01;
-          if (px > 0 && btc > 0 && (x.posSide === 'long' || x.posSide === 'short')) out.push({ t: Number(x.ts) || Date.now(), ex: 'OKX', liq: x.posSide, usd: px * btc, price: px });
+          const px = Number(x.bkPx), qty = Number(x.sz) * y.okxCt;
+          if (px > 0 && qty > 0 && (x.posSide === 'long' || x.posSide === 'short')) out.push({ t: Number(x.ts) || Date.now(), ex: 'OKX', liq: x.posSide, usd: px * qty, price: px });
         }
       }
       return out;
     },
   },
-];
+].filter(Boolean));
+export const LIQ_FEEDS = liqFeedsFor(HOME_ASSET.sym); // Bitcoin's
 
 // The last `windowMs` of liquidations: dollars of longs and shorts force-closed, and the net push toward UP as -1..+1
 // (shorts minus longs over their total plus $250k, so a few small ones read near 0)

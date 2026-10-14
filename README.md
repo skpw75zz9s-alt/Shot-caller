@@ -271,6 +271,23 @@ Security:
 
 ## Version notes (newest first)
 
+### Every Kalshi price market (v13.30)
+
+The header picker lists every Kalshi market the bot can price, grouped by asset:
+Bitcoin, Ethereum, Solana, XRP and Dogecoin (15-minute, hourly and daily), the S&P 500, Nasdaq-100, Dow, gold and WTI oil.
+The server finds them live every 10 minutes (`discovery.js`: Kalshi's series by category, matched to an asset by ticker
+or title) and runs a full copy of the bot for each market that closes within a day (`stacks.js`): its own odds,
+calls, push alerts, learning, official record, guards, 10-minute pick and Discord posts (tagged `[ETH · hourly]`), and
+for each asset its own Round scan, liquidations, futures, Market watch, micro model, forecasts and tuners. Crypto uses
+Coinbase plus each coin's exchange feeds and index; indexes, gold and oil use Yahoo's public chart prices (`prices.js`),
+settle on the price at the close (not a 60-second average), have no exchange trade feeds (those cards hide), and get
+no calls while their price is delayed (over 90 seconds old) or the market is closed. A round with many strikes is
+called on the strike nearest even odds, locked once calls can start. Each market keeps its own files
+(`data/markets/SERIES/`, `data/assets/ASSET/`); Bitcoin's 15-minute bot keeps its files where they were.
+Settings: `MARKETS=off` (Bitcoin's 15-minute market only), `MARKETS_EXTRA=SERIES:ASSET,...` (series discovery misses),
+`MARKETS_OFF=SERIES,...`, `DISCORD_ALERT_MARKETS=BTC` (which assets post market alerts; `all` for every one; calls,
+results and picks post for every market). The Auto-trader still trades Bitcoin's 15-minute official calls only.
+
 ### Discord auto-posts (v13.11)
 
 The server posts each official call to a Discord channel the moment it's made, and its result once Kalshi settles the

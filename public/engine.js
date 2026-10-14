@@ -50,7 +50,9 @@ function settlementSoFar(log, close, spot, now, basis = 0) {
 // volatility by time of week, calibration from graded windows, and the Coinbase-vs-index basis.
 // shifts: { ticker: points } learned nudges to the bot's odds that have proven themselves (the Round scan, scanfeed.js);
 // they're added last. Each row keeps pPre, its odds before them (what the scan itself grades against).
-export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, learned = null, now = Date.now(), shifts = null }) {
+// chosen: { event: ticker } (kept by the caller): for a round with many strikes (hourly and daily markets), the strike
+// the bot calls. The one nearest even odds (at the money), locked once calls can start so the call card doesn't jump.
+export function snapshot({ markets, candles, spot, settings, strikes = {}, quoteLog = {}, learned = null, now = Date.now(), shifts = null, chosen = null }) {
   const s = { ...DEFAULTS, ...settings };
   const bars = withLiveBar(candles, spot, now);
   const closes = bars.map((c) => c.c);
@@ -99,18 +101,33 @@ export function snapshot({ markets, candles, spot, settings, strikes = {}, quote
   for (const t of Object.keys(quoteLog)) if (!markets.some((m) => m.ticker === t)) delete quoteLog[t];
   // the call filter the server has learned (public/callgate.js), when it has proven itself
   const callGate = useLearned && learned?.callGate?.active ? learned.callGate : null;
-  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, volTails: s.volTails, momentumWeight: s.momentumWeight, volTune: vt, driftTune: dt, quoteLog, rows, callGate, live: rows.find((r) => r.ev.minutesLeft > 0) ?? null };
+  return { now, bars, spot, mSpot, sigmaMin, sigmaLong, driftMin, volTails: s.volTails, momentumWeight: s.momentumWeight, volTune: vt, driftTune: dt, quoteLog, rows, callGate, live: liveRow(rows, chosen, s) };
+}
+
+// The market the bot calls now: the soonest round's only market, or (many strikes) its at-the-money strike
+export function liveRow(rows, chosen = null, s = DEFAULTS) {
+  const open = rows.filter((r) => r.ev.minutesLeft > 0);
+  if (!open.length) return null;
+  const close = open[0].m.close_time, group = open.filter((r) => r.m.close_time === close);
+  if (group.length === 1) return group[0];
+  const ev = open[0].m.event_ticker || close, kept = chosen?.[ev] ? group.find((r) => r.m.ticker === chosen[ev]) : null;
+  if (kept) return kept;
+  const priced = group.filter((r) => r.ev.pYes != null);
+  const atm = (priced.length ? priced : group).reduce((a, r) => (Math.abs((r.ev.pYes ?? 0.5) - 0.5) < Math.abs((a.ev.pYes ?? 0.5) - 0.5) ? r : a));
+  if (chosen && open[0].ev.minutesLeft <= (s.maxMinutesLeft ?? DEFAULTS.maxMinutesLeft)) chosen[ev] = atm.m.ticker;
+  return atm;
 }
 
 // The side the model leans to, even below the edge threshold, so timing has something to read.
-// The side the bot leans: the one with the bigger gap, or, when neither side has any gap (both overpriced), the side
-// its odds favour (it used to lean the least-overpriced side: a 3c long shot shown at "confidence 1" while UP was 97%)
+// The side the bot leans: the one with the bigger gap, or, when neither side has any gap (both overpriced) or the gap
+// is on a long shot, the side its odds favour (it used to lean the least-overpriced side: a 3c long shot shown at "confidence 1" while UP was 97%)
 export const leanSide = (ev) => {
   if (ev.side) return ev.side;
   if (ev.evYes == null && ev.evNo == null) return null;
-  const y = ev.evYes ?? -1, n = ev.evNo ?? -1;
-  if (y <= 0 && n <= 0 && ev.pYes != null) return ev.pYes >= 0.5 ? 'YES' : 'NO';
-  return y >= n ? 'YES' : 'NO';
+  const y = ev.evYes ?? -1, n = ev.evNo ?? -1, best = y >= n ? 'YES' : 'NO';
+  // no gap on either side, or the gap is on a long shot (under 20%: it can never clear a call's confidence bar)
+  if (ev.pYes != null && ((y <= 0 && n <= 0) || (best === 'YES' ? ev.pYes : 1 - ev.pYes) < 0.2)) return ev.pYes >= 0.5 ? 'YES' : 'NO';
+  return best;
 };
 
 // Edge for `side` priced with `volScale` × the bot's volatility, keeping only drift and rejection tilt

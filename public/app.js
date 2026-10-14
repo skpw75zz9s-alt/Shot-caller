@@ -7,7 +7,8 @@ import { explainMove } from './why.js';
 import { createSplit } from './split.js';
 import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
-import { ALL_FEEDS, byExchange, createAligner, createFeeds, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
+import { byExchange, createAligner, createFeeds, feedNames, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
+const ALL_FEEDS_FOR = () => (CRYPTO ? feedNames(MKT.sym) : []);
 import { callSound, sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
@@ -23,14 +24,14 @@ import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
 import { dailyLoss, profitGuard } from './profitguard.js';
 import { successMap } from './success.js';
-import { MARKETS, isHome, marketOf, roundName, storeKey } from './markets.js';
+import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, marketOf, roundName, storeKey } from './markets.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '164'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '165'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -91,14 +92,18 @@ const SETTINGS_META = [
   ['bankroll', 'Bankroll ($)', 'Used for position sizing', 'num'],
   ['kellyFraction', 'Kelly fraction', '0.25 means quarter Kelly', 'num'],
   ['maxStake', 'Max stake ($)', 'Cap per call', 'num'],
-  ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (BTC streams live)', 'num'],
+  ['refreshSec', 'Kalshi refresh (sec)', 'How often to reload Kalshi prices (crypto prices stream live)', 'num'],
 ];
 // A fresh install has nothing to migrate: skip straight past the old upgrade steps (the v4.1 step used to double a new
 // phone's confidence bar to 95). Only the latest step (default risk level) runs.
 if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
 const settings = { series: 'KXBTC15M', refreshSec: 3, multiFeeds: true, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
-if (!MARKETS.some((m) => m.series === settings.series)) settings.series = 'KXBTC15M'; // the old free-text series box: only markets the bot has a price for
-const MKT = marketOf(settings.series), HOME = isHome(settings.series); // the market picked (public/markets.js); HOME = Bitcoin, the official bot's
+const marketList = store.get('marketList', SEEDS); // the server's discovery (every Kalshi market it can call), kept for the next start
+if (!/^[A-Z0-9]+$/.test(settings.series || '') || marketOf(settings.series, marketList) === HOME_MARKET && settings.series !== HOME_MARKET.series) settings.series = HOME_MARKET.series; // only markets the bot has a price for
+const MKT = marketOf(settings.series, marketList), HOME = isHome(settings.series); // the market picked (public/markets.js); HOME = Bitcoin's 15-minute one
+const CRYPTO = MKT.kind === 'crypto'; // exchange trade feeds and a live price socket (stock indexes, gold and oil have neither)
+// the server's readers for this market (v13.30: every market has its own copy): ?m=SERIES on their API calls
+const api = (path) => (HOME ? path : `${path}${path.includes('?') ? '&' : '?'}m=${encodeURIComponent(settings.series)}`);
 const LK = (k) => storeKey(k, settings.series); // each market keeps its own logs, so one coin's predictions are never graded on another's prices
 // v1.2: "buy the low" means Kalshi below the bot's odds, so candle-dip gating is off unless re-enabled.
 if (store.get('settingsVersion', 1) < 2) { settings.waitForDip = false; store.set('settings', settings); store.set('settingsVersion', 2); }
@@ -186,7 +191,7 @@ if (store.get('settingsVersion', 1) < 14) {
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
   positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
-  calls: store.get(LK('calls'), {}),
+  calls: store.get(LK('calls'), {}), chosen: {}, // the strike called in a round with many (hourly and daily markets)
   ruleLog: store.get(LK('ruleLog'), []), // scorecard for the two-rejections rule
   callLog: store.get(LK('callLog'), []), // every call the bot makes, graded at settlement (public/record.js)
   flipLog: store.get(LK('flipLog'), []), // predicted turns (frozen a minute before), graded on whether a V really formed
@@ -222,33 +227,32 @@ async function getJSON(path) {
 // ---------- data ----------
 async function refreshCandles() {
   // Coinbase rows: [time, low, high, open, close, volume], newest first
-  state.candles = parseCandles(await getJSON(`coinbase/products/${MKT.product}/candles?granularity=60`));
+  state.candles = parseCandles(await getJSON(CRYPTO ? `coinbase/products/${MKT.product}/candles?granularity=60` : `price/${MKT.key}/candles?granularity=60`));
   state.candlesAt = Date.now();
 }
 
 async function refreshMarkets() {
-  const data = await getJSON(`kalshi/markets?series_ticker=${encodeURIComponent(settings.series)}&status=open&limit=50`);
-  state.markets = (data.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time));
+  const data = await getJSON(`kalshi/markets?series_ticker=${encodeURIComponent(settings.series)}&status=open&limit=200`);
+  state.markets = (data.markets || []).map((m) => (MKT.settle === 'spot' ? { ...m, settleWin: 0 } : m)).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time) || (a.floor_strike ?? 0) - (b.floor_strike ?? 0));
   state.marketsAt = Date.now();
 }
 
 // What the server has learned (volatility by time of week, calibration, basis). Small; refreshed every 10 minutes.
 async function refreshMemory() {
-  state.memory = { ...(await getJSON('learn')), at: Date.now() };
+  state.memory = { ...(await getJSON(api('learn'))), at: Date.now() };
   setFeeRates(state.memory.learned?.fees); // Kalshi's real fee rates, measured from fills
   store.set('marketMemory', state.memory);
   renderMemory();
 }
 
 async function refreshIndex() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
-  const ix = await getJSON('index');
+  const ix = await getJSON(api('index'));
   state.index = ix.index ? { offset: ix.offset || 0, used: ix.used || [], at: Date.now() } : null;
 }
 
 async function refreshSpot() {
-  const t = await getJSON(`coinbase/products/${MKT.product}/ticker`);
-  state.spot = Number(t.price); state.spotAt = Date.now();
+  const t = await getJSON(CRYPTO ? `coinbase/products/${MKT.product}/ticker` : `price/${MKT.key}/ticker`);
+  state.spot = Number(t.price); state.spotAt = Date.now(); state.priceDelayed = !!t.delayed; // a delayed index or futures print: shown, never called on
   if (Date.now() - (state.spotSavedAt || 0) > 10000) { state.spotSavedAt = Date.now(); store.set('lastSpot', { p: state.spot, t: Date.now() }); }
 }
 
@@ -384,7 +388,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 // The price the bot prices with: live Coinbase shifted onto the server's multi-exchange index estimate (index.js),
 // when that's fresh and sane. Kalshi settles on an index of several exchanges, not Coinbase alone.
-const indexFresh = () => HOME && !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
+const indexFresh = () => CRYPTO && !!state.index && Date.now() - state.index.at < 20000 && state.spot && Math.abs(state.index.offset) < state.spot * 0.003;
 const modelSpot = () => (indexFresh() ? state.spot + state.index.offset : state.spot);
 const compute = () => {
   // the server's proven nudges to the odds: the Round scan, the micro model, tuned indicators and the reversal checklist (added per market)
@@ -393,7 +397,7 @@ const compute = () => {
     state.playbook?.inCalls && Date.now() - (state.playbookAt || 0) < 30000 ? state.playbook.inCalls : null];
   let shifts = null;
   for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
-  const snap = snapshot({ markets: state.markets, candles: state.candles, spot: modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: HOME ? state.memory?.learned ?? null : null, shifts: HOME ? shifts : null }); // the server learned on Bitcoin
+  const snap = snapshot({ markets: state.markets, candles: state.candles, spot: state.priceDelayed ? null : modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts, chosen: state.chosen }); // this market's own learning (the server's copy for it)
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
   snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; // the late lane's own guard and the early lane's proof (the server's records)
@@ -486,7 +490,7 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
 const impact = createImpact(); // which trades moved the price (public/chart.js)
 tape.recent = []; // every exchange trade in the last ~10 minutes, for "why it moved" (public/why.js)
-const alignPrices = createAligner(); // the global markets' USDT / futures price levels, aligned to USD spot (public/feeds.js)
+const alignPrices = createAligner(0.005, MKT.sym || undefined); // the global markets' USDT / futures price levels, aligned to USD spot (public/feeds.js)
 function handleTrades(trades) {
   trades = alignPrices(trades);
   const p = alerts.prefs();
@@ -501,15 +505,15 @@ function handleTrades(trades) {
     tape.list.unshift(x); tape.rate.push(Date.now());
     const moved = impact(x, { sigmaMin: state.sigmaNow || undefined }); // only orders that move the price bubble on the chart
     if (moved) { tape.big.push(moved); tape.bigV++; }
-    if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} BTC at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
+    if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} ${MKT.key} at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
   if (tape.recent[0] && tape.recent[0].t < Date.now() - 11 * 60000) tape.recent = tape.recent.filter((x) => x.t >= Date.now() - 10 * 60000);
   orderFrame(); // new trades show on the chart right away, not at the next refresh
   if (tape.big.length > 4000 || (tape.big[0] && tape.big[0].t < Date.now() - 6 * 3600000)) tape.big = tape.big.filter((x) => x.t >= Date.now() - 6 * 3600000).slice(-3000);
 }
-const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; } });
-function feedsOn() { if (HOME && settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); } // the exchange feeds stream BTC
+const feeds = createFeeds({ onTrades: handleTrades, onStatus: (s) => { state.feedStatus = s; }, sym: CRYPTO ? MKT.sym : null });
+function feedsOn() { if (CRYPTO && settings.multiFeeds !== false && !document.hidden) feeds.start(); else feeds.stop(); } // the coin's exchange feeds
 
 // Kalshi's own tape for the live contract (public, through the server's market-data proxy)
 async function pollKalshiTrades() {
@@ -544,12 +548,12 @@ function renderTape(force = false) {
   const st = state.feedStatus || {};
   const liveFeed = (n) => (n === 'Coinbase' ? isLive() : st[n]?.state === 'live' && now - (st[n].lastAt || 0) < 120000);
   const off = settings.multiFeeds === false;
-  setHTML($('feedChips'), [...ALL_FEEDS.map((n) => {
+  setHTML($('feedChips'), [...ALL_FEEDS_FOR().map((n) => {
     const s = n === 'Coinbase' ? (isLive() ? 'live' : 'down') : off ? 'off' : liveFeed(n) ? 'live' : st[n]?.state || 'connecting';
     return `<span class="${s}">${n}</span>`;
   }), `<span class="${state.kalshiTapeAt && now - state.kalshiTapeAt < 15000 ? 'live' : 'connecting'}">Kalshi</span>`].join(''));
   tape.rate = tape.rate.filter((t) => t > now - 60000);
-  setText($('tapeRate'), `${tape.rate.length} BTC trades/min`);
+  setText($('tapeRate'), `${tape.rate.length} ${MKT.key} trades/min`);
   const tab = state.tapeTab;
   // Per-exchange split of the round (BTC) or the Kalshi contract's taker flow
   setHidden($('tapeEx'), tab === 'kalshi'); setHidden($('kalshiFlow'), tab !== 'kalshi');
@@ -558,7 +562,7 @@ function renderTape(force = false) {
     setHTML($('tapeEx'), Object.entries(by).sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell)).map(([n, e]) => {
       const tot = e.buy + e.sell, b = tot ? e.buy / tot : 0.5;
       return `<span>${n}</span><span class="bar" title="buy ${Math.round(b * 100)}%"><i style="width:${(b * 100).toFixed(0)}%"></i></span><em>${Math.round(b * 100)}% buy · ${usd(tot, 0)}</em>`;
-    }).join('') || '<span class="muted">No BTC exchange trades yet this round</span>');
+    }).join('') || `<span class="muted">No ${MKT.key} exchange trades yet this round</span>`);
   } else {
     const kf = kalshiFlow(tape.kalshi);
     setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${int(kf.YES.count)}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${int(kf.NO.count)}</b>${usd(kf.NO.usd, 0)}</div>`);
@@ -612,7 +616,7 @@ function renderStability(st, now) {
 function renderScan(live, snap, now) {
   if (!live || now - (state.scanAt || 0) < 3000) return;
   state.scanAt = now;
-  if (HOME && now - (state.scanFetchAt || 0) > 10000) { state.scanFetchAt = now; getJSON('scan').then((d) => { state.scanSrv = d; }).catch(() => {}); }
+  if (CRYPTO && now - (state.scanFetchAt || 0) > 10000) { state.scanFetchAt = now; getJSON(api('scan')).then((d) => { state.scanSrv = d; }).catch(() => {}); }
   const srv = state.scanSrv, open = Date.parse(live.m.open_time), tk = live.m.ticker;
   let sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin, sigmaMin: snap.sigmaMin }), fromServer = false;
   if (!sc.ready && srv?.live?.ticker === tk && srv.live.sc?.ready) { sc = srv.live.sc; fromServer = true; }
@@ -685,8 +689,8 @@ function renderDeck(snap, live, sig, now) {
   // Status tiles
   const [health, hcls] = dataHealth(now);
   const ix = indexFresh() && state.index.used.length > 1 ? `index of ${state.index.used.length} exchanges` : 'Coinbase price';
-  const feedsLive = ALL_FEEDS.filter((n) => (n === 'Coinbase' ? isLive() : state.feedStatus?.[n]?.state === 'live' && now - (state.feedStatus[n].lastAt || 0) < 120000)).length;
-  setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS.length} trade feeds · ${ix}`);
+  const feedsLive = ALL_FEEDS_FOR().filter((n) => (n === 'Coinbase' ? isLive() : state.feedStatus?.[n]?.state === 'live' && now - (state.feedStatus[n].lastAt || 0) < 120000)).length;
+  setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS_FOR().length} trade feeds · ${ix}`);
   setTile('stClock', clock(now - (state.skewMs || 0)), '',
     state.skewMs == null ? 'server-synced' : Math.abs(state.skewMs) > 5000 ? `phone is ${Math.round(state.skewMs / 1000)}s off` : 'server-synced ✓');
   setTile('stContract', live ? roundName(live.m.ticker) : 'none', live ? 'ok' : 'warn', live ? `closes in ${mmss(live.ev.minutesLeft)}` : 'between markets');
@@ -761,7 +765,7 @@ function renderDeck(snap, live, sig, now) {
     }
     state.deckTicker = tk;
     const above = ms && live.strike ? ms > live.strike : null;
-    if (above != null && state.deckAbove != null && state.deckAbove.tk === tk && state.deckAbove.v !== above) alerts.event('cross', `BTC crossed ${above ? 'above' : 'below'} the target`, `${usd(ms, 0)} vs ${usd(live.strike, 0)}`, `cross:${tk}`);
+    if (above != null && state.deckAbove != null && state.deckAbove.tk === tk && state.deckAbove.v !== above) alerts.event('cross', `${MKT.key} crossed ${above ? 'above' : 'below'} the target`, `${usd(ms, 0)} vs ${usd(live.strike, 0)}`, `cross:${tk}`);
     if (above != null) state.deckAbove = { tk, v: above };
     const lean = leanSide(live.ev), called = sig?.called;
     if (sustained(watch, 'flip', !!called && !!lean && lean !== called && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: bot now leans ${lean === 'YES' ? 'UP' : 'DOWN'}`, `against the ${called === 'YES' ? 'UP' : 'DOWN'} call · held 10s`, `flip:${tk}`);
@@ -841,7 +845,7 @@ async function chartBars(tf) {
   if (c && Date.now() - c.at < 60000) return c.bars;
   if (!chartState.loading) {
     chartState.loading = true;
-    getJSON(`coinbase/products/${MKT.product}/candles?granularity=${T.gran}`).then((rows) => {
+    getJSON(CRYPTO ? `coinbase/products/${MKT.product}/candles?granularity=${T.gran}` : `price/${MKT.key}/candles?granularity=${T.gran}`).then((rows) => {
       const bars = parseCandles(rows);
       chartState.cache[tf] = { at: Date.now(), bars: T.combine > 1 ? aggregate(bars, (T.gran / 60) * T.combine) : bars };
       drawChartTab(true);
@@ -884,9 +888,8 @@ async function drawChartTab(force = false) {
 }
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
-  try { state.watch = await getJSON('watch'); state.watchAt = Date.now(); renderWatch(); } catch { /* next time */ }
+  try { state.watch = await getJSON(api('watch')); state.watchAt = Date.now(); renderWatch(); } catch { /* next time */ }
 }
 setInterval(refreshWatch, 5000);
 setTimeout(refreshWatch, 1500);
@@ -902,9 +905,8 @@ function renderWatch() {
 
 // ---------- the micro model (server: microfeed.js, public/micro.js): small details' push on the next 5 minutes ----------
 async function refreshMicro() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
-  try { state.micro = await getJSON('micro'); renderMicro(); } catch { /* next time */ }
+  try { state.micro = await getJSON(api('micro')); renderMicro(); } catch { /* next time */ }
 }
 setInterval(refreshMicro, 5000);
 setTimeout(refreshMicro, 1500);
@@ -921,9 +923,8 @@ function renderMicro() {
 
 // ---------- the playbook check (server: playbookfeed.js, public/playbook.js) ----------
 async function refreshPlaybook() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
-  try { state.playbook = await getJSON('playbook'); state.playbookAt = Date.now(); renderPlaybook(); } catch { /* next time */ }
+  try { state.playbook = await getJSON(api('playbook')); state.playbookAt = Date.now(); renderPlaybook(); } catch { /* next time */ }
 }
 setInterval(refreshPlaybook, 5000); // the live forecast moves with the price (the checklist with each 15-minute candle)
 setTimeout(refreshPlaybook, 2500);
@@ -932,7 +933,7 @@ function renderPlaybook() {
   if (!p) return;
   renderReversal(p); renderGuide(p); renderEngine(p);
   const card = (title, x) => !x ? '' : `<div class="pb-row"><b>${title}</b><span>${x.n ? `${x.n} trades · won ${Math.round(x.winRate * 100)}% · avg ${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R · total ${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R · worst drawdown ${x.maxDD.toFixed(1)}R · fees ${x.feesR.toFixed(1)}R${x.open ? ` · ${x.open} open` : ''}` : 'no trades yet'}${x.needs ? ` <small>(${x.needs} more to reach the playbook's 100)</small>` : ''}</span></div>`;
-  setHTML($('pbReport'), !r ? (p.backfilling ? 'Reading two weeks of BTC history…' : 'Starting…')
+  setHTML($('pbReport'), !r ? (p.backfilling ? `Reading two weeks of ${MKT.key} history…` : 'Starting…')
     : `<small class="muted">${int(r.bars)} one-minute candles since ${new Date(r.from).toLocaleDateString([], { month: 'short', day: 'numeric' })}, rechecked every 15 minutes. The rules never change, so this is one walk-forward test: backtest plus live paper trades.</small>`
       + card("As written: yesterday's high/low, 2R target", r.day) + card('Same, 1.5R target', r.day15) + card("Variant: the last hour's high/low, 2R", r.hour) + card('Variant, 1.5R', r.hour15)
       + engineRecord(r.predictor, p.predictorLive)
@@ -943,16 +944,15 @@ function renderPlaybook() {
 
 // ---------- indicator tuning (server: tunefeed.js, public/tune.js): which settings have really predicted the rounds ----------
 async function refreshTune() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
-  try { state.tune = await getJSON('tune'); state.tuneAt = Date.now(); renderTune(); } catch { /* next time */ }
+  try { state.tune = await getJSON(api('tune')); state.tuneAt = Date.now(); renderTune(); } catch { /* next time */ }
 }
 setInterval(refreshTune, 10000);
 setTimeout(refreshTune, 3000);
 function renderTune() {
   const t = state.tune, r = t?.report;
   if (!t) return;
-  if (!r || !r.families.length) { setHTML($('tuneReport'), 'Waiting for enough BTC history (about 2,000 one-minute candles) to run the test…'); return; }
+  if (!r || !r.families.length) { setHTML($('tuneReport'), `Waiting for enough ${MKT.key} history (about 2,000 one-minute candles) to run the test…`); return; }
   const pctOr = (x) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
   const rows = r.families.map((f) => `<tr class="${f.proven ? 'on' : ''}"><td><b>${esc(f.name)}</b><small>${esc(f.setting)} · ${f.dir > 0 ? 'with the signal' : 'against it (fade)'}</small></td>`
     + `<td>${pctOr(f.train.hit)}</td><td>${pctOr(f.test.hit)}<small>${int(f.test.rounds)} rounds</small></td><td>${f.test.z.toFixed(1)}</td><td>${f.proven ? '✓ in calls' : '—'}</td></tr>`).join('');
@@ -983,7 +983,7 @@ function renderEngine(p) {
   const e = p.predictor, rep = p.report?.predictor, thr = state.enThr;
   setHTML($('enThr'), `Call at ${[0.6, 0.7, 0.8, 0.9].map((t) => `<button type="button" data-thr="${t}" class="${Math.abs(t - thr) < 1e-9 ? 'on' : ''}">${t * 100}%+</button>`).join('')}`);
   const badge = $('fcBadge');
-  if (!e) { $('enCall').className = 'gd-call wait'; setText($('enCall'), !p.report ? 'Reading BTC history…' : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
+  if (!e) { $('enCall').className = 'gd-call wait'; setText($('enCall'), !p.report ? `Reading ${MKT.key} history…` : 'Waiting for a live round with fresh candles (no stale data as a signal).'); setHTML($('enGrid'), ''); setHTML($('enEv'), ''); setHTML($('enKalshi'), ''); setHTML($('enHist'), ''); setHidden(badge, true); state.enNow = null; return; }
   const c = engineCall(e, rep, thr), t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => `$${Math.round(x).toLocaleString()}`;
   const left = Math.max(0, (e.closeTime - Date.now()) / 60000);
   setText($('enWhen'), `${left.toFixed(1)} min left · read at ${e.checkpoint}-min model`);
@@ -1032,7 +1032,7 @@ function engineRecord(r, live) {
 // ---------- the shot-caller guide's forecast (server: playbookfeed.js, public/guide.js) ----------
 function renderGuide(p) {
   const g = p.guide;
-  if (!g) { $('gdCall').className = 'gd-call wait'; setText($('gdCall'), p.backfilling ? 'Reading BTC history…' : 'Needs about 15 hours of candles first.'); return; }
+  if (!g) { $('gdCall').className = 'gd-call wait'; setText($('gdCall'), p.backfilling ? `Reading ${MKT.key} history…` : 'Needs about 15 hours of candles first.'); return; }
   const t = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), $$ = (x) => (x == null ? '—' : `$${Math.round(x).toLocaleString()}`);
   setText($('gdWhen'), `${t(g.at)} – ${t(g.expiry)} round`);
   const cls = g.call === 'UP' ? 'up' : g.call === 'DOWN' ? 'down' : 'none';
@@ -1066,7 +1066,7 @@ function guideRecord(r, live) {
 // ---------- reversal watch (server: playbookfeed.js, public/reversal.js): the 15-minute flip checklist ----------
 function renderReversal(p) {
   const v = p.reversal;
-  if (!v) { setText($('revHead'), p.backfilling ? 'Reading BTC history…' : 'Needs about 8 hours of candles first.'); setHTML($('revList'), ''); return; }
+  if (!v) { setText($('revHead'), p.backfilling ? `Reading ${MKT.key} history…` : 'Needs about 8 hours of candles first.'); setHTML($('revList'), ''); return; }
   setText($('revWhen'), `as of ${clock(v.at)}`);
   const c = v.best || (v.down.score >= v.up.score ? v.down : v.up), other = c === v.down ? v.up : v.down;
   const label = { strong: 'strong confluence', developing: 'developing: wait for confirmation', insufficient: 'not enough confirmation' }[c.band];
@@ -1107,7 +1107,7 @@ function renderWhy(now = Date.now()) {
   setHidden($('whyBox'), !fresh);
   if (fresh) setHTML($('whyBox'), `<div class="why-h ${n.dir}"><span>Why it moved · ${esc(clock(n.t))}</span><b>${esc(n.headline)}</b></div><ul>${n.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`);
   setHTML($('whyList'), state.whyLog.length ? state.whyLog.slice(0, 8).map((x) => `<li class="${x.dir}"><span>${esc(clock(x.t))}</span><b>${esc(x.headline)}</b><small>${x.reasons.map(esc).join(' · ')}</small></li>`).join('')
-    : '<li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li>');
+    : `<li class="calm">Explanations show up here (and on the chart) whenever ${MKT.key} makes a real move.</li>`);
 }
 $('whyBox').addEventListener('click', () => { const n = state.whyLog[0]; if (n) { (state.whyHidden ||= {})[n.t] = true; renderWhy(); } }); // tap to dismiss
 
@@ -1290,7 +1290,7 @@ function trackPredictions(snap, live, now) {
   const cell = ([k, x]) => `${LINE_NAMES[k] || k} <b>$${x.miss.toFixed(0)}</b>${fit.known.includes(k) ? ` (${Math.round(fit.weights[k] / wsum * 100)}% of the blend${Math.abs((fit.scale[k] ?? 1) - 1) >= 0.05 ? `, moves ×${fit.scale[k].toFixed(2)}` : ''}${Math.abs(fit.bias[k]) >= 0.05 ? `, bias ${fit.bias[k] >= 0 ? '+' : '−'}${Math.round(Math.abs(fit.bias[k]) * 100)}% of a typical move removed` : ''})` : ''}`;
   const sc = blendScore(state.predLog), d = (x) => `$${x.toFixed(0)}`;
   setHTML($('predRecord'), (r.rounds ? `Prediction lines, average miss at the close (${r.rounds} round${r.rounds === 1 ? '' : 's'}, called with 5 min left): ${rows.map(cell).join(' · ')}. Each line's moves are scaled to how far they've really carried, then the lines are blended by their error covariance (lines that miss together share weight)${Math.abs(fit.final - 1) >= 0.05 ? ` and the blended move ×${fit.final.toFixed(2)}` : ''}, learned from every minute of every round and fitted separately for early, middle and late in the round. `
-    : 'Prediction lines are graded each round: what each one said at every minute vs where BTC closed (keep the app open through a few rounds). ')
+    : `Prediction lines are graded each round: what each one said at every minute vs where ${MKT.key} closed (keep the app open through a few rounds). `)
     + (sc.n ? `Blend scoreboard (${int(sc.n)} calls over ${int(sc.rounds)} round${sc.rounds === 1 ? '' : 's'}, every minute, out of sample): blend <b>${d(sc.blend)}</b> average miss`
       + `${sc.still != null ? ` vs <b>${d(sc.still)}</b> for "no change"` : ''}${sc.best ? ` · best single line ${LINE_NAMES[sc.best.key] || sc.best.key} <b>${d(sc.best.miss)}</b> vs the blend's ${d(sc.best.blend)} on the same calls` : ''}` : ''));
 }
@@ -1500,7 +1500,7 @@ function render() {
       const label = timing.state === 'NOW' ? `Candles: dip now, good timing for ${side}` : timing.state === 'CHASE' ? 'Candles: chasing, price just ran' : `Candles: no dip yet for ${side}`;
       entryCls.push(timing.state.toLowerCase());
       setHTML(entry, `<b>${label}</b><span>${esc(timing.reasons.slice(0, 4).join(' · '))}</span>` +
-        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if BTC hits ${usd(limit.dipLevel, 0)}</span>` : ''));
+        (limit && timing.state !== 'NOW' ? `<span>Even lower: limit ${sideName(side)} at <b>${pc(limit.price)}</b> if ${MKT.key} hits ${usd(limit.dipLevel, 0)}</span>` : ''));
     }
 
     if (!call || block) setText($('order'), '');
@@ -1654,7 +1654,7 @@ function renderMemory() {
   if (!st) { setText($('memSummary'), 'Not loaded yet. The server learns the market around the clock and shares it here.'); return; }
   const days = st.since ? Math.max(1, Math.round((Date.now() - st.since) / 86400000)) : 0;
   const lines = [];
-  lines.push(st.minutes ? `Watched BTC for ${days} day${days === 1 ? '' : 's'} (${st.minutes.toLocaleString()} one-minute moves)${st.backfilling ? ', still reading history' : ''}, graded ${st.windows.toLocaleString()} window${st.windows === 1 ? '' : 's'}.` : 'Just started watching the market.');
+  lines.push(st.minutes ? `Watched ${MKT.key} for ${days} day${days === 1 ? '' : 's'} (${st.minutes.toLocaleString()} one-minute moves)${st.backfilling ? ', still reading history' : ''}, graded ${st.windows.toLocaleString()} window${st.windows === 1 ? '' : 's'}.` : 'Just started watching the market.');
   if (st.busiest) lines.push(`Busiest half hour: ${slotLabel(st.busiest.slot)} (${st.busiest.x.toFixed(1)}× normal volatility). Quietest: ${slotLabel(st.quietest.slot)} (${st.quietest.x.toFixed(1)}×).`);
   if (st.nowFactor && Math.abs(st.nowFactor - 1) >= 0.05) lines.push(`Right now the coming minutes are usually ${st.nowFactor > 1 ? 'busier' : 'calmer'} than the last half hour (×${st.nowFactor.toFixed(2)}), and the odds account for it.`);
   if (indexFresh() && state.index.used.length > 1) lines.push(`Price: median of ${state.index.used.join(', ')} (Kalshi settles on a multi-exchange index; right now it's ${state.index.offset >= 0 ? '+' : '−'}$${Math.abs(state.index.offset).toFixed(2)} vs Coinbase).`);
@@ -1686,7 +1686,7 @@ function pulseHtml(p) {
   const x = p.expected;
   if (p.graded >= 60) {
     const how = Math.abs(x - 1) < 0.05 ? 'right in line with' : `${x.toFixed(2)}× ${x > 1 ? 'more than' : 'of'}`;
-    out.push(`Over the last half hour BTC has moved ${how} what the bot expected a minute earlier.`);
+    out.push(`Over the last half hour ${MKT.key} has moved ${how} what the bot expected a minute earlier.`);
     out.push(p.helping == null ? `The live correction switches on after an hour of grading (${n(p.needed)} seconds to go).`
       : p.helping ? (Math.abs(p.fix - 1) >= 0.01 ? `<b class="pos">Correction on:</b> the odds use ×${p.fix.toFixed(2)} volatility, because it's been predicting moves better than no correction.` : 'Correction on, but nothing to correct right now.')
       : '<b>Correction off:</b> lately it hasn\'t predicted moves better than leaving the volatility alone, so the bot ignores it.');
@@ -1721,9 +1721,8 @@ function renderCertain(r) {
 
 // ---------- the 10-minute pick (server: bot.js, public/pick.js): every round's side, locked at 10:00 left ----------
 async function refreshPick() {
-  if (!HOME) return; // a Bitcoin reader on the server: not for another coin
   if (document.hidden) return;
-  try { state.pick = await getJSON('pick'); state.pickAt = Date.now(); renderPick(); } catch { /* next time */ }
+  try { state.pick = await getJSON(api('pick')); state.pickAt = Date.now(); renderPick(); } catch { /* next time */ }
 }
 setInterval(refreshPick, 5000);
 setTimeout(refreshPick, 1200);
@@ -1798,7 +1797,7 @@ setInterval(() => { if (!document.hidden) renderSuccess(); }, 1000);
 
 // ---------- the official bot record (server: every call it made, around the clock) ----------
 async function refreshBotRecord() {
-  try { state.botRecord = await getJSON('record'); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
+  try { state.botRecord = await getJSON(api('record')); state.botRecordAt = Date.now(); renderBotRecord(); } catch { /* next time */ }
 }
 setInterval(() => { if (!document.hidden) refreshBotRecord(); }, 60000);
 function renderBotRecord() {
@@ -1860,7 +1859,7 @@ let ws = null, wsRetry = 0, wsTimer = null, renderQueued = false, shownSpot = nu
 const isLive = () => !!state.liveAt && Date.now() - state.liveAt < 10000;
 
 function liveConnect() {
-  if (ws || document.hidden || typeof WebSocket === 'undefined') return;
+  if (!CRYPTO || ws || document.hidden || typeof WebSocket === 'undefined') return; // indexes, gold and oil: polled (prices.js)
   try { ws = new WebSocket(LIVE_WS); } catch { ws = null; return; }
   ws.onopen = () => {
     wsRetry = 0;
@@ -2121,24 +2120,32 @@ function buildSettings() {
 (function marketPicker() {
   const sel = $('mktPick');
   if (!sel) return;
-  const draw = (open = null) => {
-    sel.innerHTML = MARKETS.map((m) => { const o = open?.find((x) => x.series === m.series), closed = o && o.checked && !o.open;
-      return `<option value="${m.series}"${m.series === settings.series ? ' selected' : ''}${closed && m.series !== settings.series ? ' disabled' : ''}>${m.key} · 15m${closed ? ' (closed)' : ''}</option>`; }).join('');
+  const draw = (list) => {
+    const groups = new Map();
+    for (const m of list) { const mk = marketOf(m.series, list); if (!groups.has(mk.name)) groups.set(mk.name, []); groups.get(mk.name).push({ ...m, mk }); }
+    if (!list.some((m) => m.series === settings.series)) groups.set(MKT.name, [...(groups.get(MKT.name) || []), { series: settings.series, mk: MKT, state: 'unknown' }]);
+    const order = ASSETS.map((a) => a.name);
+    sel.innerHTML = [...groups.entries()].sort((x, y) => order.indexOf(x[0]) - order.indexOf(y[0])).map(([name, ms]) => `<optgroup label="${esc(name)}">${ms.map((m) => {
+      const off = (m.state === 'closed' || m.state === 'later') && m.series !== settings.series;
+      return `<option value="${m.series}"${m.series === settings.series ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(marketLabel(m.mk))}${m.state === 'closed' ? ' (closed)' : m.state === 'later' ? ' (later)' : ''}</option>`;
+    }).join('')}</optgroup>`).join('');
   };
-  draw();
-  getJSON('markets').then((d) => draw(d.markets)).catch(() => {});
+  draw(marketList);
+  getJSON('markets').then((d) => { if (d?.markets?.length) { store.set('marketList', d.markets.map(({ series, asset, freq, title, state }) => ({ series, asset, freq, title, state }))); draw(d.markets); } }).catch(() => {});
   sel.addEventListener('change', async () => {
     const next = sel.value;
-    if (next === settings.series || !MARKETS.some((m) => m.series === next)) return;
+    if (next === settings.series || !/^[A-Z0-9]+$/.test(next)) return;
     settings.series = next; store.set('settings', settings);
-    toast(`Switching to ${marketOf(next).name}…`);
+    toast(`Switching to ${marketLabel(marketOf(next, store.get('marketList', SEEDS)))}…`);
     try { await Promise.race([pushSync(), new Promise((r) => setTimeout(r, 2500))]); } catch { /* the next sync carries it */ }
     location.reload();
   });
   document.body.classList.toggle('alt-market', !HOME);
-  if (!HOME) setText($('stRecordLabel'), 'Official record · BTC');
-  const note = $('altNote');
-  if (note) { setHidden(note, HOME); setText(note, `${MKT.name}: the bot's odds, calls, chart and alerts are on ${MKT.key}. The official record, the 10-minute pick, Discord and the Bitcoin-only readers (Round scan, Market watch, forecasts, exchange feeds) stay on Bitcoin, so they're hidden here.`); }
+  document.body.classList.toggle('no-feeds', !CRYPTO);
+  const note = $('altNote'), why = [];
+  if (!CRYPTO) why.push(`${MKT.name} has no public exchange trade feeds, so the tug of war, Round scan, live orders and futures aren't available here; its price comes from Yahoo's public charts, and the bot makes no calls while that price is delayed (over 90 seconds old) or the market is closed.`);
+  if (MKT.freq !== '15m') why.push('A round with many strikes: the bot calls the one nearest even odds, locked once calls can start.');
+  if (note) { setHidden(note, !why.length); if (why.length) setText(note, `${marketLabel(MKT)}: ${why.join(' ')}`); }
 })();
 
 // ---------- loop ----------

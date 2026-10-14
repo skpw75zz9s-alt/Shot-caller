@@ -3,35 +3,38 @@
 // trades { ex, t, price, size, side } where side is the TAKER (aggressor): 'buy' lifted the ask, 'sell' hit the bid.
 // Coinbase runs on the app's own price socket (app.js) and is parsed here too.
 
+import { HOME_ASSET } from './markets.js';
+
 const num = (v) => Number(v);
 const tr = (ex, t, price, size, side) => (price > 0 && size > 0 && (side === 'buy' || side === 'sell') ? { ex, t: t || Date.now(), price, size, side } : null);
 
-export const EXCHANGES = [
+// The USD spot exchanges for a coin (public/markets.js sym); a venue that doesn't list it is left out
+export const exchangesFor = (y) => [
   {
-    name: 'Kraken', url: 'wss://ws.kraken.com/v2',
-    subscribe: [{ method: 'subscribe', params: { channel: 'trade', symbol: ['BTC/USD'] } }],
+    need: 'kraken', name: 'Kraken', url: 'wss://ws.kraken.com/v2',
+    subscribe: [{ method: 'subscribe', params: { channel: 'trade', symbol: [y.kraken] } }],
     // { channel: 'trade', type: 'update', data: [{ side: 'buy', price, qty, timestamp }] } (side is the taker's)
     parse: (m) => (m.channel === 'trade' && Array.isArray(m.data) ? m.data.map((d) => tr('Kraken', Date.parse(d.timestamp), num(d.price), num(d.qty), d.side)) : []),
   },
   {
-    name: 'Bitstamp', url: 'wss://ws.bitstamp.net',
-    subscribe: [{ event: 'bts:subscribe', data: { channel: 'live_trades_btcusd' } }],
+    need: 'bitstamp', name: 'Bitstamp', url: 'wss://ws.bitstamp.net',
+    subscribe: [{ event: 'bts:subscribe', data: { channel: `live_trades_${y.bitstamp}` } }],
     // { event: 'trade', data: { price, amount, type: 0 buy | 1 sell (the taker), microtimestamp } }
     parse: (m) => (m.event === 'trade' && m.data ? [tr('Bitstamp', Math.floor(num(m.data.microtimestamp) / 1000) || num(m.data.timestamp) * 1000, num(m.data.price), num(m.data.amount), m.data.type === 0 ? 'buy' : m.data.type === 1 ? 'sell' : null)] : []),
   },
   {
-    name: 'Gemini', url: 'wss://api.gemini.com/v1/marketdata/BTCUSD?trades=true&bids=false&offers=false&heartbeat=true',
+    need: 'gemini', name: 'Gemini', url: `wss://api.gemini.com/v1/marketdata/${y.gemini}?trades=true&bids=false&offers=false&heartbeat=true`,
     subscribe: [],
     // { type: 'update', timestampms, events: [{ type: 'trade', price, amount, makerSide: 'bid' | 'ask' }] } (maker bid = taker sold)
     parse: (m) => (m.type === 'update' && Array.isArray(m.events) ? m.events.filter((e) => e.type === 'trade').map((e) => tr('Gemini', num(m.timestampms), num(e.price), num(e.amount), e.makerSide === 'bid' ? 'sell' : e.makerSide === 'ask' ? 'buy' : null)) : []),
   },
   {
-    name: 'Binance.US', url: 'wss://stream.binance.us:9443/ws/btcusd@trade',
+    need: 'binanceUs', name: 'Binance.US', url: `wss://stream.binance.us:9443/ws/${y.binanceUs}@trade`,
     subscribe: [],
     // { e: 'trade', p, q, T, m: buyer is the maker } (m true = the taker sold)
     parse: (m) => (m.e === 'trade' ? [tr('Binance.US', num(m.T), num(m.p), num(m.q), m.m ? 'sell' : 'buy')] : []),
   },
-];
+].filter((e) => y[e.need]);
 
 // The global markets (v13.8): where most of bitcoin's price discovery happens, so moves often show up there first.
 // Perpetual futures (Binance, Bybit, OKX, Deribit) and the biggest USDT market (Binance spot) lead; Bitfinex and
@@ -42,49 +45,51 @@ export const EXCHANGES = [
 //   ping   [ms, payload]: a keep-alive some venues need (a string is sent as is)
 //   reply  an answer the venue expects to a message (Crypto.com's heartbeat)
 //   delay  ms to wait after connecting before subscribing
-export const GLOBAL_EXCHANGES = [
+export const globalExchangesFor = (y) => [
   {
-    name: 'Binance', url: 'wss://data-stream.binance.vision/ws/btcusdt@aggTrade', align: true, subscribe: [],
+    need: 'binance', name: 'Binance', url: `wss://data-stream.binance.vision/ws/${y.binance}@aggTrade`, align: true, subscribe: [],
     // { e: 'aggTrade', p, q, T, m: buyer is the maker } (one taker order's fills, merged)
     parse: (m) => (m.e === 'aggTrade' ? [tr('Binance', num(m.T), num(m.p), num(m.q), m.m ? 'sell' : 'buy')] : []),
   },
   {
-    name: 'Binance perp', url: 'wss://fstream.binance.com/ws/btcusdt@aggTrade', align: true, subscribe: [],
+    need: 'binance', name: 'Binance perp', url: `wss://fstream.binance.com/ws/${y.binance}@aggTrade`, align: true, subscribe: [],
     parse: (m) => (m.e === 'aggTrade' ? [tr('Binance perp', num(m.T), num(m.p), num(m.q), m.m ? 'sell' : 'buy')] : []),
   },
   {
-    name: 'Bybit perp', url: 'wss://stream.bybit.com/v5/public/linear', align: true, ping: [20000, { op: 'ping' }],
-    subscribe: [{ op: 'subscribe', args: ['publicTrade.BTCUSDT'] }],
+    need: 'bybit', name: 'Bybit perp', url: 'wss://stream.bybit.com/v5/public/linear', align: true, ping: [20000, { op: 'ping' }],
+    subscribe: [{ op: 'subscribe', args: [`publicTrade.${y.bybit}`] }],
     // { topic: 'publicTrade.BTCUSDT', data: [{ T, S: 'Buy' | 'Sell' (the taker), v, p }] }
-    parse: (m) => (m.topic === 'publicTrade.BTCUSDT' && Array.isArray(m.data) ? m.data.map((d) => tr('Bybit perp', num(d.T), num(d.p), num(d.v), d.S === 'Buy' ? 'buy' : d.S === 'Sell' ? 'sell' : null)) : []),
+    parse: (m) => (m.topic === `publicTrade.${y.bybit}` && Array.isArray(m.data) ? m.data.map((d) => tr('Bybit perp', num(d.T), num(d.p), num(d.v), d.S === 'Buy' ? 'buy' : d.S === 'Sell' ? 'sell' : null)) : []),
   },
   {
-    name: 'OKX perp', url: 'wss://ws.okx.com:8443/ws/v5/public', align: true, ping: [25000, 'ping'],
-    subscribe: [{ op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT-SWAP' }] }],
+    need: 'okx', name: 'OKX perp', url: 'wss://ws.okx.com:8443/ws/v5/public', align: true, ping: [25000, 'ping'],
+    subscribe: [{ op: 'subscribe', args: [{ channel: 'trades', instId: y.okx }] }],
     // { arg: { channel: 'trades' }, data: [{ px, sz (contracts of 0.01 BTC), side (the taker), ts }] }
-    parse: (m) => (m.arg?.channel === 'trades' && Array.isArray(m.data) ? m.data.map((d) => tr('OKX perp', num(d.ts), num(d.px), num(d.sz) * 0.01, d.side)) : []),
+    parse: (m) => (m.arg?.channel === 'trades' && Array.isArray(m.data) ? m.data.map((d) => tr('OKX perp', num(d.ts), num(d.px), num(d.sz) * y.okxCt, d.side)) : []),
   },
   {
-    name: 'Deribit perp', url: 'wss://www.deribit.com/ws/api/v2', align: true,
-    subscribe: [{ jsonrpc: '2.0', id: 1, method: 'public/subscribe', params: { channels: ['trades.BTC-PERPETUAL.100ms'] } }],
+    need: 'deribit', name: 'Deribit perp', url: 'wss://www.deribit.com/ws/api/v2', align: true,
+    subscribe: [{ jsonrpc: '2.0', id: 1, method: 'public/subscribe', params: { channels: [`trades.${y.deribit}.100ms`] } }],
     // { method: 'subscription', params: { channel, data: [{ timestamp, price, amount (USD), direction (the taker) }] } }
-    parse: (m) => (m.method === 'subscription' && /^trades\.BTC-PERPETUAL/.test(m.params?.channel || '') && Array.isArray(m.params.data)
+    parse: (m) => (m.method === 'subscription' && String(m.params?.channel || '').startsWith(`trades.${y.deribit}`) && Array.isArray(m.params.data)
       ? m.params.data.map((d) => tr('Deribit perp', num(d.timestamp), num(d.price), num(d.amount) / num(d.price), d.direction)) : []),
   },
   {
-    name: 'Bitfinex', url: 'wss://api-pub.bitfinex.com/ws/2', align: true,
-    subscribe: [{ event: 'subscribe', channel: 'trades', symbol: 'tBTCUSD' }],
+    need: 'bitfinex', name: 'Bitfinex', url: 'wss://api-pub.bitfinex.com/ws/2', align: true,
+    subscribe: [{ event: 'subscribe', channel: 'trades', symbol: y.bitfinex }],
     // [chanId, 'te', [id, mts, amount (+ taker bought, - sold), price]]
     parse: (m) => (Array.isArray(m) && m[1] === 'te' && Array.isArray(m[2]) ? [tr('Bitfinex', num(m[2][1]), num(m[2][3]), Math.abs(num(m[2][2])), num(m[2][2]) > 0 ? 'buy' : 'sell')] : []),
   },
   {
-    name: 'Crypto.com', url: 'wss://stream.crypto.com/exchange/v1/market', align: true, delay: 1000,
-    subscribe: [{ id: 1, method: 'subscribe', params: { channels: ['trade.BTC_USD'] } }],
+    need: 'cryptocom', name: 'Crypto.com', url: 'wss://stream.crypto.com/exchange/v1/market', align: true, delay: 1000,
+    subscribe: [{ id: 1, method: 'subscribe', params: { channels: [`trade.${y.cryptocom}`] } }],
     reply: (m) => (m.method === 'public/heartbeat' ? { id: m.id, method: 'public/respond-heartbeat' } : null),
     // { result: { channel: 'trade', data: [{ t, p, q, s: 'BUY' | 'SELL' (the taker) }] } }
     parse: (m) => (m.result?.channel === 'trade' && Array.isArray(m.result.data) ? m.result.data.map((d) => tr('Crypto.com', num(d.t), num(d.p), num(d.q), d.s === 'BUY' ? 'buy' : d.s === 'SELL' ? 'sell' : null)) : []),
   },
-];
+].filter((e) => y[e.need]);
+
+export const EXCHANGES = exchangesFor(HOME_ASSET.sym), GLOBAL_EXCHANGES = globalExchangesFor(HOME_ASSET.sym); // Bitcoin's
 
 // Price-level alignment for the global markets: each one's offset to the USD spot price, applied to its prices. The
 // offset is measured only when the venue and USD spot (the latest Coinbase / Kraken / Bitstamp / Gemini / Binance.US
@@ -92,8 +97,8 @@ export const GLOBAL_EXCHANGES = [
 // futures premiums and the USDT rate drift over minutes, while a lead move happens in seconds, so the moves are kept
 // (a fast offset would swallow exactly the moves that show up on futures first). Trades are held back until the
 // first offset is known (a few seconds), so nothing is ever drawn at a USDT or futures price.
-export function createAligner(alpha = 0.005) {
-  const usd = new Set(['Coinbase', ...EXCHANGES.map((e) => e.name)]), aligned = new Set(GLOBAL_EXCHANGES.filter((e) => e.align).map((e) => e.name));
+export function createAligner(alpha = 0.005, sym = HOME_ASSET.sym) {
+  const usd = new Set(['Coinbase', ...exchangesFor(sym).map((e) => e.name)]), aligned = new Set(globalExchangesFor(sym).filter((e) => e.align).map((e) => e.name));
   const off = {}, at = {}; let ref = null, refT = 0;
   const fn = (trades) => {
     const out = [];
@@ -117,7 +122,8 @@ export function createAligner(alpha = 0.005) {
 // Coinbase "match": side is the MAKER's, so the taker is the other one
 export const parseCoinbase = (m) => (m.type === 'match' || m.type === 'last_match' ? [tr('Coinbase', Date.parse(m.time), num(m.price), num(m.size), m.side === 'sell' ? 'buy' : m.side === 'buy' ? 'sell' : null)] : []);
 
-export const ALL_FEEDS = ['Coinbase', ...EXCHANGES.map((e) => e.name), ...GLOBAL_EXCHANGES.map((e) => e.name)];
+export const feedNames = (sym = HOME_ASSET.sym) => ['Coinbase', ...exchangesFor(sym).map((e) => e.name), ...globalExchangesFor(sym).map((e) => e.name)];
+export const ALL_FEEDS = feedNames();
 
 // Kalshi public trades on one contract: { trades: [{ trade_id, count(_fp), yes_price(_dollars), taker_side, created_time }] }
 export function parseKalshiTrades(body) {
@@ -149,7 +155,8 @@ export function byExchange(trades) {
 }
 
 // Browser side: one socket per exchange, reconnecting with backoff, closed while the app is in the background.
-export function createFeeds({ onTrades, onStatus }) {
+export function createFeeds({ onTrades, onStatus, sym = HOME_ASSET.sym }) {
+  const list = sym ? [...exchangesFor(sym), ...globalExchangesFor(sym)] : [];
   const socks = {}, status = {}, retry = {};
   const set = (name, s) => { status[name] = { ...(status[name] || {}), ...s }; onStatus?.(status); };
   function open(ex) {
@@ -183,7 +190,7 @@ export function createFeeds({ onTrades, onStatus }) {
   }
   let stopped = true;
   return {
-    start() { stopped = false; [...EXCHANGES, ...GLOBAL_EXCHANGES].forEach(open); },
+    start() { stopped = false; list.forEach(open); },
     stop() { stopped = true; for (const [n, ws] of Object.entries(socks)) { ws.onclose = null; ws.close(); delete socks[n]; set(n, { state: 'off' }); } },
     status: () => status,
   };

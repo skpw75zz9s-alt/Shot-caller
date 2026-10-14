@@ -15,7 +15,7 @@
 const WS = 'wss://api.hyperliquid.xyz/ws', INFO = 'https://api.hyperliquid.xyz/info';
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-export function createFutures({ WSImpl = globalThis.WebSocket, fetchImpl = (...a) => fetch(...a), clock = () => Date.now(), log = console } = {}) {
+export function createFutures({ WSImpl = globalThis.WebSocket, fetchImpl = (...a) => fetch(...a), clock = () => Date.now(), log = console, coin = 'BTC' } = {}) { // coin: Hyperliquid's name for it (public/markets.js sym.hyper)
   const trades = [], ctxs = []; // trades: { t, px, usd, side }, ctxs: { t, funding, oi, mark, oracle, premium }
   let ws = null, stopped = true, retry = 0, ping = null, poll = null, lastTradeAt = 0;
   function onTrades(list) {
@@ -31,7 +31,7 @@ export function createFutures({ WSImpl = globalThis.WebSocket, fetchImpl = (...a
   function onCtx(body) {
     const uni = body?.[0]?.universe, list = body?.[1];
     if (!Array.isArray(uni) || !Array.isArray(list)) return;
-    const i = uni.findIndex((u) => u.name === 'BTC'), c = list[i];
+    const i = uni.findIndex((u) => u.name === coin), c = list[i];
     if (!c) return;
     ctxs.push({ t: clock(), funding: Number(c.funding), oi: Number(c.openInterest), mark: Number(c.markPx), oracle: Number(c.oraclePx), premium: Number(c.premium) });
     while (ctxs.length && ctxs[0].t < clock() - 1800000) ctxs.shift();
@@ -39,7 +39,7 @@ export function createFutures({ WSImpl = globalThis.WebSocket, fetchImpl = (...a
   function open() {
     if (stopped || ws || typeof WSImpl !== 'function') return;
     try { ws = new WSImpl(WS); } catch { return; }
-    ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin: 'BTC' } })); };
+    ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin } })); };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.channel === 'trades') onTrades(m.data); };
     ws.onclose = () => { ws = null; if (!stopped) { const t = setTimeout(open, Math.min(60000, 1000 * 2 ** ++retry)); t.unref?.(); } };
     ws.onerror = () => { try { ws?.close(); } catch { /* */ } };
