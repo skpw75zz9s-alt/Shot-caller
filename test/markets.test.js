@@ -58,7 +58,11 @@ test('discovery finds Kalshi\'s series, sorts them into assets and marks which c
     if (q.startsWith('series?')) return kalshi[q] ?? { series: [] };
     const s = new URL(u).searchParams.get('series_ticker'); return { markets: markets[s] ?? [] };
   };
-  const d = createDiscovery({ kalshi: 'https://k', fetchJSON, env: {}, clock: () => now, log: { warn() {} } });
+  const only15 = createDiscovery({ kalshi: 'https://k', fetchJSON, env: {}, clock: () => now, log: { warn() {} } });
+  await only15.refresh(now);
+  assert.ok(only15.list().every((m) => m.freq === '15m'), 'by default only 15-minute rounds are listed');
+  assert.ok(!only15.running().includes('KXBTCD'));
+  const d = createDiscovery({ kalshi: 'https://k', fetchJSON, env: { MARKETS_FREQ: 'all' }, clock: () => now, log: { warn() {} } });
   await d.refresh(now);
   const st = Object.fromEntries(d.list().map((m) => [m.series, m.state]));
   assert.equal(st.KXBTCD, 'active'); assert.equal(st.KXINXU, 'active'); assert.equal(st.KXBTCMAXY, 'later', 'a yearly market: listed, not run');

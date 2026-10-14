@@ -42,7 +42,7 @@ export const HOME = { ...HOME_ASSET, ...SEEDS[0] };
 // (v13.29's list, still used where only the 15-minute coins matter)
 export const MARKETS = SEEDS.map((s) => ({ ...ASSETS.find((a) => a.key === s.asset), ...s }));
 
-const FREQ = { fifteen_min: '15m', '15min': '15m', hourly: 'hourly', daily: 'daily', weekly: 'weekly', monthly: 'monthly', annual: 'yearly', yearly: 'yearly', one_off: 'one-off', custom: 'custom' };
+const FREQ = { fifteen_min: '15m', '15min': '15m', fifteen_minute: '15m', quarter_hourly: '15m', hourly: 'hourly', daily: 'daily', weekly: 'weekly', monthly: 'monthly', annual: 'yearly', yearly: 'yearly', one_off: 'one-off', custom: 'custom' };
 // The asset a Kalshi series is priced from (by its ticker first, then its title), or null when the bot has no price for it
 export function assetFor({ series, title = '' }) {
   return ASSETS.find((a) => a.match.test(series || '')) ?? ASSETS.find((a) => a.match.test(title || '')) ?? null;
@@ -53,7 +53,7 @@ export function classifySeries(x) {
   if (!series || !/^[A-Z0-9]+$/.test(series)) return null;
   const a = assetFor({ series, title: x.title });
   if (!a) return null;
-  const freq = /15M$/.test(series) ? '15m' : FREQ[String(x.frequency || '').toLowerCase()] ?? (x.freq || 'other');
+  const freq = /15M$/.test(series) || /15[- ]?min/i.test(x.title || '') ? '15m' : FREQ[String(x.frequency || '').toLowerCase()] ?? (x.freq || 'other');
   return { series, asset: a.key, freq, title: x.title || null };
 }
 
@@ -66,6 +66,8 @@ export function marketOf(series, registry = null) {
   return { ...a, asset: a.key, series: r?.series ?? series, freq: r?.freq ?? (/15M$/.test(series) ? '15m' : 'other'), title: r?.title ?? null };
 }
 export const isHome = (series) => series === HOME.series;
+// The timeframes listed and run (v13.31: 15-minute rounds only; MARKETS_FREQ=all on the server lists every timeframe)
+export const listed = (m, freq = '15m') => freq === 'all' || m.freq === freq;
 export const label = (m) => `${m.key} · ${m.freq}`;
 // The round's short name for notes and tiles (KXETH15M-26OCT141215-15 -> 26OCT141215-15)
 export const roundName = (ticker) => String(ticker || '').replace(/^[A-Z0-9]+-/, '');

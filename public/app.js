@@ -24,14 +24,14 @@ import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
 import { dailyLoss, profitGuard } from './profitguard.js';
 import { successMap } from './success.js';
-import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, marketOf, roundName, storeKey } from './markets.js';
+import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, listed, marketOf, roundName, storeKey } from './markets.js';
 import { structureRead } from './structure.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '165'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '166'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -98,8 +98,8 @@ const SETTINGS_META = [
 // phone's confidence bar to 95). Only the latest step (default risk level) runs.
 if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
 const settings = { series: 'KXBTC15M', refreshSec: 3, multiFeeds: true, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
-const marketList = store.get('marketList', SEEDS); // the server's discovery (every Kalshi market it can call), kept for the next start
-if (!/^[A-Z0-9]+$/.test(settings.series || '') || marketOf(settings.series, marketList) === HOME_MARKET && settings.series !== HOME_MARKET.series) settings.series = HOME_MARKET.series; // only markets the bot has a price for
+const marketList = store.get('marketList', SEEDS).filter((m) => listed(m)); // the server's discovery (every 15-minute Kalshi market it can call), kept for the next start
+if (!/^[A-Z0-9]+$/.test(settings.series || '') || marketOf(settings.series, marketList) === HOME_MARKET && settings.series !== HOME_MARKET.series || !listed(marketOf(settings.series, marketList))) settings.series = HOME_MARKET.series; // only 15-minute markets the bot has a price for
 const MKT = marketOf(settings.series, marketList), HOME = isHome(settings.series); // the market picked (public/markets.js); HOME = Bitcoin's 15-minute one
 const CRYPTO = MKT.kind === 'crypto'; // exchange trade feeds and a live price socket (stock indexes, gold and oil have neither)
 // the server's readers for this market (v13.30: every market has its own copy): ?m=SERIES on their API calls
@@ -2131,7 +2131,7 @@ function buildSettings() {
     }).join('')}</optgroup>`).join('');
   };
   draw(marketList);
-  getJSON('markets').then((d) => { if (d?.markets?.length) { store.set('marketList', d.markets.map(({ series, asset, freq, title, state }) => ({ series, asset, freq, title, state }))); draw(d.markets); } }).catch(() => {});
+  getJSON('markets').then((d) => { const ms = (d?.markets || []).filter((m) => listed(m)); if (ms.length) { store.set('marketList', ms.map(({ series, asset, freq, title, state }) => ({ series, asset, freq, title, state }))); draw(ms); } }).catch(() => {});
   sel.addEventListener('change', async () => {
     const next = sel.value;
     if (next === settings.series || !/^[A-Z0-9]+$/.test(next)) return;

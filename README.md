@@ -271,6 +271,12 @@ Security:
 
 ## Version notes (newest first)
 
+### 15-minute markets only (v13.31)
+
+The market picker and the server list and run only Kalshi's 15-minute rounds, for every asset Kalshi offers them on
+(crypto, and any index or commodity that gets a 15-minute market). Hourly, daily, "custom" and longer markets are left
+out. `MARKETS_FREQ=all` brings every timeframe back; a series added with `MARKETS_EXTRA` is always listed.
+
 ### Every Kalshi price market (v13.30)
 
 The header picker lists every Kalshi market the bot can price, grouped by asset:
