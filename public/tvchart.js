@@ -12,7 +12,7 @@ const TIME = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' })
 const DAY = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric' });
 const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
-function baseOptions(height, withTime = true) {
+function baseOptions(height, withTime = true, num = NUM) {
   return {
     height,
     layout: { background: { color: C.bg }, textColor: C.text, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, attributionLogo: true },
@@ -20,7 +20,7 @@ function baseOptions(height, withTime = true) {
     rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.08, bottom: 0.08 } },
     timeScale: { borderColor: '#16203a', timeVisible: true, secondsVisible: false, visible: withTime, rightOffset: 2, fixLeftEdge: false,
       tickMarkFormatter: (t, type) => (type <= 2 ? DAY.format(t * 1000) : TIME.format(t * 1000)) },
-    localization: { timeFormatter: (t) => `${DAY.format(t * 1000)} ${TIME.format(t * 1000)}`, priceFormatter: (p) => NUMF.format(p) },
+    localization: { timeFormatter: (t) => `${DAY.format(t * 1000)} ${TIME.format(t * 1000)}`, priceFormatter: (p) => num.format(p) },
     crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' }, horzLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' } },
     handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
     handleScroll: { horzTouchDrag: true, vertTouchDrag: false, mouseWheel: true, pressedMouseMove: true },
@@ -34,9 +34,10 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
   const fine = digits >= 2, PF = fine ? { priceFormat: { type: 'price', precision: digits, minMove: 10 ** -digits } } : {};
   const MF = fine ? { priceFormat: { type: 'price', precision: digits + 2, minMove: 10 ** -(digits + 2) } } : {}; // MACD, a fraction of the price
   const NUMF = fine ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : NUM;
-  const chart = createChart(main, baseOptions(300));
+  const MACDF = fine ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits + 2, maximumFractionDigits: digits + 2 }) : NUM;
+  const chart = createChart(main, baseOptions(300, true, NUMF));
   const rsiChart = createChart(rsiEl, { ...baseOptions(90, false), rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.1, bottom: 0.1 } }, handleScroll: false, handleScale: false });
-  const macdChart = createChart(macdEl, { ...baseOptions(90, false), handleScroll: false, handleScale: false });
+  const macdChart = createChart(macdEl, { ...baseOptions(90, false, MACDF), handleScroll: false, handleScale: false });
   for (const c of [rsiChart, macdChart]) c.applyOptions({ layout: { attributionLogo: false }, crosshair: { horzLine: { visible: false }, vertLine: { visible: false } } }); // one TradingView link (on the main chart) is the credit
 
   // A steady price axis (v13.22): the candles' visible range plus the target and the cone, widened at once when they
