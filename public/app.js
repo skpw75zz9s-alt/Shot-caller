@@ -29,7 +29,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '160'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '161'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1732,14 +1732,15 @@ function renderPick(now = Date.now()) {
     const up = e.side === 'YES';
     setText($('pickWhen'), `locked · closes ${new Date(Date.parse(e.closeTime)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
     setText($('pickSide'), up ? 'UP' : 'DOWN'); setClass($('pickSide'), `pick-side ${up ? 'up' : 'down'}`);
-    setText($('pickOdds'), `Math ${pc(e.p)}${e.worst != null ? ` · worst case ${pc(e.worst)}` : ''} · Kalshi ${Math.round(e.price * 100)}¢`);
+    setText($('pickOdds'), `Math ${pc(e.p)}${e.worst != null ? ` · worst case ${pc(e.worst)}` : ''} · Kalshi ${e.kalshi != null ? pc(e.kalshi) : `${Math.round(e.price * 100)}¢`}`);
     setText($('pickWhy'), e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : '');
     setText($('pickBuy'), e.buy ? 'BUY ✓' : 'PICK ONLY'); setClass($('pickBuy'), `pick-buy ${e.buy ? 'yes' : 'no'}`);
   }
   const st = k.stats, last = k.last;
   setText($('pickRecord'), [last ? `Last pick ${last.side.toLowerCase() === last.result ? 'won' : 'lost'}` : null,
     st?.graded ? `picks ${st.wins}–${st.graded - st.wins} (${Math.round(st.wins / st.graded * 100)}%), the math said ${st.avgP != null ? pc(st.avgP) : '—'} on average` : 'no graded picks yet',
-    st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null].filter(Boolean).join(' · '));
+    st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null,
+    st?.score?.vs >= 10 ? `odds ${st.score.brierBot <= st.score.brierKalshi ? 'beat' : 'behind'} Kalshi's (Brier ${st.score.brierBot.toFixed(3)} vs ${st.score.brierKalshi.toFixed(3)})` : null].filter(Boolean).join(' · '));
 }
 
 // ---------- Map to success (public/success.js): live stats, the road with a tip per step, the coach ----------

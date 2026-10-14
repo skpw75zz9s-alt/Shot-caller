@@ -114,16 +114,21 @@ export const leanSide = (ev) => {
 
 // Edge for `side` priced with `volScale` × the bot's volatility, keeping only drift and rejection tilt
 // that work AGAINST the call (anything that helps it is dropped), so it can only be harder than the real edge.
-// Returns { edge, p }: the edge after the exact fee of the order the bot would place, and the side's win chance
-function edgeUnder(row, snap, s, side, volScale) {
+// sideOdds: that side's win chance; edgeUnder: { edge, p }, the edge after the exact fee of the order the bot would place
+// (the 10-minute pick's worst case uses sideOdds too, so both judge a side the same way)
+export function sideOdds(row, snap, s, side, volScale) {
   const dir = side === 'YES' ? 1 : -1;
   const drift = (snap.driftMin || 0) * (snap.momentumWeight ?? s.momentumWeight);
   const keptDrift = drift * dir > 0 ? 0 : drift;
   const keptShift = (row.ev.pShift || 0) * dir > 0 ? 0 : (row.ev.pShift || 0);
   const p0 = probYes(row.m, row.strike, snap.mSpot ?? snap.spot, (row.sigma ?? snap.sigmaMin) * s.volMultiplier * volScale, row.ev.minutesLeft, keptDrift, row.settleAvg, snap.volTails ?? s.volTails);
-  const ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
-  if (p0 == null || ask == null) return null;
-  const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift)), p = side === 'YES' ? pS : 1 - pS;
+  if (p0 == null) return null;
+  const pS = Math.min(0.999, Math.max(0.001, p0 + keptShift));
+  return side === 'YES' ? pS : 1 - pS;
+}
+function edgeUnder(row, snap, s, side, volScale) {
+  const p = sideOdds(row, snap, s, side, volScale), ask = side === 'YES' ? row.ev.quote.yesAsk : row.ev.quote.noAsk;
+  if (p == null || ask == null) return null;
   return { edge: p - ask - orderFee(ask, p, s), p };
 }
 

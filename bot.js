@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
-import { PICK, pickNow } from './public/pick.js';
+import { PICK, pickNow, pickScore } from './public/pick.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
 import { gradeWindow, newTracker, pendingWindows, pruneWindows, trackWindow } from './public/tracker.js';
@@ -441,12 +441,10 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     if (snap.live) {
       const lv = snap.live, t = lv.m.ticker, ml = lv.ev.minutesLeft;
       if (ml <= PICK.at && ml > PICK.at - PICK.window && !pickRecord.some((e) => e.ticker === t)) {
-        const pk = pickNow({ row: lv, snap, settings: OFFICIAL }), off = officialMem[t]?.side ?? null;
-        if (pk && pk.ask != null) {
-          const same = !off || off === pk.side;
-          const e = same ? { ...pk } : { ...pk, side: off, p: 1 - pk.p, worst: null, ask: off === 'YES' ? lv.ev.quote.yesAsk : lv.ev.quote.noAsk, gap: null, buy: false, why: 'the official call stands for this round' };
+        const off = officialMem[t]?.side ?? null, e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off }); // the official call's side, with its own odds and worst case
+        if (e && e.ask != null) {
           const prev = pickRecord.filter((x) => x.result === 'yes' || x.result === 'no').at(-1) ?? null;
-          pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick' });
+          pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick' });
           if (pickRecord.length > 5000) pickRecord.splice(0, pickRecord.length - 5000);
           savePick();
           try { onPick(pickRecord.at(-1), { prev, stats: pickStats() }); } catch (err) { log.error('pick hook failed', err.message); }
@@ -474,7 +472,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   // The picks' record: all of them, and the ones marked worth buying (profit at $10 a pick, after fees)
   function pickStats() {
     const graded = pickRecord.filter((e) => e.result === 'yes' || e.result === 'no');
-    return { ...callStats(pickRecord), avgP: graded.length ? graded.reduce((a, e) => a + (e.p ?? 0), 0) / graded.length : null, buys: callStats(pickRecord.filter((e) => e.buy)) };
+    return { ...callStats(pickRecord), avgP: graded.length ? graded.reduce((a, e) => a + (e.p ?? 0), 0) / graded.length : null, buys: callStats(pickRecord.filter((e) => e.buy)), score: pickScore(pickRecord) };
   }
   function pickNowApi(now = Date.now()) {
     const lv = market.markets[LEARN_SERIES]?.find((m) => Date.parse(m.close_time) > now) ?? null;

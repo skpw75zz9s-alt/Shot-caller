@@ -36,11 +36,12 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
   // (calibrated) and the ones marked BUY make money after fees
   const pk = bot?.pick;
   if (pk) {
-    const rate = pk.graded ? pk.wins / pk.graded : null, b = pk.buys;
-    add('pick10', '10-minute picks (every round)', pk.graded || 0, !pk.graded ? 'wait' : (b?.graded >= 20 ? b.usd > 0 : rate >= (pk.avgP ?? 0.5) - 0.03) ? 'good' : 'bad',
-      pk.graded ? `won ${pk.wins} of ${pk.graded} (${pct(rate)}) · the math said ${pct(pk.avgP)} on average` : 'none graded yet: one locks every round at 10:00 left',
+    const rate = pk.graded ? pk.wins / pk.graded : null, b = pk.buys, sc = pk.score, head = sc?.vs >= 30;
+    // judged on money once 20+ BUY picks are graded, else on beating Kalshi's own odds (30+ head to head), else calibration
+    add('pick10', '10-minute picks (every round)', pk.graded || 0, !pk.graded ? 'wait' : (b?.graded >= 20 ? b.usd > 0 : head ? sc.brierBot < sc.brierKalshi : rate >= (pk.avgP ?? 0.5) - 0.03) ? 'good' : 'bad',
+      pk.graded ? `won ${pk.wins} of ${pk.graded} (${pct(rate)}) · the math said ${pct(pk.avgP)} on average${sc?.vs ? ` · Brier ${sc.brierBot.toFixed(3)} vs Kalshi's ${sc.brierKalshi.toFixed(3)} (lower is better, ${sc.vs} picks)` : ''}` : 'none graded yet: one locks every round at 10:00 left',
       b?.graded ? `BUY picks: ${b.wins} of ${b.graded} won, ${usd(b.usd)} at $10 each after fees` : 'picks marked BUY are judged on profit after fees',
-      { graded: pk.graded || 0, wins: pk.wins ?? 0, avgP: pk.avgP ?? null, buys: b ? { graded: b.graded, wins: b.wins, usd: b.usd } : null });
+      { graded: pk.graded || 0, wins: pk.wins ?? 0, avgP: pk.avgP ?? null, brier: sc?.vs ? { bot: sc.brierBot, kalshi: sc.brierKalshi, n: sc.vs } : null, buys: b ? { graded: b.graded, wins: b.wins, usd: b.usd } : null });
   }
   // flip calls (v13.19): the locked call switched sides on clear evidence; judged on profit, off while losing
   const fc = bot?.flip;
