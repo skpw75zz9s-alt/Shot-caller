@@ -14,7 +14,7 @@
 // Pure: tunefeed.js runs it hourly on the server; the bot (bot.js) and the phone (engine.js flipOk) apply a proven filter.
 import { effectiveVol, probAbove, realizedVol } from './model.js';
 
-export const FS = { lockLeft: 10, lastMin: 5, conf: 0.9, vols: [0.8, 1, 1.25], train: 2 / 3, minTrainKept: 20, minKept: 30, z: 2, minVol: 0.00008, history: 121 };
+export const FS = { lateTry: [4, 3, 2, 1], minLate: 30, minMinute: 20, lockLeft: 10, lastMin: 5, conf: 0.9, vols: [0.8, 1, 1.25], train: 2 / 3, minTrainKept: 20, minKept: 30, z: 2, minVol: 0.00008, history: 121 };
 const ROUND = 900000, MIN = 60000;
 
 function longVol(closes) { // plain 2-hour volatility (engine.js's)
@@ -125,7 +125,21 @@ export function studyFlips(s, opts = {}) {
   }
   const byLeft = {};
   for (const x of s) { const b = (byLeft[x.f.left] ||= { n: 0, wins: 0 }); b.n++; if (x.won) b.wins++; }
-  return { flips: s.length, all: tally(s), lane: tally(s.filter((x) => x.f.left > laneLastMin)), laneLastMin, train: tr, test: te, gate, proven, byLeft, recent: s.slice(-8).reverse().map((x) => ({ t: x.t, side: x.side, won: x.won, left: x.f.left, z: +x.f.z.toFixed(2), crossAge: x.f.crossAge, spike: +x.f.spike.toFixed(2) })), opts: { lockLeft: opts.lockLeft ?? FS.lockLeft, lastMin: opts.lastMin ?? FS.lastMin, conf: opts.conf ?? FS.conf } };
+  // v13.43.1 flips later than the lane's last minutes: allowed down to the latest minute where history's flips (the ones the
+  // rule keeps, once it's proven) won at least the flip bar overall and in both the older and newer half, 30+ flips
+  const conf = opts.conf ?? FS.conf, kept = s.filter((x) => !proven || !gate || flipGateOk(gate, x.f)), bands = [];
+  let lateMin = null;
+  for (const L of FS.lateTry.filter((x) => x < laneLastMin)) {
+    const band = kept.filter((x) => x.f.left >= L && x.f.left < laneLastMin), h = Math.floor(band.length / 2);
+    const b = { lastMin: L, ...tally(band), older: tally(band.slice(0, h)), newer: tally(band.slice(h)) };
+    // and the minute being added has to hold on its own (a weak last minute can't hide behind strong earlier ones)
+    b.minute = tally(band.filter((x) => x.f.left < L + 1));
+    b.ok = b.n >= FS.minLate && rate(b) >= conf - 1e-9 && rate(b.older) >= conf - 1e-9 && rate(b.newer) >= conf - 1e-9 && b.minute.n >= FS.minMinute && rate(b.minute) >= conf - 1e-9;
+    bands.push(b);
+    if (!b.ok) break; // later minutes only while every earlier one holds too
+    lateMin = L;
+  }
+  return { flips: s.length, all: tally(s), lane: tally(s.filter((x) => x.f.left >= laneLastMin)), laneLastMin, late: { lastMin: lateMin, bands, need: conf }, train: tr, test: te, gate, proven, byLeft, recent: s.slice(-8).reverse().map((x) => ({ t: x.t, side: x.side, won: x.won, left: x.f.left, z: +x.f.z.toFixed(2), crossAge: x.f.crossAge, spike: +x.f.spike.toFixed(2) })), opts: { lockLeft: opts.lockLeft ?? FS.lockLeft, lastMin: opts.lastMin ?? FS.lastMin, conf: opts.conf ?? FS.conf } };
 }
 
 // The live features for a flip to `side` (engine.js flipOk): closed 1-minute bars, the live price for the forming minute

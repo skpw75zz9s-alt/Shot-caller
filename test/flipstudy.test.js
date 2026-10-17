@@ -48,3 +48,15 @@ test('the study picks the rule on older flips and proves it only on newer ones i
   let m = 0; const flat = [...Array(600)].map(() => { m++; return { t: m, side: 'YES', won: m % 10 !== 0, f: { left: 7, z: 2, crossAge: 1 + (m % 3), spike: (m % 5) / 2, mom3: (m % 7) / 7 - 0.3, volRatio: 1 + (m % 4) / 4, rejWick: (m % 6) / 6 } }; });
   assert.equal(studyFlips(flat).proven, false);
 });
+
+test('late flips: allowed only down to the minute history proves they hold, in both halves', () => {
+  // flips at 4 and 3 minutes left win 96 in 100; at 2 left only 80 in 100
+  let n = 0; const s = [];
+  for (let i = 0; i < 300; i++) for (const left of [6, 4, 3, 2]) { n++; s.push({ t: n, side: 'YES', won: left === 2 ? n % 5 !== 0 : n % 25 !== 0, f: { left, z: 2, crossAge: 3, spike: 0.5, mom3: 1, volRatio: 1, rejWick: 0.1 } }); }
+  const r = studyFlips(s, { laneLastMin: 5 });
+  assert.equal(r.late.lastMin, 3, 'down to 3 minutes; 2 isn\'t proven');
+  assert.deepEqual(r.late.bands.map((b) => [b.lastMin, b.ok]), [[4, true], [3, true], [2, false]]);
+  assert.equal(r.lane.n, 300, 'the lane: 5+ minutes left');
+  const few = studyFlips(s.slice(0, 40), { laneLastMin: 5 });
+  assert.equal(few.late.lastMin, null, 'too few late flips: the last-minutes rule stands');
+});

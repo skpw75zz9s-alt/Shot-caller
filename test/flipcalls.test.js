@@ -74,3 +74,13 @@ test('the flip study\'s rule (once proven) blocks a flip history says to skip, a
   assert.ok(withGate(gate(2, true)).fire, 'the rule passes: the flip goes ahead');
   assert.ok(withGate(gate(40, false)).fire, 'an unproven rule never blocks');
 });
+
+test('in the last minutes a flip waits for history: allowed only down to the proven minute', () => {
+  const late = (lastMin) => ({ proven: false, gate: null, late: { lastMin, bands: [], need: 0.9 } });
+  const at = (mins, fg) => { const x = setup({ yb: 90, ya: 91, mins }); return buySignal(x.row, { ...x.snap, flipGate: fg }, t90, NOW, calledDown()); };
+  const none = at(3.5, null);
+  assert.equal(none.fire, false); assert.match(none.flip.why, /no flips in the last 5 minutes until history proves/);
+  assert.ok(at(3.5, late(3)).fire, 'history proved flips to 3 minutes left');
+  assert.match(at(2.5, late(3)).flip.why, /history proves flips only down to 3 min left/);
+  assert.ok(at(8, late(null)).fire, 'inside the normal window nothing changes');
+});

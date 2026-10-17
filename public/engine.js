@@ -240,10 +240,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     }
     return true;
   };
-  const entryOk = (side, floor = true) => {
+  const entryOk = (side, floor = true, lastMin = s.noCallLastMin) => {
     // Two-rejections rule: never make a new call against two rejections in a row
     if (s.doubleRejRule && row.rej?.double && row.rej.double.dir !== (side === 'YES' ? 1 : -1)) return false;
-    if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin) return false;
+    if (lastMin > 0 && ev.minutesLeft < lastMin) return false;
     // the price band (Profit: 60-90c): above it a win pays too little, under it Kalshi doubts the side too much
     { const ask = side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk; if (s.maxAsk > 0 && !(ask <= s.maxAsk + 1e-9)) return false; if (s.minAsk > 0 && !(ask >= s.minAsk - 1e-9)) return false; }
     // Near-certain: Kalshi's own price has to agree (its bid for the side at kalshiAgree or more)
@@ -343,7 +343,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     }
     const ask = b.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     const priced = !(s.winFloor > 0) || ask >= s.winFloor - 1e-9;
-    if (priced ? !(passes(b, ...need.switching, true) && steady(b.side) && entryOk(b.side) && holds(b) && watchOk()) : !earlyOk(b)) return no(priced ? 'not past the bar for a switch yet' : (earlyWhy || 'not past the bar yet'));
+    // v13.43.1 flips run past the last-minutes rule down to the minute history proved they hold (the flip study's late window)
+    const lateTo = fs?.late?.lastMin, flipLast = lateTo != null && lateTo < s.noCallLastMin ? lateTo : s.noCallLastMin;
+    if (s.noCallLastMin > 0 && ev.minutesLeft < s.noCallLastMin && !(ev.minutesLeft >= flipLast)) return no(lateTo != null ? `history proves flips only down to ${lateTo} min left` : `no flips in the last ${s.noCallLastMin} minutes until history proves later ones hold`);
+    if (priced ? !(passes(b, ...need.switching, true) && steady(b.side) && entryOk(b.side, true, flipLast) && holds(b) && watchOk()) : !earlyOk(b)) return no(priced ? 'not past the bar for a switch yet' : (earlyWhy || 'not past the bar yet'));
     if (!gateOk(b)) return no(gated?.lesson ? `a lesson from past losses: ${gated.lesson.label.toLowerCase()}` : 'the call filter skipped it');
     flipWhy = null;
     return true;

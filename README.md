@@ -288,6 +288,13 @@ them on the server's candle history (up to 21 days, every coin, rerun hourly in 
   flip calls (bot and phone, `engine.js` flipOk) only once proven there: the flips it keeps beat the ones it blocks,
   z 2+, 30+ kept.
 
+**Late flips (v13.43.1):** flip calls can run past the last-minutes rule (5 minutes on Profit and 90% target). They go
+down to the latest minute where history's flips won at least the flip bar (90%): over all of them, in both the older
+and the newer half, with 30+ flips, and with each added minute holding on its own (20+). The window is checked
+minute by minute, 4 then 3, 2 and 1 left, and stops at the first one that fails. The price rules still apply (the
+Profit level's 90¢ cap, the 90% target's floor, the switching gap over Kalshi's price). Until history proves it, the
+last-minutes rule stands.
+
 The Record tab's flip-calls row shows history's win rate for the lane and for every minute, and the rule's test
 numbers. The signal board lists the rule as in calls or on probation.
 
