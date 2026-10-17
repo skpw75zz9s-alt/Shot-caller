@@ -77,7 +77,9 @@
     (function () {
       var series = 'KXBTC15M';
       try { series = (JSON.parse(localStorage.getItem('settings')) || {}).series || series; } catch (e) {}
-      var paths = ['coinbase/products/BTC-USD/ticker', 'coinbase/products/BTC-USD/candles?granularity=60', 'kalshi/markets?series_ticker=' + encodeURIComponent(series) + '&status=open&limit=50', 'learn', 'index'];
+      var coin = (/^KX(BTC|ETH|SOL|XRP|DOGE)15M$/.exec(series) || [])[1], pre = coin ? ['coinbase/products/' + coin + '-USD/ticker', 'coinbase/products/' + coin + '-USD/candles?granularity=60'] : [];
+      var q = series === 'KXBTC15M' ? '' : '?m=' + series; // app.js api(): every market but Bitcoin's names itself
+      var paths = pre.concat(['kalshi/markets?series_ticker=' + encodeURIComponent(series) + '&status=open&limit=50', 'learn' + q, 'index' + q]);
       window.__pre = { at: Date.now() };
       paths.forEach(function (p) { window.__pre[p] = fetch('./api/' + p).catch(function () { return null; }); });
     })();
@@ -594,7 +596,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.42 · Simple mode, signal board, Discord roles</p>
+      <p class="fine" id="version">Shot Caller v13.42.1 · Every coin opens</p>
     </section>
   </main>
 
@@ -614,7 +616,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '179';
+    window.SC_BUILD = '180';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

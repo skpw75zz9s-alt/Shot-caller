@@ -144,6 +144,7 @@ test('without access: paywall page, open assets only, APIs locked', async () => 
     assert.ok([401, 403].includes((await get(p)).status), p);
   }
   assert.equal((await get('/api/push/sync', {})).status, 401);
+  assert.equal((await get('/api/push/sync', {})).headers.get('x-paywall'), '1', 'the phone only sends people to sign in on a marked 401');
 });
 
 test('buyer pays, admin approves from the app, buyer is unlocked', async () => {

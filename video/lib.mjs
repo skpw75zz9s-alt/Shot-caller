@@ -19,10 +19,12 @@ export async function start({ paywall = false } = {}) {
   await page.routeWebSocket(/.*/, (ws) => {
     if (!/ws-feed\.exchange\.coinbase\.com/.test(ws.url())) { ws.close(); return; }
     let timer = null;
-    ws.onMessage(() => {
+    let product = 'BTC-USD';
+    ws.onMessage((m) => {
+      try { product = JSON.parse(m).product_ids?.[0] || product; } catch { /* */ }
       if (timer) return;
       timer = setInterval(async () => {
-        try { const t = await (await fetch(`http://127.0.0.1:${MOCK}/products/BTC-USD/ticker`)).json(); ws.send(JSON.stringify({ type: 'ticker', product_id: 'BTC-USD', price: t.price, time: t.time, side: Math.random() > 0.45 ? 'buy' : 'sell', last_size: (Math.random() * 0.2).toFixed(4) })); } catch { /* */ }
+        try { const t = await (await fetch(`http://127.0.0.1:${MOCK}/products/${product}/ticker`)).json(); ws.send(JSON.stringify({ type: 'ticker', product_id: product, price: t.price, time: t.time, side: Math.random() > 0.45 ? 'buy' : 'sell', last_size: (Math.random() * 0.2).toFixed(4) })); } catch { /* */ }
       }, 1000);
     });
   });

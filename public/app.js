@@ -36,7 +36,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '179'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '180'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -217,8 +217,13 @@ try { localStorage.removeItem('tracker'); } catch { /* report cards were removed
 try { localStorage.removeItem('scanLog'); } catch { /* the scan is graded on the server since v9.1 */ }
 
 // Access lapsed (paywall): reload so the server shows the paywall page.
+// the server marks its own sign-in 401s (x-paywall); anything else is a data error, retried on the next poll. At most one
+// reload a minute, so nothing can bounce the app in a loop
 function paywalled(r) {
-  if (r.status === 401) { location.reload(); throw new Error('payment required'); }
+  if (r.status !== 401 || r.headers.get('x-paywall') !== '1') return;
+  let last = 0; try { last = Number(sessionStorage.getItem('scPaywallAt')) || 0; sessionStorage.setItem('scPaywallAt', String(Date.now())); } catch { /* storage blocked */ }
+  if (Date.now() - last > 60000) location.reload();
+  throw new Error('payment required');
 }
 
 async function getJSON(path) {
@@ -2484,8 +2489,8 @@ function buildSettings() {
     if (!list.some((m) => m.series === settings.series)) groups.set(MKT.name, [...(groups.get(MKT.name) || []), { series: settings.series, mk: MKT, state: 'unknown' }]);
     const order = ASSETS.map((a) => a.name);
     sel.innerHTML = [...groups.entries()].sort((x, y) => order.indexOf(x[0]) - order.indexOf(y[0])).map(([name, ms]) => `<optgroup label="${esc(name)}">${ms.map((m) => {
-      const off = (m.state === 'closed' || m.state === 'later') && m.series !== settings.series;
-      return `<option value="${m.series}"${m.series === settings.series ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(marketLabel(m.mk))}${m.state === 'closed' ? ' (closed)' : m.state === 'later' ? ' (later)' : ''}</option>`;
+      // never greyed out (v13.42.1): the server's last check can be wrong or stale, and a closed market just shows no round
+      return `<option value="${m.series}"${m.series === settings.series ? ' selected' : ''}>${esc(marketLabel(m.mk))}${m.state === 'closed' ? ' (closed)' : m.state === 'later' ? ' (later)' : ''}</option>`;
     }).join('')}</optgroup>`).join('');
   };
   draw(marketList);

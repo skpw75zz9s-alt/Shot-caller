@@ -12,7 +12,10 @@ for (let i = 0; i < 300; i++) { const t = open - (300 - i) * MIN + 5 * MIN; cons
 // the finished candles, fixed once (real candles don't change after they close)
 const HIST = closes.map(([t, c]) => { const o = c - gauss() * 12; return [t / 1000, Math.min(o, c) - 6, Math.max(o, c) + 6, o, c, 3 + rnd() * 5]; });
 const spot = () => K + state.lead + Math.sin(Date.now() / 7000) * 9 + Math.sin(Date.now() / 2300) * 4;
-const market = () => ({ ticker: 'KXBTC15M-26OCT131715-15', event_ticker: 'KXBTC15M-26OCT131715', title: 'Bitcoin price up in next 15 mins?', subtitle: 'Target $100,000.00', strike_type: 'greater_or_equal', floor_strike: K,
+// each coin at its own size (DOGE about 25 cents), the same shape of round
+const SCALE = { BTC: 1, ETH: 0.04, SOL: 0.002, XRP: 0.000025, DOGE: 0.0000025 };
+const scaleOf = (s) => SCALE[Object.keys(SCALE).find((k) => String(s).includes(k))] ?? 1;
+const market = (series = 'KXBTC15M') => ({ ticker: `${series}-26OCT131715-15`, event_ticker: `${series}-26OCT131715`, title: 'Bitcoin price up in next 15 mins?', subtitle: 'Target', strike_type: 'greater_or_equal', floor_strike: +(K * scaleOf(series)).toPrecision(6),
   open_time: new Date(open).toISOString(), close_time: new Date(close).toISOString(), expiration_time: new Date(close).toISOString(), status: 'active',
   yes_bid: state.yb, yes_ask: state.ya, no_bid: 100 - state.ya, no_ask: 100 - state.yb, last_price: state.ya, volume: 18450, open_interest: 9200, liquidity: 250000 });
 // Yahoo's 1-minute charts for the indexes, metals, oil and their drivers: 3 days, gold and oil built from the dollar,
@@ -41,17 +44,19 @@ http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); res.setHeader('content-type', 'application/json');
   if (u.pathname === '/__set') { for (const k of ['yb', 'ya', 'lead']) if (u.searchParams.has(k)) state[k] = +u.searchParams.get(k); return res.end(JSON.stringify(state)); }
   if (u.pathname.startsWith('/v8/finance/chart/')) { const b = yahooChart(decodeURIComponent(u.pathname.slice(18)), u.searchParams); if (b) return res.end(JSON.stringify(b)); }
+  const sc = scaleOf(u.pathname), sz = (r) => [r[0], r[1] * sc, r[2] * sc, r[3] * sc, r[4] * sc, r[5]];
   if (u.pathname.endsWith('/candles')) {
     const g = +u.searchParams.get('granularity') || 60, rows = [];
     if (g === 60) { for (const r of HIST) rows.push(r); const t = Math.floor(Date.now() / MIN) * MIN, c = spot(); rows.push([t / 1000, c - 8, c + 8, closes.at(-1)[1], c, 2]); }
     else { let q = K - 400; for (let i = 0; i < 300; i++) { const c = q + gauss() * 38 * Math.sqrt(g / 60); rows.push([(Date.now() - (300 - i) * g * 1000) / 1000, Math.min(q, c) - 10, Math.max(q, c) + 10, q, c, 10]); q = c; } }
-    return res.end(JSON.stringify(rows.reverse()));
+    return res.end(JSON.stringify(rows.map(sz).reverse()));
   }
-  if (u.pathname.endsWith('/ticker')) return res.end(JSON.stringify({ price: spot().toFixed(2), time: new Date().toISOString() }));
+  if (u.pathname.endsWith('/ticker')) return res.end(JSON.stringify({ price: (spot() * sc).toPrecision(8), time: new Date().toISOString() }));
   if (u.pathname.endsWith('/markets/trades')) return res.end(JSON.stringify({ trades: [], cursor: '' }));
-  if (u.pathname === '/markets') return res.end(JSON.stringify({ markets: [market()], cursor: '' }));
+  if (u.pathname === '/markets') return res.end(JSON.stringify({ markets: [market(u.searchParams.get('series_ticker') || 'KXBTC15M')], cursor: '' }));
   if (/\/markets\/[^/]+\/orderbook$/.test(u.pathname)) return res.end(JSON.stringify({ orderbook: { yes: [[state.yb, 500]], no: [[100 - state.ya, 500]] } }));
-  if (/\/markets\/[^/]+$/.test(u.pathname)) return res.end(JSON.stringify({ market: market() }));
-  if (u.pathname.startsWith('/series') || u.pathname.startsWith('/events')) return res.end(JSON.stringify({}));
+  if (/\/markets\/[^/]+$/.test(u.pathname)) return res.end(JSON.stringify({ market: market(u.pathname.split('/').pop().split('-')[0]) }));
+  if (u.pathname.startsWith('/series')) return res.end(JSON.stringify(u.searchParams.get('category') === 'Crypto' ? { series: [{ ticker: 'KXDOGE15M', title: 'Dogecoin price up in next 15 mins?', frequency: 'fifteen_min' }] } : {}));
+  if (u.pathname.startsWith('/events')) return res.end(JSON.stringify({}));
   res.statusCode = 404; res.end('{}');
 }).listen(PORT, () => console.log('mock on', PORT, 'close', new Date(close).toISOString()));

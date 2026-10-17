@@ -20,7 +20,7 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
-import { ASSETS, HOME, marketOf } from './public/markets.js';
+import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
 import { createStacks } from './stacks.js';
@@ -173,6 +173,8 @@ async function proxy(route, url, req, res) {
     cache.set(target, entry);
     if (cache.size > 200) cache.delete(cache.keys().next().value);
     if (r.ok) { lastGood.set(target, entry); if (lastGood.size > 200) lastGood.delete(lastGood.keys().next().value); }
+    // Kalshi or Coinbase refusing us (401/403) is their problem, not the phone's sign-in: it goes out as a 502
+    if (r.status === 401 || r.status === 403) return send(res, 502, { error: `upstream refused (${r.status})` });
     sendEntry(req, res, r.status, entry, 'application/json', { 'cache-control': 'no-store' });
   } catch (e) {
     const good = lastGood.get(target);
@@ -261,7 +263,7 @@ const ready = Promise.all([bot.load(), access.load(), discordRoles.load(), autot
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
 async function autoApi(req, res, action, token) {
   const owner = ownerOf(token);
-  if (!owner) return send(res, 401, { error: 'sign in first', paywall: true });
+  if (!owner) return send(res, 401, { error: 'sign in first', paywall: true }, 'application/json', PAYWALL_HDR);
   if (action === 'state' && req.method === 'GET') return send(res, 200, autotrade.state(owner));
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);
@@ -282,6 +284,8 @@ async function readBody(req) {
   try { return raw ? JSON.parse(raw) : {}; } catch { throw Object.assign(new Error('bad json'), { status: 400 }); }
 }
 
+// the phone sends you to sign in only on a 401 that carries this (v13.42.1): an upstream's own 401 never does
+const PAYWALL_HDR = { 'x-paywall': '1' };
 function send(res, status, body, type = 'application/json', headers = {}) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -414,7 +418,7 @@ export const server = http.createServer(async (req, res) => {
     if (!allowed) {
       if (OPEN_FILES.has(rel) && req.method === 'GET') return serveFile(req, res, rel);
       if (rel === '/index.html') return serveSite(req, res); // the app's address shows the official website; it links to sign in
-      return send(res, 401, { error: 'payment required', paywall: true });
+      return send(res, 401, { error: 'payment required', paywall: true }, 'application/json', PAYWALL_HDR);
     }
 
     const push = path.match(/^\/api\/push\/(\w+)$/);
@@ -430,7 +434,10 @@ export const server = http.createServer(async (req, res) => {
     // What the server has learned about the market (the phone prices with it too)
     // The official bot record (every call the server's bot made, graded against Kalshi's result)
     // ?m=SERIES picks the market (v13.30); without it, Bitcoin's 15-minute one
-    const mq = url.searchParams.get('m'), mb = mq ? stacks.bot(mq) : bot, ms = mq ? stacks.stack(mq) : null;
+    const mq = url.searchParams.get('m');
+    // a market opened on a phone before its bot is running starts now (Bitcoin's answers meanwhile)
+    if (mq && /^[A-Z0-9]+$/.test(mq) && !stacks.has(mq) && !isHome(mq) && marketOf(mq, discovery.list()).series === mq) stacks.start(mq);
+    const mb = mq ? stacks.bot(mq) : bot, ms = mq ? stacks.stack(mq) : null;
     const mScan = ms?.scanFeed ?? scanFeed, mWatch = ms?.marketWatch ?? marketWatch, mMicro = ms?.microFeed ?? microFeed, mPlay = ms?.playbook ?? playbook, mTune = ms?.tuneFeed ?? tuneFeed, mFlip = ms?.flipFeed ?? flipFeed, mVol = ms?.volTuneFeed ?? volTuneFeed;
     if (path === '/api/record') return send(res, 200, mb.record());
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record

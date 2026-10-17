@@ -11,6 +11,7 @@ process.env.PAYWALL = 'off'; // paywall has its own tests
 const upstream = http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.url.startsWith('/markets?')) return res.end(JSON.stringify({ markets: [{ ticker: 'KXBTC15M-T1', close_time: new Date(Date.now() + 300000).toISOString() }] }));
+  if (req.url.startsWith('/markets/KXREFUSED')) { res.statusCode = 401; return res.end('{"error":"unauthorized"}'); }
   if (req.url === '/products/BTC-USD/ticker') return res.end(JSON.stringify({ price: '100000.00' }));
   res.statusCode = 404; res.end('{}');
 });
@@ -165,4 +166,9 @@ test('Discord role routes: status says off without config, linking needs a membe
   assert.equal((await fetch(`${app}/api/discord/link`, { method: 'POST', body: '{}' })).status, 400);
   const cb = await fetch(`${app}/api/discord/callback?code=x&state=y`, { redirect: 'manual' });
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /^\/\?discord=error&msg=/);
+});
+
+test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', async () => {
+  const r = await fetch(`${app}/api/kalshi/markets/KXREFUSED-1`);
+  assert.equal(r.status, 502); assert.equal(r.headers.get('x-paywall'), null);
 });
