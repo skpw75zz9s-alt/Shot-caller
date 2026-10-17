@@ -34,7 +34,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '176'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '177'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -869,7 +869,7 @@ async function drawChartTab(force = false) {
   if (!force && now - chartState.drawnAt < 1000) return;
   chartState.drawnAt = now;
   if (!$('tfBtns').children.length) buildChartControls();
-  if (!tv) { if (!$('tvMain').clientWidth) return; tv = createTvChart({ main: $('tvMain'), rsiEl: $('tvRsi'), macdEl: $('tvMacd'), layer: $('orderLayer'), liveBtn: $('chartLive'), digits: MKT.digits }); force = true; }
+  if (!tv) { if (!$('tvMain').clientWidth) return; tv = createTvChart({ main: $('tvMain'), rsiEl: $('tvRsi'), macdEl: $('tvMacd'), layer: $('orderLayer'), liveBtn: $('chartLive'), digits: MKT.digits, name: MKT.key }); force = true; }
   const tf = chartState.tf, T = TIMEFRAMES[tf];
   const snap = compute(), live = snap.live;
   let bars = await chartBars(tf);
@@ -877,8 +877,8 @@ async function drawChartTab(force = false) {
   if (T.gran === 60) bars = withLive(bars, now);
   if (!bars.length) return;
   const barMs = T.gran * 1000 * T.combine;
-  // The round view starts 10 minutes before the open; 1m shows the last hour, others the last 120 bars
-  const viewFrom = tf === 'round' && open ? open - 10 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
+  // The round view starts 6 minutes before the open (v13.40: bigger candles); 1m shows the last hour, others the last 120 bars
+  const viewFrom = tf === 'round' && open ? open - 6 * 60000 : bars[Math.max(0, bars.length - (tf === '1m' ? 60 : 120))]?.t;
   const sigma = live?.sigma ?? snap.sigmaMin, spot = modelSpot();
   const showCone = (tf === 'round' || tf === '1m') && live;
   const preds = showCone ? predictionsNow(live, snap, now) : [];

@@ -6,7 +6,12 @@ import { createChart, CrosshairMode, LineStyle } from './vendor/lightweight-char
 import { ema, rma, bollinger, vwap, rsiSeries, macd, floorCeiling } from './indicators.js';
 import { liveBubbles } from './chart.js';
 
-const C = { bg: '#0a0f1a', grid: '#ffffff0a', text: '#8b95a7', up: '#2ee6a6', dn: '#ff4d6d', ema9: '#22d3ee', ema21: '#a78bfa', boll: '#7dd3fc55', vwap: '#fbbf24', strike: '#e8ecf3', cone: '#22d3ee' };
+// v13.40 colors: the overlays are one validated categorical set for the dark chart surface (dataviz validate_palette:
+// lightness band, chroma, colorblind separation and contrast all pass, in this order): EMA 9 blue, EMA 21 orange, RMA
+// violet, VWAP amber. Candles keep up / down green and red; the forecast is one hue (the cone) plus a neutral path.
+const C = { bg: '#0a0f1a', grid: '#ffffff07', text: '#8b95a7', ink: '#c9d1e0', up: '#2ee6a6', dn: '#ff4d6d', ema9: '#3987e5', ema21: '#d95926', rma: '#9085e9', vwap: '#c98500', boll: '#8b95a766', strike: '#e8ecf3', cone: '34,211,238', path: '#e8ecf3' };
+// the forecast sources (only with "Every forecast source" on): the reference 8-slot order, each named in the legend
+const SRC = { bot: ['Bot', '#3987e5'], kalshi: ['Kalshi', '#d95926'], exch: ['Exchanges', '#199e70'], engine: ['Engine', '#c98500'], guide: ['Guide', '#d55181'], micro: ['Micro', '#9085e9'], moves: ['Move model', '#e66767'] };
 const sec = (ms) => Math.floor(ms / 1000);
 const TIME = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
 const DAY = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric' });
@@ -15,13 +20,13 @@ const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 function baseOptions(height, withTime = true, num = NUM) {
   return {
     height,
-    layout: { background: { color: C.bg }, textColor: C.text, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, attributionLogo: true },
+    layout: { background: { color: C.bg }, textColor: C.text, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 11, attributionLogo: false }, // the TradingView credit is the link under the chart
     grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
-    rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.08, bottom: 0.08 } },
+    rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.16, bottom: 0.06 } }, // room at the top for the legend
     timeScale: { borderColor: '#16203a', timeVisible: true, secondsVisible: false, visible: withTime, rightOffset: 2, fixLeftEdge: false,
       tickMarkFormatter: (t, type) => (type <= 2 ? DAY.format(t * 1000) : TIME.format(t * 1000)) },
     localization: { timeFormatter: (t) => `${DAY.format(t * 1000)} ${TIME.format(t * 1000)}`, priceFormatter: (p) => num.format(p) },
-    crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' }, horzLine: { color: '#e8ecf355', labelBackgroundColor: '#16203a' } },
+    crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#e8ecf366', style: LineStyle.Dashed, labelBackgroundColor: '#1b2540' }, horzLine: { color: '#e8ecf366', style: LineStyle.Dashed, labelBackgroundColor: '#1b2540' } },
     handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
     handleScroll: { horzTouchDrag: true, vertTouchDrag: false, mouseWheel: true, pressedMouseMove: true },
     kineticScroll: { touch: true, mouse: false },
@@ -30,15 +35,15 @@ function baseOptions(height, withTime = true, num = NUM) {
 
 // digits: the market's price precision (public/markets.js: BTC 0, ETH and SOL 2, XRP 4, DOGE 5). Bitcoin's chart is as it
 // was; smaller-priced markets get their decimals on the axis and candles (whole cents flattened XRP's candles to lines)
-export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 }) {
+export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0, name = 'BTC' }) {
   const fine = digits >= 2, PF = fine ? { priceFormat: { type: 'price', precision: digits, minMove: 10 ** -digits } } : {};
   const MF = fine ? { priceFormat: { type: 'price', precision: digits + 2, minMove: 10 ** -(digits + 2) } } : {}; // MACD, a fraction of the price
   const NUMF = fine ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : NUM;
   const MACDF = fine ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits + 2, maximumFractionDigits: digits + 2 }) : NUM;
   const chart = createChart(main, baseOptions(300, true, NUMF));
-  const rsiChart = createChart(rsiEl, { ...baseOptions(90, false), rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.1, bottom: 0.1 } }, handleScroll: false, handleScale: false });
-  const macdChart = createChart(macdEl, { ...baseOptions(90, false, MACDF), handleScroll: false, handleScale: false });
-  for (const c of [rsiChart, macdChart]) c.applyOptions({ layout: { attributionLogo: false }, crosshair: { horzLine: { visible: false }, vertLine: { visible: false } } }); // one TradingView link (on the main chart) is the credit
+  const rsiChart = createChart(rsiEl, { ...baseOptions(96, false), rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.22, bottom: 0.08 } }, handleScroll: false, handleScale: false });
+  const macdChart = createChart(macdEl, { ...baseOptions(96, false, MACDF), rightPriceScale: { borderColor: '#16203a', scaleMargins: { top: 0.22, bottom: 0.08 } }, handleScroll: false, handleScale: false });
+  for (const c of [rsiChart, macdChart]) c.applyOptions({ crosshair: { horzLine: { visible: false }, vertLine: { visible: true, labelVisible: false } } }); // their crosshair follows the main chart's
 
   // A steady price axis (v13.22): the candles' visible range plus the target and the cone, widened at once when they
   // need more room but narrowed gently (over a few seconds), so the forecast lines shifting every few seconds don't
@@ -59,33 +64,29 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
     }
     return { priceRange: { minValue: axis.lo, maxValue: axis.hi }, margins: r.margins };
   };
-  const candles = chart.addCandlestickSeries({ ...PF, upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3', priceLineStyle: LineStyle.Dashed, autoscaleInfoProvider: steadyAxis });
-  // the expected path (public/predict.js pathMinutes), drawn invisibly: it only carries the flip (↺) and round-close markers
-  const pathLine = chart.addLineSeries({ ...PF, color: 'rgba(0,0,0,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
+  const candles = chart.addCandlestickSeries({ ...PF, upColor: C.up, downColor: C.dn, wickUpColor: C.up, wickDownColor: C.dn, borderVisible: false, priceLineColor: '#e8ecf3aa', priceLineStyle: LineStyle.Dotted, autoscaleInfoProvider: steadyAxis });
+  // the expected path (public/predict.js pathMinutes: the cone's centre, minute by minute), and the flip (↺) markers on it
+  const pathLine = chart.addLineSeries({ ...PF, color: C.path, lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
   const volume = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
-  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.9, bottom: 0 }, visible: false }); // a quiet strip at the bottom
   const line = (color, opts = {}) => chart.addLineSeries({ ...PF, color, lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...opts });
   const fwd = { autoscaleInfoProvider: () => null }; // the cone and the prediction lines reach the axis through steadyAxis
   const s = {
-    ema9: line(C.ema9), ema21: line(C.ema21), rma9: line('#22d3ee88', { lineStyle: LineStyle.Dashed }), rma21: line('#a78bfa88', { lineStyle: LineStyle.Dashed }),
-    bbUp: line(C.boll, { lineWidth: 1 }), bbLo: line(C.boll, { lineWidth: 1 }), bbMid: line('#7dd3fc33', { lineWidth: 1, lineStyle: LineStyle.Dotted }),
-    vwap: line(C.vwap, { lineStyle: LineStyle.Dashed }),
-    hi90: line('#22d3ee40', { lineWidth: 1, lineStyle: LineStyle.Dotted , ...fwd }), lo90: line('#22d3ee40', { lineWidth: 1, lineStyle: LineStyle.Dotted , ...fwd }),
-    hi50: line('#22d3ee80', { lineWidth: 1, lineStyle: LineStyle.Dashed , ...fwd }), lo50: line('#22d3ee80', { lineWidth: 1, lineStyle: LineStyle.Dashed , ...fwd }),
-    bot: line('#22d3ee', { lineWidth: 2, lastValueVisible: true, title: 'Bot', ...fwd }),
-    kalshi: line('#a78bfa', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Kalshi', ...fwd }),
-    exch: line('#fbbf24', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Exchanges', ...fwd }),
-    engine: line('#34d399', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Engine', ...fwd }),
-    guide: line('#f472b6', { lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: true, title: 'Guide', ...fwd }),
-    micro: line('#60a5fa', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Micro', ...fwd }),
-    moves: line('#fb923c', { lineWidth: 2, lineStyle: LineStyle.Dotted, lastValueVisible: true, title: 'Move model', ...fwd }),
+    ema9: line(C.ema9, { lineWidth: 2 }), ema21: line(C.ema21, { lineWidth: 2 }), rma9: line(C.rma, { lineStyle: LineStyle.Dashed }), rma21: line(C.rma + '99', { lineStyle: LineStyle.Dotted }),
+    bbUp: line(C.boll, { lineWidth: 1 }), bbLo: line(C.boll, { lineWidth: 1 }), bbMid: line('#8b95a733', { lineWidth: 1, lineStyle: LineStyle.Dotted }),
+    vwap: line(C.vwap, { lineWidth: 2, lineStyle: LineStyle.Dashed }),
+    // the cone's edges, faint: the band itself is filled on the overlay (paintLayer)
+    hi90: line(`rgba(${C.cone},0.22)`, { lineWidth: 1, ...fwd }), lo90: line(`rgba(${C.cone},0.22)`, { lineWidth: 1, ...fwd }),
+    hi50: line(`rgba(${C.cone},0.38)`, { lineWidth: 1, ...fwd }), lo50: line(`rgba(${C.cone},0.38)`, { lineWidth: 1, ...fwd }),
+    ...Object.fromEntries(Object.entries(SRC).map(([k, [, col]]) => [k, line(col, { lineWidth: 1.5, ...fwd })])), // named in the legend, not on the axis
   };
-  const rsi = rsiChart.addLineSeries({ color: '#a78bfa', lineWidth: 1.5, priceLineVisible: false });
-  rsi.createPriceLine({ price: 70, color: '#ff4d6d55', lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '' });
-  rsi.createPriceLine({ price: 30, color: '#2ee6a655', lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '' });
+  const rsi = rsiChart.addLineSeries({ color: C.rma, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 3 });
+  rsi.createPriceLine({ price: 70, color: '#ff4d6d66', lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' });
+  rsi.createPriceLine({ price: 50, color: '#8b95a733', lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '' });
+  rsi.createPriceLine({ price: 30, color: '#2ee6a666', lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' });
   const mHist = macdChart.addHistogramSeries({ ...MF, priceLineVisible: false, lastValueVisible: false });
-  const mLine = macdChart.addLineSeries({ ...MF, color: '#22d3ee', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
-  const mSig = macdChart.addLineSeries({ ...MF, color: '#fbbf24', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+  const mLine = macdChart.addLineSeries({ ...MF, color: C.ema9, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 3 });
+  const mSig = macdChart.addLineSeries({ ...MF, color: C.ema21, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
 
   // RSI and MACD scroll and zoom with the main chart
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
@@ -104,12 +105,56 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
   });
   new ResizeObserver(() => { const w = main.clientWidth; if (w) for (const c of [chart, rsiChart, macdChart]) c.applyOptions({ width: w }); paintLayer(); }).observe(main);
 
-  let lines = {}, last = null, key = null, barMs = 60000, show = {}, bubbles = [], orders = [], trend = null;
+  // ---------- the legend (TradingView style): O/H/L/C and each overlay's value at the crosshair, else the live candle;
+  // over the forecast it reads the cone at that minute. Text in text colors; a swatch carries each series' identity ----------
+  const leg = document.createElement('div'); leg.className = 'tv-legend'; main.parentElement.appendChild(leg);
+  const subLeg = (el) => { el.style.position = 'relative'; const x = document.createElement('div'); x.className = 'tv-legend sub'; el.appendChild(x); return x; };
+  const rsiLeg = subLeg(rsiEl), macdLeg = subLeg(macdEl);
+  let rows = [], idxOf = new Map(), coneAt = new Map(), hover = null, hoverFc = null, tfLabel = '';
+  const fmt = (v) => (v == null || !Number.isFinite(v) ? '—' : NUMF.format(v)), fmtM = (v) => (v == null || !Number.isFinite(v) ? '—' : MACDF.format(v));
+  const sw = (col, dash = false) => `<i class="sw${dash ? ' d' : ''}" style="--c:${col}"></i>`;
+  const item = (h) => `<span class="li">${h}</span>`; // a swatch never wraps away from its label
+  const html = (el, h) => { if (el.__h !== h) { el.innerHTML = h; el.__h = h; } };
+  function paintLegend() {
+    if (!rows.length) return;
+    if (hoverFc) {
+      const f = hoverFc;
+      html(leg, `<div class="hd"><b>${name}</b><span class="tf">forecast · ${TIME.format(f.t * 1000)}</span></div><div class="it">${f.mid != null ? item(`${sw(C.path, true)}expected <em>${fmt(f.mid)}</em>`) : ''}${item(`50% <em>${fmt(f.lo50)}</em>–<em>${fmt(f.hi50)}</em>`)}${item(`90% <em>${fmt(f.lo90)}</em>–<em>${fmt(f.hi90)}</em>`)}${f.src.length ? `</div><div class="it">${f.src.map(([n, col, v]) => item(`${sw(col)}${n} <em>${fmt(v)}</em>`)).join('')}` : ''}</div>`);
+      return;
+    }
+    const i = hover ?? rows.length - 1, r = rows[i], p = rows[i - 1];
+    const ch = p ? r.c - p.c : null, cls = ch > 0 ? 'pos' : ch < 0 ? 'neg' : '';
+    // compact on a phone: the close and its change; open / high / low / close while you drag
+    const head = `<b>${name}</b><span class="tf">${tfLabel}</span>` + (hover != null ? `<span>O <em>${fmt(r.o)}</em></span><span>H <em>${fmt(r.h)}</em></span><span>L <em>${fmt(r.l)}</em></span>` : '') + `<span>C <em>${fmt(r.c)}</em></span>`
+      + (ch != null ? `<span class="${cls}">${ch > 0 ? '+' : ch < 0 ? '−' : ''}${fmt(Math.abs(ch))} (${(Math.abs(ch / p.c) * 100).toFixed(2)}%)</span>` : '')
+      + (show.beasts && trend && hover == null ? `<span class="trend ${trend}">${trend === 'bull' ? '▲ bull' : '▼ bear'}</span>` : '');
+    const items = [];
+    if (show.ema) items.push(`${sw(C.ema9)}EMA 9 <em>${fmt(r.ema9)}</em>`, `${sw(C.ema21)}EMA 21 <em>${fmt(r.ema21)}</em>`);
+    if (show.rma) items.push(`${sw(C.rma, true)}RMA 9/21 <em>${fmt(r.rma9)}</em>/<em>${fmt(r.rma21)}</em>`);
+    if (show.vwap) items.push(`${sw(C.vwap, true)}VWAP <em>${fmt(r.vwap)}</em>`);
+    if (show.boll && hover != null) items.push(`${sw('#8b95a7')}BB <em>${fmt(r.bbLo)}</em>–<em>${fmt(r.bbUp)}</em>`);
+    if (show.volume && r.v && hover != null) items.push(`Vol <em>${r.v >= 1000 ? `${(r.v / 1000).toFixed(1)}k` : r.v.toFixed(r.v < 10 ? 2 : 0)}</em>`);
+    html(leg, `<div class="hd">${head}</div>${items.length ? `<div class="it">${items.map(item).join('')}</div>` : ''}`);
+    html(rsiLeg, r.rsi == null ? '' : `${sw(C.rma)}RSI 14 <em>${r.rsi.toFixed(1)}</em>${r.rsi > 70 ? ' <span class="neg">overbought</span>' : r.rsi < 30 ? ' <span class="pos">oversold</span>' : ''}`);
+    html(macdLeg, r.macd == null ? '' : `MACD 12/26/9 ${sw(C.ema9)}<em>${fmtM(r.macd)}</em> ${sw(C.ema21)}signal <em>${fmtM(r.sig)}</em> hist <em class="${r.hist >= 0 ? 'pos' : 'neg'}">${fmtM(r.hist)}</em>`);
+  }
+  chart.subscribeCrosshairMove((pt) => {
+    const tt = pt?.time ?? null;
+    hover = tt != null && idxOf.has(tt) ? idxOf.get(tt) : null;
+    hoverFc = tt != null && hover == null ? coneAt.get(tt) ?? null : null;
+    paintLegend();
+    const r = hover != null ? rows[hover] : null;
+    try { if (r?.rsi != null && !rsiEl.hidden) rsiChart.setCrosshairPosition(r.rsi, tt, rsi); else rsiChart.clearCrosshairPosition(); } catch { /* not drawn yet */ }
+    try { if (r?.macd != null && !macdEl.hidden) macdChart.setCrosshairPosition(r.macd, tt, mLine); else macdChart.clearCrosshairPosition(); } catch { /* not drawn yet */ }
+  });
+
+  let lines = {}, last = null, key = null, barMs = 60000, show = {}, bubbles = [], orders = [], trend = null, levels = [], coneData = [], closeAt = null, liveT = null;
   let barsKey = null, liveAt = 0, marksKey = null, gmKey = null, wmKey = null; // what's on screen, to change only what changed
 
   // ---------- data ----------
   function render(d) {
-    show = d.show; barMs = d.barMs; orders = d.orders || [];
+    show = d.show; barMs = d.barMs; orders = d.orders || []; closeAt = d.round ? d.closeTime : null;
+    tfLabel = d.tf === 'round' ? '1m' : d.tf;
     const bars = d.bars;
     if (!bars.length) return;
     const viewKey = `${d.tf}|${d.height}`;
@@ -130,55 +175,63 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
     if (bk !== barsKey) { barsKey = bk; candles.setData(bars.map((b, i) => (i === bars.length - 1 ? { time: t(b), open: last.o, high: last.h, low: last.l, close: last.c } : { time: t(b), open: b.o, high: b.h, low: b.l, close: b.c }))); }
     else candles.update({ time: t(last), open: last.o, high: last.h, low: last.l, close: last.c });
     volume.applyOptions({ visible: !!show.volume });
-    if (show.volume) volume.setData(bars.map((b) => ({ time: t(b), value: b.v || 0, color: b.c >= b.o ? '#2ee6a633' : '#ff4d6d33' })));
+    if (show.volume) volume.setData(bars.map((b) => ({ time: t(b), value: b.v || 0, color: b.c >= b.o ? '#2ee6a62a' : '#ff4d6d2a' })));
     const series = (arr) => arr.map((v, i) => (v == null ? { time: t(bars[i]) } : { time: t(bars[i]), value: v }));
     const put = (k, on, arr) => { s[k].applyOptions({ visible: !!on }); if (on) s[k].setData(arr); };
-    put('ema9', show.ema, series(ema(closes, 9))); put('ema21', show.ema, series(ema(closes, 21)));
-    put('rma9', show.rma, series(rma(closes, 9))); put('rma21', show.rma, series(rma(closes, 21)));
-    const bb = bollinger(closes, 20, 2);
+    const E9 = ema(closes, 9), E21 = ema(closes, 21), R9 = rma(closes, 9), R21 = rma(closes, 21), bb = bollinger(closes, 20, 2), VW = vwap(bars, d.round ? d.openTime : bars[0].t);
+    put('ema9', show.ema, series(E9)); put('ema21', show.ema, series(E21));
+    put('rma9', show.rma, series(R9)); put('rma21', show.rma, series(R21));
     put('bbUp', show.boll, series(bb.map((x) => x?.up))); put('bbLo', show.boll, series(bb.map((x) => x?.lo))); put('bbMid', show.boll, series(bb.map((x) => x?.mid ?? (x ? (x.up + x.lo) / 2 : null))));
-    put('vwap', show.vwap, series(vwap(bars, d.round ? d.openTime : bars[0].t)));
+    put('vwap', show.vwap, series(VW));
+    const RS = rsiSeries(closes, 14), MD = macd(closes);
+    rows = bars.map((b, i) => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0, ema9: E9[i], ema21: E21[i], rma9: R9[i], rma21: R21[i], vwap: VW[i], bbUp: bb[i]?.up, bbLo: bb[i]?.lo, rsi: RS[i], macd: MD[i]?.macd, sig: MD[i]?.signal, hist: MD[i]?.hist }));
+    Object.assign(rows[rows.length - 1], { o: last.o, h: last.h, l: last.l, c: last.c }); liveT = last.t;
+    idxOf = new Map(bars.map((b, i) => [t(b), i]));
     // the cone and the prediction lines run from now to the close
     const cone = show.cone && d.cone?.length ? d.cone : [];
     for (const [k, f] of [['hi90', 'hi90'], ['lo90', 'lo90'], ['hi50', 'hi50'], ['lo50', 'lo50']]) put(k, cone.length, dedupe(cone.map((c) => ({ time: sec(c.t), value: c[f] }))));
     // what the steady axis keeps in view beyond the candles: the target and the cone's 90% band
     const ex = [show.strike && d.strike ? d.strike : null, ...cone.flatMap((c) => [c.hi90, c.lo90])].filter(Number.isFinite);
     extra.lo = ex.length ? Math.min(...ex) : null; extra.hi = ex.length ? Math.max(...ex) : null;
-    for (const k of ['bot', 'kalshi', 'exch', 'engine', 'guide', 'micro', 'moves']) {
+    const srcPts = {};
+    for (const k of Object.keys(SRC)) {
       const p = show.predict && cone.length ? (d.predictions || []).find((x) => x.key === k) : null;
-      put(k, !!p, p ? dedupe(p.pts.map((q) => ({ time: sec(q.t), value: q.v }))) : []);
-      s[k].applyOptions({ lastValueVisible: !!show.labels });
+      const pts = p ? dedupe(p.pts.map((q) => ({ time: sec(q.t), value: q.v }))) : [];
+      put(k, !!p, pts); if (p) srcPts[k] = new Map(pts.map((q) => [q.time, q.value]));
     }
-    // the expected path's minutes (1-minute bars only: Round and 1m views)
+    // the expected path's minutes (1-minute bars only: Round and 1m views), from the live candle's close to the horizon
     const pc = barMs === 60000 && d.path?.length ? d.path.filter((c) => c.t > last.t) : [];
-    pathLine.setData(pc.map((c) => ({ time: sec(c.t), value: c.c })));
+    pathLine.setData(cone.length && pc.length ? [{ time: t(last), value: last.c }, ...pc.map((c) => ({ time: sec(c.t), value: c.c }))] : []);
+    // the cone for the overlay's filled bands and the legend's forecast read
+    const pathAt = new Map(pc.map((c) => [sec(c.t), c.c]));
+    coneData = dedupe(cone.map((c) => ({ time: sec(c.t), value: 0, ...c }))).map((c) => ({ time: c.time, hi90: c.hi90, lo90: c.lo90, hi50: c.hi50, lo50: c.lo50 }));
+    coneAt = new Map(coneData.map((c) => [c.time, { t: c.time, ...c, mid: pathAt.get(c.time) ?? (c.hi50 + c.lo50) / 2, src: Object.entries(srcPts).filter(([, m]) => m.has(c.time)).map(([k, m]) => [SRC[k][0], SRC[k][1], m.get(c.time)]) }]));
     // predicted flips on it: ↺ where the expected path turns (public/flip.js)
     const gm = pc.length && show.flips !== false ? (d.turns || []).filter((x) => pc.some((c) => c.t === x.t)).map((x) => ({ time: sec(x.t), position: x.dir === 'up' ? 'belowBar' : 'aboveBar',
       color: x.dir === 'up' ? '#2ee6a6' : '#ff4d6d', shape: x.dir === 'up' ? 'arrowUp' : 'arrowDown', text: `↺ flip ${x.dir}` })) : [];
     // where this round closes, when the predictions run past it into the next one
-    const closeBar = d.closeTime ? pc.find((c) => c.t === d.closeTime) : null;
-    if (closeBar) gm.push({ time: sec(closeBar.t), position: 'aboveBar', color: '#e8ecf3', shape: 'square', size: 0.4, text: '⏱ round closes' });
     const gk = JSON.stringify(gm);
     if (gk !== gmKey) { gmKey = gk; pathLine.setMarkers(gm.sort((a, b) => a.time - b.time)); }
     // levels: the target and the round's floor / ceiling, moved in place (deleting and redrawing them made the labels flash)
     const want = {};
-    if (show.strike && d.strike) want.strike = { price: d.strike, color: C.strike, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'target' };
+    if (show.strike && d.strike) want.strike = { price: d.strike, color: C.strike, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '', tag: 'target' };
     // the prediction engine's call: its entry level (the target above is its invalidation)
-    if (d.round && d.forecast?.entry && d.forecast.call !== 'NO CALL') want.entry = { price: d.forecast.entry, color: d.forecast.call === 'UP' ? '#2ee6a6' : '#ff4d6d', lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `entry ${d.forecast.call}` };
+    if (d.round && d.forecast?.entry && d.forecast.call !== 'NO CALL') want.entry = { price: d.forecast.entry, color: d.forecast.call === 'UP' ? '#2ee6a6' : '#ff4d6d', lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: false, title: '', tag: `entry ${d.forecast.call}` };
     const fc = d.round && show.floorCeil ? floorCeiling(bars, d.openTime) : null;
     if (fc) {
-      want.floor = { price: fc.floor, color: '#2ee6a699', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'floor' };
-      want.ceil = { price: fc.ceiling, color: '#ff4d6d99', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'ceiling' };
+      want.floor = { price: fc.floor, color: '#2ee6a699', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '', tag: 'floor' };
+      want.ceil = { price: fc.ceiling, color: '#ff4d6d99', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '', tag: 'ceiling' };
     }
     candles.applyOptions({ lastValueVisible: !!show.labels });
     // market structure (public/structure.js): the nearest unfilled fair value gap above and below the last finished
     // candle's close (measured from the live price they hopped about every tick)
     if (show.structure && d.structure?.fvg?.length && barMs === 60000) {
       const px = bars.length > 1 ? bars[bars.length - 2].c : last.c, above = d.structure.fvg.filter((g) => g.lo > px).sort((a, b) => a.lo - b.lo)[0], below = d.structure.fvg.filter((g) => g.hi < px).sort((a, b) => b.hi - a.hi)[0];
-      for (const [k, g] of [['fvgUp', above], ['fvgDn', below]]) if (g) want[k] = { price: (g.lo + g.hi) / 2, color: '#e879f999', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: !!show.labels, title: 'FVG' };
+      for (const [k, g] of [['fvgUp', above], ['fvgDn', below]]) if (g) want[k] = { price: (g.lo + g.hi) / 2, color: '#e879f999', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '', tag: 'FVG' };
     }
     for (const [k, l] of Object.entries(lines)) if (!want[k]) { candles.removePriceLine(l); delete lines[k]; }
-    for (const [k, o] of Object.entries(want)) { if (lines[k]) lines[k].applyOptions(o); else lines[k] = candles.createPriceLine(o); }
+    for (const [k, { tag, ...o }] of Object.entries(want)) { if (lines[k]) lines[k].applyOptions(o); else lines[k] = candles.createPriceLine(o); }
+    levels = Object.values(want).map((o) => ({ price: o.price, color: o.color, tag: o.tag }));
     // markers: the bot's calls, your trades and the Auto-trader's, EMA 9/21 crosses
     const marks = [];
     const inView = (ms) => ms >= bars[0].t && ms < last.t + barMs;
@@ -197,22 +250,22 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
       if ([e9[i], e21[i], e9[i - 1], e21[i - 1]].some((v) => v == null) || (e9[i] >= e21[i]) === (e9[i - 1] >= e21[i - 1]) || i - lastI < 4) continue;
       lastI = i;
       const up = e9[i] >= e21[i];
-      marks.push({ time: t(bars[i]), position: up ? 'belowBar' : 'aboveBar', color: up ? '#2ee6a699' : '#ff4d6d99', shape: 'square', size: 0.5, text: up ? '🐂' : '🐻' });
+      marks.push({ time: t(bars[i]), position: up ? 'belowBar' : 'aboveBar', color: up ? C.up : C.dn, shape: up ? 'arrowUp' : 'arrowDown', size: 0.4, text: up ? '🐂' : '🐻' }); // a small arrow and the animal (the old squares cluttered longer timeframes) (the colored squares under them cluttered longer timeframes)
     }
     const mk = JSON.stringify(marks);
     if (mk !== marksKey) { marksKey = mk; candles.setMarkers(marks.sort((a, b) => a.time - b.time)); }
     // the trend as a quiet watermark (set only when it changes)
-    const wk = `${!!(show.beasts && trend)}|${trend}`;
-    if (wk !== wmKey) { wmKey = wk; chart.applyOptions({ watermark: { visible: !!(show.beasts && trend), text: trend === 'bull' ? 'BULL TREND' : 'BEAR TREND', color: trend === 'bull' ? '#2ee6a614' : '#ff4d6d14', fontSize: 34, horzAlign: 'center', vertAlign: 'center' } }); }
+    // (the trend reads in the legend now: the old watermark sat right over the candles)
+    if (wmKey !== 'off') { wmKey = 'off'; chart.applyOptions({ watermark: { visible: false } }); }
     // RSI / MACD
     rsiEl.hidden = !show.rsi; macdEl.hidden = !show.macd;
-    if (show.rsi) rsi.setData(series(rsiSeries(closes, 14)));
+    if (show.rsi) rsi.setData(series(RS));
     if (show.macd) {
-      const m = macd(closes);
-      mHist.setData(m.map((x, i) => (x.hist == null ? { time: t(bars[i]) } : { time: t(bars[i]), value: x.hist, color: x.hist >= 0 ? '#2ee6a688' : '#ff4d6d88' })));
-      mLine.setData(series(m.map((x) => x.macd))); mSig.setData(series(m.map((x) => x.signal)));
+      mHist.setData(MD.map((x, i) => (x.hist == null ? { time: t(bars[i]) } : { time: t(bars[i]), value: x.hist, color: x.hist >= 0 ? '#2ee6a677' : '#ff4d6d77' })));
+      mLine.setData(series(MD.map((x) => x.macd))); mSig.setData(series(MD.map((x) => x.signal)));
     }
     if (d.resetView) fitDefault(d.viewFrom);
+    paintLegend();
     paintLayer();
   }
   function fitDefault(fromMs) {
@@ -220,7 +273,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
     const n = data ? data.length : 0;
     if (fromMs && n) {
       const i = data.findIndex((b) => b.time >= sec(fromMs));
-      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i) - 0.5, to: n + Math.max(2, (key?.startsWith('round') ? 16 : 3)) });
+      const ahead = key?.startsWith('round') ? (closeAt && last ? Math.min(18, Math.max(3, Math.ceil((closeAt - last.t) / barMs) + 2)) : 12) : 3; // the round: up to its close, not a fixed 16 (bigger candles)
+      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i) - 0.5, to: n + ahead });
     } else chart.timeScale().scrollToRealTime();
   }
   // Each trade moves the live candle (the library redraws only what changed)
@@ -229,6 +283,8 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
     if (Date.now() >= last.t + barMs) return; // the next bar arrives with the next refresh
     last.h = Math.max(last.h, price); last.l = Math.min(last.l, price); last.c = price; liveAt = Date.now();
     candles.update({ time: sec(last.t), open: last.o, high: last.h, low: last.l, close: price });
+    const r = rows[rows.length - 1]; if (r && liveT === last.t) { Object.assign(r, { h: last.h, l: last.l, c: price }); if (hover == null && !hoverFc) paintLegend(); }
+    paintLayer();
   }
 
   // ---------- the live-order bubbles, on a transparent canvas over the chart ----------
@@ -245,7 +301,9 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
     const ctx = layer.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    if (!show.orders || !last) return false;
+    if (!last) return false;
+    try { drawOverlay(ctx, w, h); } catch { /* a frame before the chart has laid out */ }
+    if (!show.orders) return false;
     const now = Date.now();
     bubbles = liveBubbles(orders, now);
     const ts = chart.timeScale(), spacing = ts.options().barSpacing;
@@ -283,6 +341,56 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0 
       ctx.globalAlpha = 1;
     }
     return alive;
+  }
+
+  // ---------- the overlay under the bubbles: the forecast zone, the cone as filled bands, the round's close, level tags ----------
+  function drawOverlay(ctx, w, h) {
+    const ts = chart.timeScale(), plotW = w - (chart.priceScale('right').width() || 60), plotH = h - (ts.height() || 26);
+    const y = (p) => candles.priceToCoordinate(p), spacing = ts.options().barSpacing;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, plotW, plotH); ctx.clip();
+    // the forecast zone: everything right of the live candle, faintly shaded, with a "now" line
+    const lx = ts.logicalToCoordinate(liveIndex());
+    if (coneData.length && lx != null && lx < plotW) {
+      const x0 = lx + spacing / 2;
+      ctx.fillStyle = `rgba(${C.cone},0.035)`; ctx.fillRect(x0, 0, plotW - x0, plotH);
+      ctx.setLineDash([3, 4]); ctx.strokeStyle = '#8b95a755'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, plotH); ctx.stroke(); ctx.setLineDash([]);
+      // the cone: the 90% band, then the 50% band over it, filled (one hue: how likely, not which source)
+      const pts = coneData.map((c) => ({ x: ts.timeToCoordinate(c.time), c })).filter((q) => q.x != null);
+      const start = { x: x0, c: { hi90: last.c, lo90: last.c, hi50: last.c, lo50: last.c } };
+      const band = (hi, lo, a) => {
+        const ps = [start, ...pts.filter((q) => q.x >= x0)]; if (ps.length < 2) return;
+        ctx.beginPath(); ps.forEach((q, i) => { const yy = y(q.c[hi]); if (yy == null) return; i ? ctx.lineTo(q.x, yy) : ctx.moveTo(q.x, yy); });
+        for (let i = ps.length - 1; i >= 0; i--) { const yy = y(ps[i].c[lo]); if (yy != null) ctx.lineTo(ps[i].x, yy); }
+        ctx.closePath(); ctx.fillStyle = `rgba(${C.cone},${a})`; ctx.fill();
+      };
+      if (show.cone) { band('hi90', 'lo90', 0.08); band('hi50', 'lo50', 0.14); }
+      ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace"; ctx.fillStyle = '#8b95a7'; ctx.textAlign = 'left';
+      const cx = closeAt ? ts.timeToCoordinate(sec(closeAt)) : null;
+      if (!(cx != null && cx - x0 < 90)) ctx.fillText('FORECAST ›', x0 + 6, plotH - 8);
+      // the round's close: a line and its time
+      if (cx != null && cx > x0 && cx < plotW) {
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = '#e8ecf377'; ctx.beginPath(); ctx.moveTo(cx + 0.5, 0); ctx.lineTo(cx + 0.5, plotH); ctx.stroke(); ctx.setLineDash([]);
+        const lbl = `close ${TIME.format(closeAt)}`, tw = ctx.measureText(lbl).width + 10, bx = Math.min(plotW - tw - 2, cx + 4);
+        ctx.fillStyle = '#0a0f1ae6'; ctx.fillRect(bx, plotH - 20, tw, 15); ctx.fillStyle = '#e8ecf3'; ctx.fillText(lbl, bx + 5, plotH - 9);
+      }
+    }
+    // level tags on the left edge (the past, never over the forecast), spread so they never overlap, kept under the
+    // legend; the axis keeps only the price and the target
+    if (show.labels && levels.length) {
+      ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace"; ctx.textAlign = 'left';
+      const top = (leg.offsetHeight || 0) + 14;
+      const tags = levels.map((l) => ({ ...l, y: y(l.price), text: `${l.tag} ${NUMF.format(l.price)}` })).filter((l) => l.y != null && l.y > -8 && l.y < plotH + 8).sort((a, b) => a.y - b.y);
+      if (tags.length && tags[0].y < top) tags[0].y = top;
+      for (let i = 1; i < tags.length; i++) if (tags[i].y - tags[i - 1].y < 14) tags[i].y = tags[i - 1].y + 14;
+      const over = tags.length ? tags[tags.length - 1].y - (plotH - 8) : 0; if (over > 0) for (const tg of tags) tg.y -= over;
+      for (const tg of tags) {
+        const tw = ctx.measureText(tg.text).width + 12, bx = 4;
+        ctx.fillStyle = '#0a0f1acc'; ctx.fillRect(bx, tg.y - 6, tw, 12);
+        ctx.fillStyle = tg.color; ctx.fillRect(bx, tg.y - 6, 3, 12);
+        ctx.fillStyle = C.ink; ctx.fillText(tg.text, bx + 7, tg.y + 3);
+      }
+    }
+    ctx.restore();
   }
 
   return { render, live, paint: paintLayer, resetView: () => chart.timeScale().scrollToRealTime(), chart };

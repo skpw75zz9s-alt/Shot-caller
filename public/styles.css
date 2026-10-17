@@ -988,3 +988,23 @@ nav button { position: relative; }
 .lab-losses li { padding: 8px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; font-size: 13px; } .lab-losses li:first-child { border-top: 0; }
 .lab-losses small { color: var(--muted); font-size: 11px; line-height: 1.4; }
 .lab-chips { display: flex; flex-wrap: wrap; gap: 4px; } .lab-chips span { font: 600 10px var(--mono); padding: 2px 6px; border-radius: 6px; background: var(--no-bg); color: var(--no); border: 1px solid #ff4d6d44; }
+
+/* ---------- the chart, rebuilt (v13.40): the legend, the sub-pane legends, the credit ---------- */
+.tv-legend { position: absolute; left: 8px; top: 5px; z-index: 6; pointer-events: none; font: 500 9.5px/1.45 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; max-width: calc(100% - 80px); text-shadow: 0 0 4px #0a0f1a, 0 0 2px #0a0f1a; }
+.tv-legend .hd, .tv-legend .it { display: flex; flex-wrap: wrap; gap: 2px 9px; align-items: center; }
+.tv-legend b { color: var(--text); font-weight: 800; letter-spacing: .5px; }
+.tv-legend .tf { color: var(--dim); }
+.tv-legend em { font-style: normal; color: var(--text); }
+.tv-legend .li { white-space: nowrap; }
+.tv-legend .pos, .tv-legend em.pos { color: var(--yes); } .tv-legend .neg, .tv-legend em.neg { color: var(--no); }
+.tv-legend .trend { font-weight: 700; }
+.tv-legend .trend.bull { color: var(--yes); } .tv-legend .trend.bear { color: var(--no); }
+.tv-legend .sw { display: inline-block; width: 12px; height: 0; border-top: 2px solid var(--c); margin-right: 4px; vertical-align: middle; }
+.tv-legend .sw.d { border-top-style: dashed; }
+.tv-legend.sub { top: 3px; left: 6px; max-width: calc(100% - 60px); }
+.tv-credit { margin: 4px 0 0; font-size: 10px; color: var(--dim); } .tv-credit a { color: var(--muted); }
+.pred-record.cone-read { font-size: 12px; }
+details.chart-more { margin-top: 6px; } details.chart-more summary { cursor: pointer; font: 600 11px var(--sans); color: var(--muted); list-style: none; }
+details.chart-more summary::-webkit-details-marker { display: none; } details.chart-more summary::before { content: '▸ '; } details.chart-more[open] summary::before { content: '▾ '; }
+.chart-pro .tf-btns button { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }
+.chart-pro .tf-btns button:first-child { flex-grow: 1.5; }
