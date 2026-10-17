@@ -80,6 +80,17 @@ export function sustained(state, key, on, now = Date.now(), ms = 10000) {
   return false;
 }
 
+// Live-data health without false alarms (v13.36): "lost" only once the data has been stale for holdMs straight, never
+// in the first graceMs after the app opens or comes back to the front (its timers were paused in the background, so
+// everything looks old until the first refresh lands), and "back" only after a "lost". Returns 'lost', 'back' or null.
+export function feedWatch(st, down, now, { resumedAt = 0, holdMs = 15000, graceMs = 20000 } = {}) {
+  if (now - resumedAt < graceMs) { st.since = null; return null; }
+  if (!down) { st.since = null; if (st.lost) { st.lost = false; return 'back'; } return null; }
+  if (st.since == null) st.since = now;
+  if (!st.lost && now - st.since >= holdMs) { st.lost = true; return 'lost'; }
+  return null;
+}
+
 // Recorded sounds (public/sounds/*.mp3, made by scripts/make-sounds.py) for the big moments; a call picks bull or
 // bear by its side. Anything without a file plays its tone pattern below (also the fallback if a file can't load).
 export const SOUND_FILES = { win: 'register', sellHigh: 'register', sitout: 'wait', sell: 'bail', trendBull: 'bull', trendBear: 'bear' };

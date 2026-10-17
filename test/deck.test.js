@@ -100,3 +100,17 @@ test('the bot leans the way its odds point when neither side has a gap (not the 
   assert.equal(leanSide({ side: null, pYes: 0.96, evYes: -0.02, evNo: 0.008 }), 'YES', 'a sliver of gap on a 4% long shot does not lead');
   assert.equal(leanSide({ side: null, evYes: null, evNo: null }), null);
 });
+
+test('live data: no alarm on coming back from the background or a short blip; lost after 15s straight, back once', async () => {
+  const { feedWatch } = await import('../public/alerts.js');
+  const st = {}, T = 1_000_000;
+  assert.equal(feedWatch(st, true, T + 5000, { resumedAt: T }), null, 'just came back: everything looks old for a moment');
+  assert.equal(feedWatch(st, true, T + 19000, { resumedAt: T }), null);
+  assert.equal(feedWatch(st, true, T + 21000, { resumedAt: T }), null, 'stale starts counting after the grace');
+  assert.equal(feedWatch(st, false, T + 25000, { resumedAt: T }), null, 'a blip that recovers: no alert, no "back"');
+  assert.equal(feedWatch(st, true, T + 30000, { resumedAt: T }), null);
+  assert.equal(feedWatch(st, true, T + 45000, { resumedAt: T }), 'lost');
+  assert.equal(feedWatch(st, true, T + 60000, { resumedAt: T }), null, 'said once');
+  assert.equal(feedWatch(st, false, T + 61000, { resumedAt: T }), 'back');
+  assert.equal(feedWatch(st, false, T + 62000, { resumedAt: T }), null);
+});

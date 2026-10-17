@@ -129,6 +129,7 @@ const TYPES = {
 const OPEN_FILES = new Set(['/site.html', '/site.js', '/robots.txt', '/paywall.html', '/paywall.js', '/styles.css', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/sw.js']);
 
 const cache = new Map(); // tiny ~1s cache so several open phones don't multiply upstream calls
+const lastGood = new Map(); // the last OK answer per upstream URL, for a brief upstream hiccup
 
 // Compression: brotli or gzip when the phone accepts it (cuts the app's first download ~70%).
 // Compressed copies are kept on the cached entry so each body is compressed once.
@@ -155,10 +156,17 @@ async function proxy(route, url, req, res) {
   try {
     const r = await fetch(target, { headers: { accept: 'application/json', 'user-agent': 'shot-caller/1.0' }, signal: AbortSignal.timeout(8000) });
     const entry = { at: Date.now(), status: r.status, raw: Buffer.from(await r.text()) };
+    // a rate limit or an upstream error for a moment: the last good answer from the last 8 seconds instead (v13.36),
+    // so one hiccup at Kalshi or Coinbase doesn't reach every phone as lost data
+    const good = lastGood.get(target);
+    if ((r.status === 429 || r.status >= 500) && good && Date.now() - good.at < 8000) return sendEntry(req, res, 200, good, 'application/json', { 'cache-control': 'no-store' });
     cache.set(target, entry);
     if (cache.size > 200) cache.delete(cache.keys().next().value);
+    if (r.ok) { lastGood.set(target, entry); if (lastGood.size > 200) lastGood.delete(lastGood.keys().next().value); }
     sendEntry(req, res, r.status, entry, 'application/json', { 'cache-control': 'no-store' });
   } catch (e) {
+    const good = lastGood.get(target);
+    if (good && Date.now() - good.at < 8000) return sendEntry(req, res, 200, good, 'application/json', { 'cache-control': 'no-store' });
     send(res, 502, { error: `upstream failed: ${e.message}` });
   }
 }

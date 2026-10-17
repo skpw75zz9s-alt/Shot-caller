@@ -9,7 +9,7 @@ import { createTvChart } from './tvchart.js';
 import { addTrade, flowStats, newFlow, pressureUpdate } from './flow.js';
 import { byExchange, createAligner, createFeeds, feedNames, kalshiFlow, parseCoinbase, parseKalshiTrades } from './feeds.js';
 const ALL_FEEDS_FOR = () => (CRYPTO ? feedNames(MKT.sym) : []);
-import { callSound, sustained } from './alerts.js';
+import { callSound, feedWatch, sustained } from './alerts.js';
 import { createAlertCenter } from './alertui.js';
 import { createFx, trendTurn } from './fx.js';
 import { suggestEntry, suggestExit } from './suggest.js';
@@ -32,7 +32,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '171'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '172'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -217,7 +217,8 @@ async function getJSON(path) {
   // The page's first lines already started the startup requests (index.html): use those once, if they're fresh
   const pre = window.__pre && window.__pre[path];
   if (pre) delete window.__pre[path];
-  const r = (pre && Date.now() - window.__pre.at < 15000 && await pre) || await fetch(`${API}/${path}`);
+  // a request stuck on a flaky phone connection gives up after 10s (the next poll tries again) instead of hanging
+  const r = (pre && Date.now() - window.__pre.at < 15000 && await pre) || await fetch(`${API}/${path}`, { signal: AbortSignal.timeout?.(10000) });
   paywalled(r);
   const srv = Date.parse(r.headers.get('date') || ''); // server clock, for the health check's phone-clock test
   if (srv) state.skewMs = Date.now() - srv - 500; // the Date header drops milliseconds: half a second on average
@@ -479,6 +480,7 @@ $('fxTryLock').addEventListener('click', () => { alerts.play('call', 'bull'); fx
 $('fxTryBull').addEventListener('click', () => { alerts.play('trendBull'); fx.charge('bull'); });
 $('accCopy').addEventListener('click', copyAccuracy);
 const watch = {}; // sustained conditions for alerts (alerts.js)
+const feedState = {}; // live-data health (alerts.js feedWatch)
 state.notes = [];
 function addNote(key, text, t = Date.now()) {
   state.notes.unshift({ t, key, text });
@@ -587,7 +589,7 @@ function setTile(id, text, cls = '', sub = null) {
 function dataHealth(now) {
   const mAge = now - (state.marketsAt || 0), sAge = now - (state.spotAt || 0);
   if (!state.marketsAt || !state.spotAt) return ['STARTING', 'warn'];
-  if (mAge > 30000 || sAge > 30000) return ['STALE', 'bad'];
+  if (mAge > 30000 || sAge > 30000) return ['STALE', 'bad', mAge > 30000 && sAge > 30000 ? 'Kalshi prices and the live price' : mAge > 30000 ? 'Kalshi prices' : `the ${MKT.key} price`];
   return [isLive() ? 'LIVE' : 'CURRENT', 'ok'];
 }
 
@@ -688,7 +690,7 @@ function scanRecordHtml(srv) {
 }
 function renderDeck(snap, live, sig, now) {
   // Status tiles
-  const [health, hcls] = dataHealth(now);
+  const [health, hcls, staleWhat] = dataHealth(now);
   const ix = indexFresh() && state.index.used.length > 1 ? `index of ${state.index.used.length} exchanges` : 'Coinbase price';
   const feedsLive = ALL_FEEDS_FOR().filter((n) => (n === 'Coinbase' ? isLive() : state.feedStatus?.[n]?.state === 'live' && now - (state.feedStatus[n].lastAt || 0) < 120000)).length;
   setTile('stFeed', isLive() ? 'LIVE' : state.spotAt ? 'POLLING' : '…', isLive() ? 'ok' : 'warn', `${feedsLive}/${ALL_FEEDS_FOR().length} trade feeds · ${ix}`);
@@ -773,9 +775,9 @@ function renderDeck(snap, live, sig, now) {
     const risky = !!called && hold != null && (1 - hold) * 100 >= alerts.prefs().flipRisk;
     if (sustained(watch, 'fliprisk', risky, now)) alerts.event('fliprisk', `High flip risk: ${Math.round((1 - hold) * 100)}/100`, `hold odds ${Math.round(hold * 100)}% on the ${called === 'YES' ? 'UP' : 'DOWN'} call`, `fliprisk:${tk}`);
   }
-  const down = hcls === 'bad';
-  if (state.feedDown == null) state.feedDown = down;
-  else if (down !== state.feedDown) { state.feedDown = down; alerts.event(down ? 'feedDown' : 'feedUp', down ? 'Live data lost' : 'Live data back', down ? 'prices are more than 30s old; calls paused until they refresh' : 'prices are fresh again'); }
+  // feed health: only a real outage alerts (alerts.js feedWatch), not the moment the app comes back from the background
+  const fw = feedWatch(feedState, hcls === 'bad', now, { resumedAt: state.resumedAt || performance.timeOrigin });
+  if (fw) alerts.event(fw === 'lost' ? 'feedDown' : 'feedUp', fw === 'lost' ? 'Live data lost' : 'Live data back', fw === 'lost' ? `${staleWhat || 'prices'} not updated for 45s; calls paused until they refresh` : 'prices are fresh again');
 
   renderSuggestions(snap, live, sig, now);
   renderTape();
@@ -1958,22 +1960,24 @@ function liveConnect() {
   ws.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
-    if (m.type === 'heartbeat') { state.liveAt = Date.now(); return; }
+    // a heartbeat every second proves the stream is up: no trade since means the last price still stands (quiet coins
+    // like XRP or DOGE can go 30s+ without a trade, which used to read as lost data)
+    if (m.type === 'heartbeat') { state.liveAt = Date.now(); if (state.spot && state.spotFromWs) state.spotAt = Date.now(); return; }
     if (m.type === 'match') { handleTrades(parseCoinbase(m).filter(Boolean)); return; }
     if (m.type !== 'ticker' || !m.price) return;
-    state.spot = Number(m.price); state.spotAt = Date.now();
+    state.spot = Number(m.price); state.spotAt = Date.now(); state.spotFromWs = true;
     state.open24h = Number(m.open_24h) || state.open24h;
     state.liveAt = Date.now();
     queueRender();
   };
   ws.onclose = () => {
-    ws = null; state.liveAt = 0;
+    ws = null; state.liveAt = 0; state.spotFromWs = false;
     clearTimeout(wsTimer);
     if (!document.hidden) wsTimer = setTimeout(liveConnect, Math.min(30000, 1000 * 2 ** wsRetry++));
   };
   ws.onerror = () => ws?.close();
 }
-function liveDisconnect() { clearTimeout(wsTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; } state.liveAt = 0; }
+function liveDisconnect() { clearTimeout(wsTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; } state.liveAt = 0; state.spotFromWs = false; }
 
 // Price ticks arrive many times a second; redraw at most 4 times a second.
 function queueRender() {
@@ -2242,7 +2246,7 @@ function buildSettings() {
 let timer;
 async function tick() {
   try {
-    const jobs = isLive() ? [] : [refreshSpot()];
+    const jobs = isLive() && state.spotFromWs ? [] : [refreshSpot()]; // polled until the stream has given a price
     if (Date.now() - state.candlesAt > 20000) jobs.push(refreshCandles());
     if (!(Date.now() - (state.memory?.at || 0) < 2 * 60000) && !state.memoryBusy) { state.memoryBusy = true; refreshMemory().catch(() => {}).finally(() => { state.memoryBusy = false; }); }
     const closed = state.markets.length && Date.parse(state.markets[0].close_time) < Date.now();
@@ -2343,8 +2347,8 @@ function removePosition(id) {
   pushSyncSoon();
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) liveDisconnect();
-  else { liveConnect(); tick(); }
+  if (document.hidden) { liveDisconnect(); feedState.since = null; feedState.lost = false; } // an outage is only judged while you're looking
+  else { state.resumedAt = Date.now(); liveConnect(); tick(); }
   feedsOn();
 });
 // Between polls only the clocks move, so update just those each second (a full redraw every second
