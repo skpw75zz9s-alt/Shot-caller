@@ -36,7 +36,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '182'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '183'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -432,7 +432,7 @@ const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: state.priceDelayed ? null : modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts, chosen: state.chosen }); // this market's own learning (the server's copy for it)
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
-  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); // the late lane's own guard and the early lane's proof (the server's records)
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); snap.flipGate = state.tune?.report?.flipStudy ?? null; // the late lane's own guard and the early lane's proof (the server's records)
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -1504,7 +1504,7 @@ function accuracyNow() {
   const br = state.botRecord, bot = br?.graded != null ? br : callStats(state.callLog);
   return accuracyRows({ bot, predictor: state.playbook?.report?.predictor ?? null, blend: blendScore(state.predLog), path: pathRecord(state.pcLog), cone: coneRecord(state.coneLog),
     radar: radarRecord(state.predLog, state.pcLog), flip: flipRecord(state.flipLog, state.flipBase), tune: state.memory?.learned?.volTune ?? null,
-    guard: { level: RISK_LEVELS[riskLevelOf(settings)]?.label ?? 'your settings', ...profitGuard(levelCalls()) },
+    guard: { level: RISK_LEVELS[riskLevelOf(settings)]?.label ?? 'your settings', ...profitGuard(levelCalls()) }, flipStudy: state.tune?.report?.flipStudy ?? null,
     trades: { n: state.trades.length, total: state.trades.reduce((a, t) => a + (t.pnl || 0), 0), today: dailyLoss(state.trades, settings.dailyLossLimit) } });
 }
 function renderAccuracy(now = Date.now()) {

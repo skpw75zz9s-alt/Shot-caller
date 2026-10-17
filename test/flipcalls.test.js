@@ -65,3 +65,12 @@ test('the flip check (chart history + buyers / sellers, once proven) blocks a fl
   assert.ok(buySignal(x.row, { ...x.snap, flipCheck: fc(0.08) }, t90, NOW, calledDown()).fire, 'a check that agrees lets it through');
   assert.ok(buySignal(x.row, { ...x.snap, flipCheck: { ...fc(0.4), ticker: 'OTHER' } }, t90, NOW, calledDown()).fire, 'another round\'s check is ignored');
 });
+
+test('the flip study\'s rule (once proven) blocks a flip history says to skip, and only then', () => {
+  const gate = (v, proven) => ({ proven, gate: { key: 'crossAge', op: '>=', v, label: `only after ${v}+ minutes on the new side` } });
+  const withGate = (fg) => { const x = setup({ yb: 90, ya: 91 }); return buySignal(x.row, { ...x.snap, flipGate: fg }, t90, NOW, calledDown()); };
+  const blocked = withGate(gate(40, true));
+  assert.equal(blocked.fire, false); assert.match(blocked.flip.why, /history's flip rule: only after 40\+ minutes/);
+  assert.ok(withGate(gate(2, true)).fire, 'the rule passes: the flip goes ahead');
+  assert.ok(withGate(gate(40, false)).fire, 'an unproven rule never blocks');
+});

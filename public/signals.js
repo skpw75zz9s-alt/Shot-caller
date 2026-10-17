@@ -64,6 +64,11 @@ export function signalBoard(s = {}) {
     add({ key: 'flip', name: 'Flip check', status: on ? 'in' : 'probation', pts, lean: side(pts),
       progress: on ? null : Math.max(prog(s.flip.chart?.nTest, need.chart) ?? 0, prog(s.flip.flow?.nTest, need.flow) ?? 0), note: `chart ${part(s.flip.chart, need.chart ?? 600)} · flow ${part(s.flip.flow, need.flow ?? 200)}` });
   }
+  const fst = s.tune?.report?.flipStudy;
+  if (fst?.all?.n) { // the flip study (public/flipstudy.js): history's rule for flip calls
+    add({ key: 'flipstudy', name: 'Flip rule from history', status: fst.proven ? 'in' : 'probation', note: fst.gate ? `${fst.gate.label} · test: kept won ${fst.gate.test.kept.wins}/${fst.gate.test.kept.n}, blocked ${fst.gate.test.blocked.wins}/${fst.gate.test.blocked.n} (z ${fst.gate.z.toFixed(1)})` : `history's flips won ${fst.all.wins} of ${fst.all.n}; no rule beats taking them all yet`,
+      progress: fst.proven || !fst.gate ? null : Math.max(0, Math.min(1, fst.gate.z / 2)) });
+  }
   if (s.volTune?.report) { // the volatility tuner (voltunefeed.js)
     const r = s.volTune.report, vol = !!r.proven, dr = !!r.drift?.proven;
     add({ key: 'voltune', name: 'Volatility & momentum tuner', status: vol || dr ? 'in' : 'probation', note: `volatility ${vol ? 'proven' : `z ${(r.z ?? 0).toFixed(1)}`} · momentum ${dr ? 'proven' : 'not proven'}` });

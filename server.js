@@ -103,6 +103,7 @@ export const bot = createBot({
   shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live(), cross: !!crossFeed?.shifts('BTC'), flip: !!flipFeed.shifts() }),
   watch: () => marketWatch.status(),
   flipCheck: () => flipFeed.check(),
+  flipGate: () => tuneFeed.api().report?.flipStudy ?? null, // the flip study's rule, applied once proven (public/flipstudy.js)
   lessonCtx: () => ({ scan: scanFeed.lastScan(), flip: flipFeed.api().live }), // the loss lab's context: buyers vs sellers, the flip check
   volTune: () => volTuneFeed.live(),
   onCall: (e, o) => discord.call(e, o),

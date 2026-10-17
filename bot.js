@@ -32,7 +32,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, lessonCtx = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, flipGate = () => null, lessonCtx = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
   // the market this bot calls (v13.30: one bot per Kalshi market, public/markets.js); Bitcoin's 15-minute one by default
   const MK = mk ?? HOME, ASSET = ASSETS.find((a) => a.key === MK.asset) ?? HOME_ASSET, SPOT_SETTLE = ASSET.settle === 'spot';
   const DEV = { ...DEVICE_DEFAULTS, series: MK.series };
@@ -345,7 +345,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[LEARN_SERIES] ||= {});
         const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: liveSpotNow(), settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts, chosen: market.chosen });
-        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.lessons = officialLab();
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lessons = officialLab();
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -440,7 +440,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
-    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.lessons = officialLab();
+    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lessons = officialLab();
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)

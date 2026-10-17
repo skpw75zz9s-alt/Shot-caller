@@ -9,7 +9,7 @@ const usd = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(x).toFixed(2)}`;
 // a price miss at the coin's own scale (v13.42.3): whole dollars for Bitcoin, cents for SOL, fractions of a cent for DOGE
 export const dol = (x) => { const a = Math.abs(x); return `$${a >= 100 ? Math.round(a).toLocaleString('en-US') : a >= 1 ? a.toFixed(2) : a > 0 ? a.toPrecision(2) : '0'}`; };
 
-export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null, guard = null, trades = null } = {}) {
+export function accuracyRows({ flipStudy = null, bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null, guard = null, trades = null } = {}) {
   const rows = [], add = (key, name, n, verdict, metric, vs, data, sure = false) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' && !sure ? 'wait' : verdict, metric, vs, data }); // sure: already statistically clear
   // the official calls and Near-certain: their win rates mean little alone (a 90¢ call should win 90%), so the bar is
   // profit after fees at $10 a call
@@ -45,11 +45,13 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
       { graded: pk.graded || 0, wins: pk.wins ?? 0, avgP: pk.avgP ?? null, brier: sc?.vs ? { pick: sc.brierPick, bot: sc.brierBot, kalshi: sc.brierKalshi, n: sc.vs } : null, mix: mx?.mix ?? null, buys: b ? { graded: b.graded, wins: b.wins, usd: b.usd } : null });
   }
   // flip calls (v13.19): the locked call switched sides on clear evidence; judged on profit, off while losing
-  const fc = bot?.flip;
+  const fc = bot?.flip, fst = flipStudy;
+  // what the candle history says about flips like the bot's (public/flipstudy.js): the lane's own and every minute's
+  const hist = fst?.all?.n ? ` · history: the lane's flips won ${fst.lane?.n ? `${fst.lane.wins} of ${fst.lane.n} (${pct(fst.lane.wins / fst.lane.n)})` : 'none'}, every minute's ${fst.all.wins} of ${fst.all.n} (${pct(fst.all.wins / fst.all.n)})${fst.gate ? ` · rule "${fst.gate.label}": ${fst.proven ? 'proven, in the calls' : `on test ${fst.gate.test.kept.wins} of ${fst.gate.test.kept.n} kept vs ${fst.gate.test.blocked.wins} of ${fst.gate.test.blocked.n} blocked, not proven`}` : ''}` : '';
   if (fc) add('flipcalls', 'Flip calls (switched sides)', fc.graded || 0, fc.profitGuard?.paused ? 'bad' : (fc.usd ?? 0) > 0 ? 'good' : 'bad',
     fc.graded ? `won ${fc.wins} of ${fc.graded} (${pct(fc.wins / fc.graded)})` : 'none yet: only on clear evidence of a flip',
-    fc.profitGuard?.paused ? 'OFF: flip calls lost money after fees; back on when they recover' : fc.graded ? `${usd(fc.usd ?? 0)} at $10 a call after fees · half size` : 'switch once a round, at half size, when the bot is 90%+ sure of the other side',
-    { graded: fc.graded || 0, wins: fc.wins ?? 0, usd: fc.usd ?? 0, paused: !!fc.profitGuard?.paused });
+    (fc.profitGuard?.paused ? 'OFF: flip calls lost money after fees; back on when they recover' : fc.graded ? `${usd(fc.usd ?? 0)} at $10 a call after fees · half size` : 'switch once a round, at half size, when the bot is 90%+ sure of the other side') + hist,
+    { graded: fc.graded || 0, wins: fc.wins ?? 0, usd: fc.usd ?? 0, paused: !!fc.profitGuard?.paused, ...(fst?.all?.n ? { history: { lane: fst.lane, all: fst.all, gate: fst.gate ? { label: fst.gate.label, test: fst.gate.test, z: fst.gate.z } : null, proven: !!fst.proven } } : {}) });
   // the early lane (v13.16): live unless its recent calls lose money after fees (then test calls until they recover)
   const er = bot?.early;
   if (er) add('early', `Early calls (10–5 min left)${er.live ? '' : ', paused'}`, er.n || 0, er.paused ? 'bad' : (er.usd ?? 0) > 0 ? 'good' : 'bad',

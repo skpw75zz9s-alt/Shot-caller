@@ -3,6 +3,7 @@
 import { marketOf } from './markets.js';
 import { DEFAULTS, EXIT_DEFAULTS as EXIT_D, EXIT_DEFAULTS, contractsFor, effectiveVol, feeEach, holdOdds, maxPay, evaluate, exitSignal, momentum, orderFee, probYes, quote, realizedVol } from './model.js';
 import { entrySignal, flipSigns, withLiveBar } from './candles.js';
+import { flipGateOk, liveFlipFeatures } from './flipstudy.js';
 import { deepDive, freshRejection, quoteTrend, rejections, stability } from './analysis.js';
 import { basisOf, calShift, volFactor } from './learner.js';
 import { pulseFix } from './pulse.js';
@@ -334,6 +335,12 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     // new side is likely to flip back (more than the flip bar allows, plus 5 points)
     const fc = snap.flipCheck, back = fc && fc.ticker === row.m.ticker ? fc.pLose?.[b.side] : null;
     if (back != null && back > 1 - s.flipConf + FLIP_BACK_MARGIN) return no(`chart history and buyers / sellers give ${b.side === 'YES' ? 'UP' : 'DOWN'} a ${Math.round(back * 100)}% chance of flipping back`);
+    // v13.43 the flip study (public/flipstudy.js, proven only): history's rule for the flips that hold
+    const fs = snap.flipGate;
+    if (fs?.proven && fs.gate) {
+      const f = liveFlipFeatures({ bars: snap.bars, spot: snap.mSpot ?? snap.spot, strike: row.strike, side: b.side, sigmaMin: row.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: ev.minutesLeft, openTime: Date.parse(row.m.open_time) });
+      if (!flipGateOk(fs.gate, f)) return no(`history's flip rule: ${fs.gate.label}`);
+    }
     const ask = b.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     const priced = !(s.winFloor > 0) || ask >= s.winFloor - 1e-9;
     if (priced ? !(passes(b, ...need.switching, true) && steady(b.side) && entryOk(b.side) && holds(b) && watchOk()) : !earlyOk(b)) return no(priced ? 'not past the bar for a switch yet' : (earlyWhy || 'not past the bar yet'));

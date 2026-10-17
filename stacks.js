@@ -76,6 +76,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts() }),
         watch: () => st.marketWatch.status(),
         flipCheck: () => st.flipFeed?.check() ?? null,
+        flipGate: () => st.tuneFeed.api().report?.flipStudy ?? null,
         lessonCtx: () => ({ scan: st.scanFeed.lastScan(), flip: st.flipFeed?.api().live ?? null }),
         volTune: () => st.volTuneFeed.live(),
         onCall: (e, o) => discord.call(e, o),

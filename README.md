@@ -271,6 +271,26 @@ Security:
 
 ## Version notes (newest first)
 
+### The flip study (v13.43)
+
+Flip calls had never fired on the live record, so their accuracy couldn't be measured. `public/flipstudy.js` replays
+them on the server's candle history (up to 21 days, every coin, rerun hourly in `tunefeed.js`):
+
+- **Replay:** in every past round, the side ahead at 10:00 left is the locked call. The first minute the other side's
+  worst-case odds (the bot's own math, volatility 20% off either way) reach the flip bar is a flip. It won if the
+  round closed on the new side. The study learns from every minute down to the last one, and reports the real lane's
+  flips (10 to 5 minutes left) separately.
+- **What it records at each flip:** minutes left; how far past the target in typical moves; how many minutes price had
+  held the new side; whether one sudden minute did the crossing; the last 3 minutes' push; how jumpy the market was;
+  the wick back toward the target.
+- **The rule:** one-line filters ("only after 2+ minutes on the new side", "never on a spike over 2.5 typical
+  moves", ...). The best is picked on the older two thirds of the flips and tested on the newest third. It blocks
+  flip calls (bot and phone, `engine.js` flipOk) only once proven there: the flips it keeps beat the ones it blocks,
+  z 2+, 30+ kept.
+
+The Record tab's flip-calls row shows history's win rate for the lane and for every minute, and the rule's test
+numbers. The signal board lists the rule as in calls or on probation.
+
 ### Simple mode, the signal board and Discord roles (v13.42)
 
 - **Simple mode:** the **Simple / Pro** button at the top. Simple shows the call, the line and the signal board's
