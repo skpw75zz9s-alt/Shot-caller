@@ -63,6 +63,7 @@
   <link rel="modulepreload" href="profitguard.js">
   <link rel="modulepreload" href="tvchart.js">
   <link rel="modulepreload" href="drivers.js">
+  <link rel="modulepreload" href="lessons.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -358,6 +359,11 @@
     </section>
 
     <section id="view-learn" class="view">
+      <div class="card lessons" id="lessonsCard">
+        <div class="deep-head"><span>Your notes, tested</span><b id="lsWhen"></b></div>
+        <p class="push-status">MACD, EMA, RSI, ceiling / floor and the double bottom, from a member's notes. Each one reads the live chart, and each was turned into a rule and tested on weeks of real 1-minute history. Hit = how often price moved the way the rule said, from 10, 6 and 3 minutes out to the round's close, on rounds it was never tuned on (50% is a coin flip). Only a rule that proves itself changes the bot's calls.</p>
+        <div id="lsList">Loading…</div>
+      </div>
       <div class="card learn">
         <h3>How Shot Caller calls a round</h3>
         <ol>
@@ -550,7 +556,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.36 · Steadier live data</p>
+      <p class="fine" id="version">Shot Caller v13.37 · Your notes, tested</p>
     </section>
   </main>
 
@@ -570,7 +576,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '172';
+    window.SC_BUILD = '173';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

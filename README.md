@@ -271,6 +271,19 @@ Security:
 
 ## Version notes (newest first)
 
+### Your notes, tested (v13.37)
+
+A member's notes (MACD, EMA, RSI, ceiling / floor, the double bottom) are turned into rules the bot tests instead of
+believes (`public/lessons.js`). The new ones join the hourly indicator test (`public/tune.js`): the MACD line crossing
+its signal, RSI / MACD divergence, bounces off a rising or falling EMA, the round's opening ceiling / floor
+(breakthrough and rejection), and double bottom / top neckline breaks. Each is tuned on the first 2/3 of the history,
+tested on the last 1/3, and only reaches the calls if proven. With 12 families tested at once, the bar is now |z| 2.9
+(it was 2.7 for 8).
+
+Two of the notes' own claims are checked directly. One is the "60%+ / 70%+ areas" past the ceiling: how often rounds
+finished that way from each zone, next to the bot's math. The other is the double bottom's take profit vs stop as
+drawn. The Learn tab's **Your notes, tested** card shows each lesson's live read and its record.
+
 ### Why it's moving (v13.34)
 
 Gold, silver, oil and the stock indexes get a **Why it's moving** card on the Deck (crypto keeps its trade tape and

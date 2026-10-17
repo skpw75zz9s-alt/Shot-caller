@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CANDIDATES, indicatorRead, indicatorShift, samples, tuneIndicators } from '../public/tune.js';
+import { CANDIDATES, indicatorRead, indicatorShift, samples, signalSeries, tuneIndicators } from '../public/tune.js';
 import { createTuneFeed } from '../tunefeed.js';
 
 let seed = 3; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
@@ -27,7 +27,7 @@ test('pure noise: no indicator is proven, so nothing reaches the calls', () => {
   for (const s of [3, 11, 29]) {
     const r = tuneIndicators(market(0, 21, s));
     assert.equal(r.families.filter((f) => f.proven).length, 0, `seed ${s}: ${r.families.filter((f) => f.proven).map((f) => f.setting)}`);
-    assert.equal(r.families.length, 7, 'one best setting per family');
+    assert.ok(r.families.length >= 7 && new Set(r.families.map((f) => f.family)).size === r.families.length, 'one best setting per family');
     assert.ok(r.testRounds >= 600 && r.trainRounds > r.testRounds);
   }
 });
@@ -60,7 +60,7 @@ test('the call nudge: a shift in P(YES), flipped for "less than" markets, capped
 test('every candidate gives one signal per candle in -1..1', () => {
   const bars = market(0, 1);
   for (const c of CANDIDATES) {
-    const s = c.bars ? null : c.series(bars.map((b) => b.c));
+    const s = c.bars ? null : signalSeries(c, bars);
     if (s) { assert.equal(s.length, bars.length, c.id); assert.ok(s.every((v) => v == null || [-1, 0, 1].includes(v)), c.id); }
   }
 });

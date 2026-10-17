@@ -965,3 +965,14 @@ body:not(.no-feeds) [data-alt-only] { display: none !important; } /* crypto has 
 /* the unread count on the Alerts tab when notifications are off (v13.35: no pop-ups over the app) */
 nav button { position: relative; }
 .nav-badge { position: absolute; top: 3px; left: 50%; margin-left: 5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--no); color: #fff; font: 700 9px/15px var(--mono); font-style: normal; letter-spacing: 0; text-align: center; }
+
+/* ---------- Your notes, tested (v13.37) ---------- */
+.ls { border-top: 1px solid var(--line); padding: 10px 0 4px; } .ls:first-child { border-top: 0; padding-top: 2px; }
+.ls h4 { margin: 0 0 4px; font-size: 13px; letter-spacing: .8px; text-transform: uppercase; color: var(--accent); }
+.ls-notes { margin: 0 0 6px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.ls-now { margin: 0 0 6px; font-size: 13px; line-height: 1.45; }
+.ls-tests { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; }
+.ls-test { font-size: 12px; color: var(--muted); padding-left: 14px; position: relative; line-height: 1.4; }
+.ls-test::before { content: '·'; position: absolute; left: 4px; } .ls-test b { color: var(--text); font-weight: 600; }
+.ls-test.on { color: var(--yes); } .ls-test.on::before { content: '✓'; left: 0; }
+.ls-tab { margin: 6px 0 4px; } .ls-tab td small { display: block; color: var(--dim); font-size: 10px; }

@@ -2,11 +2,16 @@
 // 1-minute candle history (playbookfeed.js, up to 21 days), and every tick it turns the proven indicators' read into
 // a nudge for the live market's odds (bot.js shifts, with the Round scan's and the micro model's).
 import { indicatorRead, indicatorShift, tuneIndicators } from './public/tune.js';
+import { patternStats, rangeLadder } from './public/lessons.js';
 
 export function createTuneFeed({ playbook, clock = () => Date.now(), log = console }) {
   let report = null, lastLive = null, read = { drift: 0, active: [] }, readAt = 0;
   function rerun() {
-    try { const bars = playbook.bars(); if (bars.length >= 2000) report = { ...tuneIndicators(bars), ranAt: clock(), bars: bars.length }; } catch (e) { log.error('indicator tuning failed', e.message); }
+    try {
+      const bars = playbook.bars();
+      // the lessons' own claims (public/lessons.js): the ceiling / floor "areas" and the double bottom's take profit vs stop
+      if (bars.length >= 2000) report = { ...tuneIndicators(bars), lessons: { ladder: rangeLadder(bars), patterns: patternStats(bars) }, ranAt: clock(), bars: bars.length };
+    } catch (e) { log.error('indicator tuning failed', e.message); }
   }
   function observe({ snap }, now = clock()) {
     const lv = snap?.live;

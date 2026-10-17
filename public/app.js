@@ -27,12 +27,13 @@ import { successMap } from './success.js';
 import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, listed, marketOf, roundName, storeKey } from './markets.js';
 import { structureRead } from './structure.js';
 import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js';
+import { lessonsNow } from './lessons.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '172'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '173'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -948,7 +949,7 @@ function renderPlaybook() {
 // ---------- indicator tuning (server: tunefeed.js, public/tune.js): which settings have really predicted the rounds ----------
 async function refreshTune() {
   if (document.hidden) return;
-  try { state.tune = await getJSON(api('tune')); state.tuneAt = Date.now(); renderTune(); } catch { /* next time */ }
+  try { state.tune = await getJSON(api('tune')); state.tuneAt = Date.now(); renderTune(); if (shownViews.has('learn')) renderLessons(); } catch { /* next time */ }
 }
 setInterval(refreshTune, 10000);
 setTimeout(refreshTune, 3000);
@@ -963,8 +964,46 @@ function renderTune() {
   setHTML($('tuneReport'), `<small class="muted">${int(r.rounds)} rounds tested (${int(r.bars)} one-minute candles), rechecked hourly. Each indicator family's best setting and direction were picked on the first ${int(r.trainRounds)} rounds, then tested on the last ${int(r.testRounds)}, which they never saw. Hit = how often BTC moved the way the signal said, from 10, 6 and 3 minutes out to the close (50% = a coin flip).</small>`
     + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
     + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
-      : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.7+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
+      : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.9+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
 }
+
+// ---------- Your notes, tested (public/lessons.js): each lesson's live read and its record on unseen rounds ----------
+function renderLessons(now = Date.now()) {
+  const el = $('lsList');
+  if (!el) return;
+  const r = state.tune?.report, L = lessonsNow(state.candles || [], now), px = (v) => (v == null ? '—' : usd(v, Math.max(2, MKT.digits ?? 2)));
+  const pctOr = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`), up = (v) => (v > 0 ? '<b class="pos">up</b>' : v < 0 ? '<b class="neg">down</b>' : 'nothing');
+  const fam = (id) => {
+    const f = r?.families?.find((x) => x.family === id);
+    if (!r) return `<li class="ls-test">Waiting for the first test on ${esc(MKT.key)} history…</li>`;
+    if (!f) return '<li class="ls-test">Too few examples in the history yet to judge.</li>';
+    return `<li class="ls-test ${f.proven ? 'on' : ''}"><b>${esc(f.setting)}</b>${f.dir < 0 ? ' (works best faded)' : ''}: hit ${pctOr(f.test.hit)} on ${int(f.test.rounds)} unseen rounds, z ${f.test.z.toFixed(1)} · ${f.proven ? '✓ proven, in the calls' : 'not proven, not used'}</li>`;
+  };
+  const block = (title, notes, now, tests, extra = '') => `<section class="ls"><h4>${title}</h4><p class="ls-notes">${notes}</p><p class="ls-now">${now}</p><ul class="ls-tests">${r ? tests : `<li class="ls-test">Waiting for the first test on ${esc(MKT.key)} history (it runs hourly once there are about 2,000 one-minute candles)…</li>`}</ul>${r ? extra : ''}</section>`;
+  const m = L?.macd, e = L?.ema, s = L?.rsi, g = L?.range, w = L?.pattern;
+  const lad = r?.lessons?.ladder, pat = r?.lessons?.patterns;
+  const ladder = lad?.rounds ? `<table class="sc-rec ls-tab"><tr><th>At 10, 6, 3 min left, price…</th><th>Finished that way</th><th>Bot's math</th><th>Times</th></tr>${lad.zones.map((z) => `<tr><td>${esc(z.zone)} the ${z.zone.includes('below') ? 'floor' : z.zone === 'inside' ? 'range' : 'ceiling'}<small>${z.side === 'up' ? 'finished up' : 'finished down'}</small></td><td>${pctOr(z.hit)}</td><td>${pctOr(z.math)}</td><td>${int(z.n)}</td></tr>`).join('')}</table><small class="muted">${int(lad.rounds)} rounds, ceiling and floor from each round's first ${lad.k} minutes, "far" = more than one range-height past it. When history and the bot's math agree, the zone adds nothing the bot doesn't already know.</small>` : '';
+  const pats = pat?.all?.n ? `<small class="muted">As drawn (buy the neckline break, take profit one pattern-height past it, stop 30% of the height back through it, an hour at most): ${int(pat.all.n)} trades, won ${pctOr(pat.all.win)} where the payoff needs ${pctOr(pat.all.need)} to break even, ${pat.all.avgR >= 0 ? '+' : '−'}${Math.abs(pat.all.avgR).toFixed(2)}R a trade before fees (W ${int(pat.W.n)}, M ${int(pat.M.n)}).</small>` : '';
+  setText($('lsWhen'), r ? `${int(r.rounds)} rounds tested` : '');
+  setHTML(el, !L ? 'Waiting for an hour of candles…' : [
+    block('MACD', 'MACD line = EMA 12 − EMA 26; the signal line is its 9-period EMA; the histogram is the gap. Line crossing above the signal = upward momentum, below = downward; above zero = bullish.',
+      `Now: the MACD line is ${m.hist >= 0 ? 'above' : 'below'} its signal (histogram ${m.hist >= 0 ? '+' : '−'}${Math.abs(m.hist).toPrecision(2)}, ${m.growing ? 'growing' : 'shrinking'}), ${m.zero >= 0 ? 'above' : 'below'} zero${m.crossAgo != null ? `; last cross ${m.crossAgo} min ago` : ''}. Says ${up(m.side)}.`,
+      fam('macd') + fam('macdx') + '<li class="ls-test muted">The zero-line cross is the same thing as the EMA 12 / 26 cross, tested under EMA.</li>'),
+    block('EMA', 'An average that weights recent prices more. Rising = uptrend, falling = downtrend; price often bounces near the line (support and resistance).',
+      `Now: EMA 9 ${px(e.e9)} is ${e.trend >= 0 ? 'above' : 'below'} EMA 21 ${px(e.e21)}, a short-term ${e.trend >= 0 ? 'uptrend' : 'downtrend'}${e.bounce ? `; price just bounced off the EMA 21 (${e.bounce > 0 ? 'support' : 'resistance'})` : ''}.`,
+      fam('ema') + fam('emasr')),
+    block('RSI', '0 to 100. Above 70 = overbought, may pull back; below 30 = oversold, may bounce. Divergence (price and RSI disagreeing) can warn of a reversal.',
+      `Now: RSI 14 is ${s.v == null ? '—' : s.v.toFixed(0)} (${s.zone})${s.divergence ? `, with a ${s.divergence > 0 ? 'bullish' : 'bearish'} divergence` : ''}.`,
+      fam('rsi') + fam('div')),
+    block('Ceiling / floor', 'A rejection at a level marks your ceiling or floor; a breakthrough means new ones can form. Past the ceiling = the 60%+ area, further = 70%+.',
+      g ? `Now: this round's ceiling ${px(g.ceil)} and floor ${px(g.floor)} (its first 3 minutes); price ${px(L.price)} is <b>${esc(g.zone)}</b>${g.zone === 'inside' ? ' the range' : g.zone.includes('below') ? ' the floor' : ' the ceiling'}${g.rejected ? `, just rejected at the ${g.rejected < 0 ? 'ceiling' : 'floor'}` : ''}.` : 'Now: the round\'s first 3 minutes set the ceiling and floor; waiting for them.',
+      fam('range'), ladder),
+    block('Double bottom', 'Two similar lows (support) with a high between them (resistance, the neckline). A break above the neckline: take profit up from there, stop loss just under it. Upside down for a double top.',
+      w ? `Now: a double ${w.type === 'W' ? 'bottom' : 'top'} broke its neckline ${px(w.neckline)} ${w.ago} min ago: take profit ${px(w.tp)}, stop ${px(w.sl)}.` : 'Now: no double bottom or top has broken out in the last 2 hours.',
+      fam('pattern'), pats),
+  ].join(''));
+}
+setInterval(() => { if (!document.hidden && $('view-learn')?.classList.contains('active')) renderLessons(); }, 15000);
 
 // ---------- the prediction engine (server: playbookfeed.js, public/predictor.js): the live round's forecast ----------
 // The call at the confidence you pick: UP/DOWN only when the model is that sure, that level has held up walk-forward
@@ -2277,6 +2316,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'settings') loadAccess();
     if (v === 'chart') requestAnimationFrame(() => drawChartTab(true)); // after the layout, so it has its width
     if (v === 'alerts') alerts.render();
+    if (v === 'learn') renderLessons();
     if (v === 'history') refreshBotRecord();
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
   }

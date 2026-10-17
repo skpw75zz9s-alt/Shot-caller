@@ -3,17 +3,20 @@
 //   The question   at 10, 6 and 3 minutes before a round's close, does the indicator's signal say which way BTC moves
 //                  from here to the close? (the move in typical moves: log return / (1-minute volatility x sqrt(minutes)))
 //   The candidates EMA and RMA crosses, RSI zones, MACD histogram, Bollinger breaks, VWAP from the round's open and plain
-//                  momentum, each at several common settings (CANDIDATES). A signal may work either way (trend or fade):
+//                  momentum, each at several common settings (CANDIDATES); since v13.37 also the lessons from a member's
+//                  notes (public/lessons.js): MACD signal crosses, divergence, EMA bounces, the opening ceiling / floor
+//                  and double bottoms / tops. A signal may work either way (trend or fade):
 //                  the direction is learned too.
 //   No peeking     each signal is read off the candle BEFORE the latest one (the server's candles can be a minute old)
 //   No fooling     the history is split by time: the first 2/3 picks each family's best setting and its direction, the
-//                  last 1/3 (rounds it never saw) tests only that pick. Proven = the held-out test agrees with |z| >= 2.7
-//                  (strict, because 8 families are tested at once) on 150+ rounds, and training agreed too.
+//                  last 1/3 (rounds it never saw) tests only that pick. Proven = the held-out test agrees with |z| >= 2.9
+//                  (strict, because 12 families are tested at once: 2.9 since v13.37, 2.7 for the first 8) on 150+ rounds, and training agreed too.
 // Only proven indicators reach the bot's calls (indicatorShift), capped at +-4 points.
 import { bollinger, ema, macd, rma, rsiSeries } from './indicators.js';
 import { oddsShift } from './model.js';
+import { LESSON_CANDIDATES, LESSON_FAMILIES } from './lessons.js';
 
-export const TUNE = { checkpoints: [10, 6, 3], train: 2 / 3, zTest: 2.7, zTrain: 2, minRounds: 150, minTrain: 100, shrink: 50, cap: 0.04 };
+export const TUNE = { checkpoints: [10, 6, 3], train: 2 / 3, zTest: 2.9, zTrain: 2, minRounds: 150, minTrain: 100, shrink: 50, cap: 0.04 };
 const ROUND = 900000, MIN = 60000;
 
 const cross = (fast, slow, f) => ({ need: slow, series: (c) => { const a = f(c, fast), b = f(c, slow); return c.map((_, i) => (a[i] != null && b[i] != null ? Math.sign(a[i] - b[i]) : null)); } });
@@ -28,8 +31,9 @@ export const CANDIDATES = [
     series: (c) => { const b = bollinger(c, n, k); return c.map((x, i) => (b[i] == null ? null : x > b[i].up ? 1 : x < b[i].lo ? -1 : 0)); } })),
   ...[3, 5, 15, 30].map((n) => ({ id: `mom${n}`, family: 'mom', name: `${n}-minute momentum`, need: n + 1, series: (c) => c.map((x, i) => (i < n ? null : Math.sign(x - c[i - n]))) })),
   { id: 'vwapRound', family: 'vwap', name: 'Price vs VWAP from the round\'s open', need: 1, bars: true },
+  ...LESSON_CANDIDATES,
 ];
-export const FAMILY_NAMES = { ema: 'EMA cross', rma: 'RMA cross', rsi: 'RSI zones', macd: 'MACD', boll: 'Bollinger bands', mom: 'Momentum', vwap: 'VWAP' };
+export const FAMILY_NAMES = { ema: 'EMA cross', rma: 'RMA cross', rsi: 'RSI zones', macd: 'MACD', boll: 'Bollinger bands', mom: 'Momentum', vwap: 'VWAP', ...LESSON_FAMILIES };
 
 // The round VWAP signal needs the candles themselves (volume); everything else works on closes
 function vwapSignals(bars) {
@@ -43,7 +47,7 @@ function vwapSignals(bars) {
   }
   return out;
 }
-export function signalSeries(cand, bars) { return cand.bars ? vwapSignals(bars) : cand.series(bars.map((b) => b.c)); }
+export function signalSeries(cand, bars) { return cand.fromBars ? cand.fromBars(bars) : cand.bars ? vwapSignals(bars) : cand.series(bars.map((b) => b.c)); }
 
 // 1-minute volatility (log returns) over the last hour, at each bar
 function volSeries(bars) {
