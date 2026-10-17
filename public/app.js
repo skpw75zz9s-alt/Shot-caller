@@ -36,7 +36,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '181'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '182'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -365,7 +365,7 @@ function positionCard(pos, snap) {
         <div><label>Target sell</label><b>${ex.action === 'SELL' ? 'now' : pc(ex.target)}</b></div>
         <div><label>Pays if right</label><b>${dollars(pos.contracts)}</b></div>
       </div>
-      <div class="pos-where">${pos.source === 'kalshi' ? '<span class="src-tag">From Kalshi</span> · ' : ''}Bought ${clock(pos.at)}${pos.source === 'kalshi' ? ` · ${+pos.contracts.toFixed(2)} contracts` : ''} · wins if BTC is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
+      <div class="pos-where">${pos.source === 'kalshi' ? '<span class="src-tag">From Kalshi</span> · ' : ''}Bought ${clock(pos.at)}${pos.source === 'kalshi' ? ` · ${+pos.contracts.toFixed(2)} contracts` : ''} · wins if ${esc(marketOf(String(pos.ticker || '').split('-')[0], marketList).key)} is${where || (pos.side === 'YES' ? ' above the target' : ' below the target')} at close</div>
       <ul class="flips"><span>Flip watch</span>${signs}</ul>
       <div class="pos-btns">${pos.source === 'kalshi' ? '' : `<button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button>`}<button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
@@ -406,6 +406,10 @@ async function alert({ tag, title, body }, kind = 'buy', extra = {}) {
 
 // ---------- render helpers ----------
 const usd = (v, d = 2) => { if (v == null) return '—'; if (d === 0 && MKT.digits && Math.abs(v) < 1000) d = MKT.digits; return `$${(USD_FMT[d] ||= new Intl.NumberFormat(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })).format(v)}`; };
+// shared text written for Bitcoin (the deep-dive checks, health checks), said for this market's coin
+const coinText = (t) => (MKT.key === 'BTC' ? t : String(t).replace(/\bBTC\b(?! Trader's)/g, MKT.key));
+// money amounts (volume traded, whale size, flow) in whole dollars, whatever the coin's price precision
+const cash = (v) => (v == null ? '—' : `$${Math.round(v).toLocaleString('en-US')}`);
 const pct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
 const pc = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
 const dollars = (v) => `$${v.toFixed(2)}`;
@@ -445,7 +449,7 @@ function renderDeep(row, sig) {
     setText($('deepScore'), `Confidence ${deep.score}`);
     setClass($('deepScore'), confTier(deep.score));
     setHTML($('deepChecks'), deep.checks.map((c) =>
-      `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(c.label)}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('') +
+      `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'meh'}"><i>${c.ok === true ? '✓' : c.ok === false ? '✕' : '•'}</i><span>${esc(coinText(c.label))}</span><b>${c.pts > 0 ? '+' : ''}${c.pts || ''}</b></li>`).join('') +
       learnedNotes(row).map((x) => `<li class="meh"><i>🧠</i><span>${esc(x)}</span><b></b></li>`).join(''));
   }
   setHidden($('rejCard'), !rej);
@@ -534,7 +538,7 @@ function handleTrades(trades) {
     tape.list.unshift(x); tape.rate.push(Date.now());
     const moved = impact(x, { sigmaMin: state.sigmaNow || undefined }); // only orders that move the price bubble on the chart
     if (moved) { tape.big.push(moved); tape.bigV++; }
-    if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${usd(w.usd, 0)}`, `${w.size.toFixed(2)} ${MKT.key} at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
+    if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${cash(w.usd)}`, `${w.size >= 100 ? int(w.size) : w.size.toFixed(2)} ${MKT.key} at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
   if (tape.recent[0] && tape.recent[0].t < Date.now() - 11 * 60000) tape.recent = tape.recent.filter((x) => x.t >= Date.now() - 10 * 60000);
@@ -590,11 +594,11 @@ function renderTape(force = false) {
     const by = byExchange(tape.ex);
     setHTML($('tapeEx'), Object.entries(by).sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell)).map(([n, e]) => {
       const tot = e.buy + e.sell, b = tot ? e.buy / tot : 0.5;
-      return `<span>${n}</span><span class="bar" title="buy ${Math.round(b * 100)}%"><i style="width:${(b * 100).toFixed(0)}%"></i></span><em>${Math.round(b * 100)}% buy · ${usd(tot, 0)}</em>`;
+      return `<span>${n}</span><span class="bar" title="buy ${Math.round(b * 100)}%"><i style="width:${(b * 100).toFixed(0)}%"></i></span><em>${Math.round(b * 100)}% buy · ${cash(tot)}</em>`;
     }).join('') || `<span class="muted">No ${MKT.key} exchange trades yet this round</span>`);
   } else {
     const kf = kalshiFlow(tape.kalshi);
-    setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${int(kf.YES.count)}</b>${usd(kf.YES.usd, 0)}</div><div>DOWN (NO) bought<b>${int(kf.NO.count)}</b>${usd(kf.NO.usd, 0)}</div>`);
+    setHTML($('kalshiFlow'), `<div>UP (YES) bought<b>${int(kf.YES.count)}</b>${cash(kf.YES.usd)}</div><div>DOWN (NO) bought<b>${int(kf.NO.count)}</b>${cash(kf.NO.usd)}</div>`);
   }
   tape.list.sort((a, b) => b.t - a.t); // feeds arrive a little out of order; the tape reads newest first
   const rows = tape.list.filter((x) => (tab === 'all' ? true : tab === 'kalshi' ? x.kalshi : !x.kalshi)).slice(0, 40);
@@ -602,8 +606,8 @@ function renderTape(force = false) {
   state.tapeTop = rows[0];
   setHTML($('tape'), rows.map((x, i) => {
     const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
-    if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${int(x.count)} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${usd(x.usd, 0)}</span></li>`;
-    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${int(x.price)}</span><span class="amt">${x.whale ? '🐋 ' : ''}${usd(x.price * x.size, 0)}</span></li>`;
+    if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${int(x.count)} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${cash(x.usd)}</span></li>`;
+    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size >= 100 ? int(x.size) : x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${x.price >= 1000 ? int(x.price) : x.price.toFixed(MKT.digits)}</span><span class="amt">${x.whale ? '🐋 ' : ''}${cash(x.price * x.size)}</span></li>`;
   }).join('') || `<li class="empty">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</li>`);
 }
 
@@ -770,16 +774,16 @@ function renderDeck(snap, live, sig, now) {
   setStyle($('pulseTugMark'), 'left', `calc(${buy == null ? 50 : (1 - buy) * 100}% - 1px)`);
   setText($('pulseLead'), buy == null ? 'Pressure' : buy >= 0.6 ? 'Buyers in control' : buy <= 0.4 ? 'Sellers in control' : 'Balanced');
   setClass($('pulseLead'), `pulse-lead ${buy == null ? '' : buy >= 0.6 ? 'pos' : buy <= 0.4 ? 'neg' : ''}`);
-  setText($('pulseNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}` : 'Buy vs sell pressure: needs the live feeds (open the app in front)');
+  setText($('pulseNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${cash(fs.nowUsd)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}` : 'Buy vs sell pressure: needs the live feeds (open the app in front)');
   $('pulseBull').classList.toggle('dom', buy != null && buy >= 0.55);
   $('pulseBear').classList.toggle('dom', buy != null && buy <= 0.45);
   renderScan(live, snap, now);
   trackPredictions(snap, live, now);
   renderStability(sig?.stability ?? stability({ bars: snap.bars, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, now }), now);
-  setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${usd(fs.nowUsd, 0)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
+  setText($('tugNow'), fs.nowUsd > 0 ? `Last 2 minutes: ${cash(fs.nowUsd)} traded across ${feedsLive} exchange${feedsLive === 1 ? '' : 's'}${flow.pressure ? ` · sustained ${flow.pressure} pressure` : ''}` : 'Needs the live feeds (they open when the app is in front).');
   setText($('tugRound'), fs.prints ? `${fs.net >= 0 ? '+' : '−'}${usd(Math.abs(fs.net), 0)}` : '—');
   setClass($('tugRound'), fs.net > 0 ? 'pos' : fs.net < 0 ? 'neg' : '');
-  setText($('tugRoundSub'), fs.prints ? `buy ${usd(fs.buyUsd, 0)} / sell ${usd(fs.sellUsd, 0)} · ${fs.prints} prints` : 'since the round opened');
+  setText($('tugRoundSub'), fs.prints ? `buy ${cash(fs.buyUsd)} / sell ${cash(fs.sellUsd)} · ${fs.prints} prints` : 'since the round opened');
   setText($('tugWhales'), fs.whaleBuys + fs.whaleSells ? `${fs.whaleBuys} buy · ${fs.whaleSells} sell` : '—');
   setText($('tugWhaleSub'), `trades ≥ ${usd(alerts.prefs().whaleMin, 0)}`);
   const fc = live ? floorCeiling(snap.bars, Date.parse(live.m.open_time)) : null, ms = modelSpot();
@@ -1509,7 +1513,7 @@ function renderAccuracy(now = Date.now()) {
   setHTML($('accList'), accuracyNow().map((r) => `<div class="acc-r ${r.verdict}"><b>${esc(r.name)}${r.verdict === 'wait' ? ` <small>(${int(r.n)} so far)</small>` : ''}</b><span>${esc(r.metric)}</span>${r.vs ? `<small>${esc(r.vs)}</small>` : ''}</div>`).join(''));
 }
 async function copyAccuracy() {
-  const text = JSON.stringify(accuracyReport(accuracyNow(), { version: $('version')?.textContent ?? null }), null, 1);
+  const text = JSON.stringify(accuracyReport(accuracyNow(), { version: $('version')?.textContent ?? null, market: { series: settings.series, name: marketLabel(MKT) } }), null, 1);
   let ok = false;
   try { await navigator.clipboard.writeText(text); ok = true; } catch {
     try { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch { /* no clipboard */ }
@@ -1707,16 +1711,16 @@ function renderNow() {
       }
     }
 
-    setText($('strike'), usd(strike));
+    setText($('strike'), usd(strike, 0));
     const d = modelSpot() && strike ? modelSpot() - strike : null;
-    setText($('dist'), d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)} (${((d / strike) * 100).toFixed(2)}%)`);
+    setText($('dist'), d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(Math.abs(strike) >= 1000 ? 0 : MKT.digits)} (${((d / strike) * 100).toFixed(2)}%)`);
     sign($('dist'), d);
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
   setClass(card, cardCls.join(' ')); setClass(entry, entryCls.join(' '));
   renderDeck(snap, live, sig, now);
 
-  setText($('spot'), usd(state.spot));
+  setText($('spot'), usd(state.spot, 0)); // the coin's own precision under $1,000
   renderTicker(live?.strike ?? null);
   setText($('vol'), sigmaMin ? `${(sigmaMin * 100).toFixed(3)}%` : '—');
   const r = timing?.rsi;
@@ -1926,7 +1930,7 @@ function renderPick(now = Date.now()) {
   setText($('pickRecord'), [last ? `Last pick ${last.side.toLowerCase() === last.result ? 'won' : 'lost'}` : null,
     st?.graded ? `picks ${st.wins}–${st.graded - st.wins} (${Math.round(st.wins / st.graded * 100)}%), the math said ${st.avgP != null ? pc(st.avgP) : '—'} on average` : 'no graded picks yet',
     st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null,
-    st?.score?.vs >= 10 ? `odds ${st.score.brierPick <= st.score.brierKalshi ? 'match or beat' : 'behind'} Kalshi's (Brier ${st.score.brierPick.toFixed(3)} vs ${st.score.brierKalshi.toFixed(3)})` : null].filter(Boolean).join(' · '));
+    st?.score?.vs >= 10 ? `odds ${st.score.brierPick <= st.score.brierKalshi ? 'match or beat' : st.score.brierPick <= st.score.brierKalshi + 0.002 ? 'level with' : 'behind'} Kalshi's (Brier ${st.score.brierPick.toFixed(3)} vs ${st.score.brierKalshi.toFixed(3)})` : null].filter(Boolean).join(' · '));
 }
 
 // The round call (v13.39): this round's 10-minute pick from the server, or, if the server's isn't in, the same math
@@ -2537,6 +2541,11 @@ function buildSettings() {
     location.reload();
   });
   document.body.classList.toggle('alt-market', !HOME);
+  // the page's own labels and explanations say BTC; on another coin they say that coin (v13.42.3), once, at startup
+  if (MKT.key !== 'BTC') {
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/\bBTC\b/.test(n.nodeValue) && !n.parentElement?.closest('script, style, select')) n.nodeValue = n.nodeValue.replace(/\bBTC\b(?! Trader's)/g, MKT.key);
+  }
   document.body.classList.toggle('no-feeds', !CRYPTO);
   const note = $('altNote'), why = [];
   if (!CRYPTO) why.push(`${MKT.name} has no public exchange trade feeds, so the tug of war, Round scan, live orders and futures aren't available here; its price comes from Yahoo's public charts, and the bot makes no calls while that price is delayed (over 90 seconds old) or the market is closed.`);
@@ -3003,7 +3012,7 @@ function renderHealth() {
   const next = (Math.floor(h.at / 1800000) + 1) * 1800000;
   setText($('healthStatus'), `${bad.length ? `${bad.length} problem${bad.length > 1 ? 's' : ''}` : 'All good'} · checked ${clock(h.at)} · next ${clock(next)} (every 2 rounds)`);
   setHTML($('healthList'), [...bad, ...h.items.filter((r) => r.level === 'ok')].map((r) =>
-    `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(r.label)}${r.fix ? `<small>${esc(r.fix)}</small>` : ''}</span></li>`).join(''));
+    `<li class="${r.level}"><b>${r.level === 'ok' ? '✓' : r.level === 'warn' ? '!' : '✕'}</b><span>${esc(coinText(r.label))}${r.fix ? `<small>${esc(coinText(r.fix))}</small>` : ''}</span></li>`).join(''));
   renderRuleScore();
 }
 $('healthRun').addEventListener('click', () => runHealth(true));

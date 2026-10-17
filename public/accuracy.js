@@ -6,7 +6,8 @@
 export const ACC = { min: 30 };
 const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const usd = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(x).toFixed(2)}`;
-const dol = (x) => `$${Math.round(x).toLocaleString('en-US')}`;
+// a price miss at the coin's own scale (v13.42.3): whole dollars for Bitcoin, cents for SOL, fractions of a cent for DOGE
+export const dol = (x) => { const a = Math.abs(x); return `$${a >= 100 ? Math.round(a).toLocaleString('en-US') : a >= 1 ? a.toFixed(2) : a > 0 ? a.toPrecision(2) : '0'}`; };
 
 export function accuracyRows({ bot = null, predictor = null, blend = null, path = null, cone = null, radar = null, flip = null, tune = null, guard = null, trades = null } = {}) {
   const rows = [], add = (key, name, n, verdict, metric, vs, data, sure = false) => rows.push({ key, name, n, verdict: n < ACC.min && verdict !== 'off' && !sure ? 'wait' : verdict, metric, vs, data }); // sure: already statistically clear
@@ -40,7 +41,7 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
     // judged on money once 20+ BUY picks are graded, else on its odds matching Kalshi's or better (30+ head to head), else calibration
     add('pick10', '10-minute picks (every round)', pk.graded || 0, !pk.graded ? 'wait' : (b?.graded >= 20 ? b.usd > 0 : head ? sc.brierPick <= sc.brierKalshi + 0.002 : rate >= (pk.avgP ?? 0.5) - 0.03) ? 'good' : 'bad',
       pk.graded ? `won ${pk.wins} of ${pk.graded} (${pct(rate)}) · its odds said ${pct(pk.avgP)} on average${sc?.vs ? ` · Brier: pick ${sc.brierPick.toFixed(3)}, bot alone ${sc.brierBot.toFixed(3)}, Kalshi ${sc.brierKalshi.toFixed(3)} (lower is better, ${sc.vs} picks)` : ''}${mx ? ` · odds ${mx.mix >= 1 ? 'the bot\'s alone' : mx.mix <= 0 ? 'Kalshi\'s alone' : `${Math.round(mx.mix * 100)}% bot, ${Math.round((1 - mx.mix) * 100)}% Kalshi`}${mx.learned ? ' (learned)' : ' (until 30 graded)'}` : ''}` : 'none graded yet: one locks every round at 10:00 left',
-      b?.graded ? `BUY picks: ${b.wins} of ${b.graded} won, ${usd(b.usd)} at $10 each after fees` : 'picks marked BUY are judged on profit after fees',
+      `${head ? `odds ${sc.brierPick <= sc.brierKalshi ? 'match or beat' : sc.brierPick <= sc.brierKalshi + 0.002 ? 'level with' : 'behind'} Kalshi's · ` : ''}${b?.graded ? `BUY picks: ${b.wins} of ${b.graded} won, ${usd(b.usd)} at $10 each after fees${b.graded < 20 ? ` (judged on money from 20, ${b.graded} so far)` : ''}` : 'picks marked BUY are judged on profit after fees'}`,
       { graded: pk.graded || 0, wins: pk.wins ?? 0, avgP: pk.avgP ?? null, brier: sc?.vs ? { pick: sc.brierPick, bot: sc.brierBot, kalshi: sc.brierKalshi, n: sc.vs } : null, mix: mx?.mix ?? null, buys: b ? { graded: b.graded, wins: b.wins, usd: b.usd } : null });
   }
   // flip calls (v13.19): the locked call switched sides on clear evidence; judged on profit, off while losing
@@ -92,17 +93,20 @@ export function accuracyRows({ bot = null, predictor = null, blend = null, path 
   if (guard) add('profit', `Profit guard (${guard.level})`, Math.max(guard.n, ACC.min), guard.paused ? 'bad' : guard.n >= 20 ? 'good' : 'off',
     guard.paused ? 'buy alerts PAUSED: this level is losing money' : guard.n >= 20 ? 'buy alerts on: this level is making money' : `watching (${guard.n} of 20 graded calls)`,
     guard.n ? `last ${guard.n} calls: ${usd(guard.usd)} after fees at $10 a call` : 'pauses alerts when a level loses money after fees', { n: guard.n, usd: guard.usd, paused: guard.paused });
+  // your trades are a ledger, not an estimate: from 10 trades a loss is a loss, sample size or not
   if (trades) add('trades', 'Your trades', trades.n, !trades.n ? 'wait' : trades.total > 0 ? 'good' : 'bad', trades.n ? `${usd(trades.total)} over ${trades.n} trades` : 'no tracked trades yet',
     trades.today.limit > 0 ? `today ${usd(trades.today.pnl)} of your ${'$'}${trades.today.limit} daily loss limit${trades.today.hit ? ': limit hit, buy alerts off until midnight' : ''}` : 'no daily loss limit set (Settings)',
-    { n: trades.n, total: trades.total, today: trades.today.pnl, limit: trades.today.limit, hit: trades.today.hit });
+    { n: trades.n, total: trades.total, today: trades.today.pnl, limit: trades.today.limit, hit: trades.today.hit }, trades.n >= 10);
   // the server's tuners: on only once proven
-  add('tuning', 'Tuned volatility and momentum', ACC.min, tune?.use || tune?.drift ? 'good' : 'off',
+  add('tuning', 'Tuned volatility and momentum', tune?.use || tune?.drift ? Math.max(ACC.min, tune.test ?? 0) : 0, tune?.use || tune?.drift ? 'good' : 'off',
     tune?.use ? `volatility: EWMA ${tune.lambda}, floor ${tune.floor}, ×${tune.scale}${tune.tails ? `, fat tails ${tune.tails}` : ''} (z ${tune.z.toFixed(1)})` : 'volatility: standard settings (nothing proven better yet)',
     tune?.drift ? `momentum: ${tune.drift.w > 0 ? 'carry' : 'fade'} the last ${tune.drift.n} minutes at ${Math.abs(tune.drift.w)} (z ${tune.drift.z.toFixed(1)})` : 'momentum: none (nothing proven better yet)', tune || null);
   return rows;
 }
 
 // The report to copy: the rows' numbers, sample sizes and verdicts, plus when and which version
-export function accuracyReport(rows, { version = null, at = Date.now() } = {}) {
-  return { app: 'Shot Caller', version, at: new Date(at).toISOString(), rows: rows.map((r) => ({ key: r.key, name: r.name, n: r.n, verdict: r.verdict, metric: r.metric, vs: r.vs, data: r.data })) };
+// numbers kept to 6 significant digits (9.850000000000001 -> 9.85)
+const tidy = (v) => (typeof v === 'number' ? (Number.isFinite(v) && !Number.isInteger(v) ? Number(v.toPrecision(6)) : v) : Array.isArray(v) ? v.map(tidy) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, tidy(x)])) : v);
+export function accuracyReport(rows, { version = null, at = Date.now(), market = null } = {}) {
+  return { app: 'Shot Caller', version, ...(market ? { market } : {}), at: new Date(at).toISOString(), rows: rows.map((r) => ({ key: r.key, name: r.name, n: r.n, verdict: r.verdict, metric: r.metric, vs: r.vs, data: tidy(r.data) })) };
 }

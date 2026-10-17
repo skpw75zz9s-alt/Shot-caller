@@ -34,6 +34,10 @@ const side = (s) => (s === 'YES' ? 'UP' : 'DOWN');
 const pc = (p) => `${Math.round(p * 100)}%`;
 const cents = (p) => `${Math.round(p * 100)}¢`;
 const money = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
+// a price at the coin's own precision (v13.42.3: DOGE's $0.078 used to read $0), a size in whole coins once it's big
+const px = (v, mk) => (Math.abs(v) >= 1000 ? money(v) : `$${Number(v).toFixed(mk?.digits ?? 2)}`);
+const qty = (v) => (v >= 100 ? Math.round(v).toLocaleString('en-US') : v.toFixed(2));
+const BTC = { key: 'BTC', digits: 2 };
 const ts = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
 
 // The embeds (pure)
@@ -42,25 +46,25 @@ export const alertEmbeds = {
     description: `The bot's odds on its ${side(b.side)} call fell to ${pc(b.p)}. If you bought it, selling now keeps ${b.bid ? `about ${cents(b.bid)} of each $1` : 'part of it'} instead of risking all of it.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
   flip: ({ called, p, ticker }) => ({ title: `↺ FLIP WARNING · the bot now leans against its ${side(called)} call`, color: COLORS.warn,
     description: `Its odds on ${side(called)} are down to ${pc(p)}. Not a bail yet: that comes if they keep falling.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
-  cross: ({ above, spot, strike, minsLeft }) => ({ title: `${above ? '⬆️' : '⬇️'} BTC crossed ${above ? 'above' : 'below'} the target`, color: above ? COLORS.up : COLORS.down,
-    description: `BTC ${money(spot)} vs the target ${money(strike)}, ${minsLeft.toFixed(1)} minutes left in the round.` }),
-  trend: ({ bull, price }) => ({ title: bull ? '🐂 Chart turns bull' : '🐻 Chart turns bear', color: bull ? COLORS.up : COLORS.down,
-    description: `EMA 9 crossed ${bull ? 'above' : 'below'} EMA 21 on the 1-minute chart (BTC ${money(price)}). A trend read, not a call.` }),
-  whale: ({ x }) => ({ title: `🐋 Whale ${x.side === 'buy' ? 'buy' : 'sell'}: ${money(x.price * x.size)}`, color: x.side === 'buy' ? COLORS.up : COLORS.down,
-    description: `${x.size.toFixed(2)} BTC at ${money(x.price)} on ${x.ex}.` }),
-  liquidation: ({ side, usd, n }) => ({ title: `💥 Liquidation cascade: ${money(usd)} of ${side === 'long' ? 'longs' : 'shorts'} force-closed`, color: side === 'long' ? COLORS.down : COLORS.up,
-    description: `${n} liquidations in the last minute on the futures exchanges: forced ${side === 'long' ? 'selling' : 'buying'}, which often pushes BTC ${side === 'long' ? 'down' : 'up'} for a few minutes. A read, not a call.` }),
+  cross: ({ above, spot, strike, minsLeft, mk = BTC }) => ({ title: `${above ? '⬆️' : '⬇️'} ${mk.key} crossed ${above ? 'above' : 'below'} the target`, color: above ? COLORS.up : COLORS.down,
+    description: `${mk.key} ${px(spot, mk)} vs the target ${px(strike, mk)}, ${minsLeft.toFixed(1)} minutes left in the round.` }),
+  trend: ({ bull, price, mk = BTC }) => ({ title: bull ? '🐂 Chart turns bull' : '🐻 Chart turns bear', color: bull ? COLORS.up : COLORS.down,
+    description: `EMA 9 crossed ${bull ? 'above' : 'below'} EMA 21 on the 1-minute chart (${mk.key} ${px(price, mk)}). A trend read, not a call.` }),
+  whale: ({ x, mk = BTC }) => ({ title: `🐋 Whale ${x.side === 'buy' ? 'buy' : 'sell'}: ${money(x.price * x.size)}`, color: x.side === 'buy' ? COLORS.up : COLORS.down,
+    description: `${qty(x.size)} ${mk.key} at ${px(x.price, mk)} on ${x.ex}.` }),
+  liquidation: ({ side, usd, n, mk = BTC }) => ({ title: `💥 Liquidation cascade: ${money(usd)} of ${side === 'long' ? 'longs' : 'shorts'} force-closed`, color: side === 'long' ? COLORS.down : COLORS.up,
+    description: `${n} liquidations in the last minute on the futures exchanges: forced ${side === 'long' ? 'selling' : 'buying'}, which often pushes ${mk.key} ${side === 'long' ? 'down' : 'up'} for a few minutes. A read, not a call.` }),
   hold: ({ h }) => ({ title: '⚠️ Market watch: new calls on hold', color: COLORS.warn, description: `${h.why}\nOn hold until ${ts(h.until)}.` }),
   early: ({ w, ticker, closeTime }) => ({ title: `🧪 Early read (TEST, not a call) · ${side(w.side)} at ${cents(w.price)}`, color: COLORS.grey,
     description: `The early lane would call ${side(w.side)} here (the bot's worst case ${pc(w.p)}), but it's paused after its recent calls lost money after fees: this is logged and graded, not a call to buy.`,
     fields: [{ name: 'Closes', value: ts(Date.parse(closeTime)), inline: true }, { name: 'Market', value: `\`${ticker}\``, inline: true }] }),
-  sitout: ({ result, ticker, value, strike }) => ({ title: `😴 No call · the round closed ${result === 'yes' ? 'UP' : 'DOWN'}`, color: COLORS.grey,
-    description: `Nothing cleared the bar this round${value && strike ? `: BTC settled ${money(value)} vs the target ${money(strike)}` : ''}.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
+  sitout: ({ result, ticker, value, strike, mk = BTC }) => ({ title: `😴 No call · the round closed ${result === 'yes' ? 'UP' : 'DOWN'}`, color: COLORS.grey,
+    description: `Nothing cleared the bar this round${value && strike ? `: ${mk.key} settled ${px(value, mk)} vs the target ${px(strike, mk)}` : ''}.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
   status: ({ text, good }) => ({ title: good ? '✅ Bot status' : '⏸️ Bot status', color: good ? COLORS.up : COLORS.warn, description: text }),
 };
 
 // The watcher: fed the official bot's every tick (bot.js onTick), each settled round (onRound) and big trades (whale)
-export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS } = {}) {
+export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS } = {}) {
   const rounds = new Map(); // ticker -> what's been posted this round
   const sent = []; // times of the last hour's alerts
   let trendBull = null, trendAt = 0, whaleAt = 0, prev = null, liqAt = 0;
@@ -70,7 +74,7 @@ export function createAlertWatcher({ post, kinds = alertKinds(), whaleMin = Numb
     while (sent.length && sent[0] < now - 3600000) sent.shift();
     if (!always && sent.length >= limits.perHour) return false;
     sent.push(now);
-    return post(alertEmbeds[kind](args)) !== false;
+    return post(alertEmbeds[kind]({ mk: market, ...args })) !== false;
   };
   const round = (t) => { let r = rounds.get(t); if (!r) { rounds.set(t, (r = { crosses: 0 })); if (rounds.size > 20) rounds.delete(rounds.keys().next().value); } return r; };
 

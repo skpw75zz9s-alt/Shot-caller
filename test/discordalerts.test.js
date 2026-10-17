@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ALERT_KINDS, DEFAULT_ALERTS, alertKinds, createAlertWatcher } from '../discordalerts.js';
+import { ALERT_KINDS, DEFAULT_ALERTS, alertEmbeds, alertKinds, createAlertWatcher } from '../discordalerts.js';
 import { createDiscord } from '../discord.js';
 
 const T0 = 1_700_000_000_000, K = 100000;
@@ -83,4 +83,13 @@ test('alerts go to their own channel when DISCORD_ALERTS_WEBHOOK_URL is set, wit
   assert.equal(d.status().alerts, 'own channel');
   assert.equal(createDiscord({ url: MAIN, alertsUrl: '' }).status().alerts, 'calls channel');
   assert.equal(createDiscord({ url: '', alertsUrl: '' }).alert({ title: 'x' }), false, 'no webhook: nothing sent');
+});
+
+test('alerts name their own coin at its own precision', () => {
+  const posts = [];
+  const w = createAlertWatcher({ post: (e) => posts.push(e), market: { key: 'DOGE', digits: 5 }, kinds: new Set(['whale']), whaleMin: 1000 });
+  w.whale({ side: 'buy', price: 0.07803, size: 20000, ex: 'Coinbase', t: 1 }, 1e9);
+  assert.match(posts[0].description, /^20,000 DOGE at \$0\.07803 on Coinbase/);
+  assert.match(alertEmbeds.cross({ above: true, spot: 0.0781, strike: 0.078, minsLeft: 4, mk: { key: 'DOGE', digits: 5 } }).description, /DOGE \$0\.07810 vs the target \$0\.07800/);
+  assert.match(alertEmbeds.cross({ above: true, spot: 100250, strike: 100000, minsLeft: 4 }).description, /BTC \$100,250 vs the target \$100,000/);
 });

@@ -302,6 +302,12 @@ coin's bot is running, the server answers its requests with "starting" instead o
 logs are type-checked as they load, and a bad saved position gets its own small card. If the Deck still can't draw,
 the error shows on the card, and the phone clears that coin's saved logs and reloads, once a session.
 
+**Every coin, its own numbers (v13.42.3):** prices, misses and moves are shown at the coin's own precision across the
+Deck, the accuracy report, Market watch and Discord alerts (DOGE's $0.078 used to read $0). Labels and explanations name
+the coin you're on. The accuracy report says which market it's for, and its numbers are tidied to 6 significant
+digits. Your own trades get a good/bad verdict from 10 trades (a ledger, not an estimate). A pick whose odds are
+within 0.002 of Kalshi's reads "level with Kalshi", and BUY picks are judged on money from 20.
+
 ### The line, receipts and record windows (v13.41)
 
 These ideas came from studying another 15-minute terminal. Each was rebuilt and tested the Shot Caller way.

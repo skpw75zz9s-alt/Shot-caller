@@ -38,13 +38,13 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     if (assets.has(key)) return assets.get(key);
     const a = ASSETS.find((x) => x.key === key);
     const dir = join(dataDir, 'assets', key), crypto = a.kind === 'crypto';
-    const discordAlerts = createAlertWatcher({ post: (embed) => (say(key) ? discord.alert({ ...embed, title: `[${key}] ${embed.title || ''}` }) : null) });
+    const discordAlerts = createAlertWatcher({ market: { key: a.key, digits: a.digits }, post: (embed) => (say(key) ? discord.alert({ ...embed, title: `[${key}] ${embed.title || ''}` }) : null) });
     const futures = crypto && a.sym?.hyper ? createFutures({ coin: a.sym.hyper }) : null;
     const scanFeed = crypto ? createScanFeed({ file: join(dir, 'scan.json'), futures, asset: a, onTrade: (x, now) => discordAlerts.whale(x, now), onLiq: (x, now) => discordAlerts.liquidation(x, now) }) : nullScan();
     const playbook = createPlaybook({ coinbase, file: join(dir, 'bars.json'), candleRows: (o = {}) => prices.candleRows(a, { gran: 60, ...o }) });
     if (futures) playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; });
     playbook.setFlow(() => scanFeed.imbalance(clock() - 900000));
-    const marketWatch = createMarketWatch({ kalshi, scanFeed, futures, playbook });
+    const marketWatch = createMarketWatch({ kalshi, asset: { key: a.key, digits: a.digits }, scanFeed, futures, playbook });
     const tuneFeed = createTuneFeed({ playbook }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
     const microFeed = createMicroFeed({ file: join(dir, 'micro.json'), scanFeed, futures, marketWatch, playbook });
     const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, discordAlerts, ready: null };

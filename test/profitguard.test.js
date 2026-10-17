@@ -40,6 +40,7 @@ test('the accuracy card: levels judged by profit, the guard and your trades show
   const v = Object.fromEntries(rows.map((r) => [r.key, r.verdict]));
   assert.equal(v.calls, 'bad', 'won 92.5% but lost money: red');
   assert.equal(v.profit, 'bad'); assert.match(rows.find((r) => r.key === 'profit').metric, /PAUSED/);
-  assert.equal(v.trades, 'wait', '12 trades: too few to judge');
+  assert.equal(v.trades, 'bad', 'your own trades are a ledger: 12 losing trades are a loss, not a sample');
+  assert.equal(accuracyRows({ trades: { n: 5, total: -3, today: { pnl: 0, limit: 25, hit: false } } }).find((r) => r.key === 'trades').verdict, 'wait', 'under 10 trades: wait');
   assert.match(rows.find((r) => r.key === 'trades').vs, /daily loss limit/);
 });

@@ -16,11 +16,14 @@
 // Severe events hold NEW calls for a short while (bad data or an untradeable book); everything else is logged, shown
 // on the Deck, and counted into each call's record so the call filter can learn whether it matters.
 const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
-const fmt$ = (v) => `$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+// a move at the coin's own scale (v13.42.3): whole dollars for Bitcoin, its own decimals for a coin under $1,000
+// (digits 0 for a coin priced in the thousands, like Bitcoin)
+const fmt$ = (v, digits = 0) => `$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: Math.min(2, digits) })}`;
 const k$ = (v) => (v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
 export const WATCH = { dedupeMs: 30000, keep: 200 };
 
-export function createDetector({ clock = () => Date.now() } = {}) {
+export function createDetector({ clock = () => Date.now(), asset = { key: 'BTC', digits: 2 } } = {}) {
+  const coin = asset.key, dgOf = (p) => (p >= 1000 ? 0 : asset.digits ?? 2); // a move in whole dollars on a coin priced in the thousands
   const prices = [], flows = [], spreads = [], depths = [], mids = [], kTrades = [];
   const events = [], last = {}, breakSince = {};
   let hold = null, round = null;
@@ -53,13 +56,13 @@ export function createDetector({ clock = () => Date.now() } = {}) {
       const then = at(prices, now - 5000);
       if (then && sigmaMin > 0 && now - then.t <= 8000) {
         const sd = price * sigmaMin * Math.sqrt(5 / 60), d = price - then.p, z = Math.abs(d) / sd;
-        if (z >= 5) add(emit(now, 'jump', 'severe', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds): new calls wait 30s for the dust to settle`, 'jump', 30, Math.sign(d)));
-        else if (z >= 3) add(emit(now, 'jump', 'warn', `BTC ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d)} in 5s (${z.toFixed(1)}× a normal 5 seconds)`, 'jump', 0, Math.sign(d)));
+        if (z >= 5) add(emit(now, 'jump', 'severe', `${coin} ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d, dgOf(price))} in 5s (${z.toFixed(1)}× a normal 5 seconds): new calls wait 30s for the dust to settle`, 'jump', 30, Math.sign(d)));
+        else if (z >= 3) add(emit(now, 'jump', 'warn', `${coin} ${d > 0 ? 'jumped' : 'dropped'} ${d > 0 ? '+' : '−'}${fmt$(d, dgOf(price))} in 5s (${z.toFixed(1)}× a normal 5 seconds)`, 'jump', 0, Math.sign(d)));
       }
       // the price itself stopped: no fresh price for 30 s while the bot is running
     }
     const lastPrice = prices[prices.length - 1];
-    if (prices.length && now - lastPrice.t > 30000) add(emit(now, 'silent', 'severe', 'No fresh BTC price for 30s+: new calls are on hold until the feeds are back', 'price-dead', 30));
+    if (prices.length && now - lastPrice.t > 30000) add(emit(now, 'silent', 'severe', `No fresh ${coin} price for 30s+: new calls are on hold until the feeds are back`, 'price-dead', 30));
     // exchanges: volume bursts
     push(flows, { t: now, usd: flowUsd || 0 }, 600000);
     const span = flows.length ? (now - flows[0].t) / 1000 : 0;
@@ -75,7 +78,7 @@ export function createDetector({ clock = () => Date.now() } = {}) {
         const others = median(names.filter((o) => o !== n).map((o) => venues[o])), gap = venues[n] - others;
         if (Math.abs(gap) >= Math.max(25, others * 0.0003)) {
           breakSince[n] ??= now;
-          if (now - breakSince[n] >= 5000) add(emit(now, 'breakaway', 'warn', `${n} is ${fmt$(gap)} ${gap > 0 ? 'above' : 'below'} the other exchanges for ${Math.round((now - breakSince[n]) / 1000)}s`, `break-${n}`));
+          if (now - breakSince[n] >= 5000) add(emit(now, 'breakaway', 'warn', `${n} is ${fmt$(gap, dgOf(price))} ${gap > 0 ? 'above' : 'below'} the other exchanges for ${Math.round((now - breakSince[n]) / 1000)}s`, `break-${n}`));
         } else delete breakSince[n];
       }
     }
@@ -93,7 +96,7 @@ export function createDetector({ clock = () => Date.now() } = {}) {
         const m10 = at(mids, now - 10000), p10 = at(prices, now - 10000);
         if (m10 && now - m10.t <= 15000 && Math.abs(mid - m10.v) >= 0.08) {
           const z10 = p10 && sigmaMin > 0 && price > 0 ? Math.abs(price - p10.p) / (price * sigmaMin * Math.sqrt(10 / 60)) : null;
-          if (z10 != null && z10 < 1) add(emit(now, 'reprice', 'warn', `Kalshi repriced ${mid > m10.v ? '+' : '−'}${Math.round(Math.abs(mid - m10.v) * 100)}¢ in 10s while BTC barely moved: someone may know something`));
+          if (z10 != null && z10 < 1) add(emit(now, 'reprice', 'warn', `Kalshi repriced ${mid > m10.v ? '+' : '−'}${Math.round(Math.abs(mid - m10.v) * 100)}¢ in 10s while ${coin} barely moved: someone may know something`));
         }
       }
       if (kalshi.near != null) {

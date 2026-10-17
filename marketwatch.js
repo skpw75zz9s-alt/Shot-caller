@@ -6,8 +6,8 @@ import { createDetector } from './public/watch.js';
 import { parseBook } from './public/trader.js';
 import { parseKalshiTrades } from './public/feeds.js';
 
-export function createMarketWatch({ kalshi, scanFeed, futures = null, playbook = null, fetchJSON = defaultFetch, clock = () => Date.now(), log = console }) {
-  const det = createDetector({ clock });
+export function createMarketWatch({ kalshi, asset = undefined, scanFeed, futures = null, playbook = null, fetchJSON = defaultFetch, clock = () => Date.now(), log = console }) {
+  const det = createDetector({ clock, asset });
   const recentK = [];
   let book = null, bookAt = 0, tradesAt = 0, busy = { book: false, trades: false }, seen = new Set(), pending = [], lastFlowAt = 0;
   async function pollBook(ticker, now) {
