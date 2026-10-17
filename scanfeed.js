@@ -10,6 +10,7 @@ import { HOME_ASSET } from './public/markets.js';
 import { quote } from './public/model.js';
 import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
 import { liqFeedsFor } from './public/liquidations.js';
+import { pressureAgreement } from './public/settle.js';
 
 const coinbaseFeed = (product) => ({ name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: [product], channels: ['matches'] }], parse: parseCoinbase });
 const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
@@ -174,7 +175,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
       rounds.push({ ticker: s.ticker, lean: s.lean, score: s.score, y: s.y, pModel: s.pModel, pScan: s.pScan });
       if (rounds.length >= 12) break;
     }
-    return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds,
+    return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds, agreement: pressureAgreement(data.samples),
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
   return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data };

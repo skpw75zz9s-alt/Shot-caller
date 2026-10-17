@@ -58,7 +58,7 @@ export function callMessage(e, { strike = null, floor = null, paper = false, lev
         ...(late ? [{ name: 'Late lane', value: 'Last 5 minutes: passed a stress test (1.35× volatility, fat tails). Half size.', inline: false }] : []),
         { name: 'Market', value: `\`${e.ticker}\``, inline: true },
       ],
-      footer: { text: `${level} · ${DISCLAIMER}` },
+      footer: { text: `${level}${e.receipt ? ` · receipt ${e.receipt}` : ''} · ${DISCLAIMER}` },
       timestamp: new Date(e.at).toISOString(),
     }],
   };
@@ -98,7 +98,7 @@ export function pickMessage(e, { prev = null, stats = null, base = null } = {}) 
         ...(last ? [{ name: 'Last pick', value: last, inline: true }] : []),
         ...(stats?.graded ? [{ name: 'Picks so far', value: `${stats.wins}–${stats.graded - stats.wins} (${Math.round(stats.wins / stats.graded * 100)}%)`, inline: true }] : []),
       ],
-      footer: { text: `Every round gets a call, locked at 10:00 left${e.late ? ' (late: the server restarted)' : ''} · ${DISCLAIMER}` },
+      footer: { text: `Every round gets a call, locked at 10:00 left${e.late ? ' (late: the server restarted)' : ''}${e.receipt ? ` · receipt ${e.receipt}` : ''} · ${DISCLAIMER}` },
     }],
   };
 }

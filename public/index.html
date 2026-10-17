@@ -67,6 +67,7 @@
   <link rel="modulepreload" href="flipmodel.js">
   <link rel="modulepreload" href="losslab.js">
   <link rel="modulepreload" href="pick.js">
+  <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -150,6 +151,17 @@
         <div class="entry" id="entry" hidden></div>
       </div>
 
+      <div class="card line-card" id="lineCard" hidden>
+        <div class="deep-head"><span>The line · how safe the lead is</span><b id="lnWhen"></b></div>
+        <div class="ln-lead" id="lnLead"></div>
+        <div class="ln-razor" id="lnRazor" hidden></div>
+        <div class="ln-bar" aria-hidden="true"><i id="lnFill"></i><em style="left:25%"></em><em style="left:50%"></em></div>
+        <p class="ln-say" id="lnSay"></p>
+        <div class="ln-settle" id="lnSettle" hidden></div>
+        <p class="ln-press" id="lnPress"></p>
+        <div class="ln-sess" id="lnSess"></div>
+        <details class="how"><summary>How it works</summary><small class="fine-left">The lead is how far price is past the target. The move left is how far price usually still travels in the time remaining (price × its 1-minute volatility × √minutes). Their ratio is the cushion: under 0.25 is a razor-thin coin-flip zone, around 1 is solid, 3+ is near-certain. "Rounds actually finished" comes from every round in the last three weeks of 1-minute candles, at the same cushion and time left: history, not the model. In the last 60 seconds of a crypto round Kalshi settles on the average of the final 60 one-second prints, so each second that passes is banked: the settlement watch shows where that average lands if price stays put, and what the seconds left would have to average to flip it. Pressure is buyers vs sellers on the exchanges; the record shows how often the leading side still won when they disagreed. Sessions: when the big markets' trading days open and close, which is when volume and volatility change.</small></details>
+      </div>
       <div data-crypto-only class="card tug" id="tugCard">
         <div class="deep-head"><span>Tug of war · all exchanges</span><b id="tugLead"></b></div>
         <div class="tug-sides">
@@ -426,6 +438,7 @@
           <div><b id="brStreak">—</b><small>streak</small></div>
         </div>
         <p class="push-status" id="brSub">Loading the bot's record…</p>
+        <div class="rec-range" id="brRange"></div>
         <div class="rec-days" id="brDays"></div>
         <div class="mem-axis"><span>14 days ago</span><span>today</span></div>
         <ul class="history" id="brBuckets"></ul>
@@ -571,7 +584,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.40 · The chart, rebuilt</p>
+      <p class="fine" id="version">Shot Caller v13.41 · The line, receipts</p>
     </section>
   </main>
 
@@ -591,7 +604,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '177';
+    window.SC_BUILD = '178';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

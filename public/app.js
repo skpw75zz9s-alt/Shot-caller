@@ -29,12 +29,13 @@ import { structureRead } from './structure.js';
 import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js';
 import { lessonsNow } from './lessons.js';
 import { pickNow } from './pick.js';
+import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '177'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '178'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -724,6 +725,7 @@ function renderDeck(snap, live, sig, now) {
     setText($('holdNote'), `${sig.side === 'YES' ? 'UP' : 'DOWN'} side · hold odds = chance confidence stays above ${Math.round(settings.holdFloor * 100)} until the last minute (300 simulated paths)${sig.locked ? ' · call locked' : ''}`);
   }
   renderFlipCheck(live, now);
+  renderLine(live, snap, now);
 
   // Tug of war
   const fs = flowStats(flow, now);
@@ -970,6 +972,52 @@ function renderTune() {
     + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
     + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
       : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.9+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
+}
+
+$('brRange')?.addEventListener('click', (e) => { const b = e.target.closest('button[data-r]'); if (!b) return; store.set('brRange', b.dataset.r); renderBotRecord(); });
+
+// ---------- The line (public/settle.js): the lead, the cushion, history at this cushion, the last-60-seconds settlement,
+// pressure vs the leader, the trading sessions ----------
+function renderLine(live, snap, now) {
+  const card = $('lineCard');
+  if (!card) return;
+  const ml = live?.ev.minutesLeft, open = live && ml > 0 && ml <= 14.5 && now >= Date.parse(live.m.open_time);
+  setHidden(card, !open);
+  if (!open) return;
+  const price = modelSpot(), strike = live.strike, sigma = live.sigma ?? snap.sigmaMin, dg = Math.max(0, MKT.digits ?? 0);
+  const below = /^less/.test(live.m.strike_type || ''), c = cushionRead({ price, strike, sigmaMin: sigma, minutesLeft: ml });
+  if (!c) { setHidden(card, true); return; }
+  const $$ = (v) => `$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: dg, maximumFractionDigits: Math.max(dg, Math.abs(v) < 100 ? 2 : 0) })}`;
+  const leadSide = c.up !== below ? 'UP' : 'DOWN', mmssLeft = mmss(ml);
+  setText($('lnWhen'), `${mmssLeft} left`);
+  setHTML($('lnLead'), `<b class="${leadSide === 'UP' ? 'pos' : 'neg'}">${leadSide} is winning by ${$$(c.lead)}</b><small>target ${$$(strike)} · live ${$$(price)}</small>`);
+  setHidden($('lnRazor'), !c.razor);
+  if (c.razor) setText($('lnRazor'), `⚡ Razor: ${$$(c.lead)} from the line · coin-flip zone`);
+  const fill = $('lnFill'); fill.style.width = `${Math.min(100, (c.ratio / 2) * 50 + (c.ratio > 2 ? 25 : 0)).toFixed(1)}%`; fill.className = c.word.replace(' ', '');
+  const h = cushionHistory(state.tune?.report?.cushion, c.ratio, ml);
+  setHTML($('lnSay'), `With ${mmssLeft} left, ${esc(MKT.key)} usually still moves about <b class="nw">±${$$(c.move)}</b>. That lead is <b>${c.ratio.toFixed(2)}×</b> the move left: a ${c.word} cushion.`
+    + (h ? ` At this cushion and time left, rounds actually finished <b>${leadSide} ${Math.round(h.rate * 100)}%</b> of the time (n=${int(h.n)}, last 3 weeks).` : '')
+    + ` To flip it, the other side needs ${$$(c.lead)} in ${mmssLeft}.`);
+  // the last 60 seconds of a crypto round: the average Kalshi settles on, banked second by second
+  const sw = MKT.settle === 'avg60' ? settlementWatch({ prints: snap.quoteLog?.[live.m.ticker], close: Date.parse(live.m.close_time), spot: price, strike, sigmaMin: sigma, now }) : null;
+  setHidden($('lnSettle'), !sw);
+  if (sw) {
+    const projSide = (sw.lead >= 0) !== below ? 'UP' : 'DOWN';
+    setHTML($('lnSettle'), `<b>⏱ Settlement watch</b> ${sw.banked}/60 s banked · average lands <b class="${projSide === 'UP' ? 'pos' : 'neg'}">${projSide} by ${$$(sw.lead)}</b> if price holds`
+      + (sw.left ? ` · to flip, the last ${sw.left} s must average ${$$(sw.need)} (${sw.sigmas === Infinity ? '—' : sw.sigmas.toFixed(1)}σ away)${sw.locked ? ' · <b class="lock">🔒 locked by arithmetic</b>' : ''}` : ' · final'));
+  }
+  // buyers vs sellers against the leader, and how that has gone
+  const ag = state.scanSrv?.agreement, tugBuy = flowStats(flow, now).nowBuyShare, pressSide = tugBuy == null ? null : tugBuy >= 0.5 ? 'UP' : 'DOWN';
+  let press = '';
+  if (pressSide && CRYPTO) {
+    const share = Math.round(Math.max(tugBuy, 1 - tugBuy) * 100), disagree = pressSide !== leadSide, b = disagree ? ag?.disagree : ag?.agree;
+    press = `Pressure leans <b class="${pressSide === 'UP' ? 'pos' : 'neg'}">${pressSide}</b> (${share}% of the last 2 minutes' trades)` + (disagree ? ', against the leader' : ', with the leader')
+      + (b?.n >= 20 ? `. When pressure ${disagree ? 'disagreed with' : 'agreed with'} the leading side, it still won <b>${Math.round(b.won / b.n * 100)}%</b> (${int(b.n)} graded checkpoints)${disagree && b.won / b.n > 0.6 ? ': follow the line, not the pressure' : ''}.` : '.');
+  }
+  setHTML($('lnPress'), press);
+  // the sessions, refreshed once a minute
+  if (!state.sessAt || now - state.sessAt > 60000) { state.sessAt = now; state.sess = sessions(now); }
+  setHTML($('lnSess'), (state.sess || []).map((x) => `<span class="${x.open ? 'on' : ''}" title="${x.open ? 'open' : 'closed'}">${x.flag} ${esc(x.name)} ${x.open ? `● closes ${span(x.closesIn)}` : `opens ${span(x.opensIn)}`}</span>`).join(''));
 }
 
 // ---------- Flip check (server: flipfeed.js, public/flipmodel.js): will the side that's ahead lose? ----------
@@ -2024,6 +2072,12 @@ function renderBotRecord() {
   setHTML($('brSub'), (!r.calls.length ? `No calls yet on the ${esc(r.level)} level. The bot calls on its own around the clock, and every call shows up here, win or lose.`
     : `Every call the bot made${since ? ` since ${since}` : ''}, around the clock, graded against Kalshi's result. It said ${r.said != null ? Math.round(r.said) : '—'}% on average and won ${pctOf(r.wins, r.graded)}. $10 on every call, held to settlement: ${money(r.usd)}. Best win streak: ${r.bestWin}.` +
       `${r.graded < 30 ? ' Under 30 graded calls is too early to judge: luck still dominates.' : ''}`) + timeLine + guardLine + beforeLine);
+  // the record over a time window (v13.41): last hour to all time
+  const RANGES = [['1h', 1], ['4h', 4], ['12h', 12], ['24h', 24], ['3d', 72], ['all', 0]], sel = store.get('brRange', 'all');
+  const winCalls = sel === 'all' ? null : r.calls.filter((e) => e.at >= Date.now() - (RANGES.find((x) => x[0] === sel)?.[1] ?? 0) * 3600000);
+  const ws = winCalls ? callStats(winCalls) : null;
+  setHTML($('brRange'), RANGES.map(([k]) => `<button type="button" data-r="${k}" class="${k === sel ? 'on' : ''}">${k === 'all' ? 'all time' : `last ${k}`}</button>`).join('')
+    + `<small>${ws ? `last ${sel}: ${ws.graded ? `<b>${ws.wins}–${ws.graded - ws.wins}</b> (${pctOf(ws.wins, ws.graded)}) · ${money(ws.usd)} at $10 a call` : 'no graded calls in this window'}` : `all time: <b>${r.wins}–${losses}</b> (${pctOf(r.wins, r.graded)}) · ${money(r.usd)} at $10 a call`}</small>`);
   const days = dailyRecord(r.calls, 14), top = Math.max(1, ...days.map((d) => d.w + d.l));
   setHTML($('brDays'), days.map((d) => `<div title="${d.day}: ${d.w} won, ${d.l} lost"><i class="w" style="height:${(d.w / top) * 100}%"></i><i class="l" style="height:${(d.l / top) * 100}%"></i></div>`).join(''));
   $('brDays').classList.toggle('empty', !days.some((d) => d.w + d.l));
@@ -2036,7 +2090,7 @@ function renderBotRecord() {
     const up = e.side === 'YES', graded = e.result === 'yes' || e.result === 'no', won = graded && e.side.toLowerCase() === e.result;
     const badge = graded ? (won ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>') : e.result === 'unknown' ? '<span class="badge">VOID</span>' : Date.parse(e.closeTime) > now ? '<span class="badge live">LIVE</span>' : '<span class="badge">SETTLING</span>';
     const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${pc(e.price)}</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}</small></span>${badge}</li>`;
+    return `<li><img src="${up ? 'bull' : 'bear'}.svg" alt=""><span><b>${up ? 'UP' : 'DOWN'} at ${pc(e.price)}</b><small>${when} · confidence ${e.conf ?? '—'}${e.hold != null ? ` · hold ${Math.round(e.hold * 100)}%` : ''}${e.receipt ? ` · <span class="rcpt" title="Sealed: a hash of this call and the one before it. Editing or removing any call breaks every receipt after it.">🔒 ${esc(e.receipt.slice(0, 10))}</span>` : ''}</small></span>${badge}</li>`;
   }).join('') || '<li class="empty">The first call will show up here.</li>');
 }
 

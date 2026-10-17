@@ -271,6 +271,34 @@ Security:
 
 ## Version notes (newest first)
 
+### The line, receipts and record windows (v13.41)
+
+These ideas came from studying another 15-minute terminal. Each was rebuilt and tested the Shot Caller way.
+
+The Deck's new **The line** card has these parts:
+
+- **The lead:** the lead over the target next to how far price usually still moves in the time left. The ratio between
+  them is the cushion (razor, thin, solid, strong, near-certain).
+- **History at this cushion:** how often rounds actually finished on the leader's side at this cushion and time left,
+  over the last three weeks of candles (`cushionTable`, `public/settle.js`).
+- **What a flip needs:** how much the other side has to move, and in how long.
+- **Razor warning:** shown when the lead is under a quarter of the move left.
+- **Settlement watch (crypto, last 60 seconds):** Kalshi settles on the average of the last 60 one-second prints. The
+  watch shows the seconds already banked, where the average lands if price holds, and what the seconds left would
+  have to average to flip it. Past about 4σ it is locked by arithmetic.
+- **Pressure vs the leader:** how often the leader still won when buyers and sellers disagreed with it (the Round
+  scan's graded samples).
+- **Sessions:** when Sydney, Tokyo, London and New York open and close.
+
+Every official call and round call is **sealed with a receipt**: a hash of the call and the receipt before it. Editing
+or removing any call breaks every receipt after it. The receipt is shown in the record and posted to Discord with the
+call.
+
+The official record can be read over the **last 1h, 4h, 12h, 24h or 3d**, or all time.
+
+One idea was deliberately not copied: keeping thin-lead rounds off the record as "practice". Every round call is
+graded.
+
 ### A call every round, and the loss lab (v13.39)
 
 **Every round gets a call.** From 10:00 left, when nothing is worth buying, the Deck shows the round call (the

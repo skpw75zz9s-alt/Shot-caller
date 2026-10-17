@@ -6,6 +6,7 @@ import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelO
 import { earlyProof, profitGuard } from './public/profitguard.js';
 import { PICK, pickMix, pickNow, pickScore } from './public/pick.js';
 import { causeTally, contextOf, deepDive, lessonStudy, lessonsFor } from './public/losslab.js';
+import { createHash } from 'node:crypto';
 import { ASSETS, HOME, HOME_ASSET } from './public/markets.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
@@ -454,7 +455,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
       if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL,
         ctx: lessonContext(snap.live, sig.callSide, snap, now), strike: snap.live.strike, sigma: snap.live.sigma ?? snap.sigmaMin, strikeType: snap.live.m.strike_type || 'greater', ...(HAS_FLOOR ? { fl: guard.floor } : {}), ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
-        recordDirty = true; saveRecord();
+        seal(record, record.at(-1)); recordDirty = true; saveRecord();
         try { onCall(record.at(-1), { strike: snap.live.strike, floor: HAS_FLOOR ? guard.floor : null, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late', early: sig.lane === 'early', flip: sig.lane === 'flip' ? { from: sig.flip?.from ?? null } : null }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
       }
     }
@@ -479,6 +480,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
           const prev = pickRecord.filter((x) => x.result === 'yes' || x.result === 'no').at(-1) ?? null;
           pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: Math.round(e.pb * 1000) / 1000, mix: e.mix, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
             ctx, sigma: lv.sigma ?? snap.sigmaMin, strikeType: lv.m.strike_type || 'greater', ...(ml < PICK.at - PICK.window ? { late: true } : {}), ...(orig ? { orig, lessons: applied.map((x) => x.label) } : {}) });
+          seal(pickRecord, pickRecord.at(-1));
           if (pickRecord.length > 5000) pickRecord.splice(0, pickRecord.length - 5000);
           savePick();
           try { onPick(pickRecord.at(-1), { prev, stats: pickStats() }); } catch (err) { log.error('pick hook failed', err.message); }
@@ -502,6 +504,13 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   async function savePick() {
     pickDirty = false;
     try { await mkdir(dirname(pickFile), { recursive: true }); await writeFile(`${pickFile}.tmp`, JSON.stringify(pickRecord)); await rename(`${pickFile}.tmp`, pickFile); } catch (e) { log.error('saving the pick record failed', e.message); }
+  }
+  // ---------- receipts (v13.41): each call sealed with a hash of itself and the receipt before it, so the record can't be
+  // quietly edited: changing or removing any call breaks every receipt after it (posted to Discord with the call) ----------
+  function seal(list, e) {
+    if (!e || e.receipt) return;
+    const prev = [...list].reverse().find((x) => x !== e && x.receipt)?.receipt ?? '';
+    e.receipt = createHash('sha256').update(`${prev}|${e.ticker}|${e.side}|${e.price}|${e.at}`).digest('hex').slice(0, 16);
   }
   // ---------- the loss lab (public/losslab.js): why each loss happened, and the lessons the record proves ----------
   let labDirty = true, labs = null;

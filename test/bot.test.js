@@ -237,6 +237,7 @@ test('every round gets a call: a server that starts late still locks it (marked 
   assert.equal(picks.length, 1, 'locked anyway');
   const e = picks[0].e;
   assert.equal(e.late, true); assert.ok(e.ctx && e.ctx.z > 0 && e.ctx.flow === 40, JSON.stringify(e.ctx));
+  assert.match(e.receipt, /^[0-9a-f]{16}$/, 'sealed with a receipt');
   const L = b.lessons();
   assert.ok(L.pick && L.official && Array.isArray(L.losses) && L.reviewed === 0);
   b.stop(); tape = 100000;
