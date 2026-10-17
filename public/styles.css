@@ -976,3 +976,4 @@ nav button { position: relative; }
 .ls-test::before { content: '·'; position: absolute; left: 4px; } .ls-test b { color: var(--text); font-weight: 600; }
 .ls-test.on { color: var(--yes); } .ls-test.on::before { content: '✓'; left: 0; }
 .ls-tab { margin: 6px 0 4px; } .ls-tab td small { display: block; color: var(--dim); font-size: 10px; }
+.flip-chk { display: block; margin-top: 4px; color: var(--muted); } .flip-chk b { color: var(--text); }

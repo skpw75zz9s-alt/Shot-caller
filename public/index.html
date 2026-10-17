@@ -64,6 +64,7 @@
   <link rel="modulepreload" href="tvchart.js">
   <link rel="modulepreload" href="drivers.js">
   <link rel="modulepreload" href="lessons.js">
+  <link rel="modulepreload" href="flipmodel.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -132,6 +133,7 @@
           <div class="hold-row"><span>Confidence</span><b id="confBig">—</b><span>Hold odds</span><b id="holdBig">—</b><span>Flip risk</span><b id="flipBig">—</b></div>
           <div class="hold-bar"><i id="holdFill"></i></div>
           <small id="holdNote">Hold odds: the chance confidence stays above 80 until the last minute, from 300 simulated paths.</small>
+          <small class="flip-chk" id="flipChk" hidden></small>
         </div>
         <div class="price-boxes">
           <div class="pbox up"><label>UP · YES</label><b id="upAsk">—</b><small id="upBot"></small></div>
@@ -556,7 +558,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.37 · Your notes, tested</p>
+      <p class="fine" id="version">Shot Caller v13.38 · Flip check</p>
     </section>
   </main>
 
@@ -576,7 +578,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '173';
+    window.SC_BUILD = '174';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

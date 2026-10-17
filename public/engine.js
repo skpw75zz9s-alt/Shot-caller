@@ -7,6 +7,7 @@ import { deepDive, freshRejection, quoteTrend, rejections, stability } from './a
 import { basisOf, calShift, volFactor } from './learner.js';
 import { pulseFix } from './pulse.js';
 import { gateCheck } from './callgate.js';
+const FLIP_BACK_MARGIN = 0.05; // the flip check's room over the flip bar (public/flipmodel.js FLIP.backMargin)
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
 export const parseCandles = (rows) =>
@@ -318,6 +319,10 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     if (snap.flipOff) return no('flip calls lost money lately: off until they recover');
     if ((mem.flips || 0) >= s.flipMax) return no('already flipped this round');
     if (b.winProb == null || b.winProb < s.flipConf - 1e-9) return no(`the bot's worst case on ${b.side === 'YES' ? 'UP' : 'DOWN'} is ${b.winProb == null ? '—' : `${(b.winProb * 100).toFixed(0)}%`}, needs ${Math.round(s.flipConf * 100)}%`);
+    // v13.38 the flip check (public/flipmodel.js, proven only): chart history and the buyers and sellers must not say the
+    // new side is likely to flip back (more than the flip bar allows, plus 5 points)
+    const fc = snap.flipCheck, back = fc && fc.ticker === row.m.ticker ? fc.pLose?.[b.side] : null;
+    if (back != null && back > 1 - s.flipConf + FLIP_BACK_MARGIN) return no(`chart history and buyers / sellers give ${b.side === 'YES' ? 'UP' : 'DOWN'} a ${Math.round(back * 100)}% chance of flipping back`);
     const ask = b.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     const priced = !(s.winFloor > 0) || ask >= s.winFloor - 1e-9;
     if (priced ? !(passes(b, ...need.switching, true) && steady(b.side) && entryOk(b.side) && holds(b) && watchOk()) : !earlyOk(b)) return no(priced ? 'not past the bar for a switch yet' : (earlyWhy || 'not past the bar yet'));

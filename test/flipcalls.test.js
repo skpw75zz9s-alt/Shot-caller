@@ -56,3 +56,12 @@ test('flip calls on the accuracy card and in the Discord post', () => {
   const e = callMessage(call, { flip: { from: 'NO' } }).embeds[0];
   assert.match(e.title, /↺ FLIP · 🐂 UP call/); assert.match(e.fields.find((f) => f.name === 'Flip').value, /from the earlier DOWN call/);
 });
+
+test('the flip check (chart history + buyers / sellers, once proven) blocks a flip it says would flip back', () => {
+  const x = setup({ yb: 90, ya: 91 }), mem = calledDown();
+  const fc = (p) => ({ ticker: 'T', lead: 'YES', used: true, pLose: { YES: p, NO: 1 - p } });
+  const blocked = buySignal(x.row, { ...x.snap, flipCheck: fc(0.22) }, t90, NOW, mem);
+  assert.equal(blocked.fire, false); assert.match(blocked.flip.why, /give UP a 22% chance of flipping back/);
+  assert.ok(buySignal(x.row, { ...x.snap, flipCheck: fc(0.08) }, t90, NOW, calledDown()).fire, 'a check that agrees lets it through');
+  assert.ok(buySignal(x.row, { ...x.snap, flipCheck: { ...fc(0.4), ticker: 'OTHER' } }, t90, NOW, calledDown()).fire, 'another round\'s check is ignored');
+});

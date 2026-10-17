@@ -144,7 +144,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     const mLeft = live.ev.minutesLeft, pModel = live.pPre ?? live.ev.pYes; // the odds before the scan's own nudge
     const x = sc.ready ? featureVector(sc, live.m.strike_type) : null;
     const chance = scanChance(pModel, x, data.models, mLeft);
-    last = { ticker: live.m.ticker, at: now, minutesLeft: mLeft, sc: slim(sc), chance, kalshi, feeds: liveFeeds(now) };
+    last = { ticker: live.m.ticker, at: now, minutesLeft: mLeft, sc: slim(sc), chance, kalshi, feeds: liveFeeds(now), x }; // x: the reads toward YES (the flip check's buyers / sellers)
     // a sample at each checkpoint, only with at least 3 exchanges streaming (an outage would teach it nonsense)
     const cp = CHECKPOINTS.find((c) => mLeft <= c && mLeft > c - 1.5);
     if (cp && sc.ready && pModel != null && liveFeeds(now) >= 3 && !data.samples.some((s) => s.ticker === live.m.ticker && s.cp === cp)) {

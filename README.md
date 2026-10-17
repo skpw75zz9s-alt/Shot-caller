@@ -271,6 +271,23 @@ Security:
 
 ## Version notes (newest first)
 
+### Flip check (v13.38)
+
+The flip logic now reads the chart's history and the buyers and sellers (`public/flipmodel.js`, `flipfeed.js`). Every
+hour it relearns how often the side that's ahead at 10, 6 and 3 minutes left ends up losing, on top of the bot's math:
+
+- **Chart history:** every past round in up to 3 weeks of 1-minute candles. It reads momentum against the leader, the
+  leader's recent run, RSI, a rejection wick, candle flow (volume on up vs down candles, where candles closed), a
+  volume surge, and the pullback from the round's extreme.
+- **Buyers / sellers:** the Round scan's graded tape samples (flow, absorption, big prints, futures, liquidations),
+  turned to point against the leader.
+
+Each part is fitted on the older 2/3 of its data and scored on the newer 1/3 against the bot's math. It's used only
+once it beats the math there (z 2.5+ on 600+ chart or 200+ tape samples). Once proven, it does three things. It nudges
+the odds (5 points at most). It blocks a flip call when it says the new side is likely to flip back (more than the flip
+bar allows plus 5 points). It sends a flip warning when it gives the called side a 50%+ chance of losing. The Deck's
+hold box shows the live flip check, or that it's still learning.
+
 ### Your notes, tested (v13.37)
 
 A member's notes (MACD, EMA, RSI, ceiling / floor, the double bottom) are turned into rules the bot tests instead of

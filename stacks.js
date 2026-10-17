@@ -16,6 +16,7 @@ import { createPlaybook } from './playbookfeed.js';
 import { createMarketWatch } from './marketwatch.js';
 import { createMicroFeed } from './microfeed.js';
 import { createTuneFeed } from './tunefeed.js';
+import { createFlipFeed } from './flipfeed.js';
 import { createVolTuneFeed } from './voltunefeed.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { ASSETS, HOME, dataDir as marketDir, marketOf } from './public/markets.js';
@@ -44,9 +45,9 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     if (futures) playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; });
     playbook.setFlow(() => scanFeed.imbalance(clock() - 900000));
     const marketWatch = createMarketWatch({ kalshi, scanFeed, futures, playbook });
-    const tuneFeed = createTuneFeed({ playbook }), volTuneFeed = createVolTuneFeed({ playbook });
+    const tuneFeed = createTuneFeed({ playbook }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
     const microFeed = createMicroFeed({ file: join(dir, 'micro.json'), scanFeed, futures, marketWatch, playbook });
-    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, microFeed, discordAlerts, ready: null };
+    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, discordAlerts, ready: null };
     st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load()]).then(() => {
       if (crypto && on('SCAN_FEEDS')) scanFeed.start();
       if (futures && on('FUTURES')) futures.start();
@@ -66,14 +67,15 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         vapidFrom: () => home.bot.vapidKeys(), log, env,
         onObserve: (o) => {
           for (const [name, f] of [['round scan', () => st.scanFeed.observe(o)], ['market watch', () => st.marketWatch.observe(o)], ['micro model', () => st.microFeed.observe(o)],
-            ['indicator tuning', () => st.tuneFeed.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
+            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
             try { f(); } catch (e) { log.error?.(`${series} ${name} step failed`, e.message); }
           }
         },
         liveSpot: () => st.scanFeed.spot(),
-        shifts: () => mergeShifts(st.scanFeed.shifts(), st.microFeed?.shifts(), st.tuneFeed.shifts(), st.playbook.shifts(), crossFeed?.shifts(mk.asset)), // every proven nudge, related markets included
-        shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset) }),
+        shifts: () => mergeShifts(st.scanFeed.shifts(), st.microFeed?.shifts(), st.tuneFeed.shifts(), st.playbook.shifts(), crossFeed?.shifts(mk.asset), st.flipFeed?.shifts()), // every proven nudge, related markets included
+        shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts() }),
         watch: () => st.marketWatch.status(),
+        flipCheck: () => st.flipFeed?.check() ?? null,
         volTune: () => st.volTuneFeed.live(),
         onCall: (e, o) => discord.call(e, o),
         onSettle: (e, stats) => discord.result(e, stats),

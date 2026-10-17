@@ -33,7 +33,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '173'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '174'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -403,7 +403,7 @@ const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: state.priceDelayed ? null : modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts, chosen: state.chosen }); // this market's own learning (the server's copy for it)
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
-  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; // the late lane's own guard and the early lane's proof (the server's records)
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); // the late lane's own guard and the early lane's proof (the server's records)
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -722,6 +722,7 @@ function renderDeck(snap, live, sig, now) {
     setStyle($('holdFill'), 'width', `${hold == null ? 0 : Math.round(hold * 100)}%`);
     setText($('holdNote'), `${sig.side === 'YES' ? 'UP' : 'DOWN'} side · hold odds = chance confidence stays above ${Math.round(settings.holdFloor * 100)} until the last minute (300 simulated paths)${sig.locked ? ' · call locked' : ''}`);
   }
+  renderFlipCheck(live, now);
 
   // Tug of war
   const fs = flowStats(flow, now);
@@ -772,6 +773,9 @@ function renderDeck(snap, live, sig, now) {
     if (above != null && state.deckAbove != null && state.deckAbove.tk === tk && state.deckAbove.v !== above) alerts.event('cross', `${MKT.key} crossed ${above ? 'above' : 'below'} the target`, `${usd(ms, 0)} vs ${usd(live.strike, 0)}`, `cross:${tk}`);
     if (above != null) state.deckAbove = { tk, v: above };
     const lean = leanSide(live.ev), called = sig?.called;
+    // v13.38: the flip check (chart history + buyers / sellers, proven only) says the called side is more likely than not to lose
+    const fcLose = called ? flipCheckNow(tk)?.pLose?.[called] : null;
+    if (sustained(watch, 'flipchk', fcLose != null && fcLose >= 0.5 && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: ${Math.round(fcLose * 100)}% the ${called === 'YES' ? 'UP' : 'DOWN'} call flips`, 'chart history and buyers / sellers · held 10s', `flipchk:${tk}`);
     if (sustained(watch, 'flip', !!called && !!lean && lean !== called && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: bot now leans ${lean === 'YES' ? 'UP' : 'DOWN'}`, `against the ${called === 'YES' ? 'UP' : 'DOWN'} call · held 10s`, `flip:${tk}`);
     const risky = !!called && hold != null && (1 - hold) * 100 >= alerts.prefs().flipRisk;
     if (sustained(watch, 'fliprisk', risky, now)) alerts.event('fliprisk', `High flip risk: ${Math.round((1 - hold) * 100)}/100`, `hold odds ${Math.round(hold * 100)}% on the ${called === 'YES' ? 'UP' : 'DOWN'} call`, `fliprisk:${tk}`);
@@ -965,6 +969,31 @@ function renderTune() {
     + `<table class="sc-rec tune-tab"><tr><th>Indicator (best setting)</th><th>Hit (tuning)</th><th>Hit (unseen)</th><th>z</th><th></th></tr>${rows}</table>`
     + `<small class="muted">${proven.length ? `Proven: ${proven.map((f) => esc(f.setting)).join(', ')}. ${act.length ? `Right now: ${act.map((a) => `${esc(a.setting)} says ${a.push > 0 ? 'up' : 'down'}`).join(' · ')}${t.inCalls ? ` (${Object.values(t.inCalls).map((v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))} pts on YES`).join(', ')})` : ''}.` : 'None is signalling right now.'}`
       : 'No indicator has predicted the rounds on data it wasn\'t tuned on yet (|z| 2.9+ on 150+ rounds), so none changes the bot\'s calls. That\'s normal for chart indicators at this speed.'}</small>`);
+}
+
+// ---------- Flip check (server: flipfeed.js, public/flipmodel.js): will the side that's ahead lose? ----------
+async function refreshFlipCheck() {
+  if (document.hidden) return;
+  try { state.flipChk = await getJSON(api('flip')); state.flipChkAt = Date.now(); } catch { /* next time */ }
+}
+setInterval(refreshFlipCheck, 5000);
+setTimeout(refreshFlipCheck, 2000);
+// the live check the bot's flip calls read: only when a part is proven, fresh, and for this round
+function flipCheckNow(ticker = null) {
+  const l = state.flipChk?.live;
+  return l && l.used && Date.now() - (state.flipChkAt || 0) < 20000 && (!ticker || l.ticker === ticker) ? l : null;
+}
+function renderFlipCheck(live, now) {
+  const el = $('flipChk'), f = state.flipChk, l = f?.live;
+  if (!el) return;
+  if (!live || !l || l.ticker !== live.m.ticker || now - (state.flipChkAt || 0) > 20000) { setHidden(el, true); return; }
+  const side = l.lead === 'YES' ? 'UP' : 'DOWN', pc = (x) => `${Math.round(x * 100)}%`;
+  const learn = (e, what, need) => (!e ? `${what}: gathering` : e.proven ? `${what} ✓` : `${what}: learning (${int(e.nTest)}/${int(need)} test samples, z ${e.z.toFixed(1)})`);
+  const why = l.parts.slice(0, 3).map((p) => `${p.name.toLowerCase()} ${p.push > 0 ? '↑' : '↓'}`).join(', ');
+  setHTML(el, l.used
+    ? `<b>Flip check:</b> ${side} leads; ${pc(l.p)} chance it loses by the close (bot's math ${pc(l.base)})${why ? ` · ${esc(why)}` : ''}`
+    : `<b>Flip check:</b> ${side} leads; the bot's math gives it ${pc(l.base)} to lose. ${learn(f.chart, 'Chart history', f.need.chart)} · ${learn(f.flow, 'buyers / sellers', f.need.flow)}; used once proven.`);
+  setHidden(el, false);
 }
 
 // ---------- Your notes, tested (public/lessons.js): each lesson's live read and its record on unseen rounds ----------
