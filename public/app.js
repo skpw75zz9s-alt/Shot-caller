@@ -28,12 +28,13 @@ import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, liste
 import { structureRead } from './structure.js';
 import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js';
 import { lessonsNow } from './lessons.js';
+import { pickNow } from './pick.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '174'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '175'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -765,7 +766,7 @@ function renderDeck(snap, live, sig, now) {
     const tk = live.m.ticker;
     if (state.deckTicker && state.deckTicker !== tk) {
       const prev = state.deckTicker;
-      if (!state.callLog.some((e) => e.ticker === prev)) alerts.event('sitout', 'Sat out last round', `${prev}: no call met the bar`, `sit:${prev}`);
+      if (!state.callLog.some((e) => e.ticker === prev)) alerts.event('sitout', 'No buy last round', `${prev}: the round call was a lean, not a buy`, `sit:${prev}`);
       addNote('info', `New round ${roundName(tk)} · target ${usd(live.strike, 0)}`);
     }
     state.deckTicker = tk;
@@ -1520,6 +1521,7 @@ function render() {
       : sig.called && sig.stance === 'switching' && ev.side ? `Called ${sideName(sig.called)} earlier. ${sideName(ev.side)} looks cheap now, but switching needs a ${(sig.edgeNeed * 100).toFixed(0)}-pt gap and confidence ${sig.confNeed}.`
       : ev.side && settings.doubleRejRule !== false && live.rej?.double && live.rej.double.dir !== (ev.side === 'YES' ? 1 : -1) ? `${sideName(ev.side)} looks cheap, but not calling it: ${live.rej.double.label}`
       : sig.watchHold ? `Market watch has new calls on hold until ${clock(sig.watchHold.until)}: ${sig.watchHold.why}`
+      : sig.gated?.lesson ? `Confidence ${sig.deep?.score ?? '—'}, but not buying: a lesson from past losses (${sig.gated.lesson.label.toLowerCase()}: ${sig.gated.lesson.why}) shows calls like this win less often than their price needs.`
       : sig.gated ? `Confidence ${sig.deep?.score ?? '—'}, but the call filter skipped it: calls like this have won ${Math.round(sig.gated.pWin * 100)}% in the bot's record, and at ${Math.round((sig.gated.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk) * 100)}¢ it needs ${Math.round(sig.gated.need * 100)}% to pay.`
       : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `No new calls in the last ${settings.noCallLastMin} minutes: by now the outcome is mostly priced in, so a win pays only a few cents.`
       : sig.early?.would && !sig.early.live ? `Early read (paused, not a call): ${sideName(sig.early.would.side)} at ${Math.round(sig.early.would.price * 100)}¢, the bot's worst case ${Math.round(sig.early.would.p * 100)}%. Early calls are paused because their recent calls lost money after fees; they come back once their test calls are profitable again${earlyStatus()}.`
@@ -1541,6 +1543,17 @@ function render() {
     setText($('callSub'), call && strike ? `${MKT.key} ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
     if (call) cardCls.push(call.toLowerCase());
     if (waiting) cardCls.push('waiting');
+    // v13.39 every round gets a call: from 10:00 left, no buy means the round call (the 10-minute pick), never SIT OUT
+    const rc = !call && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
+    if (rc) {
+      const up = rc.side === 'YES', pcx = (x) => `${Math.round(x * 100)}%`;
+      if (setText(callEl, up ? 'UP' : 'DOWN')) pop(callEl);
+      setClass(callEl, `call ${rc.side.toLowerCase()} round`);
+      setText($('callLabel'), rc.buy ? 'ROUND CALL · BUY' : 'ROUND CALL · LEAN, NOT A BUY');
+      setText($('callSub'), `${MKT.key} ${up ? 'above' : 'below'} ${usd(rc.strike ?? strike, 0)} at close · ${pcx(rc.p)}`);
+      setText($('reason'), `Every round gets a call after the first 5 minutes: at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). ${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${Math.max(1, Math.round((1 - rc.p) * 10))} in 10.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}`);
+      cardCls.push(rc.side.toLowerCase(), 'round');
+    }
     // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
     const bail = sig.bail;
     if (bail) {
@@ -1823,6 +1836,38 @@ function renderPick(now = Date.now()) {
     st?.graded ? `picks ${st.wins}–${st.graded - st.wins} (${Math.round(st.wins / st.graded * 100)}%), the math said ${st.avgP != null ? pc(st.avgP) : '—'} on average` : 'no graded picks yet',
     st?.buys?.graded ? `BUY picks ${st.buys.wins}–${st.buys.graded - st.buys.wins}, ${st.buys.usd >= 0 ? '+' : '−'}$${Math.abs(st.buys.usd).toFixed(2)} at $10 each` : null,
     st?.score?.vs >= 10 ? `odds ${st.score.brierPick <= st.score.brierKalshi ? 'match or beat' : 'behind'} Kalshi's (Brier ${st.score.brierPick.toFixed(3)} vs ${st.score.brierKalshi.toFixed(3)})` : null].filter(Boolean).join(' · '));
+}
+
+// The round call (v13.39): this round's 10-minute pick from the server, or, if the server's isn't in, the same math
+// here, locked once for the round
+function roundCallFor(live, snap, now) {
+  const k = state.pick?.live;
+  if (k && k.closeTime === live.m.close_time && now - (state.pickAt || 0) < 60000) return k;
+  state.localPick ||= {};
+  if (!state.localPick[live.m.ticker]) {
+    try { const e = pickNow({ row: live, snap, settings }); if (e) state.localPick[live.m.ticker] = { ...e, price: e.ask, strike: live.strike, closeTime: live.m.close_time, local: true }; } catch { /* next tick */ }
+  }
+  return state.localPick[live.m.ticker] ?? null;
+}
+
+// ---------- Loss lab (server: bot.js, public/losslab.js): why each loss happened, the lessons the record proves ----------
+async function refreshLab(force = false) {
+  if (document.hidden || (!force && !shownViews.has('history'))) return;
+  try { state.lab = await getJSON(api('lessons')); renderLab(); } catch { /* next time */ }
+}
+setInterval(refreshLab, 30000);
+function renderLab() {
+  const L = state.lab;
+  if (!L || !$('labCard')) return;
+  const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`), side = (s) => (s === 'YES' ? 'UP' : 'DOWN');
+  setText($('labWhen'), `${int(L.reviewed)} loss${L.reviewed === 1 ? '' : 'es'} reviewed`);
+  const rows = (st, mode) => (st?.lessons || []).filter((x) => x.n > 0).slice(0, 5).map((x) => `<li class="${x.proven ? 'on' : ''}"><span><b>${esc(x.label)}</b><small>${esc(x.why)}</small></span>`
+    + `<span>${int(x.n)} call${x.n === 1 ? '' : 's'}, won ${pc(x.rate)}<small>${mode === 'flip' ? 'the other side wins if under 50%' : `needs ${pc(x.need)}`} · z ${x.z.toFixed(1)}</small></span>`
+    + `<b>${x.proven ? (mode === 'flip' ? '✓ takes the other side' : '✓ skips these') : 'watching'}</b></li>`).join('') || '<li class="empty">Not enough graded calls with context yet.</li>';
+  setHTML($('labLessons'), `<h4>Round calls (every round)</h4><ul class="lab-rules">${rows(L.pick, 'flip')}</ul><h4>Calls worth buying</h4><ul class="lab-rules">${rows(L.official, 'skip')}</ul>`);
+  setHTML($('labLosses'), (L.losses || []).map((e) => `<li><div><b>${esc(side(e.side))} ${esc(e.kind)}</b> <small>${clock(e.at)} · ${esc(roundName(e.ticker))}${e.p != null ? ` · said ${pc(e.p)}` : e.conf != null ? ` · confidence ${e.conf}` : ''}</small></div>`
+    + `<div class="lab-chips">${(e.review?.causes || []).map((c) => `<span>${esc(c.label)}</span>`).join('')}</div><small>${esc(e.review?.summary || '')}</small></li>`).join('') || '<li class="empty">No losses reviewed yet. Each one is looked at as soon as Kalshi settles it.</li>');
+  setText($('labTally'), L.tally?.length ? `Most common reasons: ${L.tally.slice(0, 4).map((t) => `${t.label} ×${t.n}`).join(' · ')}` : '');
 }
 
 // ---------- Related markets (server: crossfeed.js, public/cross.js): what moves this market ----------
@@ -2346,6 +2391,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'chart') requestAnimationFrame(() => drawChartTab(true)); // after the layout, so it has its width
     if (v === 'alerts') alerts.render();
     if (v === 'learn') renderLessons();
+    if (v === 'history') refreshLab(true);
     if (v === 'history') refreshBotRecord();
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
   }

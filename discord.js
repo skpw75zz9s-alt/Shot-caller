@@ -73,7 +73,8 @@ export function resultMessage(e, stats = null, base = null) {
       title: `${tag(mk)}${won ? '✅ WIN' : '❌ LOSS'} · ${sideName(e.side)} at ${cents(e.price)}`,
       description: `${mk.key} closed ${e.result === 'yes' ? 'above' : 'below'} the target.${rec ? `\n**Record:** ${rec}` : ''}`,
       color: won ? 0x2ee6a6 : 0xff4d6d,
-      fields: [{ name: 'Market', value: `\`${e.ticker}\``, inline: true }, { name: 'Called', value: ts(e.at), inline: true }],
+      fields: [{ name: 'Market', value: `\`${e.ticker}\``, inline: true }, { name: 'Called', value: ts(e.at), inline: true },
+        ...(!won && e.review?.summary ? [{ name: 'Why it lost', value: e.review.summary.slice(0, 1000) }] : [])], // the loss lab's deep dive (public/losslab.js)
       footer: { text: DISCLAIMER },
     }],
   };
@@ -83,13 +84,13 @@ export function resultMessage(e, stats = null, base = null) {
 // in the same post (one message a round, not two)
 export function pickMessage(e, { prev = null, stats = null, base = null } = {}) {
   const { author, ...sender } = brand(base), up = e.side === 'YES', mk = mkOf(e.ticker);
-  const pc = (x) => `${Math.round(x * 100)}%`, last = prev ? `${prev.side.toLowerCase() === prev.result ? '✅ won' : '❌ lost'} (${sideName(prev.side)} at ${cents(prev.price)})` : null;
+  const pc = (x) => `${Math.round(x * 100)}%`, last = prev ? `${prev.side.toLowerCase() === prev.result ? '✅ won' : '❌ lost'} (${sideName(prev.side)} at ${cents(prev.price)})${prev.side.toLowerCase() !== prev.result && prev.review?.summary ? `\nWhy: ${prev.review.summary.slice(0, 400)}` : ''}` : null;
   return {
     ...sender,
     embeds: [{
       author,
-      title: `${tag(mk)}🔒 10-MIN PICK · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
-      description: `${mk.key} ${up ? 'above' : 'below'} ${e.strike ? px(e.strike, mk) : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}`,
+      title: `${tag(mk)}🔒 ROUND CALL · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
+      description: `${mk.key} ${up ? 'above' : 'below'} ${e.strike ? px(e.strike, mk) : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}${e.orig ? `\n🧠 A lesson from past losses turned it from ${sideName(e.orig.side)}: ${(e.lessons || []).join(', ')}.` : ''}`,
       color: e.buy ? (up ? 0x2ee6a6 : 0xff4d6d) : 0x5d6880,
       fields: [
         { name: 'Kalshi', value: cents(e.price), inline: true },
@@ -97,7 +98,7 @@ export function pickMessage(e, { prev = null, stats = null, base = null } = {}) 
         ...(last ? [{ name: 'Last pick', value: last, inline: true }] : []),
         ...(stats?.graded ? [{ name: 'Picks so far', value: `${stats.wins}–${stats.graded - stats.wins} (${Math.round(stats.wins / stats.graded * 100)}%)`, inline: true }] : []),
       ],
-      footer: { text: `Locked at 10:00 left · ${DISCLAIMER}` },
+      footer: { text: `Every round gets a call, locked at 10:00 left${e.late ? ' (late: the server restarted)' : ''} · ${DISCLAIMER}` },
     }],
   };
 }

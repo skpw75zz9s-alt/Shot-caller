@@ -99,6 +99,7 @@ export const bot = createBot({
   shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live(), cross: !!crossFeed?.shifts('BTC'), flip: !!flipFeed.shifts() }),
   watch: () => marketWatch.status(),
   flipCheck: () => flipFeed.check(),
+  lessonCtx: () => ({ scan: scanFeed.lastScan(), flip: flipFeed.api().live }), // the loss lab's context: buyers vs sellers, the flip check
   volTune: () => volTuneFeed.live(),
   onCall: (e, o) => discord.call(e, o),
   onSettle: (e, stats) => discord.result(e, stats),
@@ -410,6 +411,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/record') return send(res, 200, mb.record());
     // the 10-minute pick: this round's (once locked), when it locks, the last graded one and the picks' record
     if (path === '/api/pick') return send(res, 200, mb.pick());
+    if (path === '/api/lessons') return send(res, 200, mb.lessons()); // the loss lab: why each loss happened and the lessons proven (public/losslab.js)
     if (path === '/api/cross') return send(res, 200, crossFeed.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC'));
     if (path === '/api/drivers') return send(res, 200, crossFeed.why(mq ? marketOf(mq, discovery.list()).asset : 'BTC', Number(url.searchParams.get('w')) || 60)); // why it's moving (public/drivers.js)
     if (path === '/api/markets') return send(res, 200, { markets: discovery.list().map((m) => ({ ...m, name: marketOf(m.series, discovery.list()).name, kind: marketOf(m.series, discovery.list()).kind, running: stacks.has(m.series) })), at: discovery.at() });

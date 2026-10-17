@@ -225,6 +225,23 @@ test('the 10-minute pick: locked once as the round crosses 10:00 left, posted, g
   b.stop(); tape = 100000;
 });
 
+test('every round gets a call: a server that starts late still locks it (marked late), with what it saw, and the loss lab answers', async () => {
+  Object.assign(quotes, { yes_bid: 80, yes_ask: 81 }); nextWindow = false; tape = 100050;
+  const file = join(await mkdtemp(join(tmpdir(), 'shot-late-')), 'data.json'), picks = [];
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: file, env: { PUSH_HOST_ALLOW: '127.0.0.1', INDEX: 'off' }, log: quiet, onPick: (e, o) => picks.push({ e, o }),
+    lessonCtx: () => ({ scan: { ticker: 'KXBTC15M-T1', sc: { ready: true, score: 40 } }, flip: null }) });
+  await b.load();
+  const p = fakeBrowser();
+  b.sync({ subscription: { endpoint: `${svc.base}/push/late`, keys: p.keys }, settings: { notifyBuy: false }, positions: [] });
+  for (let s = -120; s <= -90; s += 3) await b.tick(NOW + s * 1000); // first seen at 8 minutes left
+  assert.equal(picks.length, 1, 'locked anyway');
+  const e = picks[0].e;
+  assert.equal(e.late, true); assert.ok(e.ctx && e.ctx.z > 0 && e.ctx.flow === 40, JSON.stringify(e.ctx));
+  const L = b.lessons();
+  assert.ok(L.pick && L.official && Array.isArray(L.losses) && L.reviewed === 0);
+  b.stop(); tape = 100000;
+});
+
 test('official bot record: the server bot calls on its own (Profit: 60-90c with a big gap) and grades the call', async () => {
   Object.assign(quotes, { yes_bid: 38, yes_ask: 40 }); nextWindow = false;
   tape = 100050; // a calm market: the tape ends near the live price

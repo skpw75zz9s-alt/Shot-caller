@@ -34,7 +34,7 @@ test('BUY only when it pays: inside the 60-90c band with an 8c+ worst-case edge 
 test('the pick on Discord (with the last one\'s result) and on the accuracy card', () => {
   const e = { ticker: 'T', side: 'YES', price: 0.8, p: 0.93, worst: 0.9, gap: 0.09, buy: true, why: 'worth buying', strike: K, closeTime: new Date(NOW + 600000).toISOString() };
   const m = pickMessage(e, { prev: { side: 'NO', price: 0.7, result: 'no' }, stats: { graded: 10, wins: 7 } }).embeds[0];
-  assert.match(m.title, /10-MIN PICK · 🐂 UP · ✅ BUY/); assert.match(m.description, /93%/);
+  assert.match(m.title, /ROUND CALL · 🐂 UP · ✅ BUY/); assert.match(m.description, /93%/);
   assert.equal(m.fields.find((f) => f.name === 'Last pick').value, '✅ won (DOWN at 70¢)');
   assert.ok(!pickMessage({ ...e, buy: false, why: 'a pick, not a buy: at 95c' }).embeds[0].title.includes('BUY'));
   const row = accuracyRows({ bot: { graded: 0, wins: 0, pick: { graded: 40, wins: 29, avgP: 0.71, buys: { graded: 5, wins: 4, usd: 3 } } } }).find((r) => r.key === 'pick10');

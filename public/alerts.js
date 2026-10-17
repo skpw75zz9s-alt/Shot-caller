@@ -9,7 +9,7 @@ export const ALERT_GROUPS = [
     ['call', 'New call (bull for UP, bear roar for DOWN)', true, true],
     ['win', 'Call won at settlement (cash register)', true, true],
     ['loss', 'Call lost at settlement', false, true],
-    ['sitout', 'Round ended with no call ("Wait.")', true, false],
+    ['sitout', 'Round ended with no buy ("Wait.")', true, false],
     ['light', 'Buy light: a smaller bet just under the bar', false, true],
   ] },
   { title: 'Market warnings', events: [

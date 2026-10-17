@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
 import { PICK, pickMix, pickNow, pickScore } from './public/pick.js';
+import { causeTally, contextOf, deepDive, lessonStudy, lessonsFor } from './public/losslab.js';
 import { ASSETS, HOME, HOME_ASSET } from './public/markets.js';
 import { guardStats, withGuard } from './public/winguard.js';
 import { addMessage, bailMessage, buyMessage, buySignal, parseCandles, positionCheck, releaseCall, sellMessage, snapshot, updateMessage } from './public/engine.js';
@@ -30,7 +31,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, lessonCtx = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
   // the market this bot calls (v13.30: one bot per Kalshi market, public/markets.js); Bitcoin's 15-minute one by default
   const MK = mk ?? HOME, ASSET = ASSETS.find((a) => a.key === MK.asset) ?? HOME_ASSET, SPOT_SETTLE = ASSET.settle === 'spot';
   const DEV = { ...DEVICE_DEFAULTS, series: MK.series };
@@ -343,7 +344,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[LEARN_SERIES] ||= {});
         const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: liveSpotNow(), settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts, chosen: market.chosen });
-        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow;
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.lessons = officialLab();
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -438,7 +439,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
-    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow;
+    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.lessons = officialLab();
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
@@ -451,7 +452,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       // what the bot saw at the call, for the call filter to learn from (public/callgate.js)
       const q = snap.live.ev.quote, spread = q.yesAsk != null && q.yesBid != null ? Math.round((q.yesAsk - q.yesBid) * 100) / 100 : null;
       const feat = { mins: Math.round(snap.live.ev.minutesLeft * 10) / 10, stab: sig.stability?.score ?? null, vr: snap.sigmaMin && snap.sigmaLong ? Math.round(snap.sigmaMin / snap.sigmaLong * 100) / 100 : null, spread, ev60: watchNow?.events60 ?? 0 };
-      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL, ...(HAS_FLOOR ? { fl: guard.floor } : {}), ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
+      if (sig.fire && logCall(record, { ticker: snap.live.m.ticker, side: sig.callSide, price: sig.price, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, at: now, closeTime: snap.live.m.close_time, n: sig.callN, feat, lv: OFFICIAL_LEVEL,
+        ctx: lessonContext(snap.live, sig.callSide, snap, now), strike: snap.live.strike, sigma: snap.live.sigma ?? snap.sigmaMin, strikeType: snap.live.m.strike_type || 'greater', ...(HAS_FLOOR ? { fl: guard.floor } : {}), ...(sig.lane ? { lane: sig.lane } : {}) }, 20000)) {
         recordDirty = true; saveRecord();
         try { onCall(record.at(-1), { strike: snap.live.strike, floor: HAS_FLOOR ? guard.floor : null, paper: !!profitNow(OFFICIAL_LEVEL, now)?.paused, level: RISK_LEVELS[OFFICIAL_LEVEL].label, late: sig.lane === 'late', early: sig.lane === 'early', flip: sig.lane === 'flip' ? { from: sig.flip?.from ?? null } : null }); } catch (e) { log.error('call hook failed', e.message); } // (Discord: discord.js)
       }
@@ -459,15 +461,24 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     // The early lane's calls, test or live, once per round (its record decides whether it goes live)
     const ew = sig?.early?.would;
     if (ew && !earlyRecord.some((e) => e.ticker === snap.live.m.ticker) && logCall(earlyRecord, { ticker: snap.live.m.ticker, side: ew.side, price: ew.price, conf: ew.conf ?? null, at: now, closeTime: snap.live.m.close_time, lane: sig.early.live ? 'early' : 'test' }, 5000)) { earlyDirty = true; saveEarly(); }
-    // The 10-minute pick: locked once, as the round crosses 10:00 left (a server that restarts later than a minute past
-    // the mark skips that round rather than lock late). If the official bot already called, the pick is that call.
+    // The 10-minute pick, the round's call: locked once, as the round crosses 10:00 left. Every round gets one (v13.39: a
+    // server that restarts late still locks it, marked late, until the last minute). If the official bot already called,
+    // the pick is that call. Otherwise a proven lesson from past losses (public/losslab.js) can turn it to the other side.
     if (snap.live) {
       const lv = snap.live, t = lv.m.ticker, ml = lv.ev.minutesLeft;
-      if (ml <= PICK.at && ml > PICK.at - PICK.window && !pickRecord.some((e) => e.ticker === t)) {
-        const off = officialMem[t]?.side ?? null, e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off, mix: pickMix(pickRecord).mix }); // the official call's side, with its own odds and worst case; the bot's odds and Kalshi's in the mix the record favours
+      if (ml <= PICK.at && ml > 1 && !pickRecord.some((e) => e.ticker === t)) {
+        const off = officialMem[t]?.side ?? null, mix = pickMix(pickRecord).mix;
+        let e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off, mix }); // the official call's side, with its own odds and worst case; the bot's odds and Kalshi's in the mix the record favours
+        let ctx = e ? lessonContext(lv, e.side, snap, now) : null, orig = null, applied = [];
+        if (e && !off) {
+          applied = lessonsFor(pickLab(), ctx);
+          const e2 = applied.length ? pickNow({ row: lv, snap, settings: OFFICIAL, side: e.side === 'YES' ? 'NO' : 'YES', mix }) : null;
+          if (e2 && e2.ask != null) { orig = { side: e.side, ctx, p: Math.round(e.p * 1000) / 1000 }; e = e2; ctx = lessonContext(lv, e.side, snap, now); } else applied = [];
+        }
         if (e && e.ask != null) {
           const prev = pickRecord.filter((x) => x.result === 'yes' || x.result === 'no').at(-1) ?? null;
-          pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: Math.round(e.pb * 1000) / 1000, mix: e.mix, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick' });
+          pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: Math.round(e.pb * 1000) / 1000, mix: e.mix, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
+            ctx, sigma: lv.sigma ?? snap.sigmaMin, strikeType: lv.m.strike_type || 'greater', ...(ml < PICK.at - PICK.window ? { late: true } : {}), ...(orig ? { orig, lessons: applied.map((x) => x.label) } : {}) });
           if (pickRecord.length > 5000) pickRecord.splice(0, pickRecord.length - 5000);
           savePick();
           try { onPick(pickRecord.at(-1), { prev, stats: pickStats() }); } catch (err) { log.error('pick hook failed', err.message); }
@@ -492,6 +503,37 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     pickDirty = false;
     try { await mkdir(dirname(pickFile), { recursive: true }); await writeFile(`${pickFile}.tmp`, JSON.stringify(pickRecord)); await rename(`${pickFile}.tmp`, pickFile); } catch (e) { log.error('saving the pick record failed', e.message); }
   }
+  // ---------- the loss lab (public/losslab.js): why each loss happened, and the lessons the record proves ----------
+  let labDirty = true, labs = null;
+  // what the bot saw for a side: its odds and Kalshi's, distance, volatility, momentum, the flip check, buyers vs sellers
+  function lessonContext(lv, side, snap, now) {
+    try {
+      const lc = lessonCtx() || {}, q = quote(lv.m), mid = q.yesBid != null && q.yesAsk != null && q.yesAsk - q.yesBid <= 0.1 ? (q.yesBid + q.yesAsk) / 2 : null;
+      const pYes = lv.pPre ?? lv.ev.pYes, below = /^less/.test(lv.m.strike_type || ''), score = lc.scan?.ticker === lv.m.ticker && lc.scan.sc?.ready ? lc.scan.sc.score : null;
+      return contextOf({ side, kalshi: mid == null ? null : side === 'YES' ? mid : 1 - mid, pBot: pYes == null ? null : side === 'YES' ? pYes : 1 - pYes,
+        spot: snap.mSpot ?? snap.spot, strike: lv.strike, sigma: lv.sigma ?? snap.sigmaMin, minutesLeft: lv.ev.minutesLeft, strikeType: lv.m.strike_type, bars: snap.bars ?? market.candles, now,
+        sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong, flip: lc.flip?.ticker === lv.m.ticker ? lc.flip.pLose?.[side] ?? null : null,
+        flow: score == null ? null : score * ((side === 'YES') !== below ? 1 : -1) });
+    } catch { return null; }
+  }
+  // a lost call's deep dive, once, from the candles around it (before the result hook posts it)
+  function review(e) {
+    if (e.review || !e.ctx || (e.result !== 'yes' && e.result !== 'no') || e.side.toLowerCase() === e.result) return;
+    try { e.review = deepDive(e, market.candles); } catch (err) { log.error('loss review failed', err.message); }
+  }
+  function lab() {
+    if (labDirty || !labs) { labDirty = false; labs = { pick: lessonStudy(pickRecord, 'flip'), official: lessonStudy(record.filter((e) => e.lv === OFFICIAL_LEVEL), 'skip') }; }
+    return labs;
+  }
+  const pickLab = () => lab().pick, officialLab = () => lab().official.active;
+  function lessonsApi() {
+    const losses = [...pickRecord.filter((e) => e.review).map((e) => ({ ...e, kind: 'round call' })), ...record.filter((e) => e.lv === OFFICIAL_LEVEL && e.review).map((e) => ({ ...e, kind: 'official call' }))]
+      .sort((a, b) => b.at - a.at);
+    const L = lab();
+    return { pick: L.pick, official: L.official, losses: losses.slice(0, 12).map((e) => ({ kind: e.kind, ticker: e.ticker, side: e.side, p: e.p ?? null, conf: e.conf ?? null, price: e.price, at: e.at, review: e.review, lessons: e.lessons ?? null })),
+      tally: causeTally(losses), reviewed: losses.length };
+  }
+
   // The picks' record: all of them, and the ones marked worth buying (profit at $10 a pick, after fees)
   function pickStats() {
     const graded = pickRecord.filter((e) => e.result === 'yes' || e.result === 'no');
@@ -590,7 +632,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     prunePulse(learned.pulse, now);
     for (const e of unsettledCalls(record, now)) {
       if (results.has(e.ticker)) {
-        settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; gateDirty = true;
+        settleCalls(record, e.ticker, results.get(e.ticker)); recordDirty = true; gateDirty = true; labDirty = true;
+        review(e);
         if (e.lv === OFFICIAL_LEVEL && (e.result === 'yes' || e.result === 'no')) try { onSettle(e, callStats(currentRecord())); } catch (err) { log.error('settle hook failed', err.message); }
       } else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; recordDirty = true; } // voided or never reported
     }
@@ -603,7 +646,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; earlyDirty = true; }
     }
     for (const e of unsettledCalls(pickRecord, now)) {
-      if (results.has(e.ticker)) { settleCalls(pickRecord, e.ticker, results.get(e.ticker)); pickDirty = true; }
+      if (results.has(e.ticker)) { settleCalls(pickRecord, e.ticker, results.get(e.ticker)); pickDirty = true; labDirty = true; review(e); }
       else if (Date.parse(e.closeTime) < now - 6 * 3600000) { e.result = 'unknown'; pickDirty = true; }
     }
     if (pickDirty) savePick();
@@ -633,5 +676,5 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
   return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, vapidKeys: () => (vapid ? { publicKey: vapid.publicKey, privateKey: vapid.privateKey } : null), market: () => ({ series: MK.series, asset: ASSET.key, freq: MK.freq, delayed: market.delayed }), devices,
-    learned: () => publicLearned(learned), learnStatus, record: officialRecord, pick: pickNowApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
+    learned: () => publicLearned(learned), learnStatus, record: officialRecord, pick: pickNowApi, lessons: lessonsApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
 }

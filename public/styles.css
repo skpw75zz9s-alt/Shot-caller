@@ -977,3 +977,14 @@ nav button { position: relative; }
 .ls-test.on { color: var(--yes); } .ls-test.on::before { content: '✓'; left: 0; }
 .ls-tab { margin: 6px 0 4px; } .ls-tab td small { display: block; color: var(--dim); font-size: 10px; }
 .flip-chk { display: block; margin-top: 4px; color: var(--muted); } .flip-chk b { color: var(--text); }
+
+/* ---------- a call every round, the loss lab (v13.39) ---------- */
+.call.round { opacity: .82; }
+.lab-card h4, .lab-h { margin: 10px 0 4px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); }
+.lab-rules, .lab-losses { list-style: none; margin: 0; padding: 0; }
+.lab-rules li { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.lab-rules li:first-child { border-top: 0; } .lab-rules li span { display: grid; min-width: 0; } .lab-rules small { color: var(--muted); font-size: 11px; }
+.lab-rules li > b { font-size: 11px; color: var(--dim); white-space: nowrap; } .lab-rules li.on > b { color: var(--yes); }
+.lab-losses li { padding: 8px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; font-size: 13px; } .lab-losses li:first-child { border-top: 0; }
+.lab-losses small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.lab-chips { display: flex; flex-wrap: wrap; gap: 4px; } .lab-chips span { font: 600 10px var(--mono); padding: 2px 6px; border-radius: 6px; background: var(--no-bg); color: var(--no); border: 1px solid #ff4d6d44; }

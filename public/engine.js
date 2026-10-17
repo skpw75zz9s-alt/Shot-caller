@@ -7,6 +7,7 @@ import { deepDive, freshRejection, quoteTrend, rejections, stability } from './a
 import { basisOf, calShift, volFactor } from './learner.js';
 import { pulseFix } from './pulse.js';
 import { gateCheck } from './callgate.js';
+import { contextOf, lessonsFor } from './losslab.js';
 const FLIP_BACK_MARGIN = 0.05; // the flip check's room over the flip bar (public/flipmodel.js FLIP.backMargin)
 
 // Coinbase rows: [time, low, high, open, close, volume], newest first
@@ -226,6 +227,16 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const q = ev.quote, spread = q.yesAsk != null && q.yesBid != null ? q.yesAsk - q.yesBid : null;
     const g = gateCheck(snap.callGate, { conf: a.score, mins: ev.minutesLeft, stab: stab.score, vr: snap.sigmaMin && snap.sigmaLong ? snap.sigmaMin / snap.sigmaLong : 1, spread, ev60: snap.watchEvents60 ?? 0, at: now }, a.price);
     if (g?.skip) { gated = { side: a.side, ...g }; return false; }
+    // v13.39 the loss lab's proven lessons for calls worth buying (public/losslab.js): skip a kind of call the record
+    // shows wins less often than its price needs
+    if (snap.lessons?.length) {
+      const q2 = ev.quote, mid = q2.yesBid != null && q2.yesAsk != null && q2.yesAsk - q2.yesBid <= 0.1 ? (q2.yesBid + q2.yesAsk) / 2 : null, pY = row.pPre ?? ev.pYes;
+      const ctx = contextOf({ side: a.side, kalshi: mid == null ? null : a.side === 'YES' ? mid : 1 - mid, pBot: pY == null ? null : a.side === 'YES' ? pY : 1 - pY, spot: snap.mSpot ?? snap.spot,
+        strike: row.strike, sigma: row.sigma ?? snap.sigmaMin, minutesLeft: ev.minutesLeft, strikeType: row.m.strike_type, bars: snap.bars, now, sigmaMin: snap.sigmaMin, sigmaLong: snap.sigmaLong,
+        flip: snap.flipCheck?.ticker === row.m.ticker ? snap.flipCheck.pLose?.[a.side] ?? null : null });
+      const hit = lessonsFor({ active: snap.lessons }, ctx);
+      if (hit.length) { gated = { side: a.side, lesson: hit[0] }; return false; }
+    }
     return true;
   };
   const entryOk = (side, floor = true) => {
@@ -326,7 +337,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     const ask = b.side === 'YES' ? ev.quote.yesAsk : ev.quote.noAsk;
     const priced = !(s.winFloor > 0) || ask >= s.winFloor - 1e-9;
     if (priced ? !(passes(b, ...need.switching, true) && steady(b.side) && entryOk(b.side) && holds(b) && watchOk()) : !earlyOk(b)) return no(priced ? 'not past the bar for a switch yet' : (earlyWhy || 'not past the bar yet'));
-    if (!gateOk(b)) return no('the call filter skipped it');
+    if (!gateOk(b)) return no(gated?.lesson ? `a lesson from past losses: ${gated.lesson.label.toLowerCase()}` : 'the call filter skipped it');
     flipWhy = null;
     return true;
   };

@@ -65,6 +65,8 @@
   <link rel="modulepreload" href="drivers.js">
   <link rel="modulepreload" href="lessons.js">
   <link rel="modulepreload" href="flipmodel.js">
+  <link rel="modulepreload" href="losslab.js">
+  <link rel="modulepreload" href="pick.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -405,6 +407,14 @@
         <button type="button" id="accCopy">Copy accuracy report</button>
         <p class="fine-left" id="accNote">Paste the report to whoever tunes the bot: it has every number above, with sample sizes, and nothing personal (no keys, no balances, no trades).</p>
       </div>
+      <div class="card lab-card" id="labCard">
+        <div class="deep-head"><span>Loss lab · why it lost</span><b id="labWhen"></b></div>
+        <p class="push-status">After every loss the bot looks back at what it saw and what happened next, and says why it most likely lost. It keeps score of those reasons over every graded call. A reason the record proves (30+ calls, clear by z 2.8, in both the older and the newer half) changes the calls from then on: the round call takes the other side, and calls worth buying skip that kind. Nothing makes 15-minute rounds certain; this fixes the mistakes the record proves, it can't remove luck.</p>
+        <div id="labLessons"></div>
+        <h4 class="lab-h">Latest losses</h4>
+        <ul class="lab-losses" id="labLosses"><li class="empty">Loading…</li></ul>
+        <p class="fine-left" id="labTally"></p>
+      </div>
       <div class="card rec-card" id="botRec">
         <div class="deep-head"><span>Official bot record</span><b id="brLevel"></b></div>
         <div class="rec-hero">
@@ -558,7 +568,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.38 · Flip check</p>
+      <p class="fine" id="version">Shot Caller v13.39 · A call every round, loss lab</p>
     </section>
   </main>
 
@@ -578,7 +588,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '174';
+    window.SC_BUILD = '175';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

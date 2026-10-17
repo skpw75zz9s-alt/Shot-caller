@@ -271,6 +271,27 @@ Security:
 
 ## Version notes (newest first)
 
+### A call every round, and the loss lab (v13.39)
+
+**Every round gets a call.** From 10:00 left, when nothing is worth buying, the Deck shows the round call (the
+10-minute pick: the likelier side by the bot's odds and Kalshi's combined) instead of SIT OUT. It's marked BUY only when
+the price is right; otherwise it says it's a lean. A server that restarts late still locks the round's call (marked
+late) until the last minute. If the server's call isn't in, the phone works out the same call itself. Discord posts it
+as the ROUND CALL.
+
+**The loss lab** (`public/losslab.js`). Every call stores what the bot saw: distance to the target, volatility vs
+normal, Kalshi's odds, the bot-vs-Kalshi gap, momentum, the flip check, and buyers vs sellers. After each loss it does a
+deep dive from the candles: how far ahead it got, how far behind, when price last crossed the target, and how fast price
+moved vs what the bot expected. It names the likely reasons (too close to call, a volatility spike, a late turn, never
+ahead, Kalshi disagreed, sellers against it, the flip check warned, momentum against it, or just the odds). Discord's
+result post says why it lost.
+
+Ten kinds of call are scored over the whole record. A kind is proven when it has 30+ graded calls (20 for calls worth
+buying), a gap clear by z 2.8, and the same direction in the older and newer half. A proven kind changes the calls from
+then on. The round call takes the other side when calls like it lose more than they win. Calls worth buying skip that
+kind when it wins less often than its price needs. The Record tab's **Loss lab** card shows the latest losses and why,
+the most common reasons, and every lesson's status.
+
 ### Flip check (v13.38)
 
 The flip logic now reads the chart's history and the buyers and sellers (`public/flipmodel.js`, `flipfeed.js`). Every
