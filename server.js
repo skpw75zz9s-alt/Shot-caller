@@ -25,6 +25,7 @@ import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
 import { createStacks } from './stacks.js';
 import { createCrossFeed } from './crossfeed.js';
+import { createDiscordRoles } from './discordroles.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const KALSHI = process.env.KALSHI_API || 'https://api.elections.kalshi.com/trade-api/v2';
@@ -48,6 +49,9 @@ export const access = createAccess({
     body: `Someone says they sent $${cfg.price} to $${cfg.cashtag} with note ${m.code}. Check Cash App, then approve it in Settings → Admin.`,
   }),
 });
+// Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
+// DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
+export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
@@ -251,7 +255,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([bot.load(), access.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -316,12 +320,30 @@ async function accessApi(req, res, action, token) {
 // /api/admin/* — admin only
 async function adminApi(req, res, action, token) {
   if (!access.isAdminToken(token)) return send(res, 403, { error: 'admin only' });
-  if (action === 'members' && req.method === 'GET') return reply(req, res, access.listMembers());
+  if (action === 'members' && req.method === 'GET') { const out = access.listMembers(), dv = discordRoles.adminView(); out.body.members = out.body.members.map((m) => (dv[m.code] ? { ...m, discord: dv[m.code] } : m)); out.body.discord = discordRoles.config().on; return reply(req, res, out); }
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);
   const actions = { approve: access.approve, deny: access.deny, revoke: access.revoke, config: access.setConfig };
   if (!actions[action]) return send(res, 404, { error: 'not found' });
-  reply(req, res, actions[action](body));
+  const out = actions[action](body);
+  if (out.status === 200 && body?.code) await discordRoles.syncOne(out.body?.member?.code ?? body.code).catch(() => {}); // the Discord role follows right away
+  reply(req, res, out);
+}
+
+// /api/discord/* — link a member's Discord account so they get the members' role (discordroles.js). The callback is
+// where Discord sends them back (its one-time state names the member); the rest need a member session.
+async function discordApi(req, res, action, token, url) {
+  if (action === 'callback' && req.method === 'GET') {
+    const out = await discordRoles.callback({ code: url.searchParams.get('code'), state: url.searchParams.get('state') }).catch(() => ({ error: 'Discord linking failed. Try again.' }));
+    const q = out.ok ? `discord=linked${out.error ? `&msg=${encodeURIComponent(out.error)}` : ''}` : `discord=error&msg=${encodeURIComponent(url.searchParams.get('error') === 'access_denied' ? 'You cancelled on Discord.' : out.error)}`;
+    return send(res, 302, '', 'text/plain', { location: `/?${q}` });
+  }
+  const code = access.check(token).member?.code ?? null;
+  if (action === 'status' && req.method === 'GET') return send(res, 200, { ...discordRoles.status(code), member: !!code });
+  if (!code) return send(res, 400, { error: 'Discord roles are for members: sign in with your code first' });
+  if (action === 'link' && req.method === 'POST') { const link = discordRoles.linkUrl(code); return link ? send(res, 200, { url: link }) : send(res, 503, { error: 'Discord linking isn\'t set up on this server yet' }); }
+  if (action === 'unlink' && req.method === 'POST') return send(res, 200, await discordRoles.unlink(code));
+  send(res, 404, { error: 'not found' });
 }
 
 // POST /api/push/{sync,test,unsubscribe,report}
@@ -384,6 +406,8 @@ export const server = http.createServer(async (req, res) => {
     if (acc) return await accessApi(req, res, acc[1], token);
     const adm = path.match(/^\/api\/admin\/(\w+)$/);
     if (adm) return await adminApi(req, res, adm[1], token);
+    const dsc = path.match(/^\/api\/discord\/(\w+)$/);
+    if (dsc) return await discordApi(req, res, dsc[1], token, url);
 
     const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
     const allowed = !PAYWALL || access.hasAccess(token);
@@ -451,4 +475,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
   if (process.env.MARKETS !== 'off') ready.then(() => stacks.begin()); // every other Kalshi market (stacks.js)
   if (process.env.CROSS !== 'off') crossFeed.start(); // related markets (crossfeed.js)
+  ready.then(() => discordRoles.start()); // members' Discord role, every 10 minutes (only when it's set up)
 }

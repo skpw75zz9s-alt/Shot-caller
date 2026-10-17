@@ -158,3 +158,11 @@ test('orders: only checked fill-now orders on the BTC 15-minute markets reach Ka
     assert.equal(got.length, 2, 'nothing else reached Kalshi');
   } finally { srv.close(); kal.close(); demo.close(); }
 });
+
+test('Discord role routes: status says off without config, linking needs a member, a stray callback goes back to the app', async () => {
+  const st = await (await fetch(`${app}/api/discord/status`)).json();
+  assert.equal(st.on, false); assert.equal(st.member, false); assert.ok(st.missing.includes('DISCORD_BOT_TOKEN'));
+  assert.equal((await fetch(`${app}/api/discord/link`, { method: 'POST', body: '{}' })).status, 400);
+  const cb = await fetch(`${app}/api/discord/callback?code=x&state=y`, { redirect: 'manual' });
+  assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /^\/\?discord=error&msg=/);
+});

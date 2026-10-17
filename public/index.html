@@ -68,6 +68,7 @@
   <link rel="modulepreload" href="losslab.js">
   <link rel="modulepreload" href="pick.js">
   <link rel="modulepreload" href="settle.js">
+  <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -86,7 +87,7 @@
   <div id="fx" class="fx" hidden aria-live="polite"></div>
   <header>
     <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <select id="mktPick" class="tag mkt-pick" aria-label="Kalshi market"><option>BTC · 15m</option></select></h1>
-    <div class="hdr-r"><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
+    <div class="hdr-r"><button type="button" id="modeBtn" class="mode-btn" aria-pressed="false" title="Simple shows just the call; Pro shows everything">Simple</button><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
     <div id="splitMenu" class="split-menu" hidden></div>
   </header>
   <div class="ticker" id="ticker">
@@ -103,7 +104,7 @@
   <main>
     <section id="view-live" class="view active">
       <div class="nudge" id="pushNudge" hidden><button id="nudgeGo">🔔 Get alerts with the app closed</button><button id="nudgeX" class="x" aria-label="Dismiss">✕</button></div>
-      <div class="tiles4">
+      <div class="tiles4" data-pro>
         <div class="tile"><label>Feeds</label><b id="stFeed">—</b><small id="stFeedSub"></small></div>
         <div class="tile"><label>Clock</label><b id="stClock">—</b><small id="stClockSub">server-synced</small></div>
         <div class="tile"><label>Contract</label><b id="stContract">—</b><small id="stContractSub"></small></div>
@@ -130,9 +131,9 @@
         <div class="call" id="call">—</div>
         <div class="call-sub" id="callSub"></div>
         <div class="conf" id="conf" hidden></div>
-        <div class="stab-chip" id="stabChip" hidden><span class="thumb" id="stabThumb"></span><b id="stabLabel"></b><small id="stabScore"></small></div>
+        <div class="stab-chip" id="stabChip" data-pro hidden><span class="thumb" id="stabThumb"></span><b id="stabLabel"></b><small id="stabScore"></small></div>
         <div class="suggest" id="suggest" hidden><b id="sugTitle"></b><span id="sugWhy"></span></div>
-        <div class="hold" id="holdBox" hidden>
+        <div class="hold" id="holdBox" data-pro hidden>
           <div class="hold-row"><span>Confidence</span><b id="confBig">—</b><span>Hold odds</span><b id="holdBig">—</b><span>Flip risk</span><b id="flipBig">—</b></div>
           <div class="hold-bar"><i id="holdFill"></i></div>
           <small id="holdNote">Hold odds: the chance confidence stays above 80 until the last minute, from 300 simulated paths.</small>
@@ -142,13 +143,13 @@
           <div class="pbox up"><label>UP · YES</label><b id="upAsk">—</b><small id="upBot"></small></div>
           <div class="pbox down"><label>DOWN · NO</label><b id="downAsk">—</b><small id="downBot"></small></div>
         </div>
-        <div class="odds" id="odds"></div>
+        <div class="odds" id="odds" data-pro></div>
         <div class="reason" id="reason"></div>
         <div class="order" id="order"></div>
         <button id="boughtBtn" class="buy-btn" hidden>I bought it</button>
         <p id="autoNote" class="auto-note" hidden>Kalshi linked: when you buy, it shows up here on its own</p>
         <div id="atStrip" class="at-strip" hidden><span id="atStripText"></span><button id="atStripStop" type="button">STOP</button></div>
-        <div class="entry" id="entry" hidden></div>
+        <div class="entry" id="entry" data-pro hidden></div>
       </div>
 
       <div class="card line-card" id="lineCard" hidden>
@@ -158,11 +159,19 @@
         <div class="ln-bar" aria-hidden="true"><i id="lnFill"></i><em style="left:25%"></em><em style="left:50%"></em></div>
         <p class="ln-say" id="lnSay"></p>
         <div class="ln-settle" id="lnSettle" hidden></div>
-        <p class="ln-press" id="lnPress"></p>
-        <div class="ln-sess" id="lnSess"></div>
+        <p class="ln-press" id="lnPress" data-pro></p>
+        <div class="ln-sess" id="lnSess" data-pro></div>
         <details class="how"><summary>How it works</summary><small class="fine-left">The lead is how far price is past the target. The move left is how far price usually still travels in the time remaining (price × its 1-minute volatility × √minutes). Their ratio is the cushion: under 0.25 is a razor-thin coin-flip zone, around 1 is solid, 3+ is near-certain. "Rounds actually finished" comes from every round in the last three weeks of 1-minute candles, at the same cushion and time left: history, not the model. In the last 60 seconds of a crypto round Kalshi settles on the average of the final 60 one-second prints, so each second that passes is banked: the settlement watch shows where that average lands if price stays put, and what the seconds left would have to average to flip it. Pressure is buyers vs sellers on the exchanges; the record shows how often the leading side still won when they disagreed. Sessions: when the big markets' trading days open and close, which is when volume and volatility change.</small></details>
       </div>
-      <div data-crypto-only class="card tug" id="tugCard">
+      <!-- the signal board (v13.42, public/signals.js): every factor, where it stands with the calls, and what it says now -->
+      <div class="card board" id="boardCard">
+        <div class="deep-head"><span>Signal board</span><b id="sbSum"></b></div>
+        <div class="sb-meter" id="sbMeter" aria-hidden="true"></div>
+        <p class="sb-say" id="sbSay">Reading every factor…</p>
+        <ul class="sb-list" id="sbList" data-pro></ul>
+        <details class="how" data-pro><summary>How it works</summary><small class="fine-left">Every factor the bot learns from, in one list. <b>In calls</b>: it proved itself on rounds it never trained on (each has its own bar: enough graded samples and a z-score that luck rarely reaches), so its nudge goes into the bot's odds or its rule into the calls. <b>Probation</b>: still being tested; it's shown, never used, and the bar shows how far it is from the line. <b>Context</b>: there to explain the market, never part of a call. With / against compares what each proven factor says this round to the side on the card. A factor against the call doesn't make the call wrong: they're weighed together, and every call can lose.</small></details>
+      </div>
+      <div data-crypto-only data-pro class="card tug" id="tugCard">
         <div class="deep-head"><span>Tug of war · all exchanges</span><b id="tugLead"></b></div>
         <div class="tug-sides">
           <div class="sell" id="tugBear"><img src="bear.svg" alt="" class="beast"><div><label>Sell pressure</label><b id="tugSell">—</b></div></div>
@@ -179,14 +188,14 @@
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
       </div>
 
-      <div class="card watch" id="watchCard">
+      <div data-pro class="card watch" id="watchCard">
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
         <ul class="watch-list" id="watchList"></ul>
         <details class="how"><summary>How it works</summary><small class="fine-left">The bot's sharp eye, every second, on the server: BTC jumps, volume bursts, an exchange breaking away or going silent, and on Kalshi's live round a blown-out spread, pulled liquidity, walls, trade flurries and repricing without BTC moving. Severe events hold new calls briefly; the rest go into each call's record so the call filter can learn what matters.</small></details>
       </div>
       <!-- Related markets (v13.33, public/cross.js): what moves this market, and the model that reads them -->
-      <div data-alt-only class="card drv" id="drvCard">
+      <div data-alt-only data-pro class="card drv" id="drvCard">
         <div class="deep-head"><span id="drvTitle">Why it's moving</span><b id="drvWhen"></b></div>
         <div class="drv-tabs" id="drvTabs" role="tablist" aria-label="Time window"><button type="button" data-w="15">15m</button><button type="button" data-w="60">1h</button><button type="button" data-w="240">4h</button><button type="button" data-w="1440">1 day</button></div>
         <p class="drv-say" id="drvSay">Reading the dollar, yields and the rest of its market…</p>
@@ -196,14 +205,14 @@
         <p class="drv-fit" id="drvFit"></p>
         <details class="how"><summary>How it works</summary><small class="fine-left">Gold, silver and oil are traded as futures, so their price is set by people buying and selling, but most of that trading reacts to a few things. <b>Macro</b>: the US dollar (they're priced in dollars, so a stronger dollar usually pushes them down), the 10-year Treasury yield (higher rates make gold, which pays nothing, less attractive) and stocks. <b>Its market</b>: the rest of its own market (silver, platinum and copper for gold; Brent, gasoline, diesel and natural gas for US crude), minus what the macro already explains, so a move they share is sector-wide buying. <b>Its own</b>: whatever's left, its own buyers and sellers and news (for US crude: inventories, US supply, big orders). Fitted on the last 3 days of 1-minute moves; over any window the parts add up to the actual move. Volume underneath shows when trading was heavy (Yahoo's futures volume). It explains moves, it doesn't predict them, and a market moving together isn't proof one caused the other.</small></details>
       </div>
-      <div class="card cross" id="crossCard">
+      <div data-pro class="card cross" id="crossCard">
         <div class="deep-head"><span id="crossTitle">Related markets</span><b id="crossWhen"></b></div>
         <div class="cross-own" id="crossOwn">Reading every market's last few days…</div>
         <ul class="cross-list" id="crossList"></ul>
         <p class="cross-model" id="crossModel"></p>
         <details class="how"><summary>How it works</summary><small class="fine-left">Every market is read next to the others that move with it: Bitcoin drags the other coins, crypto often follows the Nasdaq and S&amp;P 500 in US hours, gold and oil move on the same news. ρ is how closely each one has moved with this market minute by minute over the last few days (1 = in lockstep), β how much this market has moved per 1% of it, and catch-up is how far this market has lagged what the others just did (β × their 5-minute move − this market's). A model of the next 5 minutes from all of them is refitted every 30 minutes and scored on data it never trained on against "no change"; it only nudges the bot's odds (±5 points at most) once it proves itself.</small></details>
       </div>
-      <div class="card gd" id="engCard">
+      <div data-pro class="card gd" id="engCard">
         <div class="deep-head"><span>Live forecast · this round</span><b id="enWhen"></b></div>
         <div class="en-thr" id="enThr"></div>
         <div class="gd-call" id="enCall">Loading…</div>
@@ -213,7 +222,7 @@
         <div class="gd-kalshi" id="enHist"></div>
         <details class="how"><summary>How it works</summary><small class="fine-left">The prediction engine: a statistical model trained on the 1-minute BTC history, starting from the distance to the target and adding the 1-hour trend, 15-minute EMAs, VWAP, 5-minute RSI, momentum, volume, liquidity sweeps and structure. Every number is tested walk-forward (on rounds the model hadn't seen). It calls only at your confidence level, when that level has held up historically and Kalshi's price plus fees leaves an edge. Nothing is 100%: high-confidence calls come late in the round, when Kalshi already prices them high.</small></details>
       </div>
-      <div class="card gd" id="guideCard">
+      <div data-pro class="card gd" id="guideCard">
         <div class="deep-head"><span>15-minute forecast</span><b id="gdWhen"></b></div>
         <div class="gd-call" id="gdCall">Loading…</div>
         <div class="gd-grid" id="gdGrid"></div>
@@ -221,13 +230,13 @@
         <div class="gd-kalshi" id="gdKalshi"></div>
         <details class="how"><summary>How it works</summary><small class="fine-left">From the shot-caller guide: UP when price is above VWAP, the 20 EMA above the 50, RSI above 50 and structure bullish (DOWN is the mirror); anything mixed is NO CALL. So is low volatility, an untested setup, or one history doesn't back. The UP probability is how often BTC really finished up after the same evidence, counted walk-forward. Major economic announcements aren't known to the bot: skip those yourself. No strategy is 100% accurate.</small></details>
       </div>
-      <div class="card rev" id="revCard">
+      <div data-pro class="card rev" id="revCard">
         <div class="deep-head"><span>Reversal watch · 15-min</span><b id="revWhen"></b></div>
         <div class="rev-head" id="revHead">Loading…</div>
         <ul class="rev-list" id="revList"></ul>
         <details class="how"><summary>How it works</summary><small class="fine-left">The reversal guide's checklist on the latest closed 15-minute candle: sweep and reclaim 3, structure break 3, RSI divergence 2, volume 1, VWAP flip 1, open interest 1. 8+ strong, 5–7 developing, 0–4 not enough. The scores aren't probabilities: the bot measures how often each band really called the next round (Record → Playbook check) and only lets a proven band touch its calls.</small></details>
       </div>
-      <div data-crypto-only class="card scan" id="scanCard">
+      <div data-crypto-only data-pro class="card scan" id="scanCard">
         <div class="deep-head"><span>Round scan · 12 exchanges</span><b id="scanWhen"></b></div>
         <div class="scan-verdict" id="scanVerdict"><b id="scanLabel">Reading the round…</b><span id="scanScore"></span></div>
         <div class="scan-meter"><i id="scanFill"></i><em></em></div>
@@ -239,7 +248,7 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">Every trade on Coinbase, Kraken, Bitstamp, Gemini and Binance.US since the round opened. Leader = the exchange whose price moves first. Absorption = heavy flow one way that doesn't move the price. Scan chance = the bot's odds nudged by the reads the server has learned to trust from graded rounds. The server scans and grades every round, app open or not. Context only: the bot's calls don't use it.</small></details>
       </div>
 
-      <div data-crypto-only class="card tape-card">
+      <div data-crypto-only data-pro class="card tape-card">
         <div class="deep-head"><span>Live orders · all markets</span><b id="tapeRate"></b></div>
         <div class="feed-chips" id="feedChips"></div>
         <div class="seg" id="tapeTabs"><button data-tape="all" class="on">All</button><button data-tape="btc">Exchanges</button><button data-tape="kalshi">Kalshi contract</button></div>
@@ -249,17 +258,17 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">Every executed trade, as it happens: BTC/USD on Coinbase, Kraken, Bitstamp, Gemini and Binance.US (straight from their public feeds), plus trades on the live Kalshi contract. Buy/sell is the aggressor's side. 🐋 = a trade at or above your whale minimum.</small></details>
       </div>
 
-      <div class="card notes">
+      <div data-pro class="card notes">
         <div class="deep-head"><span>Live notes</span><b id="notesWhen"></b></div>
         <ul id="notes" class="note-list"></ul>
       </div>
 
-      <details class="card deep" id="deepCard" hidden open>
+      <details data-pro class="card deep" id="deepCard" hidden open>
         <summary class="deep-head"><span>Why this call</span><b id="deepScore"></b></summary>
         <ul id="deepChecks" class="checks"></ul>
       </details>
 
-      <details class="card deep" id="rejCard" hidden>
+      <details data-pro class="card deep" id="rejCard" hidden>
         <summary class="deep-head"><span>Rejections this round</span><b id="rejBias"></b></summary>
         <div class="rej-grid">
           <div><label>Target rejected</label><b id="rejCaps" class="neg">0</b></div>
@@ -271,7 +280,7 @@
         <ul id="rejSummary" class="rej-sum"></ul>
       </details>
 
-      <div class="grid grid3">
+      <div class="grid grid3" data-pro>
         <div class="stat"><label>Live BTC</label><b id="spot">—</b></div>
         <div class="stat"><label>Target</label><b id="strike">—</b></div>
         <div class="stat"><label>Distance</label><b id="dist">—</b></div>
@@ -283,7 +292,7 @@
         <div class="stat"><label>Learned now</label><b id="learnedNow" class="small">—</b></div>
       </div>
 
-      <div class="card">
+      <div class="card" data-pro>
         <div class="chart-head"><span>This round · 1-min</span><span><i class="lg up">▲</i>/<i class="lg dn">▼</i> reversal <i class="lg rj">✕</i> rejection</span></div>
         <canvas id="chart" height="220"></canvas>
       </div>
@@ -312,7 +321,7 @@
         <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
         <details class="how"><summary>How it works</summary><p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. The <b>expected path</b> (dashed white) runs through the cone; the shaded zone right of the dotted line is the forecast, and the round's close is marked. Drag across the chart: the legend reads every candle, and over the forecast it reads that minute of the cone. <b>Every forecast source</b> (off by default, Chart tools): where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p></details>
       </div>
-      <div class="card pulse" id="pulseCard">
+      <div data-pro class="card pulse" id="pulseCard">
         <div class="deep-head"><span>Market pulse</span><b id="pulseWhen"></b></div>
         <div class="pulse-stab" id="pulseStab">
           <span class="thumb big" id="pulseThumb"></span>
@@ -415,7 +424,7 @@
     </section>
 
     <section id="view-history" class="view">
-      <div class="card acc-card" id="accCard">
+      <div data-pro class="card acc-card" id="accCard">
         <div class="deep-head"><span>Accuracy: every predictor's record</span></div>
         <p class="push-status">Each one is graded on calls it made before the outcome was known, next to the baseline it has to beat. Green beats its baseline, red is behind it, grey needs more data.</p>
         <div class="acc-list" id="accList"></div>
@@ -445,7 +454,7 @@
         <h4 class="rec-h">Latest calls</h4>
         <ul class="rec-calls" id="brCalls"></ul>
       </div>
-      <div class="card rec-card" id="certRec">
+      <div data-pro class="card rec-card" id="certRec">
         <div class="deep-head"><span>Near-certain record</span><b>side by side</b></div>
         <div class="rec-hero">
           <div><b id="crWL">—</b><small>won – lost</small></div>
@@ -465,12 +474,12 @@
       </div>
       <ul id="tradeList" class="history"></ul>
       <h2 class="sec">Playbook check</h2>
-      <div class="card playbook">
+      <div data-pro class="card playbook">
         <details class="how"><summary>How it works</summary><p class="fine-left">From "The BTC Trader's Playbook": its 15-minute liquidity-sweep strategy, run exactly as written and measured the way it says to (100+ examples, win rate, average reward-to-risk, max drawdown, fees). With the 1-hour trend, a 15-minute candle sweeps yesterday's high or low and closes back inside; a market structure shift on above-average volume confirms; entry on the retest; stop beyond the sweep plus a volatility allowance; target 2R. Its other secrets (sweeps, structure shifts, fair value gaps, order blocks, volume divergence, VWAP, open interest, funding) are inputs the micro model learns from: they sway the candles and calls only once proven.</p></details>
         <div id="pbReport" class="pb-report">Loading…</div>
       </div>
       <h2 class="sec">Indicator tuning</h2>
-      <div class="card tune">
+      <div data-pro class="card tune">
         <details class="how"><summary>How it works</summary><p class="fine-left">Which chart indicators, at which settings, have actually called BTC's 15-minute rounds. EMA and RMA crosses, RSI zones, MACD, Bollinger breaks, VWAP from the round's open and momentum, each at several common settings, tested on up to three weeks of real 1-minute BTC history. Only a setting that keeps working on rounds it was never tuned on nudges the bot's calls (±4 pts max).</p></details>
         <div id="tuneReport" class="pb-report">Loading…</div>
       </div>
@@ -511,6 +520,7 @@
       <div class="card access-card">
         <div class="deep-head"><span>Your access</span><span class="head-links"><button id="adminLogin" class="link" hidden>Admin code</button><button id="signOut" class="link">Sign out</button></span></div>
         <p id="accessLine" class="push-status"></p>
+        <div class="dsc-row" id="dscRow" hidden><span class="dsc-txt"><b>Discord</b><small id="dscLine"></small></span><span class="dsc-btns"><button id="dscLink" type="button">Link Discord</button><button id="dscUnlink" type="button" class="link" hidden>Unlink</button></span></div>
       </div>
       <div class="card admin-card" id="adminCard" hidden>
         <h3>Admin</h3>
@@ -522,7 +532,7 @@
         <h4>Members</h4>
         <ul id="admMembers" class="adm-list"></ul>
       </div>
-      <div class="card push-card kalshi-card">
+      <div data-pro class="card push-card kalshi-card">
         <h3>Kalshi account</h3>
         <p id="kStatus" class="push-status">Not linked. Link it and the app reads exactly what you bought, sold and when, so there's nothing to tap.</p>
         <div id="kForm">
@@ -561,7 +571,7 @@
         <h4>What it did</h4>
         <ul class="at-log" id="atLog"></ul>
       </div>
-      <div class="card push-card health-card" id="healthCard">
+      <div data-pro class="card push-card health-card" id="healthCard">
         <h3>Health check</h3>
         <p class="push-status" id="healthStatus">Runs every 2 rounds (every 30 minutes, at :00 and :30) while the app is open, and tells you only when something new is wrong.</p>
         <ul id="healthList" class="health-list"></ul>
@@ -584,7 +594,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.41 · The line, receipts</p>
+      <p class="fine" id="version">Shot Caller v13.42 · Simple mode, signal board, Discord roles</p>
     </section>
   </main>
 
@@ -593,18 +603,18 @@
   <nav>
     <button data-view="live" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Deck</button>
     <button data-view="chart"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-6 4 3 6-8"/></svg>Chart</button>
-    <button data-view="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
+    <button data-view="radar" data-pro><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
-    <button data-view="learn"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
+    <button data-view="learn" data-pro><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
 
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '178';
+    window.SC_BUILD = '179';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

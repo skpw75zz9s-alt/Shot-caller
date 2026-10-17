@@ -271,6 +271,31 @@ Security:
 
 ## Version notes (newest first)
 
+### Simple mode, the signal board and Discord roles (v13.42)
+
+- **Simple mode:** the **Simple / Pro** button at the top. Simple shows the call, the line and the signal board's
+  one-line summary, and hides the Radar and Learn tabs and every card marked `data-pro`. A brand-new phone starts in
+  Simple; a phone that already used the app stays in Pro.
+- **Signal board** (Deck, `public/signals.js`): every factor the bot learns from in one list, each marked **in
+  calls** (proven on rounds it never trained on), **probation** (still being tested, with a bar showing how far it is
+  from proven) or **context** (never part of a call). Each proven factor that has a read on this round shows its side
+  and whether it is with or against the side on the card. The rows on probation are folded under the proven ones.
+- **Discord role sync** (`discordroles.js`): a paying member taps **Link Discord** in Settings and signs in on
+  Discord's own page. The server adds them to your Discord server with the members' role, and removes the role when
+  their access ends (expired or revoked). It re-checks right after any admin change and every 10 minutes. Admins see
+  each member's Discord name and role state in the members list. To turn it on:
+  1. In the Discord Developer Portal, create an application. Under **OAuth2 → Redirects**, add
+     `https://<your app>/api/discord/callback`.
+  2. Under **Bot**, create the bot and reset its token. Invite it to your server with **Manage Roles** and
+     **Create Invite**, then drag its role above the members' role.
+  3. Turn on Developer Mode in Discord, then copy your server's ID and the role's ID.
+  4. In Railway → Variables, set `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`,
+     `DISCORD_GUILD_ID` and `DISCORD_ROLE_ID`. The redirect comes from `APP_URL` or the Railway domain, or from
+     `DISCORD_REDIRECT_URI` if you set it.
+
+  Until these are set, the feature is off, and admins see which variables are missing. The client secret and the bot
+  token never leave the server.
+
 ### The line, receipts and record windows (v13.41)
 
 These ideas came from studying another 15-minute terminal. Each was rebuilt and tested the Shot Caller way.

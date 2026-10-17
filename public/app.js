@@ -30,12 +30,13 @@ import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js
 import { lessonsNow } from './lessons.js';
 import { pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
+import { signalBoard } from './signals.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '178'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '179'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -101,6 +102,10 @@ const SETTINGS_META = [
 // A fresh install has nothing to migrate: skip straight past the old upgrade steps (the v4.1 step used to double a new
 // phone's confidence bar to 95). Only the latest step (default risk level) runs.
 if (store.get('settings', null) == null && store.get('settingsVersion', null) == null) store.set('settingsVersion', 11);
+// Simple mode (v13.42): the call, the line and the signal board's summary; everything marked data-pro hides. A brand-new
+// phone starts in Simple, a phone that already used the app keeps Pro; the header button switches.
+let simpleMode = store.get('simpleMode', store.get('settings', null) == null);
+document.body.classList.toggle('simple', simpleMode); // before the first paint, so Pro cards never flash
 const settings = { series: 'KXBTC15M', refreshSec: 3, multiFeeds: true, waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, tradeAmount: 0, ...DEFAULTS, ...EXIT_DEFAULTS, ...store.get('settings', {}) };
 const marketList = store.get('marketList', SEEDS).filter((m) => listed(m)); // the server's discovery (every 15-minute Kalshi market it can call), kept for the next start
 if (!/^[A-Z0-9]+$/.test(settings.series || '') || marketOf(settings.series, marketList) === HOME_MARKET && settings.series !== HOME_MARKET.series || !listed(marketOf(settings.series, marketList))) settings.series = HOME_MARKET.series; // only 15-minute markets the bot has a price for
@@ -726,6 +731,7 @@ function renderDeck(snap, live, sig, now) {
   }
   renderFlipCheck(live, now);
   renderLine(live, snap, now);
+  renderBoard(live, sig, now);
 
   // Tug of war
   const fs = flowStats(flow, now);
@@ -1518,6 +1524,7 @@ function withLive(bars, now) {
 function render() {
   state.renderedAt = Date.now();
   state.clock = null;
+  boardSide = null;
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
@@ -1590,6 +1597,7 @@ function render() {
     const rc = !call && !sig.bail && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
     // the big word, set once a render so its pop plays only on a real change (bail and paused included)
     const paused = !!(block && call && !sig.bail);
+    boardSide = call ?? rc?.side ?? (ev.pYes != null && ev.pYes !== 0.5 ? (ev.pYes > 0.5 ? 'YES' : 'NO') : null); // else the bot's lean
     if (setText(callEl, sig.bail ? 'BAIL OUT' : paused ? 'PAUSED' : call ? (call === 'YES' ? 'UP' : 'DOWN') : rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
     setClass(callEl, sig.bail ? 'call bail' : paused ? 'call pass' : rc ? `call ${rc.side.toLowerCase()} round` : `call ${(call ?? 'pass').toLowerCase()}`);
     setText($('callSub'), call && strike ? `${MKT.key} ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
@@ -1599,7 +1607,7 @@ function render() {
       const up = rc.side === 'YES', pcx = (x) => `${Math.round(x * 100)}%`;
       setText($('callLabel'), rc.buy ? 'ROUND CALL · BUY' : 'ROUND CALL · LEAN, NOT A BUY');
       setText($('callSub'), `${MKT.key} ${up ? 'above' : 'below'} ${usd(rc.strike ?? strike, 0)} at close · ${pcx(rc.p)}`);
-      setText($('reason'), `Every round gets a call after the first 5 minutes: at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). ${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${Math.max(1, Math.round((1 - rc.p) * 10))} in 10.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}`);
+      setText($('reason'), `Every round gets a call after the first 5 minutes: at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). ${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${1 - rc.p < 0.1 ? `${Math.max(1, Math.round((1 - rc.p) * 100))} in 100` : `${Math.round((1 - rc.p) * 10)} in 10`}.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}`);
       cardCls.push(rc.side.toLowerCase(), 'round');
     }
     // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
@@ -1894,6 +1902,59 @@ function roundCallFor(live, snap, now) {
   }
   return state.localPick[live.m.ticker] ?? null;
 }
+
+// ---------- Signal board (public/signals.js): every factor, in calls / probation / context, with or against the card ----------
+let boardSide = null; // the side on the card (set by render: the call, the round call or the bot's lean)
+async function refreshBoardExtras() { // the two sources nothing else on the Deck fetches
+  if (document.hidden || !shownViews.has('live')) return;
+  const [vt, lab] = await Promise.all([getJSON(api('voltune')).catch(() => null), getJSON(api('lessons')).catch(() => null)]);
+  if (vt) state.volTuneApi = vt;
+  if (lab) state.lab = lab;
+}
+setInterval(refreshBoardExtras, 60000);
+setTimeout(refreshBoardExtras, 4000);
+function renderBoard(live, sig, now) {
+  if (!$('boardCard')) return;
+  const t = live?.m?.ticker ?? null, fresh = (at, ms) => now - (at || 0) < ms;
+  const b = signalBoard({ ticker: t, side: boardSide, crypto: CRYPTO, scan: fresh(state.scanFetchAt, 60000) ? state.scanSrv : null, micro: state.micro, tune: state.tune, playbook: state.playbook,
+    cross: state.cross, flip: fresh(state.flipChkAt, 30000) ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab });
+  const c = b.counts, nm = (x) => (x === 'YES' ? 'UP' : 'DOWN');
+  setText($('sbSum'), `${c.in} in calls · ${c.probation} on probation`);
+  setHTML($('sbMeter'), b.side && c.with + c.against ? `${c.with ? `<i class="w" style="flex:${c.with}"></i>` : ''}${c.against ? `<i class="a" style="flex:${c.against}"></i>` : ''}` : '<i class="n" style="flex:1"></i>');
+  setText($('sbSay'), !b.rows.length ? 'Reading every factor…'
+    : !c.in ? `Nothing has proven itself yet: the call comes from the bot's own price math alone. ${c.probation} factor${c.probation === 1 ? ' is' : 's are'} still being tested.`
+    : !b.side ? `${c.in} proven factor${c.in === 1 ? ' feeds' : 's feed'} the calls. No side on the card yet.`
+    : !(c.with + c.against) ? `${c.in} proven factor${c.in === 1 ? ' feeds' : 's feed'} the calls; none has a read on this round right now.`
+    : `${nm(b.side)}: ${c.with} proven factor${c.with === 1 ? '' : 's'} with it, ${c.against} against${c.against > c.with ? ' (the price math still outweighs them, but be careful)' : ''}.`);
+  const chip = (r) => (r.status === 'in' ? '<em class="in">in calls</em>' : r.status === 'context' ? '<em class="ctx">context</em>' : '<em class="pr">probation</em>');
+  const row = (r) => `<li class="sb-${r.status}${r.vs ? ` vs-${r.vs}` : ''}"><span class="sb-name"><b>${esc(r.name)}</b><small>${esc(r.note || '')}</small>`
+    + `${r.progress != null ? `<span class="sb-prog" aria-label="${Math.round(r.progress * 100)}% of the way to proven"><i style="width:${Math.round(r.progress * 100)}%"></i></span>` : ''}</span>`
+    + `<span class="sb-right">${chip(r)}${r.lean ? `<b class="sb-lean ${r.lean === 'YES' ? 'up' : 'dn'}">${nm(r.lean)}${r.pts != null ? ` ${r.pts >= 0 ? '+' : '−'}${Math.abs(Math.round(r.pts * 1000) / 10)}` : ''}</b>` : '<b class="sb-lean">—</b>'}${r.vs ? `<small>${r.vs}</small>` : ''}</span></li>`;
+  // the proven ones up front; the ones still being tested folded under them (there can be a dozen or more)
+  const on = b.rows.filter((r) => r.status !== 'probation'), pr = b.rows.filter((r) => r.status === 'probation');
+  setHTML($('sbList'), on.map(row).join('') + (pr.length ? `<li class="sb-fold"><details${state.sbOpen ? ' open' : ''}><summary>${pr.length} on probation · tested, not used yet</summary><ul class="sb-list">${pr.map(row).join('')}</ul></details></li>` : ''));
+}
+
+$('sbList').addEventListener('toggle', (e) => { state.sbOpen = e.target.open; }, true); // stays open across re-renders
+
+// ---------- Simple mode ----------
+function applyMode() {
+  document.body.classList.toggle('simple', simpleMode);
+  const b = $('modeBtn');
+  setText(b, simpleMode ? 'Simple' : 'Pro');
+  b.setAttribute('aria-pressed', String(!simpleMode));
+  b.title = simpleMode ? 'Simple: just the call. Tap for Pro (everything)' : 'Pro: everything. Tap for Simple (just the call)';
+  // a screen Simple hides can't stay open
+  const hidden = [...document.querySelectorAll('nav button[data-pro]')].map((x) => x.dataset.view);
+  if (simpleMode && [...shownViews].some((v) => hidden.includes(v))) split.show('live');
+}
+$('modeBtn').addEventListener('click', () => {
+  simpleMode = !simpleMode;
+  store.set('simpleMode', simpleMode);
+  applyMode();
+  toast(simpleMode ? 'Simple mode: just the call. Tap "Simple" up top for everything.' : 'Pro mode: every card and tab.');
+  if (!simpleMode) requestAnimationFrame(() => { if (shownViews.has('chart')) drawChartTab(true); });
+});
 
 // ---------- Loss lab (server: bot.js, public/losslab.js): why each loss happened, the lessons the record proves ----------
 async function refreshLab(force = false) {
@@ -2292,8 +2353,46 @@ async function loadAccess() {
     setHidden($('adminCard'), st.role !== 'admin');
     setHidden($('adminLogin'), st.role === 'admin');
     if (st.role === 'admin') loadAdmin();
+    loadDiscord();
   } catch { /* offline */ }
 }
+
+// ---------- Discord role (server: discordroles.js): link once, the members' role follows your access ----------
+let discordNote = null; // what Discord's sign-in page sent back (?discord=linked|error&msg=), shown once
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('discord')) {
+    discordNote = q.get('discord') === 'linked' ? (q.get('msg') ? `Linked, but: ${q.get('msg')}` : 'Linked ✓ Your role is on its way.') : `Not linked: ${q.get('msg') || 'something went wrong'}`;
+    history.replaceState(null, '', location.pathname + location.hash);
+    setTimeout(() => split.show('settings'), 300);
+  }
+}
+async function loadDiscord() {
+  try {
+    const d = await getJSON('discord/status');
+    // only members can link; when the server owner hasn't set it up, only admins hear about it (with what's missing)
+    const admin = state.access?.role === 'admin';
+    setHidden($('dscRow'), !(d.member && d.on) && !(admin && !d.on));
+    setHidden($('dscLink'), !d.member || !d.on);
+    setHidden($('dscUnlink'), !d.linked);
+    setText($('dscLink'), d.linked ? 'Relink' : 'Link Discord');
+    const l = d.linked;
+    setText($('dscLine'), discordNote ?? (!d.on ? `Off: set ${d.missing.join(', ')} in Railway's Variables to give paying members their Discord role.`
+      : !l ? 'Link your Discord account to get the members\' role while your access is active.'
+      : l.error ? `${l.name}: ${l.error}` : `${l.name} · ${l.role ? 'members\' role on ✓' : l.role === false ? 'no role (access not active)' : 'checking…'}`));
+    discordNote = null;
+  } catch { setHidden($('dscRow'), true); }
+}
+$('dscLink').addEventListener('click', async () => {
+  setText($('dscLink'), 'Opening Discord…');
+  try { const { url } = await postJSON('discord/link', {}); location.assign(url); }
+  catch (e) { setText($('dscLine'), e.message); setText($('dscLink'), 'Link Discord'); }
+});
+$('dscUnlink').addEventListener('click', async () => {
+  if (!confirm('Unlink your Discord account? The members\' role comes off.')) return;
+  try { await postJSON('discord/unlink', {}); } catch (e) { window.alert(e.message); }
+  loadDiscord();
+});
 
 async function loadAdmin() {
   try {
@@ -2309,7 +2408,8 @@ async function loadAdmin() {
     setHTML($('admMembers'), others.map((m) => {
       const active = m.status === 'active' && m.expires > now;
       const label = active ? `active until ${day(m.expires)}` : m.status === 'active' ? `expired ${day(m.expires)}` : m.status;
-      return `<li><span><b>${m.code}</b><small>${label} · ${m.devices} device${m.devices === 1 ? '' : 's'}</small></span>
+      const dsc = m.discord ? ` · Discord ${esc(m.discord.name)} ${m.discord.error ? '⚠' : m.discord.role ? '✓ role' : 'no role'}` : '';
+      return `<li><span><b>${m.code}</b><small>${label} · ${m.devices} device${m.devices === 1 ? '' : 's'}${dsc}</small></span>
         <span class="adm-btns">${active ? `<button data-adm="approve" data-code="${m.code}" class="ghost">+${state.access?.days ?? ''}d</button><button data-adm="revoke" data-code="${m.code}" class="ghost">Revoke</button>` : `<button data-adm="approve" data-code="${m.code}">Approve</button>`}</span></li>`;
     }).join('') || '<li class="muted">No members yet.</li>');
   } catch (e) { setText($('admErr'), e.message); }
@@ -2909,3 +3009,4 @@ schedule();
 
 // Last: the saved split-screen layout (its screens' refreshes need everything above set up first)
 split.start();
+applyMode();

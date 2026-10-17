@@ -270,5 +270,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
 
   const isAdminToken = (token) => check(token).role === 'admin';
   const hasAccess = (token) => check(token).access;
-  return { load, save, check, statusBody, request, paid, redeem, restore, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
+  // is this member code's access active right now (the Discord role sync asks, discordroles.js)
+  const isActive = (code) => { const m = db.members[normalizeCode(code)]; return !!m && m.status === 'active' && m.expires > clock(); };
+  return { isActive, load, save, check, statusBody, request, paid, redeem, restore, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
 }
