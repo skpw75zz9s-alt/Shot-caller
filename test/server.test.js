@@ -172,3 +172,11 @@ test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', 
   const r = await fetch(`${app}/api/kalshi/markets/KXREFUSED-1`);
   assert.equal(r.status, 502); assert.equal(r.headers.get('x-paywall'), null);
 });
+
+test('a market whose bot isn\'t running yet answers "starting", never with Bitcoin\'s record or learning', async () => {
+  for (const p of ['learn', 'pick', 'record', 'index']) {
+    const r = await fetch(`${app}/api/${p}?m=KXDOGE15M`);
+    assert.equal(r.status, 503, p); assert.equal((await r.json()).starting, true);
+  }
+  assert.equal((await fetch(`${app}/api/learn`)).status, 200, 'Bitcoin\'s own still answers');
+});

@@ -296,6 +296,12 @@ Security:
   Until these are set, the feature is off, and admins see which variables are missing. The client secret and the bot
   token never leave the server.
 
+**Every coin opens, refresh-proof (v13.42.1–v13.42.2):** closed coins stay pickable. Only the server's own sign-in 401s
+(marked `x-paywall`) send the phone to sign in. Each coin keeps its own saved price and learned numbers, and until a
+coin's bot is running, the server answers its requests with "starting" instead of Bitcoin's data. On the phone, saved
+logs are type-checked as they load, and a bad saved position gets its own small card. If the Deck still can't draw,
+the error shows on the card, and the phone clears that coin's saved logs and reloads, once a session.
+
 ### The line, receipts and record windows (v13.41)
 
 These ideas came from studying another 15-minute terminal. Each was rebuilt and tested the Shot Caller way.

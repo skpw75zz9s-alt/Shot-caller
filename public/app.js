@@ -36,7 +36,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '180'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '181'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -197,17 +197,21 @@ if (store.get('settingsVersion', 1) < 14) {
   store.set('settings', settings); store.set('settingsVersion', 14);
 }
 
+// saved logs, type-checked as they load (v13.42.2): one damaged entry used to stop the app before it drew anything
+const savedList = (k) => { const v = store.get(k, []); return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : []; };
+const savedMap = (k) => { const v = store.get(k, {}); return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).filter(([, x]) => x && typeof x === 'object')) : {}; };
 const state = { markets: [], spot: null, candles: [], candlesAt: 0, marketsAt: 0, strikes: {}, quoteLog: {}, alerted: {},
-  positions: store.get('positions', []), trades: store.get('trades', []), kalshi: { key: null, keyId: null },
+  positions: savedList('positions'), trades: savedList('trades'), kalshi: { key: null, keyId: null },
   notifyLog: {}, // anti-spam limiter for in-app alerts
-  calls: store.get(LK('calls'), {}), chosen: {}, // the strike called in a round with many (hourly and daily markets)
-  ruleLog: store.get(LK('ruleLog'), []), // scorecard for the two-rejections rule
-  callLog: store.get(LK('callLog'), []), // every call the bot makes, graded at settlement (public/record.js)
-  flipLog: store.get(LK('flipLog'), []), // predicted turns (frozen a minute before), graded on whether a V really formed
-  coneLog: store.get(LK('coneLog'), []), // each round's cone at 5 min left (close band, chance above the target), graded at the close
-  pcLog: store.get(LK('pcLog'), []), // each minute's prediction candle as it stood when the minute began, graded at its close
-  predLog: store.get(LK('predLog'), []), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
-  memory: store.get('marketMemory', null) }; // what the server has learned about the market (public/learner.js)
+  calls: savedMap(LK('calls')), chosen: {}, // the strike called in a round with many (hourly and daily markets)
+  ruleLog: savedList(LK('ruleLog')), // scorecard for the two-rejections rule
+  callLog: savedList(LK('callLog')), // every call the bot makes, graded at settlement (public/record.js)
+  flipLog: savedList(LK('flipLog')), // predicted turns (frozen a minute before), graded on whether a V really formed
+  coneLog: savedList(LK('coneLog')), // each round's cone at 5 min left (close band, chance above the target), graded at the close
+  pcLog: savedList(LK('pcLog')), // each minute's prediction candle as it stood when the minute began, graded at its close
+  predLog: savedList(LK('predLog')), // each round's prediction-line closes with 5 min left, graded at the close (public/predict.js)
+  // what the server has learned about this market (public/learner.js): kept per market (v13.42.2), and never another market's
+  memory: ((m) => (m?.market?.series && m.market.series !== settings.series ? null : m))(store.get(LK('marketMemory'), null)) };
 // v5.0: auto-trading and Practice were removed: drop what they stored
 try { for (const k of ['practice', 'practiceCfg', 'liveCfg', 'liveOrders', 'learned']) localStorage.removeItem(k); } catch { /* storage blocked */ }
 // v8.0: the Auto-trader moved to the server: drop what the phone-side one stored
@@ -254,9 +258,11 @@ async function refreshMarkets() {
 
 // What the server has learned (volatility by time of week, calibration, basis). Small; refreshed every 10 minutes.
 async function refreshMemory() {
-  state.memory = { ...(await getJSON(api('learn'))), at: Date.now() };
+  const got = await getJSON(api('learn'));
+  if (got?.market?.series && got.market.series !== settings.series) throw new Error('another market\'s learning'); // never price one coin with another's
+  state.memory = { ...got, at: Date.now() };
   setFeeRates(state.memory.learned?.fees); // Kalshi's real fee rates, measured from fills
-  store.set('marketMemory', state.memory);
+  store.set(LK('marketMemory'), state.memory);
   renderMemory();
 }
 
@@ -268,7 +274,7 @@ async function refreshIndex() {
 async function refreshSpot() {
   const t = await getJSON(CRYPTO ? `coinbase/products/${MKT.product}/ticker` : `price/${MKT.key}/ticker`);
   state.spot = Number(t.price); state.spotAt = Date.now(); state.priceDelayed = !!t.delayed; // a delayed index or futures print: shown, never called on
-  if (Date.now() - (state.spotSavedAt || 0) > 10000) { state.spotSavedAt = Date.now(); store.set('lastSpot', { p: state.spot, t: Date.now() }); }
+  if (Date.now() - (state.spotSavedAt || 0) > 10000) { state.spotSavedAt = Date.now(); store.set(LK('lastSpot'), { p: state.spot, t: Date.now() }); }
 }
 
 // ---------- settlement ----------
@@ -318,7 +324,15 @@ function closePosition(pos, exit, how, at = Date.now(), contracts = pos.contract
 }
 
 function renderPositions(snap) {
-  const html = state.positions.map((pos) => {
+  const html = state.positions.map((pos) => { try { return positionCard(pos, snap); } catch (e) {
+    // one unreadable position (damaged on the phone, or from another market) gets a small card instead of blanking the Deck
+    console.error('position card failed', e);
+    return `<div class="card pos-card"><div class="pos-why">Couldn't read a saved position${pos?.ticker ? ` (${esc(String(pos.ticker))})` : ''}.</div><div class="pos-btns"><button data-act="remove" data-id="${esc(String(pos?.id ?? ''))}" class="ghost">Remove</button></div></div>`;
+  } }).join('');
+  setHTML($('positions'), html);
+}
+function positionCard(pos, snap) {
+  {
     const check = positionCheck(pos, snap, settings);
     (state.posChecks ||= {})[pos.id] = check; // the Suggestions strip reads the same result
     const { row, minutesLeft, pSide, bid, ex } = check;
@@ -355,8 +369,7 @@ function renderPositions(snap) {
       <ul class="flips"><span>Flip watch</span>${signs}</ul>
       <div class="pos-btns">${pos.source === 'kalshi' ? '' : `<button data-act="sell" data-id="${pos.id}">I sold${bid != null ? ` at ${pc(bid)}` : ''}</button>`}<button data-act="remove" data-id="${pos.id}" class="ghost">Remove</button></div>
     </div>`;
-  }).join('');
-  setHTML($('positions'), html);
+  }
 }
 
 // ---------- one-tap tracking ----------
@@ -1218,7 +1231,7 @@ function reversalReport(rv) {
 }
 
 // ---------- why it moved (public/why.js): every 2 seconds, explain any real move on the chart ----------
-state.whyLog = store.get(LK('whyLog'), []).filter((n) => n.t > Date.now() - 6 * 3600000);
+state.whyLog = savedList(LK('whyLog')).filter((n) => n.t > Date.now() - 6 * 3600000);
 function runWhy() {
   if (document.hidden) return;
   const now = Date.now(), live = state.markets.find((m) => Date.parse(m.close_time) > now);
@@ -1526,7 +1539,27 @@ function withLive(bars, now) {
   return [...bars, { t, o: last.c, h: Math.max(last.c, s), l: Math.min(last.c, s), c: s, v: 0 }];
 }
 
+// The Deck's draw, guarded (v13.42.2): one bad value (often something saved on the phone) used to throw on every tick and
+// leave the whole Deck blank. Now the error shows on the card, and if it keeps happening the phone clears this market's
+// saved logs and reloads, once a session.
+let renderFails = 0;
+const MARKET_CACHES = ['calls', 'ruleLog', 'callLog', 'flipLog', 'coneLog', 'pcLog', 'predLog', 'whyLog', 'marketMemory', 'lastSpot'];
 function render() {
+  try { renderNow(); renderFails = 0; } catch (e) { renderFailed(e); }
+}
+function renderFailed(e) {
+  console.error('render failed', e);
+  renderFails++;
+  setClass($('status'), 'dot err');
+  $('status').title = `Couldn't draw the Deck: ${e.message}`;
+  const key = `scHealed:${settings.series}`;
+  let healed = true; try { healed = !!sessionStorage.getItem(key); } catch { /* storage blocked */ }
+  setText($('reason'), `Couldn't draw this round (${e.message}). ${renderFails < 3 ? 'Retrying…' : healed ? 'Still failing after clearing this market\'s saved data: send a screenshot of this.' : 'Clearing this market\'s saved data on the phone…'}`);
+  if (renderFails < 3 || healed) return;
+  try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) localStorage.removeItem(LK(k)); } catch { /* storage blocked */ }
+  location.reload();
+}
+function renderNow() {
   state.renderedAt = Date.now();
   state.clock = null;
   boardSide = null;
@@ -2590,7 +2623,7 @@ $('boughtBtn').addEventListener('click', () => {
 $('positions').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
-  const pos = state.positions.find((p) => p.id === btn.dataset.id);
+  const pos = state.positions.find((p) => String(p.id ?? '') === btn.dataset.id);
   if (!pos) return;
   if (btn.dataset.act === 'remove') {
     if (confirm('Stop tracking this position? It won\'t be added to your trades.')) { removePosition(pos.id); render(); }
@@ -3000,7 +3033,8 @@ buildSettings(); // (v5.0 cleanup dropped these two: the settings form and risk 
 renderRisk();
 if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout(() => toast('New default: Steady. Calls only when confidence is 85+ and likely to hold all round. Change it in Settings → Risk level.'), 1500); }
 // Show the last price from the previous visit right away (marked DELAYED until a fresh one lands a moment later)
-{ const last = store.get('lastSpot', null); if (last && Date.now() - last.t < 15 * 60000 && !state.spot) { state.spot = last.p; renderTicker(null); } }
+{ const last = store.get(LK('lastSpot'), null); // this market's own last price (v13.42.2: it used to be shared, so a switch showed BTC's price on DOGE)
+  if (last && Date.now() - last.t < 15 * 60000 && !state.spot) { state.spot = last.p; renderTicker(null); } }
 loadKalshi();
 autopilot = createAutopilot({ $, esc, API, toast, paywalled });
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }

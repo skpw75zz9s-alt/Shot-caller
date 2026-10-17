@@ -286,6 +286,8 @@ async function readBody(req) {
 
 // the phone sends you to sign in only on a 401 that carries this (v13.42.1): an upstream's own 401 never does
 const PAYWALL_HDR = { 'x-paywall': '1' };
+// the answers that belong to one market's own bot and readers (asked with ?m=SERIES)
+const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|learn|index)$/;
 function send(res, status, body, type = 'application/json', headers = {}) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -437,6 +439,8 @@ export const server = http.createServer(async (req, res) => {
     const mq = url.searchParams.get('m');
     // a market opened on a phone before its bot is running starts now (Bitcoin's answers meanwhile)
     if (mq && /^[A-Z0-9]+$/.test(mq) && !stacks.has(mq) && !isHome(mq) && marketOf(mq, discovery.list()).series === mq) stacks.start(mq);
+    // until it is, its own answers wait: Bitcoin's record, pick and learning must never show up as another market's (v13.42.2)
+    if (mq && !isHome(mq) && !stacks.has(mq) && MARKET_OWN.test(path)) return send(res, 503, { error: 'this market is starting', starting: true });
     const mb = mq ? stacks.bot(mq) : bot, ms = mq ? stacks.stack(mq) : null;
     const mScan = ms?.scanFeed ?? scanFeed, mWatch = ms?.marketWatch ?? marketWatch, mMicro = ms?.microFeed ?? microFeed, mPlay = ms?.playbook ?? playbook, mTune = ms?.tuneFeed ?? tuneFeed, mFlip = ms?.flipFeed ?? flipFeed, mVol = ms?.volTuneFeed ?? volTuneFeed;
     if (path === '/api/record') return send(res, 200, mb.record());
