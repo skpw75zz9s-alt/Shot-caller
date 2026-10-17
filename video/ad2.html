@@ -1,0 +1,363 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* The v13.39 ad: 1920x1080. Every frame is drawn by render(t), so the recording is exact and can be supersampled
+     in time (adrender2.mjs renders 2 frames per output frame for real motion blur). */
+  * { box-sizing: border-box; margin: 0; transition: none !important; animation: none !important; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #03050b; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #eef2f8; }
+  #bgc, #fx { position: absolute; inset: 0; }
+  #stage { position: absolute; inset: 0; perspective: 1800px; }
+  #cam { position: absolute; inset: 0; transform-origin: 50% 50%; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .eyebrow { font: 700 20px 'DejaVu Sans Mono', monospace; letter-spacing: 6px; color: #22d3ee; text-transform: uppercase; }
+  .h { font-weight: 800; font-size: 84px; line-height: 1.02; letter-spacing: -2.5px; }
+  .h em { font-style: normal; background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 30px; line-height: 1.42; color: #b9c3d6; max-width: 900px; }
+  .left { position: absolute; left: 130px; top: 170px; width: 1000px; display: flex; flex-direction: column; gap: 22px; }
+  /* phones: a 3D device with a glass sheen */
+  .phone { position: absolute; width: 430px; height: 930px; border-radius: 58px; background: #000; transform-style: preserve-3d;
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; overflow: hidden; }
+  .phone .scr { position: absolute; left: 0; top: 0; width: 430px; transform-origin: 50% 0; }
+  .phone .gloss { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, #ffffff1c 45%, transparent 60%); mix-blend-mode: screen; pointer-events: none; }
+  .phone .notch { position: absolute; left: 50%; top: 14px; width: 130px; height: 36px; margin-left: -65px; border-radius: 20px; background: #000; }
+  .refl { position: absolute; width: 430px; height: 260px; border-radius: 58px; background: linear-gradient(180deg, #22d3ee18, transparent 70%); filter: blur(10px); }
+  .chip { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font: 800 26px 'DejaVu Sans Mono', monospace; background: #2a0d16; color: #ff6b85; border: 2px solid #ff4d6d77; box-shadow: 0 0 30px #ff4d6d33; }
+  .chip.ok { background: #062419; color: #4dfbb8; border-color: #2ee6a688; box-shadow: 0 0 30px #2ee6a633; }
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; }
+  /* intro */
+  #logo { position: absolute; left: 50%; top: 250px; width: 210px; height: 210px; margin-left: -105px; border-radius: 48px; box-shadow: 0 0 0 2px #22d3ee66, 0 30px 120px #22d3ee66; }
+  #brand { position: absolute; width: 100%; top: 510px; text-align: center; font-weight: 800; font-size: 104px; letter-spacing: 16px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #sweep { position: absolute; top: 500px; height: 140px; width: 260px; background: linear-gradient(90deg, transparent, #ffffff55, transparent); mix-blend-mode: overlay; transform: skewX(-20deg); }
+  #tag { position: absolute; width: 100%; top: 650px; text-align: center; font-size: 36px; color: #b9c3d6; }
+  #ver { position: absolute; left: 50%; top: 730px; transform: translateX(-50%); font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #22d3ee; border: 2px solid #22d3ee77; border-radius: 999px; padding: 8px 26px; }
+  /* s1 */
+  #sitout { position: absolute; left: 130px; top: 300px; font-weight: 800; font-size: 200px; letter-spacing: 6px; color: #5d6880; white-space: nowrap; }
+  #sitout span { display: inline-block; }
+  #strike { position: absolute; left: 120px; top: 405px; height: 16px; background: #ff4d6d; box-shadow: 0 0 30px #ff4d6d; border-radius: 8px; }
+  #ring { position: absolute; width: 230px; height: 230px; }
+  #ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 46px 'DejaVu Sans Mono', monospace; color: #eef2f8; }
+  #ring small { position: absolute; left: 0; width: 100%; top: 150px; text-align: center; font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #2ee6a6; }
+  /* s4 notes */
+  .note { position: absolute; width: 330px; height: 420px; border-radius: 10px; background: #f5f3ec; color: #1d2433; padding: 26px 26px 0 58px; overflow: hidden;
+    background-image: linear-gradient(90deg, transparent 44px, #e2707088 44px, #e2707088 46px, transparent 46px), repeating-linear-gradient(180deg, transparent 0 33px, #8fb4e055 33px 35px); box-shadow: 0 30px 70px #000b; }
+  .note h3 { font: italic 700 46px 'DejaVu Serif', serif; margin-bottom: 8px; }
+  .note p { font: italic 21px/35px 'DejaVu Serif', serif; color: #2b3550; }
+  .stamp { position: absolute; right: 18px; bottom: 30px; padding: 8px 16px; border: 5px solid #11a873; border-radius: 10px; color: #11a873; font: 800 34px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; transform: rotate(-12deg); background: #ffffffaa; }
+  /* s6 lock screen */
+  #lock { position: absolute; left: 1180px; top: 75px; width: 430px; height: 930px; border-radius: 58px; overflow: hidden; background: radial-gradient(120% 70% at 30% 0%, #1b3a6b, #070b16 70%);
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; }
+  #lock .time { position: absolute; width: 100%; top: 110px; text-align: center; font-weight: 300; font-size: 104px; letter-spacing: -2px; }
+  #lock .date { position: absolute; width: 100%; top: 90px; text-align: center; font-size: 22px; color: #c9d4ea; }
+  .ban { position: absolute; left: 16px; width: 398px; padding: 16px 18px; border-radius: 26px; background: #1c2537e6; backdrop-filter: blur(8px); display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; }
+  .ban img { width: 44px; height: 44px; border-radius: 11px; }
+  .ban b { font-size: 18px; display: block; } .ban span { font-size: 16px; color: #c3cde0; line-height: 1.3; display: block; } .ban i { font-style: normal; float: right; font-size: 14px; color: #8e9ab2; font-weight: 400; }
+  /* outro */
+  #o-logo { position: absolute; left: 50%; top: 190px; width: 170px; height: 170px; margin-left: -85px; border-radius: 40px; box-shadow: 0 30px 110px #22d3ee66; }
+  #o-h { position: absolute; width: 100%; top: 410px; text-align: center; font-size: 110px; }
+  #o-sub { position: absolute; width: 100%; top: 540px; text-align: center; max-width: none; }
+  #o-cta { position: absolute; left: 50%; top: 630px; transform: translateX(-50%); padding: 22px 50px; border-radius: 22px; background: linear-gradient(90deg, #22d3ee, #5ef2c8); color: #04121a; font: 800 34px 'DejaVu Sans', sans-serif; letter-spacing: 1px; box-shadow: 0 0 60px #22d3ee77; white-space: nowrap; }
+  #o-fine { position: absolute; left: 260px; right: 260px; bottom: 70px; text-align: center; font-size: 20px; line-height: 1.5; color: #7f8aa0; }
+  #flash { position: absolute; inset: 0; background: #e9fbff; opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%); pointer-events: none; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); box-shadow: 0 0 20px #22d3ee; }
+  #note { position: absolute; right: 30px; bottom: 18px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 2px; }
+</style></head>
+<body>
+<canvas id="bgc" width="1920" height="1080"></canvas>
+<div id="stage"><div id="cam">
+
+<section class="scene" id="s0">
+  <img id="logo" src="../public/icon-512.png">
+  <div id="brand">SHOT<em>CALLER</em></div><div id="sweep"></div>
+  <div id="tag">It calls every round. It learns from every loss.</div>
+  <div id="ver">v13.39</div>
+</section>
+
+<section class="scene" id="s1">
+  <div id="sitout"><span>S</span><span>I</span><span>T</span><span>&nbsp;</span><span>O</span><span>U</span><span>T</span><span>?</span></div>
+  <div id="strike"></div>
+  <div class="left" id="s1t" style="top:250px">
+    <div class="eyebrow a">New · the round call</div>
+    <div class="h a">Every round.<br><em>A call.</em></div>
+    <div class="sub a">From 10:00 left the bot always picks a side, UP or DOWN. It says BUY only when the price is worth it.</div>
+  </div>
+  <div class="refl" id="r1" style="left:1240px;top:1010px"></div>
+  <div class="phone" id="p1" style="left:1240px;top:75px"><img class="scr" src="ad2/deck-round.png"><div class="notch"></div><div class="gloss"></div></div>
+  <div id="ring" style="left:130px;top:640px"><svg width="230" height="230" viewBox="0 0 230 230"><circle cx="115" cy="115" r="100" fill="#06101cdd" stroke="#1d2a44" stroke-width="12"/><circle id="ringArc" cx="115" cy="115" r="100" fill="none" stroke="#2ee6a6" stroke-width="12" stroke-linecap="round" transform="rotate(-90 115 115)" stroke-dasharray="628" stroke-dashoffset="628" style="filter:drop-shadow(0 0 10px #2ee6a6)"/></svg><b id="ringT">10:00</b><small>LOCKS</small></div>
+</section>
+
+<section class="scene" id="s2">
+  <div class="left" style="top:120px">
+    <div class="eyebrow a">New · loss lab</div>
+    <div class="h a">It studies<br><em>every loss.</em></div>
+    <div class="sub a">What it saw, what happened next, and why it lost.</div>
+  </div>
+  <div class="chips" id="s2c" style="position:absolute;left:130px;top:860px;width:1000px">
+    <div class="chip c">✕ Late turn</div><div class="chip c">✕ Kalshi disagreed</div><div class="chip ok c">✓ Proven lesson: take the other side</div>
+  </div>
+  <div class="phone" id="p2" style="left:1240px;top:75px"><img class="scr" src="ad2/losslab.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s3">
+  <div class="left" style="top:110px">
+    <div class="eyebrow a">Rebuilt · flip check</div>
+    <div class="h a">Flips read the chart<br><em>and the crowd.</em></div>
+  </div>
+  <div class="phone" id="p3" style="left:1240px;top:75px"><img class="scr" id="p3i" src="ad2/deck-flip.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s4">
+  <div class="left" style="top:80px;width:1700px">
+    <div class="eyebrow a">From the community</div>
+    <div class="h a">Your notes. <em>Tested.</em></div>
+  </div>
+  <div class="note n" style="left:130px;top:330px"><h3>MACD</h3><p>Line crosses above the signal = upward momentum.</p><div class="stamp">TESTED</div></div>
+  <div class="note n" style="left:480px;top:350px"><h3>EMA</h3><p>Rising line = uptrend. Price bounces near it.</p><div class="stamp">TESTED</div></div>
+  <div class="note n" style="left:830px;top:330px"><h3>RSI</h3><p>Above 70 overbought, below 30 oversold.</p><div class="stamp">TESTED</div></div>
+  <div class="note n" style="left:1180px;top:350px"><h3>Ceiling</h3><p>Rejection or breakthrough: the 60%+ area.</p><div class="stamp">TESTED</div></div>
+  <div class="note n" style="left:1530px;top:330px"><h3>W bottom</h3><p>Break the neckline: TP above, stop below.</p><div class="stamp">TESTED</div></div>
+  <div class="sub a" id="s4s" style="position:absolute;left:130px;top:830px;max-width:1660px">Every rule is tuned on old rounds and scored on new ones it never saw. Only the ones that prove themselves touch the calls.</div>
+</section>
+
+<section class="scene" id="s5">
+  <div class="left" style="top:110px;width:980px">
+    <div class="eyebrow a">Related markets · why it's moving</div>
+    <div class="h a">Every market reads<br><em>every other.</em></div>
+    <div class="sub a" id="s5s">Gold and oil split every move into the dollar, rates, their sector and their own news.</div>
+  </div>
+  <div class="phone" id="p5" style="left:1240px;top:75px"><img class="scr" src="ad2/drv-gold.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s6">
+  <div class="left" style="top:230px">
+    <div class="eyebrow a">Cleaner</div>
+    <div class="h a">Alerts as <em>real<br>notifications.</em></div>
+    <div class="sub a">No more pop-ups over the app. Steadier live data, no false alarms.</div>
+  </div>
+  <div id="lock"><div class="date">Saturday, October 17</div><div class="time">10:53</div>
+    <div class="ban b"><img src="../public/icon-192.png"><div><b>Round call · UP <i>now</i></b><span>BTC above $100,000 at the close · 72%</span></div></div>
+    <div class="ban b"><img src="../public/icon-192.png"><div><b>Whale buy: $162,353 <i>now</i></b><span>66.84 ETH at $2,429 on OKX perp</span></div></div>
+    <div class="ban b"><img src="../public/icon-192.png"><div><b>Flip warning <i>1m ago</i></b><span>55% the DOWN call flips · chart history and buyers / sellers</span></div></div>
+    <div class="ban b"><img src="../public/icon-192.png"><div><b>Why it lost <i>14m ago</i></b><span>Late turn: it was winning, then turned in the last 2 minutes</span></div></div>
+  </div>
+</section>
+
+<section class="scene" id="s7">
+  <img id="o-logo" src="../public/icon-512.png">
+  <div id="o-h" class="h">Shot<em>Caller</em> v13.39</div>
+  <div id="o-sub" class="sub">Live now. Reopen the app to update.</div>
+  <div id="o-cta">Open Shot Caller</div>
+  <div id="o-fine">Signals, not guarantees: every call can lose, and a round call is a lean unless it says BUY. Not financial advice. Trade only what you can afford to lose. Screens show sample market data.</div>
+</section>
+
+</div></div>
+<canvas id="fx" width="1920" height="1080"></canvas>
+<div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
+const easeIO = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const pop = (x) => { x = clamp(x); const c = 1.7; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const SCENES = [['s0', 0, 3.8], ['s1', 3.8, 10.2], ['s2', 10.2, 17.0], ['s3', 17.0, 23.2], ['s4', 23.2, 29.4], ['s5', 29.4, 36.0], ['s6', 36.0, 41.0], ['s7', 41.0, 47.0]];
+window.DURATION = 47.0;
+window.CUTS = SCENES.map((s) => s[1]);
+const TR = 0.45; // transition length
+
+// deterministic randomness
+function rng(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32; }
+const R = rng(11), PARTS = Array.from({ length: 260 }, () => ({ x: R() * 1920, y: R() * 1080, z: 0.2 + R() * 0.8, s: R() * Math.PI * 2, hue: R() < 0.7 ? 188 : 160 }));
+const bg = $('bgc').getContext('2d'), fx = $('fx').getContext('2d');
+
+function drawBg(t) {
+  const g = bg;
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#03050b'; g.fillRect(0, 0, 1920, 1080);
+  g.globalCompositeOperation = 'lighter';
+  // aurora blobs
+  for (const [cx, cy, r, c, sp] of [[1400, 120, 900, '#0e3a6e', 0.11], [400, 900, 800, '#06304a', 0.08], [1000, 500, 700, '#0b2d3d', 0.06]]) {
+    const x = cx + Math.sin(t * sp * 6) * 140, y = cy + Math.cos(t * sp * 5) * 90, gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, c); gr.addColorStop(1, 'transparent'); g.fillStyle = gr; g.fillRect(0, 0, 1920, 1080);
+  }
+  // perspective floor grid
+  g.globalCompositeOperation = 'source-over';
+  const hz = 700, vx = 960 + Math.sin(t * 0.3) * 40;
+  g.strokeStyle = 'rgba(34,211,238,0.10)'; g.lineWidth = 1.2;
+  for (let i = -24; i <= 24; i++) { g.beginPath(); g.moveTo(vx + i * 22, hz); g.lineTo(vx + i * 260, 1080); g.stroke(); }
+  for (let k = 0; k < 14; k++) { const f = ((k + (t * 0.6) % 1) / 14), y = hz + Math.pow(f, 2.2) * 380; g.globalAlpha = f; g.beginPath(); g.moveTo(0, y); g.lineTo(1920, y); g.stroke(); }
+  g.globalAlpha = 1;
+  const fade = g.createLinearGradient(0, hz - 40, 0, hz + 140); fade.addColorStop(0, '#03050b'); fade.addColorStop(1, 'rgba(3,5,11,0)'); g.fillStyle = fade; g.fillRect(0, hz - 40, 1920, 180);
+  // particles (depth: size, speed, brightness)
+  g.globalCompositeOperation = 'lighter';
+  for (const p of PARTS) {
+    const x = (p.x + t * 30 * p.z) % 1960 - 20, y = (p.y - t * 18 * p.z + 1080 * 4) % 1100 - 10, a = 0.15 + 0.5 * p.z * (0.6 + 0.4 * Math.sin(t * 2 + p.s));
+    g.fillStyle = `hsla(${p.hue},90%,65%,${a})`; g.beginPath(); g.arc(x, y, 0.6 + p.z * 2.2, 0, 7); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+}
+
+// the scene graphics drawn on the overlay canvas
+function lossChart(g, local) {
+  const X0 = 130, X1 = 1060, Y0 = 470, Y1 = 820, n = 60, prog = clamp((local - 0.6) / 2.6);
+  const tgt = Y0 + (Y1 - Y0) * 0.55;
+  g.fillStyle = 'rgba(8,14,28,0.72)'; g.strokeStyle = 'rgba(34,211,238,0.25)'; g.lineWidth = 2; roundRect(g, X0 - 20, Y0 - 30, X1 - X0 + 40, Y1 - Y0 + 60, 22); g.fill(); g.stroke();
+  g.setLineDash([10, 10]); g.strokeStyle = '#8b95a7'; g.beginPath(); g.moveTo(X0, tgt); g.lineTo(X1, tgt); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#8b95a7'; g.font = '700 18px DejaVu Sans Mono'; g.fillText('TARGET', X1 - 90, tgt - 12);
+  const R2 = rng(5), pts = []; let v = -0.35;
+  for (let i = 0; i < n; i++) { const f = i / (n - 1); v += (R2() - 0.5) * 0.16 + (f < 0.72 ? -0.012 : 0.115); pts.push([X0 + f * (X1 - X0), tgt + v * 120]); }
+  const m = Math.max(2, Math.floor(prog * n));
+  const grad = g.createLinearGradient(X0, 0, X1, 0); grad.addColorStop(0, '#2ee6a6'); grad.addColorStop(0.72, '#2ee6a6'); grad.addColorStop(0.86, '#ff4d6d'); grad.addColorStop(1, '#ff4d6d');
+  g.strokeStyle = grad; g.lineWidth = 6; g.lineJoin = 'round'; g.shadowColor = '#22d3ee'; g.shadowBlur = 18; g.beginPath();
+  pts.slice(0, m).forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.shadowBlur = 0;
+  const [hx, hy] = pts[m - 1]; g.fillStyle = '#fff'; g.beginPath(); g.arc(hx, hy, 9, 0, 7); g.fill();
+  g.fillStyle = '#2ee6a6'; g.font = '800 22px DejaVu Sans Mono'; g.fillText('CALLED UP ▲', X0 + 6, pts[0][1] + 44);
+  if (prog > 0.97) { const k = pop((local - 3.3) / 0.4); g.save(); g.translate(X1 - 120, Y1 - 40); g.scale(k, k); g.fillStyle = '#ff4d6d'; g.font = '800 40px DejaVu Sans Mono'; g.fillText('LOSS', -50, 14); g.restore(); }
+}
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function flipViz(g, local) {
+  // candles
+  const X0 = 130, W = 560, Y0 = 420, H = 300, R3 = rng(21); let p = 0.5; const cs = [];
+  for (let i = 0; i < 26; i++) { const o = p; p += (R3() - (i < 18 ? 0.42 : 0.62)) * 0.09; cs.push([o, p, Math.max(o, p) + R3() * 0.03, Math.min(o, p) - R3() * 0.03]); }
+  const lo = Math.min(...cs.map((c) => c[3])), hi = Math.max(...cs.map((c) => c[2])), shown = Math.floor(clamp((local - 0.4) / 2.2) * cs.length), y = (v) => Y0 + 14 + (H - 28) * (1 - (v - lo) / (hi - lo));
+  g.fillStyle = 'rgba(8,14,28,0.72)'; g.strokeStyle = 'rgba(34,211,238,0.25)'; g.lineWidth = 2; roundRect(g, X0 - 20, Y0 - 30, W + 40, H + 60, 22); g.fill(); g.stroke();
+  cs.slice(0, shown).forEach(([o, c, h, l], i) => { const x = X0 + 10 + i * (W - 20) / 26, up = c >= o; g.strokeStyle = g.fillStyle = up ? '#2ee6a6' : '#ff4d6d'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + 7, y(h)); g.lineTo(x + 7, y(l)); g.stroke(); g.fillRect(x, y(Math.max(o, c)), 14, Math.max(3, Math.abs(y(o) - y(c)))); });
+  g.fillStyle = '#8b95a7'; g.font = '700 18px DejaVu Sans Mono'; g.fillText('CHART HISTORY', X0, Y0 - 44);
+  // buyers vs sellers tug
+  const ty = 820, buy = 0.5 - 0.16 * ease((local - 1.2) / 2) + 0.03 * Math.sin(local * 3);
+  g.fillText('BUYERS vs SELLERS', X0, ty - 24);
+  g.fillStyle = '#2ee6a6'; roundRect(g, X0, ty, W * buy, 34, 10); g.fill(); g.fillStyle = '#ff4d6d'; roundRect(g, X0 + W * buy + 6, ty, W * (1 - buy) - 6, 34, 10); g.fill();
+  g.fillStyle = '#04121a'; g.font = '800 20px DejaVu Sans Mono'; g.fillText(`${Math.round(buy * 100)}%`, X0 + 12, ty + 25); g.fillText(`${Math.round((1 - buy) * 100)}%`, X0 + W - 64, ty + 25);
+  // gauge
+  const cx = 930, cy = 680, r = 150, val = 0.14 * ease((local - 1.6) / 1.4), base = 0.09;
+  g.lineWidth = 26; g.lineCap = 'round'; g.strokeStyle = '#17223a'; g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
+  const ang = (v) => Math.PI + clamp(v / 0.5) * Math.PI;
+  g.strokeStyle = '#5d6880'; g.lineWidth = 6; g.beginPath(); g.arc(cx, cy, r + 28, ang(base) - 0.02, ang(base) + 0.02); g.stroke();
+  const gg = g.createLinearGradient(cx - r, 0, cx + r, 0); gg.addColorStop(0, '#2ee6a6'); gg.addColorStop(1, '#fbbf24');
+  g.strokeStyle = gg; g.lineWidth = 26; g.shadowColor = '#fbbf24'; g.shadowBlur = 20; g.beginPath(); g.arc(cx, cy, r, Math.PI, ang(val)); g.stroke(); g.shadowBlur = 0; g.lineCap = 'butt';
+  g.fillStyle = '#eef2f8'; g.font = '800 64px DejaVu Sans Mono'; g.textAlign = 'center'; g.fillText(`${Math.round(val * 100)}%`, cx, cy - 20);
+  g.font = '700 18px DejaVu Sans Mono'; g.fillStyle = '#8b95a7'; g.fillText('FLIP CHANCE', cx, cy + 20); g.fillText(`bot's math ${Math.round(base * 100)}%`, cx, cy + 50); g.textAlign = 'left';
+}
+const NODES = [['BTC', 0, 0, '#f7931a'], ['ETH', 1, 0, '#8c8cff'], ['SOL', 1, 1, '#2ee6a6'], ['XRP', 1, 2, '#e8ecf3'], ['DOGE', 1, 3, '#c2a633'], ['S&P', 1, 4, '#22d3ee'], ['NDX', 1, 5, '#22d3ee'], ['DOW', 1, 6, '#22d3ee'], ['GOLD', 1, 7, '#fbbf24'], ['SILVER', 1, 8, '#cfd6e4'], ['OIL', 1, 9, '#a78bfa'], ['DXY', 2, 0, '#5d6880'], ['10Y', 2, 1, '#5d6880'], ['BRENT', 2, 2, '#5d6880']];
+function network(g, local) {
+  const cx = 620, cy = 690, k = ease((local - 0.3) / 1.2), pos = NODES.map(([, ring, i]) => {
+    if (!ring) return [cx, cy];
+    const n = ring === 1 ? 10 : 3, r = ring === 1 ? 250 : 360, a = (i / n) * Math.PI * 2 + local * 0.12 * (ring === 1 ? 1 : -1) + (ring === 2 ? 2.2 : 0);
+    return [cx + Math.cos(a) * r * k, cy + Math.sin(a) * r * 0.62 * k];
+  });
+  g.lineWidth = 2;
+  for (let i = 0; i < NODES.length; i++) for (let j = i + 1; j < NODES.length; j++) {
+    const strong = i === 0 || (NODES[i][1] === 1 && NODES[j][1] === 2 && (i >= 8));
+    if (!strong && (i + j) % 4) continue;
+    const [x1, y1] = pos[i], [x2, y2] = pos[j];
+    g.strokeStyle = `rgba(34,211,238,${strong ? 0.28 : 0.1})`; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    const f = (local * 0.6 + (i * 7 + j * 3) * 0.13) % 1; g.fillStyle = 'rgba(125,255,208,0.9)'; g.beginPath(); g.arc(x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, strong ? 4 : 2.5, 0, 7); g.fill();
+  }
+  NODES.forEach(([name, ring, , col], i) => {
+    const [x, y] = pos[i], r = ring ? (ring === 1 ? 34 : 26) : 52, a = clamp((local - 0.3 - i * 0.05) / 0.4);
+    g.globalAlpha = a; g.fillStyle = '#0a1426'; g.strokeStyle = col; g.lineWidth = 3; g.shadowColor = col; g.shadowBlur = 16;
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke(); g.shadowBlur = 0;
+    g.fillStyle = '#eef2f8'; g.font = `800 ${ring ? 15 : 22}px DejaVu Sans Mono`; g.textAlign = 'center'; g.fillText(name, x, y + 6); g.textAlign = 'left'; g.globalAlpha = 1;
+  });
+}
+
+const els = (id, sel) => [...$(id).querySelectorAll(sel)];
+function enter(list, local, start, step = 0.12, dy = 34) { list.forEach((el, i) => { const k = ease((local - start - i * step) / 0.6); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`; el.style.filter = `blur(${(1 - k) * 8}px)`; }); }
+// a phone flying in on a 3D arc, then drifting
+function phone3d(el, local, dur, { ry = -16, rx = 5, from = 520, zoom = 0 } = {}) {
+  const k = ease(local / 0.9), drift = local / dur;
+  el.style.transform = `translateX(${(1 - k) * from}px) translateZ(${(1 - k) * -400 + zoom * drift}px) rotateY(${ry * (1 - 0.35 * drift) - (1 - k) * 30}deg) rotateX(${rx}deg) rotateZ(${(1 - k) * 4}deg)`;
+  el.style.opacity = clamp(local / 0.4);
+  const gl = el.querySelector('.gloss'); if (gl) gl.style.transform = `translateX(${-500 + ((local * 260) % 1400)}px)`;
+}
+
+window.render = (t) => {
+  drawBg(t);
+  fx.clearRect(0, 0, 1920, 1080);
+  $('bar').style.width = `${(t / window.DURATION) * 100}%`;
+  // the camera: a slow push in each scene, a short shake after each cut
+  let since = Infinity, cutIdx = 0; for (let i = 1; i < SCENES.length; i++) if (t >= SCENES[i][1]) { since = t - SCENES[i][1]; cutIdx = i; }
+  const shake = since < 0.35 ? (1 - since / 0.35) * 7 : 0, sc = SCENES[cutIdx], push = (t - sc[1]) / (sc[2] - sc[1]);
+  $('cam').style.transform = `scale(${1 + 0.035 * push}) translate(${Math.sin(t * 61) * shake}px, ${Math.cos(t * 47) * shake}px)`;
+  // the flash on each cut
+  $('flash').style.opacity = since < 0.3 ? (1 - since / 0.3) * 0.28 : 0;
+  for (const [id, a, b] of SCENES) {
+    const el = $(id), local = t - a, dur = b - a, on = t >= a - 0.001 && t < b + TR;
+    el.style.display = on ? 'block' : 'none';
+    if (!on) continue;
+    // whip: the outgoing scene slides left and blurs as the next comes in
+    const out = clamp((t - b) / TR), inn = id === 's0' ? 1 : ease(local / TR);
+    el.style.opacity = Math.min(inn, 1 - out);
+    el.style.transform = `translateX(${(1 - inn) * 160 - out * 260}px)`;
+    el.style.filter = out > 0 || inn < 1 ? `blur(${Math.max(out, 1 - inn) * 14}px)` : 'none';
+    el.style.zIndex = out > 0 ? 1 : 2;
+    if (out > 0) continue;
+    if (id === 's0') {
+      const k = pop(local / 0.9); $('logo').style.transform = `scale(${0.3 + 0.7 * k}) rotate(${(1 - k) * -20}deg)`; $('logo').style.opacity = clamp(local / 0.3);
+      enter([$('brand'), $('tag'), $('ver')], local, 0.7, 0.22, 26);
+      $('brand').style.letterSpacing = `${16 + (1 - ease((local - 0.7) / 1.4)) * 40}px`;
+      $('sweep').style.left = `${-300 + clamp((local - 1.4) / 1.0) * 2400}px`;
+      // a shockwave ring behind the logo
+      for (const d of [0.1, 0.35]) { const x = clamp((local - d) / 1.3); fx.strokeStyle = `rgba(34,211,238,${(1 - x) * 0.7})`; fx.lineWidth = 4 * (1 - x) + 1; fx.beginPath(); fx.arc(960, 355, 20 + x * 700, 0, 7); fx.stroke(); }
+    }
+    if (id === 's1') {
+      // SIT OUT? gets struck through, then its letters fly apart
+      const so = $('sitout'), st = $('strike'), blow = clamp((local - 1.25) / 0.7);
+      so.style.opacity = local < 2.0 ? clamp(local / 0.2) : 0;
+      st.style.width = `${ease((local - 0.55) / 0.45) * 1060}px`; st.style.opacity = local < 1.3 ? 1 : 1 - blow;
+      [...so.children].forEach((s, i) => { const d = (i - 3.5); s.style.transform = `translate(${d * 120 * ease(blow)}px, ${(-200 + i * 37 % 160) * ease(blow)}px) rotate(${d * 40 * blow}deg) scale(${1 + blow})`; s.style.opacity = 1 - blow; });
+      const tx = els('s1t', '.a'); enter(tx, local, 1.7, 0.16);
+      phone3d($('p1'), Math.max(0, local - 1.6), dur);
+      $('r1').style.opacity = clamp((local - 2.2) / 0.5) * 0.8;
+      const rk = clamp((local - 2.6) / 2.6); $('ringArc').setAttribute('stroke-dashoffset', String(628 * (1 - rk)));
+      const secs = Math.round(600 + (1 - rk) * 25); $('ringT').textContent = rk >= 1 ? 'LOCKED' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      $('ringT').style.fontSize = rk >= 1 ? '34px' : '46px';
+      const rp = pop((local - 2.3) / 0.5); $('ring').style.opacity = clamp((local - 2.3) / 0.3); $('ring').style.transform = `scale(${0.6 + 0.4 * rp})`;
+    }
+    if (id === 's2') {
+      enter(els(id, '.a'), local, 0.1);
+      lossChart(fx, local);
+      els(id, '.c').forEach((c, i) => { const k = pop((local - 3.6 - i * 0.45) / 0.45); c.style.opacity = clamp((local - 3.6 - i * 0.45) / 0.2); c.style.transform = `scale(${0.6 + 0.4 * k})`; });
+      phone3d($('p2'), local, dur);
+    }
+    if (id === 's3') {
+      enter(els(id, '.a'), local, 0.1);
+      flipViz(fx, local);
+      phone3d($('p3'), local, dur, { ry: -14 });
+      const z = easeIO((local - 2.2) / 1.6); $('p3i').style.transform = `translateY(${-z * 420}px) scale(${1 + z * 0.35})`; // push in on the flip check line
+    }
+    if (id === 's4') {
+      enter(els(id, '.a'), local, 0.1);
+      els(id, '.n').forEach((n, i) => {
+        const k = ease((local - 0.4 - i * 0.18) / 0.8), wob = Math.sin(local * 1.4 + i) * 2;
+        n.style.opacity = clamp((local - 0.4 - i * 0.18) / 0.3);
+        n.style.transform = `perspective(1400px) translateY(${(1 - k) * 260}px) rotateX(${(1 - k) * 50}deg) rotateZ(${(i - 2) * 3 + wob}deg)`;
+        const s = n.querySelector('.stamp'), sk = pop((local - 2.2 - i * 0.28) / 0.35);
+        s.style.opacity = clamp((local - 2.2 - i * 0.28) / 0.12); s.style.transform = `rotate(-12deg) scale(${2.2 - 1.2 * sk})`;
+      });
+      const sub = $('s4s'), sk = ease((local - 3.9) / 0.6); sub.style.opacity = sk; sub.style.transform = `translateY(${(1 - sk) * 30}px)`;
+    }
+    if (id === 's5') {
+      enter(els(id, '.a'), local, 0.1);
+      network(fx, local);
+      phone3d($('p5'), Math.max(0, local - 2.4), dur, { ry: -14 });
+      $('p5').style.opacity = clamp((local - 2.4) / 0.4);
+    }
+    if (id === 's6') {
+      enter(els(id, '.a'), local, 0.1);
+      const L = $('lock'), k = ease(local / 0.9); L.style.transform = `perspective(1800px) translateX(${(1 - k) * 520}px) rotateY(${-14 + (1 - k) * -30}deg) rotateX(4deg)`; L.style.opacity = clamp(local / 0.4);
+      els(id, '.ban').forEach((bn, i) => { const d = 0.9 + i * 0.6, kk = pop((local - d) / 0.5), y = 300 + i * 112; bn.style.top = `${y - (1 - clamp((local - d) / 0.35)) * 140}px`; bn.style.opacity = clamp((local - d) / 0.25); bn.style.transform = `scale(${0.9 + 0.1 * kk})`; });
+    }
+    if (id === 's7') {
+      const k = pop(local / 0.8); $('o-logo').style.transform = `scale(${0.4 + 0.6 * k})`; $('o-logo').style.opacity = clamp(local / 0.3);
+      enter([$('o-h'), $('o-sub'), $('o-fine')], local, 0.4, 0.2, 24);
+      const c = pop((local - 1.1) / 0.5); $('o-cta').style.opacity = clamp((local - 1.1) / 0.2); $('o-cta').style.transform = `translateX(-50%) scale(${0.8 + 0.2 * c + 0.025 * Math.sin(local * 5) * clamp(local - 1.8)})`;
+      for (const d of [0.05, 0.3]) { const x = clamp((local - d) / 1.4); fx.strokeStyle = `rgba(46,230,166,${(1 - x) * 0.5})`; fx.lineWidth = 3; fx.beginPath(); fx.arc(960, 275, 30 + x * 800, 0, 7); fx.stroke(); }
+    }
+  }
+  $('note').style.opacity = t > 3.8 && t < 41 ? 1 : 0;
+};
+Promise.all([...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => document.fonts.ready).then(() => { window.render(0); window.ready = true; });
+</script>
+</body></html>
