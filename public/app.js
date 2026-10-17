@@ -34,7 +34,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '175'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '176'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1538,17 +1538,17 @@ function render() {
       : sig.called ? `Called ${sig.called} earlier · no new buy`
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `Last ${settings.noCallLastMin} minutes · no new calls` : sig.early?.would && !sig.early.live ? 'Early read · paused, not a call' : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
-    if (setText(callEl, call ? (call === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
-    setClass(callEl, `call ${(call ?? 'pass').toLowerCase()}`);
+    // v13.39 every round gets a call: from 10:00 left, no buy means the round call (the 10-minute pick), never SIT OUT
+    const rc = !call && !sig.bail && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
+    // the big word, set once a render so its pop plays only on a real change (bail and paused included)
+    const paused = !!(block && call && !sig.bail);
+    if (setText(callEl, sig.bail ? 'BAIL OUT' : paused ? 'PAUSED' : call ? (call === 'YES' ? 'UP' : 'DOWN') : rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
+    setClass(callEl, sig.bail ? 'call bail' : paused ? 'call pass' : rc ? `call ${rc.side.toLowerCase()} round` : `call ${(call ?? 'pass').toLowerCase()}`);
     setText($('callSub'), call && strike ? `${MKT.key} ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
     if (call) cardCls.push(call.toLowerCase());
     if (waiting) cardCls.push('waiting');
-    // v13.39 every round gets a call: from 10:00 left, no buy means the round call (the 10-minute pick), never SIT OUT
-    const rc = !call && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
     if (rc) {
       const up = rc.side === 'YES', pcx = (x) => `${Math.round(x * 100)}%`;
-      if (setText(callEl, up ? 'UP' : 'DOWN')) pop(callEl);
-      setClass(callEl, `call ${rc.side.toLowerCase()} round`);
       setText($('callLabel'), rc.buy ? 'ROUND CALL · BUY' : 'ROUND CALL · LEAN, NOT A BUY');
       setText($('callSub'), `${MKT.key} ${up ? 'above' : 'below'} ${usd(rc.strike ?? strike, 0)} at close · ${pcx(rc.p)}`);
       setText($('reason'), `Every round gets a call after the first 5 minutes: at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). ${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${Math.max(1, Math.round((1 - rc.p) * 10))} in 10.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}`);
@@ -1557,8 +1557,6 @@ function render() {
     // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
     const bail = sig.bail;
     if (bail) {
-      if (setText(callEl, 'BAIL OUT')) pop(callEl);
-      setClass(callEl, 'call bail');
       setText($('callSub'), `${bail.side === 'YES' ? 'UP' : 'DOWN'} call went bad${bail.bid ? ` · sell at ${Math.round(bail.bid * 100)}¢` : ''}`);
       setText($('reason'), `The bot's odds on its ${bail.side === 'YES' ? 'UP' : 'DOWN'} call fell to ${Math.round(bail.p * 100)}% (bail line ${Math.round((settings.bailBelow ?? 0.4) * 100)}%). If you bought it, sell now and keep ${bail.bid ? `about ${Math.round(bail.bid * 100)}¢ of each $1` : 'part of it'} instead of risking all of it.`);
       cardCls.length = 2; cardCls.push('bail');
@@ -1570,8 +1568,7 @@ function render() {
 
     // Paused (daily loss limit or profit guard): the call is shown, but not as a buy
     if (block && call && !bail) {
-      if (setText(callEl, 'PAUSED')) pop(callEl);
-      setClass(callEl, 'call pass'); cardCls.length = 2;
+      cardCls.length = 2;
       setText($('callLabel'), block.kind === 'loss' ? 'Daily loss limit hit · no buys today' : 'Profit guard · buys paused');
       setText($('callSub'), `The bot would call ${call === 'YES' ? 'UP' : 'DOWN'}, logged as a paper call`);
       setText($('reason'), block.kind === 'loss'
