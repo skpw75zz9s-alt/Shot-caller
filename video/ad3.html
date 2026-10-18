@@ -62,6 +62,13 @@
   #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%); pointer-events: none; }
   #bar { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); box-shadow: 0 0 20px #22d3ee; }
   #note { position: absolute; right: 30px; bottom: 18px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 2px; }
+  /* kinetic type: each word slides up from behind a mask; gradient words carry their own gradient */
+  .h .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding: 0.02em 0.04em 0.2em; margin: -0.02em -0.04em -0.2em; }
+  .h .w > span { display: inline-block; will-change: transform; }
+  .h em { background: none; color: inherit; }
+  .h em .w > span { background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #leak { position: absolute; left: -30%; top: -30%; width: 160%; height: 160%; pointer-events: none; mix-blend-mode: screen; opacity: 0;
+    background: radial-gradient(28% 34% at 50% 50%, #ffb86b66, #f472b62a 40%, #22d3ee1c 60%, transparent 75%); }
   .coins { position: absolute; left: 130px; top: 560px; width: 820px; display: flex; flex-wrap: wrap; gap: 16px; }
   .coin { padding: 14px 22px; border-radius: 16px; background: #0b1426e6; border: 2px solid #22d3ee44; font: 800 28px 'DejaVu Sans Mono', monospace; color: #eef2f8; box-shadow: 0 0 30px #22d3ee22; }
   .coin b { color: #22d3ee; margin-right: 12px; }
@@ -156,7 +163,7 @@
 
 </div></div>
 <canvas id="fx" width="1920" height="1080"></canvas>
-<div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
+<div id="leak"></div><div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
 <script>
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -313,11 +320,18 @@ window.render = (t) => {
     el.style.filter = out > 0 || inn < 1 ? `blur(${Math.max(out, 1 - inn) * 14}px)` : 'none';
     el.style.zIndex = out > 0 ? 1 : 2;
     if (out > 0) continue;
+    kinetic(el, local);
     if (id === 's0') {
       const k = pop(local / 0.9); $('logo').style.transform = `scale(${0.3 + 0.7 * k}) rotate(${(1 - k) * -20}deg)`; $('logo').style.opacity = clamp(local / 0.3);
       enter([$('brand'), $('tag'), $('ver')], local, 0.7, 0.22, 26);
       $('brand').style.letterSpacing = `${16 + (1 - ease((local - 0.7) / 1.4)) * 40}px`;
       $('sweep').style.left = `${-300 + clamp((local - 1.4) / 1.0) * 2400}px`;
+      fx.globalCompositeOperation = 'lighter';
+      for (const d of DOTS) { const u = ease((local - d.d) / 0.75); if (u >= 1 || local < d.d) continue; const r = d.r * (1 - u), x = 960 + Math.cos(d.a + u * 1.6) * r, y = 355 + Math.sin(d.a + u * 1.6) * r * 0.7; fx.fillStyle = `hsla(${d.h},95%,70%,${0.9 * (1 - u * 0.6)})`; fx.beginPath(); fx.arc(x, y, d.s, 0, 7); fx.fill(); }
+      fx.globalCompositeOperation = 'source-over';
+      const gl = local > 0.75 && local < 1.15, jx = gl ? Math.sin(local * 173) * 14 : 0;
+      $('brand').style.textShadow = gl ? `${-jx}px 0 rgba(255,45,85,0.8), ${jx}px 0 rgba(34,211,238,0.8)` : '0 0 40px rgba(34,211,238,0.35)';
+      if (gl) $('brand').style.transform = `${$('brand').style.transform} translateX(${jx * 0.6}px)`;
       // a shockwave ring behind the logo
       for (const d of [0.1, 0.35]) { const x = clamp((local - d) / 1.3); fx.strokeStyle = `rgba(34,211,238,${(1 - x) * 0.7})`; fx.lineWidth = 4 * (1 - x) + 1; fx.beginPath(); fx.arc(960, 355, 20 + x * 700, 0, 7); fx.stroke(); }
     }
@@ -362,11 +376,47 @@ window.render = (t) => {
       const k = pop(local / 0.8); $('o-logo').style.transform = `scale(${0.4 + 0.6 * k})`; $('o-logo').style.opacity = clamp(local / 0.3);
       enter([$('o-h'), $('o-sub'), $('o-fine')], local, 0.4, 0.2, 24);
       const c = pop((local - 1.1) / 0.5); $('o-cta').style.opacity = clamp((local - 1.1) / 0.2); $('o-cta').style.transform = `translateX(-50%) scale(${0.8 + 0.2 * c + 0.025 * Math.sin(local * 5) * clamp(local - 1.8)})`;
+      fx.globalCompositeOperation = 'lighter';
+      for (const d of DOTS) { const u = ease((local - 0.15 - d.d * 0.4) / 1.6); if (u <= 0 || u >= 1) continue; const r = 60 + u * d.r * 0.9, x = 960 + Math.cos(d.a) * r, y = 275 + Math.sin(d.a) * r * 0.62; fx.fillStyle = `hsla(${d.h},95%,70%,${(1 - u) * 0.85})`; fx.beginPath(); fx.arc(x, y, d.s * (1.4 - u), 0, 7); fx.fill(); }
+      fx.globalCompositeOperation = 'source-over';
       for (const d of [0.05, 0.3]) { const x = clamp((local - d) / 1.4); fx.strokeStyle = `rgba(46,230,166,${(1 - x) * 0.5})`; fx.lineWidth = 3; fx.beginPath(); fx.arc(960, 275, 30 + x * 800, 0, 7); fx.stroke(); }
     }
   }
   $('note').style.opacity = t > 3.8 && t < 42.5 ? 1 : 0;
+  // the beat (124 bpm from the first cut, like the soundtrack): the vignette breathes, the accents glow
+  const beat = t >= 3.8 ? ((t - 3.8) * 124 / 60) % 1 : 1, pulse = Math.exp(-beat * 7) * (t < 42.5 ? 1 : 0.4);
+  $('vig').style.opacity = String(1 - 0.18 * pulse);
+  document.querySelectorAll('.eyebrow').forEach((e) => { e.style.textShadow = `0 0 ${4 + 16 * pulse}px rgba(34,211,238,${0.4 + 0.5 * pulse})`; });
+  bg.globalCompositeOperation = 'lighter'; bg.fillStyle = `rgba(34,211,238,${0.03 * pulse})`; bg.fillRect(0, 0, 1920, 1080); bg.globalCompositeOperation = 'source-over';
+  // each cut: a light leak sweeping across and light streaks racing through
+  const lk = since < 1.1 ? since / 1.1 : null;
+  $('leak').style.opacity = lk == null ? 0 : String(Math.sin(lk * Math.PI) * 0.9);
+  if (lk != null) $('leak').style.transform = `translateX(${-45 + lk * 90}%) rotate(${(cutIdx % 2 ? 1 : -1) * 12}deg)`;
+  if (since < 0.45) {
+    const a = 1 - since / 0.45; fx.globalCompositeOperation = 'lighter';
+    for (const st of STREAKS) { const x = ((st.v * since + st.y * 3) % 2600) - 400; const gr = fx.createLinearGradient(x, 0, x + st.l, 0); gr.addColorStop(0, `rgba(${st.c},0)`); gr.addColorStop(0.8, `rgba(${st.c},${st.a * a})`); gr.addColorStop(1, `rgba(255,255,255,${st.a * a})`); fx.fillStyle = gr; fx.fillRect(x, st.y, st.l, st.w); }
+    fx.globalCompositeOperation = 'source-over';
+  }
 };
+function splitWords(el) {
+  for (const n of [...el.childNodes]) {
+    if (n.nodeType === 3) {
+      const frag = document.createDocumentFragment();
+      n.nodeValue.split(/(\s+)/).forEach((w) => { if (!w) return; if (/^\s+$/.test(w)) { frag.append(' '); return; } const o = document.createElement('span'), i = document.createElement('span'); o.className = 'w'; i.textContent = w; o.append(i); frag.append(o); });
+      n.replaceWith(frag);
+    } else if (n.nodeType === 1 && n.tagName !== 'BR') splitWords(n);
+  }
+}
+document.querySelectorAll('.h').forEach(splitWords);
+const R5 = rng(77), STREAKS = Array.from({ length: 34 }, () => ({ y: R5() * 1080, l: 200 + R5() * 900, v: 2600 + R5() * 3400, w: 1 + R5() * 3, a: 0.3 + R5() * 0.7, c: R5() < 0.5 ? '125,255,208' : R5() < 0.7 ? '244,114,182' : '34,211,238' }));
+const DOTS = Array.from({ length: 170 }, () => ({ a: R5() * Math.PI * 2, r: 500 + R5() * 900, d: R5() * 0.35, s: 1 + R5() * 2.5, h: R5() < 0.8 ? 188 : 330 }));
+// the headline: words slide up in turn, with a red / cyan split that settles as the scene lands
+function kinetic(el, local) {
+  el.querySelectorAll('.h').forEach((h) => {
+    h.querySelectorAll('.w > span').forEach((w, i) => { const k = ease((local - 0.12 - i * 0.07) / 0.55); w.style.transform = `translateY(${(1 - k) * 115}%) rotate(${(1 - k) * 4}deg)`; });
+    const amt = Math.max(0, 1 - local / 0.7) * 9; h.style.textShadow = amt > 0.2 ? `${-amt}px 0 rgba(255,45,85,0.55), ${amt}px 0 rgba(34,211,238,0.55)` : 'none';
+  });
+}
 Promise.all([...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => document.fonts.ready).then(() => { window.render(0); window.ready = true; });
 </script>
 </body></html>

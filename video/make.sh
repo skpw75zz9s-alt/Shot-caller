@@ -28,7 +28,7 @@ fi
 if [ "${1:-}" = ad3 ]; then
   node adcap3.mjs
   (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
-  for i in 0 1 2; do AD=ad3 node adrender2.mjs worker $i 3 & done; wait
+  for i in 0 1 2 3; do AD=ad3 node adrender2.mjs worker $i 4 & done; wait
   AD=ad3 python3 admusic2.py && bash ad3post.sh; exit 0
 fi
 if [ "${1:-}" = shots ]; then rm -f shots/boxes.json; node capture.mjs app; node capture.mjs buy; node capture.mjs loss; node capture.mjs site; fi
