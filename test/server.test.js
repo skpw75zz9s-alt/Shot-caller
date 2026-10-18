@@ -162,7 +162,7 @@ test('orders: only checked fill-now orders on the BTC 15-minute markets reach Ka
 
 test('Discord role routes: status says off without config, linking needs a member, a stray callback goes back to the app', async () => {
   const st = await (await fetch(`${app}/api/discord/status`)).json();
-  assert.equal(st.on, false); assert.equal(st.member, false); assert.ok(st.missing.includes('DISCORD_BOT_TOKEN'));
+  assert.equal(st.on, false); assert.equal(st.member, false); assert.equal(st.missing, undefined, 'which variables are missing: admins only');
   assert.equal((await fetch(`${app}/api/discord/link`, { method: 'POST', body: '{}' })).status, 400);
   const cb = await fetch(`${app}/api/discord/callback?code=x&state=y`, { redirect: 'manual' });
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /^\/\?discord=error&msg=/);
@@ -179,4 +179,12 @@ test('a market whose bot isn\'t running yet answers "starting", never with Bitco
     assert.equal(r.status, 503, p); assert.equal((await r.json()).starting, true);
   }
   assert.equal((await fetch(`${app}/api/learn`)).status, 200, 'Bitcoin\'s own still answers');
+});
+
+test('a made-up market name never starts a bot, and only admins see which Discord variables are missing', async () => {
+  const r = await fetch(`${app}/api/record?m=KXBTCMADEUP15M`);
+  assert.notEqual(r.status, 500);
+  const { stacks } = await import('../server.js');
+  assert.equal(stacks.has('KXBTCMADEUP15M'), false);
+  assert.equal('missing' in await (await fetch(`${app}/api/discord/status`)).json(), false);
 });

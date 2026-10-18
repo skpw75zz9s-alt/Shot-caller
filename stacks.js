@@ -45,7 +45,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     if (futures) playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; });
     playbook.setFlow(() => scanFeed.imbalance(clock() - 900000));
     const marketWatch = createMarketWatch({ kalshi, asset: { key: a.key, digits: a.digits }, scanFeed, futures, playbook });
-    const tuneFeed = createTuneFeed({ playbook }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
+    const tuneFeed = createTuneFeed({ playbook, settle: a.settle }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
     const microFeed = createMicroFeed({ file: join(dir, 'micro.json'), scanFeed, futures, marketWatch, playbook });
     const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, discordAlerts, ready: null };
     st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load()]).then(() => {
@@ -76,7 +76,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts() }),
         watch: () => st.marketWatch.status(),
         flipCheck: () => st.flipFeed?.check() ?? null,
-        flipGate: () => st.tuneFeed.api().report?.flipStudy ?? null,
+        flipGate: () => (mk.freq === '15m' ? st.tuneFeed.api().report?.flipStudy ?? null : null), // learned from 15-minute rounds: only for them
         lessonCtx: () => ({ scan: st.scanFeed.lastScan(), flip: st.flipFeed?.api().live ?? null }),
         volTune: () => st.volTuneFeed.live(),
         onCall: (e, o) => discord.call(e, o),

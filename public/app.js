@@ -36,7 +36,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '184'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '185'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1546,20 +1546,22 @@ function withLive(bars, now) {
 // The Deck's draw, guarded (v13.42.2): one bad value (often something saved on the phone) used to throw on every tick and
 // leave the whole Deck blank. Now the error shows on the card, and if it keeps happening the phone clears this market's
 // saved logs and reloads, once a session.
-let renderFails = 0;
+let renderFails = 0, renderFailSince = 0; // the Deck redraws several times a second: a moment's glitch must not wipe anything
 const MARKET_CACHES = ['calls', 'ruleLog', 'callLog', 'flipLog', 'coneLog', 'pcLog', 'predLog', 'whyLog', 'marketMemory', 'lastSpot'];
 function render() {
-  try { renderNow(); renderFails = 0; } catch (e) { renderFailed(e); }
+  try { renderNow(); renderFails = 0; renderFailSince = 0; } catch (e) { renderFailed(e); }
 }
 function renderFailed(e) {
   console.error('render failed', e);
   renderFails++;
+  renderFailSince ||= Date.now();
+  const stuck = renderFails >= 3 && Date.now() - renderFailSince >= 10000; // failing for 10 s or more, not a one-off
   setClass($('status'), 'dot err');
   $('status').title = `Couldn't draw the Deck: ${e.message}`;
   const key = `scHealed:${settings.series}`;
   let healed = true; try { healed = !!sessionStorage.getItem(key); } catch { /* storage blocked */ }
-  setText($('reason'), `Couldn't draw this round (${e.message}). ${renderFails < 3 ? 'Retrying…' : healed ? 'Still failing after clearing this market\'s saved data: send a screenshot of this.' : 'Clearing this market\'s saved data on the phone…'}`);
-  if (renderFails < 3 || healed) return;
+  setText($('reason'), `Couldn't draw this round (${e.message}). ${!stuck ? 'Retrying…' : healed ? 'Still failing after clearing this market\'s saved data: send a screenshot of this.' : 'Clearing this market\'s saved data on the phone…'}`);
+  if (!stuck || healed) return;
   try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) localStorage.removeItem(LK(k)); } catch { /* storage blocked */ }
   location.reload();
 }

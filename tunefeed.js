@@ -6,13 +6,14 @@ import { patternStats, rangeLadder } from './public/lessons.js';
 import { cushionTable } from './public/settle.js';
 import { flipStudy } from './public/flipstudy.js';
 
-export function createTuneFeed({ playbook, clock = () => Date.now(), log = console }) {
+export function createTuneFeed({ playbook, settle = 'avg60', clock = () => Date.now(), log = console }) {
   let report = null, lastLive = null, read = { drift: 0, active: [] }, readAt = 0;
   function rerun() {
     try {
       const bars = playbook.bars();
       // the lessons' own claims (public/lessons.js): the ceiling / floor "areas" and the double bottom's take profit vs stop
-      if (bars.length >= 2000) report = { ...tuneIndicators(bars), lessons: { ladder: rangeLadder(bars), patterns: patternStats(bars) }, cushion: cushionTable(bars), flipStudy: flipStudy(bars, { lastMin: 1, laneLastMin: 5 }), ranAt: clock(), bars: bars.length }; // flips learned from every minute to the last one (public/flipstudy.js)
+      // the flip study: crypto settles on a 60-second average (w 1), indexes, gold and oil on the close (w 0)
+      if (bars.length >= 2000) report = { ...tuneIndicators(bars), lessons: { ladder: rangeLadder(bars), patterns: patternStats(bars) }, cushion: cushionTable(bars), flipStudy: flipStudy(bars, { lastMin: 1, laneLastMin: 5, w: settle === 'avg60' ? 1 : 0 }), ranAt: clock(), bars: bars.length }; // flips learned from every minute to the last one (public/flipstudy.js)
     } catch (e) { log.error('indicator tuning failed', e.message); }
   }
   function observe({ snap }, now = clock()) {

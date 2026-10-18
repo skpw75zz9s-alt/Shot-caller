@@ -287,6 +287,8 @@ async function readBody(req) {
 
 // the phone sends you to sign in only on a 401 that carries this (v13.42.1): an upstream's own 401 never does
 const PAYWALL_HDR = { 'x-paywall': '1' };
+// a market the server may start a bot for: one Kalshi lists (discovery.js), never any name a request makes up (v13.43.2)
+const listedSeries = (s) => typeof s === 'string' && /^[A-Z0-9]+$/.test(s) && discovery.list().some((m) => m.series === s);
 // the answers that belong to one market's own bot and readers (asked with ?m=SERIES)
 const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|learn|index)$/;
 function send(res, status, body, type = 'application/json', headers = {}) {
@@ -346,7 +348,7 @@ async function discordApi(req, res, action, token, url) {
     return send(res, 302, '', 'text/plain', { location: `/?${q}` });
   }
   const code = access.check(token).member?.code ?? null;
-  if (action === 'status' && req.method === 'GET') return send(res, 200, { ...discordRoles.status(code), member: !!code });
+  if (action === 'status' && req.method === 'GET') { const st = discordRoles.status(code); if (!access.isAdminToken(token)) delete st.missing; return send(res, 200, { ...st, member: !!code }); } // which variables are missing: admins only
   if (!code) return send(res, 400, { error: 'Discord roles are for members: sign in with your code first' });
   if (action === 'link' && req.method === 'POST') { const link = discordRoles.linkUrl(code); return link ? send(res, 200, { url: link }) : send(res, 503, { error: 'Discord linking isn\'t set up on this server yet' }); }
   if (action === 'unlink' && req.method === 'POST') return send(res, 200, await discordRoles.unlink(code));
@@ -360,7 +362,7 @@ async function pushApi(req, res, action, token) {
   // each phone lives in its market's bot (v13.30); a market that isn't running yet starts now, Bitcoin's covers it meanwhile
   if (action === 'sync') {
     const series = typeof body?.settings?.series === 'string' ? body.settings.series : HOME.series;
-    if (!stacks.has(series) && marketOf(series, discovery.list()).series === series) stacks.start(series);
+    if (!stacks.has(series) && listedSeries(series)) stacks.start(series); // only markets Kalshi lists (discovery), never a made-up name
     const target = stacks.bot(series);
     for (const [, b] of stacks.bots()) if (b !== target && endpoint && b.devices.has(endpoint)) b.unsubscribe({ endpoint });
     const out = await target.sync(body, { token });
@@ -439,7 +441,7 @@ export const server = http.createServer(async (req, res) => {
     // ?m=SERIES picks the market (v13.30); without it, Bitcoin's 15-minute one
     const mq = url.searchParams.get('m');
     // a market opened on a phone before its bot is running starts now (Bitcoin's answers meanwhile)
-    if (mq && /^[A-Z0-9]+$/.test(mq) && !stacks.has(mq) && !isHome(mq) && marketOf(mq, discovery.list()).series === mq) stacks.start(mq);
+    if (mq && !stacks.has(mq) && !isHome(mq) && listedSeries(mq)) stacks.start(mq);
     // until it is, its own answers wait: Bitcoin's record, pick and learning must never show up as another market's (v13.42.2)
     if (mq && !isHome(mq) && !stacks.has(mq) && MARKET_OWN.test(path)) return send(res, 503, { error: 'this market is starting', starting: true });
     const mb = mq ? stacks.bot(mq) : bot, ms = mq ? stacks.stack(mq) : null;
