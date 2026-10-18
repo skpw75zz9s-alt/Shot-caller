@@ -14,7 +14,7 @@ function setup({ yb, ya, lead = 250, mins = 8, secs = 70, flipOff = false }) {
   const log = { T: [...Array(secs / 2 + 1)].map((_, i) => ({ t: NOW - secs * 1000 + i * 2000, p: 0.99, yesAsk: null, noAsk: null })) };
   return { row: { m, strike: K, ev, rej: { tilt: 0, summary: [], events: [] } }, snap: { now: NOW, bars, sigmaMin: SIG, sigmaLong: SIG, driftMin: 0, spot: K + lead, quoteLog: log, earlyLive: true, flipOff } };
 }
-const t90 = riskSettings('target90');
+const t90 = { ...riskSettings('target90'), switchLocked: true }; // the switching mechanics (off by default since v13.45: a locked call never switches)
 const calledDown = () => ({ T: { side: 'NO', at: NOW - 240000, price: 0.9, n: 1, bail: { side: 'NO', at: NOW - 60000, p: 0.2 } } });
 const run = (o, s = t90, mem = calledDown()) => { const x = setup(o); return { sig: buySignal(x.row, x.snap, s, NOW, mem), mem }; };
 
@@ -83,4 +83,18 @@ test('in the last minutes a flip waits for history: allowed only down to the pro
   assert.ok(at(3.5, late(3)).fire, 'history proved flips to 3 minutes left');
   assert.match(at(2.5, late(3)).flip.why, /history proves flips only down to 3 min left/);
   assert.ok(at(8, late(null)).fire, 'inside the normal window nothing changes');
+});
+
+test('by default a locked call never switches sides, and nothing is called against the locked round', () => {
+  const base = riskSettings('target90');
+  const x = setup({ yb: 90, ya: 91 });
+  const sig = buySignal(x.row, x.snap, base, NOW, calledDown());
+  assert.equal(sig.fire, false); assert.match(sig.flip.why, /locked for this round: it never switches/);
+  // no call yet, but the round call locked DOWN: the bot leans UP, so no call at all
+  const y = setup({ yb: 90, ya: 91 });
+  const locked = buySignal(y.row, { ...y.snap, lockedSide: { ticker: 'T', side: 'NO' } }, base, NOW, {});
+  assert.equal(locked.callSide, null); assert.equal(locked.lockedOut, true); assert.equal(locked.roundLock, 'NO');
+  const free = buySignal(y.row, { ...y.snap, lockedSide: { ticker: 'T', side: 'YES' } }, base, NOW, {});
+  assert.equal(free.lockedOut, false, 'locked UP and leaning UP: nothing held back');
+  assert.equal(buySignal(y.row, { ...y.snap, lockedSide: { ticker: 'OTHER', side: 'NO' } }, base, NOW, {}).lockedOut, false, 'another round\'s lock doesn\'t apply');
 });

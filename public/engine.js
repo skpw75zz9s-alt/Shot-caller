@@ -327,6 +327,8 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
   let flipWhy = null;
   const flipOk = (b) => {
     const no = (why) => { flipWhy = why; return false; };
+    // v13.45 a locked call never switches sides: flip calls only where switchLocked is set on purpose
+    if (!s.switchLocked) return no('the call is locked for this round: it never switches sides');
     if (!(s.flipCalls > 0)) return no('off');
     if (snap.flipOff) return no('flip calls lost money lately: off until they recover');
     if ((mem.flips || 0) >= s.flipMax) return no('already flipped this round');
@@ -361,17 +363,22 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     holding: [s.minEdge * s.holdEdgeFrac, s.minConfidence - s.holdConfDrop],
     switching: [s.minEdge + s.switchEdgeExtra, s.minConfidence + s.switchConfExtra],
   };
-  let pick = null, shown = null, stance = 'new', earlyWould = null, flipPick = null;
+  let pick = null, shown = null, stance = 'new', earlyWould = null, flipPick = null, lockedOut = false;
+  // v13.45 one side a round: once the round call has locked (snap.lockedSide: the server's 10-minute pick, or the one
+  // this phone showed), no call is ever made on the other side
+  const locked = snap.lockedSide && snap.lockedSide.ticker === row.m.ticker ? snap.lockedSide.side : null;
   if (called) {
     const a = assess(called);
     shown = a; stance = 'holding';
     if (passes(a, ...need.holding)) pick = a;
-    if (lean && lean !== called) {
+    if (lean && lean !== called && !(locked && lean !== locked)) {
       const b = assess(lean);
       if (!s.lockCall && (inLate ? lateOk(b) : passes(b, ...need.switching, true) && steady(lean)) && entryOk(lean) && holds(b) && watchOk() && gateOk(b)) { pick = b; stance = 'switching'; }
       else if (s.lockCall && flipOk(b)) { pick = b; stance = 'switching'; flipPick = b; }
       else if (!pick) { shown = b; stance = 'switching'; }
     }
+  } else if (lean && locked && lean !== locked) {
+    shown = assess(lean); lockedOut = true; // the bot leans the other way, but the round is locked: no call against it
   } else if (lean) {
     shown = assess(lean);
     if ((inLate ? lateOk(shown) : passes(shown, ...need.new, true) && steady(lean)) && !(mem.cooldownUntil > now) && entryOk(lean) && holds(shown) && watchOk() && gateOk(shown)) pick = shown;
@@ -425,6 +432,7 @@ export function buySignal(row, snap, settings, now = snap.now, memory = null) {
     late: inLate ? { on: true, why: callSide ? null : lateWhy, p: lateP, made: callSide ? (callSide === called ? !!mem.late : late) : false } : null,
     lane: callSide && (callSide === called ? mem.late : late) ? 'late' : callSide && (callSide === called ? mem.early : early) ? 'early' : callSide && (callSide === called ? mem.flip : flip) ? 'flip' : null,
     // flip calls: why a locked call isn't switching (while the bot leans the other way), and the side it flipped from
+    roundLock: locked, lockedOut,
     flip: called && lean && lean !== called && !flipPick && s.flipCalls > 0 ? { why: flipWhy } : (callSide && (callSide === called ? mem.flip : flip)) ? { from: mem.flipFrom ?? called } : null,
     // the early lane: on from earlyMin minutes left; would = the call it makes now (a test call unless live)
     early: inEarly && !called ? { on: true, live: !!snap.earlyLive, would: earlyWould ? { side: earlyWould.side, price: earlyWould.price, p: earlyWould.winProb, conf: earlyWould.score } : null, why: earlyWould ? null : earlyWhy } : null,

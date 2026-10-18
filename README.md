@@ -271,6 +271,18 @@ Security:
 
 ## Version notes (newest first)
 
+### Locked means locked (v13.45)
+
+Once a round's call locks, its side never changes for the rest of the round:
+
+- **No flip calls:** a locked call never switches sides (`engine.js` flipOk; only a `switchLocked` setting, off
+  everywhere, would allow it). The flip study still runs and is shown for reading, as context.
+- **Nothing against the locked side:** once the 10-minute pick has locked (`snap.lockedSide`: the server's pick, or
+  the side the phone showed), no buy call is made on the other side. The card says when the bot leans the other way
+  but the lock holds.
+- **The phone never shows two sides:** it waits up to 15 seconds past 10:00 left for the server's pick ("Locking the
+  round call…") rather than showing its own guess. The first side it shows is the side for the rest of the round.
+
 ### Chart patterns (v13.44)
 
 `public/chartpatterns.js` reads the candles for the shapes traders look for:

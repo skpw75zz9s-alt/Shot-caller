@@ -28,7 +28,7 @@ import { ASSETS, HOME as HOME_MARKET, SEEDS, isHome, label as marketLabel, liste
 import { structureRead } from './structure.js';
 import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js';
 import { lessonsNow } from './lessons.js';
-import { pickFallback, pickNow } from './pick.js';
+import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
@@ -37,7 +37,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '187'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '188'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -433,7 +433,7 @@ const compute = () => {
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: state.priceDelayed ? null : modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts, chosen: state.chosen }); // this market's own learning (the server's copy for it)
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
-  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); snap.flipGate = state.tune?.report?.flipStudy ?? null; // the late lane's own guard and the early lane's proof (the server's records)
+  snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); snap.flipGate = state.tune?.report?.flipStudy ?? null; snap.lockedSide = lockedSideFor(snap.live, snap.now); // the late lane's own guard and the early lane's proof (the server's records)
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -1619,11 +1619,11 @@ function renderNow() {
     setText($('countdown'), `closes in ${mmss(ev.minutesLeft)}`);
     state.clock = { close: Date.parse(m.close_time), callsAt: null };
     roundBar(state.clock.close, now);
-    const rc = ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
+    const rcRaw = ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null, locking = !!rcRaw?.locking, rc = locking ? null : rcRaw;
     boardSide = rc?.side ?? null;
-    if (setText(callEl, rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
+    if (setText(callEl, rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : locking ? '…' : 'SIT OUT')) pop(callEl);
     setClass(callEl, rc ? `call ${rc.side.toLowerCase()} round` : 'call pass');
-    setText($('callLabel'), rc ? 'ROUND CALL · LEAN, NOT A BUY' : 'Waiting for a live price');
+    setText($('callLabel'), rc ? 'ROUND CALL · LEAN, NOT A BUY' : locking ? 'Locking the round call…' : 'Waiting for a live price');
     setText($('callSub'), rc ? `${MKT.key} ${rc.side === 'YES' ? 'above' : 'below'} ${usd(rc.strike ?? live.strike, 0)} at close${rc.p != null ? ` · ${Math.round(rc.p * 100)}%` : ''}` : '');
     setText($('reason'), rc ? `The round call for this round${rc.fallback ? ` (${rc.why})` : ''}. Buy calls wait for a live ${MKT.key} price.` : `Getting a live ${MKT.key} price. The round call comes at 10:00 left.`);
     ['order', 'odds'].forEach((id) => setText($(id), ''));
@@ -1677,11 +1677,13 @@ function renderNow() {
       : waitingToCall ? `Watching the first ${settings.waitMinutes} minutes` : !sig.called && settings.noCallLastMin > 0 && ev.minutesLeft < settings.noCallLastMin ? `Last ${settings.noCallLastMin} minutes · no new calls` : sig.early?.would && !sig.early.live ? 'Early read · paused, not a call' : sig.late?.on && sig.late.why ? 'Late lane · not safe enough yet' : sig.cooldown ? 'Just sold · re-entry soon' : ev.side && !sig.robust ? 'Low price, edge too thin'
       : ev.side && sig.deep && sig.deep.score >= sig.confNeed && !(sig.holdOk && sig.steadyOk) ? 'Low price, not steady yet' : ev.side ? 'Low price, not confident' : 'No low price');
     // v13.39 every round gets a call: from 10:00 left, no buy means the round call (the 10-minute pick), never SIT OUT
-    const rc = !call && !sig.bail && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
+    const rcRaw = !call && !sig.bail && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
+    const locking = !!rcRaw?.locking, rc = locking ? null : rcRaw; // the first seconds after 10:00 left: waiting for the server's pick
     // the big word, set once a render so its pop plays only on a real change (bail and paused included)
     const paused = !!(block && call && !sig.bail);
     boardSide = call ?? rc?.side ?? (ev.pYes != null && ev.pYes !== 0.5 ? (ev.pYes > 0.5 ? 'YES' : 'NO') : null); // else the bot's lean
-    if (setText(callEl, sig.bail ? 'BAIL OUT' : paused ? 'PAUSED' : call ? (call === 'YES' ? 'UP' : 'DOWN') : rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : 'SIT OUT')) pop(callEl);
+    if (setText(callEl, sig.bail ? 'BAIL OUT' : paused ? 'PAUSED' : call ? (call === 'YES' ? 'UP' : 'DOWN') : rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : locking ? '…' : 'SIT OUT')) pop(callEl);
+    if (locking) { setText($('callLabel'), 'Locking the round call…'); setText($('reason'), 'The round call locks at 10:00 left; the side it locks is the side for the rest of the round.'); }
     setClass(callEl, sig.bail ? 'call bail' : paused ? 'call pass' : rc ? `call ${rc.side.toLowerCase()} round` : `call ${(call ?? 'pass').toLowerCase()}`);
     setText($('callSub'), call && strike ? `${MKT.key} ${call === 'YES' ? 'above' : 'below'} ${usd(strike, 0)} at close` : '');
     if (call) cardCls.push(call.toLowerCase());
@@ -1690,7 +1692,7 @@ function renderNow() {
       const up = rc.side === 'YES', pcx = (x) => `${Math.round(x * 100)}%`;
       setText($('callLabel'), rc.buy ? 'ROUND CALL · BUY' : 'ROUND CALL · LEAN, NOT A BUY');
       setText($('callSub'), `${MKT.key} ${up ? 'above' : 'below'} ${usd(rc.strike ?? strike, 0)} at close · ${pcx(rc.p)}`);
-      setText($('reason'), `Every round gets a call after the first 5 minutes: ${rc.fallback ? `${up ? 'UP' : 'DOWN'}, because ${rc.why.replace(/; a pick, not a buy$/, '')} (${pcx(rc.p)}). ` : `at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). `}${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${1 - rc.p < 0.1 ? `${Math.max(1, Math.round((1 - rc.p) * 100))} in 100` : `${Math.round((1 - rc.p) * 10)} in 10`}.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}`);
+      setText($('reason'), `Every round gets a call after the first 5 minutes: ${rc.fallback ? `${up ? 'UP' : 'DOWN'}, because ${rc.why.replace(/; a pick, not a buy$/, '')} (${pcx(rc.p)}). ` : `at 10:00 left the bot locked ${up ? 'UP' : 'DOWN'}, the likelier side by its odds and Kalshi's combined (${pcx(rc.p)}). `}${rc.buy ? `Worth buying at up to ${Math.round((rc.price ?? rc.ask) * 100)}¢.` : `Not a buy at this price${rc.why ? `: ${rc.why}` : ''}.`} ${/^(8|11|18)/.test(String(Math.round(rc.p * 100))) ? 'An' : 'A'} ${pcx(rc.p)} call still loses about ${1 - rc.p < 0.1 ? `${Math.max(1, Math.round((1 - rc.p) * 100))} in 100` : `${Math.round((1 - rc.p) * 10)} in 10`}.${rc.orig ? ` A lesson from past losses (${(rc.lessons || []).join(', ').toLowerCase()}) turned it from ${rc.orig.side === 'YES' ? 'UP' : 'DOWN'}.` : ''}${sig.lockedOut ? ` The bot leans ${up ? 'DOWN' : 'UP'} right now, but the round call is locked: it never switches.` : ''}`);
       cardCls.push(rc.side.toLowerCase(), 'round');
     }
     // The bot's call went bad: BAIL OUT (sig.bail, engine.js), shown for the rest of the round
@@ -1976,17 +1978,33 @@ function renderPick(now = Date.now()) {
 
 // The round call (v13.39): this round's 10-minute pick from the server, or, if the server's isn't in, the same math
 // here, locked once for the round
-function roundCallFor(live, snap, now) {
+// v13.45 one side a round: the first side shown for a round is the side for the rest of it (the server's pick when it has
+// it, which the phone waits up to 15 s past 10:00 left for, so it never shows a side the server then contradicts)
+function serverPickFor(live, now) {
   const k = state.pick?.live;
-  if (k && k.closeTime === live.m.close_time && now - (state.pickAt || 0) < 60000) return k;
+  return k && k.closeTime === live.m.close_time && now - (state.pickAt || 0) < 60000 ? k : null;
+}
+function lockedSideFor(live, now) {
+  if (!live) return null;
+  const k = serverPickFor(live, now) ?? state.roundShown?.[live.m.ticker];
+  return k?.side ? { ticker: live.m.ticker, side: k.side } : null;
+}
+function roundCallFor(live, snap, now) {
+  const t = live.m.ticker, server = serverPickFor(live, now), shown = (state.roundShown ||= {})[t];
+  if (shown) return server && server.side === shown.side ? server : shown;
+  if (server) return (state.roundShown[t] = server);
+  const lockAt = Date.parse(live.m.close_time) - PICK.at * 60000;
+  if (now < lockAt + 15000 && now - (state.pickAt || 0) < 30000) return { locking: true };
+  for (const k of Object.keys(state.roundShown)) if (!state.markets.some((m) => m.ticker === k)) delete state.roundShown[k];
+  const keep = (e) => (e?.side ? (state.roundShown[t] = e) : null);
   state.localPick ||= {};
   if (!state.localPick[live.m.ticker]) {
     try { const e = pickNow({ row: live, snap, settings }); if (e) state.localPick[live.m.ticker] = { ...e, price: e.ask, strike: live.strike, closeTime: live.m.close_time, local: true }; } catch { /* next tick */ }
   }
-  // v13.43.3 guaranteed: until the bot's own pick can be worked out, Kalshi's favourite (or the side price is on), never cached
-  if (state.localPick[live.m.ticker]) return state.localPick[live.m.ticker];
+  // v13.43.3 guaranteed: the bot's own pick, else Kalshi's favourite (or the side price is on); kept once shown (v13.45)
+  if (state.localPick[t]) return keep(state.localPick[t]);
   const fb = pickFallback({ row: live, snap });
-  return fb ? { ...fb, price: fb.ask, strike: live.strike, closeTime: live.m.close_time, local: true } : null;
+  return keep(fb ? { ...fb, price: fb.ask, strike: live.strike, closeTime: live.m.close_time, local: true } : null);
 }
 
 // ---------- Signal board (public/signals.js): every factor, in calls / probation / context, with or against the card ----------

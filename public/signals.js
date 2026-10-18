@@ -66,13 +66,12 @@ export function signalBoard(s = {}) {
   }
   const fst = s.tune?.report?.flipStudy;
   if (fst?.all?.n) { // the flip study (public/flipstudy.js): history's rule for flip calls
-    add({ key: 'flipstudy', name: 'Flip rule from history', status: fst.proven ? 'in' : 'probation', note: fst.gate ? `${fst.gate.label} · test: kept won ${fst.gate.test.kept.wins}/${fst.gate.test.kept.n}, blocked ${fst.gate.test.blocked.wins}/${fst.gate.test.blocked.n} (z ${fst.gate.z.toFixed(1)})` : `history's flips won ${fst.all.wins} of ${fst.all.n}; no rule beats taking them all yet`,
-      progress: fst.proven || !fst.gate ? null : Math.max(0, Math.min(1, fst.gate.z / 2)) });
+    // v13.45 a locked call never switches, so flip calls are off: what the study learns is shown for reading only
+    add({ key: 'flipstudy', name: 'Flip rule from history', status: 'context', note: 'flip calls are off: a locked call never switches · ' + (fst.gate ? `${fst.gate.label} · test: kept won ${fst.gate.test.kept.wins}/${fst.gate.test.kept.n}, blocked ${fst.gate.test.blocked.wins}/${fst.gate.test.blocked.n} (z ${fst.gate.z.toFixed(1)})` : `history's flips won ${fst.all.wins} of ${fst.all.n}; no rule beats taking them all yet`) });
   }
   if (fst?.late?.bands?.length) { // flips later than the last-minutes rule, once history proves they hold
     const b = fst.late.bands.at(-1), on = fst.late.lastMin != null;
-    add({ key: 'flipwindow', name: 'Late flips (past the last-minutes rule)', status: on ? 'in' : 'probation', note: on ? `flips allowed to ${fst.late.lastMin} min left · history won ${fst.late.bands.find((x) => x.lastMin === fst.late.lastMin).wins}/${fst.late.bands.find((x) => x.lastMin === fst.late.lastMin).n}` : `at ${b.lastMin}+ min left history won ${b.wins}/${b.n} (needs ${Math.round(fst.late.need * 100)}%+ in both halves, 30+)`,
-      progress: on ? null : Math.min(1, b.n / 30) });
+    add({ key: 'flipwindow', name: 'Late flips (past the last-minutes rule)', status: 'context', note: on ? `flips allowed to ${fst.late.lastMin} min left · history won ${fst.late.bands.find((x) => x.lastMin === fst.late.lastMin).wins}/${fst.late.bands.find((x) => x.lastMin === fst.late.lastMin).n}` : `at ${b.lastMin}+ min left history won ${b.wins}/${b.n} (needs ${Math.round(fst.late.need * 100)}%+ in both halves, 30+)` });
   }
   if (s.volTune?.report) { // the volatility tuner (voltunefeed.js)
     const r = s.volTune.report, vol = !!r.proven, dr = !!r.drift?.proven;

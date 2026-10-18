@@ -345,7 +345,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         const s = d.settings;
         const quoteLog = (market.quoteLogs[LEARN_SERIES] ||= {});
         const snap = snapshot({ markets: market.markets[LEARN_SERIES] || [], candles: market.candles, spot: liveSpotNow(), settings: s, strikes: market.strikes, quoteLog, learned: learnedNow(), now, shifts: learnedShifts, chosen: market.chosen });
-        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lessons = officialLab();
+        snap.watchHold = watchNow?.hold ?? null; snap.watchEvents60 = watchNow?.events60 ?? 0; snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lockedSide = lockedSideOf(snap); snap.lessons = officialLab();
         // Each alert key goes out at most once, and only if the anti-spam limiter allows it (public/notify.js)
         const fire = (key, msg, ttl, kind, extra = {}) => {
           if (d.alerted[key]) return;
@@ -440,7 +440,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     }
     if (learnDirty && now - learnSavedAt > 5 * 60000) saveLearned();
     // The official call for this round (same engine and rules as phones on the 90% target level, with the guard's floor)
-    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lessons = officialLab();
+    snap.lateOff = lateOffNow(now); snap.earlyLive = earlyLiveNow(now); snap.flipOff = flipOffNow(now); snap.flipCheck = flipNow; snap.flipGate = flipGate(); snap.lockedSide = lockedSideOf(snap); snap.lessons = officialLab();
     const guard = guardNow(), sig = snap.live ? buySignal(snap.live, snap, withGuard(OFFICIAL, guard.floor), now, officialMem) : null;
     // The server-side Auto-trader trades the same official call (autotrade.js)
     // (while the profit guard has the official level paused, the Auto-trader gets no new buy)
@@ -539,6 +539,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     return labs;
   }
   const pickLab = () => lab().pick, officialLab = () => lab().official.active;
+  // v13.45 the round's locked side: once the 10-minute pick has locked, no call goes the other way (engine.js buySignal)
+  function lockedSideOf(snap) {
+    const t = snap?.live?.m?.ticker, e = t ? pickRecord.findLast((x) => x.ticker === t) : null;
+    return e ? { ticker: t, side: e.side } : null;
+  }
   function lessonsApi() {
     const losses = [...pickRecord.filter((e) => e.review).map((e) => ({ ...e, kind: 'round call' })), ...record.filter((e) => e.lv === OFFICIAL_LEVEL && e.review).map((e) => ({ ...e, kind: 'official call' }))]
       .sort((a, b) => b.at - a.at);
