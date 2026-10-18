@@ -9,14 +9,16 @@
 //                  the direction is learned too.
 //   No peeking     each signal is read off the candle BEFORE the latest one (the server's candles can be a minute old)
 //   No fooling     the history is split by time: the first 2/3 picks each family's best setting and its direction, the
-//                  last 1/3 (rounds it never saw) tests only that pick. Proven = the held-out test agrees with |z| >= 2.9
-//                  (strict, because 12 families are tested at once: 2.9 since v13.37, 2.7 for the first 8) on 150+ rounds, and training agreed too.
+//                  last 1/3 (rounds it never saw) tests only that pick. Proven = the held-out test agrees with |z| >= 3.0
+//                  (strict, because 17 families are tested at once: 3.0 since v13.44's chart patterns, 2.9 for 12, 2.7 for the first 8)
+//                  on 150+ rounds, and training agreed too.
 // Only proven indicators reach the bot's calls (indicatorShift), capped at +-4 points.
 import { bollinger, ema, macd, rma, rsiSeries } from './indicators.js';
 import { oddsShift } from './model.js';
 import { LESSON_CANDIDATES, LESSON_FAMILIES } from './lessons.js';
+import { PATTERN_CANDIDATES, PATTERN_FAMILIES } from './chartpatterns.js';
 
-export const TUNE = { checkpoints: [10, 6, 3], train: 2 / 3, zTest: 2.9, zTrain: 2, minRounds: 150, minTrain: 100, shrink: 50, cap: 0.04 };
+export const TUNE = { checkpoints: [10, 6, 3], train: 2 / 3, zTest: 3.0, zTrain: 2, minRounds: 150, minTrain: 100, shrink: 50, cap: 0.04 };
 const ROUND = 900000, MIN = 60000;
 
 const cross = (fast, slow, f) => ({ need: slow, series: (c) => { const a = f(c, fast), b = f(c, slow); return c.map((_, i) => (a[i] != null && b[i] != null ? Math.sign(a[i] - b[i]) : null)); } });
@@ -32,8 +34,9 @@ export const CANDIDATES = [
   ...[3, 5, 15, 30].map((n) => ({ id: `mom${n}`, family: 'mom', name: `${n}-minute momentum`, need: n + 1, series: (c) => c.map((x, i) => (i < n ? null : Math.sign(x - c[i - n]))) })),
   { id: 'vwapRound', family: 'vwap', name: 'Price vs VWAP from the round\'s open', need: 1, bars: true },
   ...LESSON_CANDIDATES,
+  ...PATTERN_CANDIDATES, // v13.44 chart patterns (public/chartpatterns.js)
 ];
-export const FAMILY_NAMES = { ema: 'EMA cross', rma: 'RMA cross', rsi: 'RSI zones', macd: 'MACD', boll: 'Bollinger bands', mom: 'Momentum', vwap: 'VWAP', ...LESSON_FAMILIES };
+export const FAMILY_NAMES = { ema: 'EMA cross', rma: 'RMA cross', rsi: 'RSI zones', macd: 'MACD', boll: 'Bollinger bands', mom: 'Momentum', vwap: 'VWAP', ...LESSON_FAMILIES, ...PATTERN_FAMILIES };
 
 // The round VWAP signal needs the candles themselves (volume); everything else works on closes
 function vwapSignals(bars) {

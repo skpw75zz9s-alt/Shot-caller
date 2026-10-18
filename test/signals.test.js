@@ -7,7 +7,7 @@ const sources = () => ({
   ticker: T, side: 'YES', crypto: true,
   scan: { record: { 10: { activeN: 140, skill: 0.03 }, 6: { activeN: 90, skill: 0.0 } }, inCalls: { [T]: 0.021 }, live: { ticker: T, lean: 'YES' } },
   micro: { read: { horizons: { 1: { active: false }, 5: { active: false } } }, inCalls: null, models: { 1: { n: 400, skill: 0.004 }, 5: { n: 400, skill: -0.01 } } },
-  tune: { report: { families: [{ name: 'MACD cross', setting: 'macd 12/26/9', proven: true, dir: 1, test: { z: 3.1, rounds: 400 } }, { name: 'RSI', setting: 'rsi 14 > 70', proven: false, dir: -1, test: { z: 1.45, rounds: 380 } }] }, read: { active: [{ setting: 'macd 12/26/9', push: -0.4 }] } },
+  tune: { report: { families: [{ name: 'MACD cross', setting: 'macd 12/26/9', proven: true, dir: 1, test: { z: 3.1, rounds: 400 } }, { name: 'RSI', setting: 'rsi 14 > 70', proven: false, dir: -1, test: { z: 1.5, rounds: 380 } }] }, read: { active: [{ setting: 'macd 12/26/9', push: -0.4 }] } },
   playbook: { report: { reversal: { bands: { strong: { n: 120, z15: 2.7 }, developing: { n: 300, z15: 1.0 }, insufficient: { n: 900, z15: 0 } } }, guide: { proven: false }, predictor: { proven: false, z: 1.2, rounds: 500 } },
     reversal: { best: { band: 'strong', dir: 'up' } }, guide: { call: 'DOWN' }, inCalls: { [T]: 0.012 } },
   cross: { model: { proven: false, n: 750, z: 1.1, need: { minTest: 1500 } }, inCalls: null },
@@ -21,7 +21,7 @@ test('signal board: proven factors are in calls, the rest on probation, with pro
   assert.equal(by.scan.status, 'in'); assert.equal(by.scan.lean, 'YES'); assert.equal(by.scan.pts, 0.021); assert.equal(by.scan.vs, 'with');
   assert.equal(by.micro.status, 'probation'); assert.equal(by.micro.lean, null);
   assert.equal(by['tune:MACD cross'].status, 'in'); assert.equal(by['tune:MACD cross'].lean, 'NO'); assert.equal(by['tune:MACD cross'].vs, 'against');
-  assert.equal(by['tune:RSI'].status, 'probation'); assert.ok(Math.abs(by['tune:RSI'].progress - 0.5) < 1e-9, 'z 1.45 of 2.9');
+  assert.equal(by['tune:RSI'].status, 'probation'); assert.ok(Math.abs(by['tune:RSI'].progress - 0.5) < 1e-9, 'z 1.5 of 3.0');
   assert.equal(by.reversal.status, 'in'); assert.equal(by.reversal.lean, 'YES'); assert.equal(by.reversal.pts, 0.012, 'the playbook\'s shared nudge');
   assert.equal(by.guide.status, 'probation'); assert.equal(by.guide.pts, null, 'unproven parts don\'t claim the nudge');
   assert.equal(by.predictor.progress, 0.5);

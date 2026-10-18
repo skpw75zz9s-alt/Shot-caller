@@ -9,10 +9,13 @@ import { liveBubbles } from './chart.js';
 // v13.40 colors: the overlays are one validated categorical set for the dark chart surface (dataviz validate_palette:
 // lightness band, chroma, colorblind separation and contrast all pass, in this order): EMA 9 blue, EMA 21 orange, RMA
 // violet, VWAP amber. Candles keep up / down green and red; the forecast is one hue (the cone) plus a neutral path.
-const C = { bg: '#0a0f1a', grid: '#ffffff07', text: '#8b95a7', ink: '#c9d1e0', up: '#2ee6a6', dn: '#ff4d6d', ema9: '#3987e5', ema21: '#d95926', rma: '#9085e9', vwap: '#c98500', boll: '#8b95a766', strike: '#e8ecf3', cone: '34,211,238', path: '#e8ecf3' };
+const C = { bg: '#0a0f1a', grid: '#ffffff07', text: '#8b95a7', ink: '#c9d1e0', up: '#2ee6a6', dn: '#ff4d6d', ema9: '#3987e5', ema21: '#d95926', rma: '#9085e9', vwap: '#c98500', boll: '#8b95a766', strike: '#e8ecf3', cone: '34,211,238', path: '#e8ecf3', pat: '#f472b6', patRgb: '244,114,182' }; // pat: chart patterns (v13.44)
 // the forecast sources (only with "Every forecast source" on): the reference 8-slot order, each named in the legend
 const SRC = { bot: ['Bot', '#3987e5'], kalshi: ['Kalshi', '#d95926'], exch: ['Exchanges', '#199e70'], engine: ['Engine', '#c98500'], guide: ['Guide', '#d55181'], micro: ['Micro', '#9085e9'], moves: ['Move model', '#e66767'] };
 const sec = (ms) => Math.floor(ms / 1000);
+// a chart pattern's short tag for its marker (public/chartpatterns.js)
+const patTag = (e) => (e.key === 'hs' ? (e.dir > 0 ? 'iH&S' : 'H&S') : e.key === 'flag' ? 'Flag' : e.key === 'level' ? (e.dir > 0 ? 'Res' : 'Sup')
+  : e.key === 'triangle' ? ({ rwedge: 'Wedge', fwedge: 'Wedge', chup: 'Chan', chdn: 'Chan' }[e.shape] ?? 'Tri') : e.name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 3));
 const TIME = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
 const DAY = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric' });
 const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -148,12 +151,12 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0,
     try { if (r?.macd != null && !macdEl.hidden) macdChart.setCrosshairPosition(r.macd, tt, mLine); else macdChart.clearCrosshairPosition(); } catch { /* not drawn yet */ }
   });
 
-  let lines = {}, last = null, key = null, barMs = 60000, show = {}, bubbles = [], orders = [], trend = null, levels = [], coneData = [], closeAt = null, liveT = null;
+  let lines = {}, last = null, key = null, barMs = 60000, show = {}, bubbles = [], orders = [], trend = null, levels = [], coneData = [], closeAt = null, liveT = null, pats = null;
   let barsKey = null, liveAt = 0, marksKey = null, gmKey = null, wmKey = null; // what's on screen, to change only what changed
 
   // ---------- data ----------
   function render(d) {
-    show = d.show; barMs = d.barMs; orders = d.orders || []; closeAt = d.round ? d.closeTime : null;
+    show = d.show; barMs = d.barMs; orders = d.orders || []; closeAt = d.round ? d.closeTime : null; pats = show.patterns !== false ? d.patterns ?? null : null;
     tfLabel = d.tf === 'round' ? '1m' : d.tf;
     const bars = d.bars;
     if (!bars.length) return;
@@ -242,6 +245,9 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0,
     if (show.structure && barMs === 60000) for (const [e, label] of [[d.structure?.sweep, 'sweep'], [d.structure?.shift, 'MSS']]) if (e && inView(e.t)) marks.push({ time: barOf(e.t), position: e.dir > 0 ? 'belowBar' : 'aboveBar', color: '#e879f9', shape: e.dir > 0 ? 'arrowUp' : 'arrowDown', text: `${label} ${e.dir > 0 ? '↑' : '↓'}` });
     if (show.markers) for (const m of d.markers || []) if (inView(m.t)) marks.push({ time: barOf(m.t), position: m.side === 'YES' ? 'belowBar' : 'aboveBar', color: m.side === 'YES' ? C.up : C.dn, shape: m.side === 'YES' ? 'arrowUp' : 'arrowDown', text: m.label });
     if (show.fills) for (const f of d.fills || []) if (inView(f.t)) marks.push({ time: barOf(f.t), position: f.kind === 'buy' ? 'belowBar' : 'aboveBar', color: f.kind === 'buy' ? '#22d3ee' : f.kind === 'bail' ? C.dn : '#fbbf24', shape: 'circle', text: `${f.kind === 'buy' ? 'B' : f.kind === 'bail' ? '✕' : 'S'} ${f.label || ''}`.trim() });
+    // chart patterns (public/chartpatterns.js): a marker naming each one where it confirmed; its lines go on the overlay
+    // (short tags, the 3 newest: the full names are in the Chart patterns card under the chart)
+    for (const e of (pats?.recent || []).slice(0, 3)) if (inView(e.t)) marks.push({ time: barOf(e.t), position: e.dir > 0 ? 'belowBar' : 'aboveBar', color: C.pat, shape: e.dir > 0 ? 'arrowUp' : 'arrowDown', text: `${patTag(e)} ${e.dir > 0 ? '↑' : '↓'}` });
     // why it moved: a marker naming the cause on each candle that made a real move (public/why.js)
     if (show.why !== false) for (const n of d.notes || []) if (inView(n.t)) marks.push({ time: barOf(n.t), position: n.dir === 'up' ? 'aboveBar' : 'belowBar', color: '#c4b5fd', shape: 'circle', size: 0.6, text: n.tag });
     const e9 = ema(closes, 9), e21 = ema(closes, 21);
@@ -373,6 +379,22 @@ export function createTvChart({ main, rsiEl, macdEl, layer, liveBtn, digits = 0,
         const lbl = `close ${TIME.format(closeAt)}`, tw = ctx.measureText(lbl).width + 10, bx = Math.min(plotW - tw - 2, cx + 4);
         ctx.fillStyle = '#0a0f1ae6'; ctx.fillRect(bx, plotH - 20, tw, 15); ctx.fillStyle = '#e8ecf3'; ctx.fillText(lbl, bx + 5, plotH - 9);
       }
+    }
+    // chart patterns: the confirmed shapes' lines solid, the one still forming dashed (its breakout lines)
+    if (pats) {
+      const xy = (t, p) => ({ x: ts.timeToCoordinate(sec(t)), y: y(p) });
+      const draw = (ln, dash, alpha) => {
+        const a = xy(ln.t1, ln.p1), b = xy(ln.t2, ln.p2);
+        if (a.x == null || b.x == null || a.y == null || b.y == null) return;
+        ctx.setLineDash(dash); ctx.strokeStyle = `rgba(${C.patRgb},${alpha})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      };
+      for (const e of (pats.recent || []).filter((x) => x.lines?.length).slice(0, 2)) for (const ln of e.lines) draw(ln, [], 0.85); // the 2 newest shapes
+      if (pats.forming) {
+        for (const ln of pats.forming.lines) draw(ln, [4, 3], 0.7);
+        const ln = pats.forming.lines[0], a = xy(ln.t2, ln.p2);
+        if (a.x != null && a.y != null) { ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace"; ctx.textAlign = 'right'; ctx.fillStyle = C.pat; ctx.fillText(`${pats.forming.name} forming`, Math.min(plotW - 4, a.x), a.y - 6); }
+      }
+      ctx.setLineDash([]);
     }
     // level tags on the left edge (the past, never over the forecast), spread so they never overlap, kept under the
     // legend; the axis keeps only the price and the target

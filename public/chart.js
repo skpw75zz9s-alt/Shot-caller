@@ -10,6 +10,7 @@ export const CHART_TOGGLES = [
   ['orders', 'Live orders (only ones that move the price)', true], ['fills', 'My trades + Auto-trader buys/sells', true],
   ['why', 'Why it moved (explains each real move)', true],
   ['structure', 'Market structure: sweeps, structure shifts, fair value gaps', true],
+  ['patterns', 'Chart patterns: head and shoulders, triangles, wedges, channels, flags, support / resistance breaks, candlestick patterns', true],
 ];
 export const chartDefaults = () => Object.fromEntries(CHART_TOGGLES.map(([k, , on]) => [k, on]));
 

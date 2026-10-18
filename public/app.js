@@ -31,12 +31,13 @@ import { lessonsNow } from './lessons.js';
 import { pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { signalBoard } from './signals.js';
+import { patternsNow } from './chartpatterns.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '186'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '187'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -922,9 +923,29 @@ async function drawChartTab(force = false) {
   if (key === chartState.key && !force) return;
   const resetView = chartState.viewKey !== `${tf}|${chartState.height}`;
   chartState.key = key; chartState.viewKey = `${tf}|${chartState.height}`;
-  tv.render({ tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
+  // chart patterns on the closed candles of the timeframe on screen (a forming candle never confirms one), once a candle
+  const pk = `${tf}|${bars.length}|${lb.t}`;
+  if (pk !== chartState.patKey) { chartState.patKey = pk; try { chartState.pats = patternsNow(bars.slice(0, -1)); } catch { chartState.pats = null; } renderPatterns(tf); }
+  tv.render({ patterns: chartState.show.patterns !== false ? chartState.pats : null, tf, bars, barMs, height: chartState.height, show: chartState.show, strike: live?.strike, openTime: open, closeTime: close, round: tf === 'round' || tf === '1m',
     cone: showCone ? coneNow(live, snap, now, pcs.path, horizonOf(live, now)).pts : [], predictions: pcs.lines || [], path: pcs.minutes, turns: pcs.turns, structure: T.gran === 60 && chartState.show.structure !== false ? structureRead(snap.bars, { now, price: spot, sigmaMin: snap.sigmaMin || 0.0008 }) : null, markers, fills: chartState.fills, orders: tape.big, notes: state.whyLog, viewFrom, resetView, forecast: state.enNow });
 }
+// ---------- Chart patterns (public/chartpatterns.js): what's on the chart, and how each kind has done ----------
+function renderPatterns(tf) {
+  const P = chartState.pats, card = $('cpCard');
+  if (!card) return;
+  const fams = new Map((state.tune?.report?.families || []).filter((f) => /^cp_/.test(f.family)).map((f) => [f.family.slice(3), f]));
+  const hist = (key) => {
+    const f = fams.get(key);
+    if (!f) return 'graded once the server has 3 weeks of candles';
+    const hit = f.test?.hit, n = f.test?.rounds;
+    return `${f.proven ? '✓ proven, in the calls' : 'not proven, not used'} · on unseen rounds ${hit != null ? `${Math.round(hit * 100)}%` : '—'} right${n ? ` of ${int(n)}` : ''}${f.dir < 0 ? ' (works best faded)' : ''} · z ${(f.test?.z ?? 0).toFixed(1)}`;
+  };
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : `${m} min ago`; };
+  setText($('cpWhen'), tf === 'round' || tf === '1m' ? '1-minute candles' : `${TIMEFRAMES[tf]?.label ?? tf} candles · graded on 1-minute`);
+  setHTML($('cpForming'), P?.forming ? `<b>${esc(P.forming.name)} forming</b><small>A close above ${usd(P.forming.up, 0)} or below ${usd(P.forming.dn, 0)} confirms it (dashed lines on the chart).</small>` : '<small>No triangle, wedge or channel forming right now.</small>');
+  setHTML($('cpList'), (P?.recent || []).map((e) => `<li class="${e.dir > 0 ? 'up' : 'dn'}"><span><b>${esc(e.name)}</b><small>${ago(e.t)} · says ${e.dir > 0 ? 'UP' : 'DOWN'}${e.target != null ? ` · measured target ${usd(e.target, 0)}` : ''}</small><small class="cp-hist">${esc(hist(e.key))}</small></span><i>${e.dir > 0 ? '▲' : '▼'}</i></li>`).join('') || '<li class="empty">No pattern confirmed in the last 30 minutes (candle patterns: the last 5).</li>');
+}
+
 // ---------- Market watch (server: marketwatch.js, public/watch.js): every detail, every second ----------
 async function refreshWatch() {
   if (document.hidden) return;
@@ -984,7 +1005,7 @@ function renderPlaybook() {
 // ---------- indicator tuning (server: tunefeed.js, public/tune.js): which settings have really predicted the rounds ----------
 async function refreshTune() {
   if (document.hidden) return;
-  try { state.tune = await getJSON(api('tune')); state.tuneAt = Date.now(); renderTune(); if (shownViews.has('learn')) renderLessons(); } catch { /* next time */ }
+  try { state.tune = await getJSON(api('tune')); state.tuneAt = Date.now(); renderTune(); if (shownViews.has('learn')) renderLessons(); if (shownViews.has('chart') && chartState.pats) renderPatterns(chartState.tf); } catch { /* next time */ }
 }
 setInterval(refreshTune, 10000);
 setTimeout(refreshTune, 3000);

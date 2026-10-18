@@ -70,6 +70,7 @@
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
+  <link rel="modulepreload" href="chartpatterns.js">
   <link rel="modulepreload" href="cross.js">
   <link rel="modulepreload" href="vendor/lightweight-charts.js">
   <script>
@@ -323,6 +324,13 @@
         </details>
         <div class="why-log"><div class="why-log-head">Why it moved</div><ul id="whyList"><li class="calm">Explanations show up here (and on the chart) whenever BTC makes a real move.</li></ul></div>
         <details class="how"><summary>How it works</summary><p class="fine-left" id="chartNote">Cone: where BTC is likely to close (inner band 50% of outcomes, outer 90%), centred on the expected path and recalibrated from its own record. The <b>expected path</b> (dashed white) runs through the cone; the shaded zone right of the dotted line is the forecast, and the round's close is marked. Drag across the chart: the legend reads every candle, and over the forecast it reads that minute of the cone. <b>Every forecast source</b> (off by default, Chart tools): where each source says BTC closes: <b style="color:#22d3ee">Bot</b> (the bot's own odds), <b style="color:#a78bfa">Kalshi</b> (the close its price implies), <b style="color:#fbbf24">Exchanges</b> (the trend across every streamed market, the global ones included), <b style="color:#34d399">Engine</b>, <b style="color:#f472b6">Guide</b>, <b style="color:#60a5fa">Micro</b> and <b style="color:#fb923c">Move model</b>. Each line's moves are scaled to how far they've really carried, and the lines are blended by their error covariance into the expected path (the cone's centre); all of it is graded every minute. <b>Flip watch</b>: the path carries today's momentum and turns where a flip looks ripe; ↺ marks each predicted turn, checked afterwards. Bull and bear heads mark the bot's UP and DOWN calls; small ones mark EMA 9/21 crosses. The faded animal behind the candles is the trend (bull while EMA 9 is above EMA 21). <b>Live orders</b>: orders that pushed the price at least $5 and 30% of a typical 10-second move bubble up at their price, green for buyers and red for sellers (gold for a whale). <b>B</b> / <b>S</b> / <b>✕</b> flags mark your buys, sells and bail-outs.</p></details>
+      </div>
+      <!-- chart patterns (v13.44, public/chartpatterns.js) -->
+      <div class="card cp" id="cpCard">
+        <div class="deep-head"><span>Chart patterns</span><b id="cpWhen"></b></div>
+        <div class="cp-forming" id="cpForming"><small>Reading the chart…</small></div>
+        <ul class="cp-list" id="cpList"></ul>
+        <details class="how"><summary>How it works</summary><small class="fine-left">The bot reads the chart for the shapes traders look for: head and shoulders (and inverse), triangles (ascending, descending, symmetric), rising and falling wedges, channels, flags, support and resistance breaks after 3+ touches, and candlestick patterns (hammer, shooting star, engulfing, morning and evening star, three white soldiers and black crows, piercing line and dark cloud cover). It never peeks ahead: a swing high or low only counts once 3 more candles have closed, and a pattern counts on the candle that confirms it (a close through its neckline or line). Each kind is tested on the server's last 3 weeks of 1-minute candles like every indicator: picked on the older rounds, checked on the newest ones it never saw. Only a kind that proves itself there (z 3+) touches the calls; until then it's shown here, on the chart and on the signal board, and nothing more. Patterns are a popular idea, not a guarantee: many of them do no better than a coin flip on 1-minute crypto charts, and the record here says which.</small></details>
       </div>
       <div data-pro class="card pulse" id="pulseCard">
         <div class="deep-head"><span>Market pulse</span><b id="pulseWhen"></b></div>
@@ -597,7 +605,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.43.3 · A call every round, guaranteed</p>
+      <p class="fine" id="version">Shot Caller v13.44 · Chart patterns</p>
     </section>
   </main>
 
@@ -617,7 +625,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '186';
+    window.SC_BUILD = '187';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

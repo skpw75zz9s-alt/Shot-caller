@@ -1054,3 +1054,12 @@ details.chart-more summary::-webkit-details-marker { display: none; } details.ch
 .sb-fold summary::before { content: '▸ '; } .sb-fold details[open] summary::before { content: '▾ '; }
 .sb-fold summary::-webkit-details-marker { display: none; }
 @media (max-width: 400px) { .hdr-r { gap: 8px; } header { gap: 8px; } header h1 { letter-spacing: 1px; gap: 6px; min-width: 0; } .mkt-pick { max-width: 112px; } }
+
+/* ---------- v13.44 chart patterns ---------- */
+.cp-forming { padding: 6px 0 8px; display: grid; gap: 2px; } .cp-forming b { color: #f472b6; font-size: 13px; } .cp-forming small { color: var(--muted); font-size: 12px; }
+.cp-list { list-style: none; margin: 0; padding: 0; }
+.cp-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
+.cp-list li span { display: grid; gap: 1px; min-width: 0; } .cp-list li b { font-size: 12.5px; } .cp-list small { color: var(--muted); font-size: 11px; }
+.cp-list .cp-hist { color: var(--dim); }
+.cp-list li i { font-style: normal; font-size: 14px; } .cp-list li.up i { color: var(--yes); } .cp-list li.dn i { color: var(--no); }
+.cp-list li.empty { display: block; color: var(--muted); font-size: 12px; }

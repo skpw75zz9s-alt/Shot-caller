@@ -271,6 +271,26 @@ Security:
 
 ## Version notes (newest first)
 
+### Chart patterns (v13.44)
+
+`public/chartpatterns.js` reads the candles for the shapes traders look for:
+
+- **Shapes:** head and shoulders (and inverse); ascending, descending and symmetric triangles; rising and falling
+  wedges; channels; flags; support and resistance breaks after 3+ touches.
+- **Candlestick patterns:** hammer, shooting star, engulfing, morning and evening star, three white soldiers and black
+  crows, piercing line and dark cloud cover.
+
+It never peeks ahead: a swing high or low only counts once 3 more candles have closed, and a pattern counts on the
+candle that confirms it (tested: the patterns found on part of the history match the full history's).
+
+- **On the Chart tab:** a marker on the confirming candle (short tags: H&S, Tri, Wedge, Chan, Flag, Res/Sup, …), the
+  2 newest shapes' lines, and the shape still forming dashed. A **Chart patterns** card lists the recent ones, with
+  what each says and how that kind has done on unseen rounds.
+- **In the calls:** each kind is a candidate in the indicator test (`public/tune.js`), its signal held 3 or 8 minutes
+  after it confirms. It touches the calls only once proven there, like every indicator. With 17 families tested at
+  once, the bar is now z 3.0 (was 2.9). On random-walk test data none of them passes (49.7–52.8% right): patterns
+  are a popular idea, and the record says whether they work here.
+
 ### A call every round, guaranteed (v13.43.3)
 
 From 10:00 left the Deck always shows a side; there's no SIT OUT after the first 5 minutes.
