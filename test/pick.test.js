@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, evaluate, probYes, riskSettings } from '../public/model.js';
-import { PICK, mixOdds, pickMix, pickNow, pickScore } from '../public/pick.js';
+import { PICK, mixOdds, pickAlways, pickFallback, pickMix, pickNow, pickScore } from '../public/pick.js';
 import { sideOdds } from '../public/engine.js';
 import { accuracyRows } from '../public/accuracy.js';
 import { pickMessage } from '../discord.js';
@@ -129,4 +129,19 @@ test("the mix is learned from the pick's own record from 30 graded picks: Kalshi
   const good = pickMix(make(true)), noise = pickMix(make(false));
   assert.equal(good.learned, true); assert.ok(good.mix <= 0.25, `Kalshi righter: mix ${good.mix}`);
   assert.ok(noise.mix >= 0.75, `Kalshi noise: mix ${noise.mix}`);
+});
+
+test('the guaranteed pick: when the bot\'s odds can\'t be worked out, Kalshi\'s favourite, else the side price is on; never a buy', () => {
+  const row = (q, spot, type = 'greater') => ({ m: { ticker: 'T', strike_type: type }, strike: 100000, ev: { pYes: null, minutesLeft: 8, quote: q } });
+  const kal = pickFallback({ row: row({ yesBid: 0.3, yesAsk: 0.32, noBid: 0.68, noAsk: 0.7 }), snap: { spot: 100500 } });
+  assert.deepEqual([kal.side, kal.fallback, kal.buy, Math.round(kal.p * 100)], ['NO', 'kalshi', false, 69]);
+  const px = pickFallback({ row: row({}), snap: { spot: 100500 } });
+  assert.deepEqual([px.side, px.fallback, px.p], ['YES', 'price', 0.5]);
+  assert.equal(pickFallback({ row: row({}, 0, 'less'), snap: { spot: 100500 } }).side, 'NO', 'a "less" market: above the target is NO');
+  assert.equal(pickFallback({ row: row({}), snap: {} }), null, 'nothing to go on at all');
+  assert.equal(pickAlways({ row: row({ yesBid: 0.6, yesAsk: 0.62 }), snap: {} }).fallback, 'kalshi');
+  // fallback picks stay out of the bot-vs-Kalshi score and the learned mix (they're Kalshi's own side)
+  const graded = [...Array(40)].map((_, i) => ({ side: 'YES', result: 'yes', p: 0.6, pb: null, kalshi: 0.6, fallback: 'kalshi', at: i }));
+  assert.equal(pickScore(graded).vs, 0);
+  assert.equal(pickMix(graded).learned ?? false, false);
 });

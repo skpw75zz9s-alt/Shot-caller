@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
-import { PICK, pickMix, pickNow, pickScore } from './public/pick.js';
+import { PICK, pickFallback, pickMix, pickNow, pickScore } from './public/pick.js';
 import { causeTally, contextOf, deepDive, lessonStudy, lessonsFor } from './public/losslab.js';
 import { createHash } from 'node:crypto';
 import { ASSETS, HOME, HOME_ASSET } from './public/markets.js';
@@ -470,15 +470,19 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       if (ml <= PICK.at && ml > 1 && !pickRecord.some((e) => e.ticker === t)) {
         const off = officialMem[t]?.side ?? null, mix = pickMix(pickRecord).mix;
         let e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off, mix }); // the official call's side, with its own odds and worst case; the bot's odds and Kalshi's in the mix the record favours
-        let ctx = e ? lessonContext(lv, e.side, snap, now) : null, orig = null, applied = [];
-        if (e && !off) {
+        // v13.43.3 every round gets its call: if the bot's own odds aren't ready a minute after the lock, Kalshi's favourite (or
+        // the side price is on), marked fallback, never a buy
+        const fallbackDue = ml <= PICK.at - 1;
+        if (!e && fallbackDue) e = pickFallback({ row: lv, snap });
+        let ctx = e && !e.fallback ? lessonContext(lv, e.side, snap, now) : null, orig = null, applied = [];
+        if (e && !off && !e.fallback) {
           applied = lessonsFor(pickLab(), ctx);
           const e2 = applied.length ? pickNow({ row: lv, snap, settings: OFFICIAL, side: e.side === 'YES' ? 'NO' : 'YES', mix }) : null;
           if (e2 && e2.ask != null) { orig = { side: e.side, ctx, p: Math.round(e.p * 1000) / 1000 }; e = e2; ctx = lessonContext(lv, e.side, snap, now); } else applied = [];
         }
-        if (e && e.ask != null) {
+        if (e && (e.ask != null || fallbackDue)) { // no Kalshi price yet: a minute's grace, then it locks anyway
           const prev = pickRecord.filter((x) => x.result === 'yes' || x.result === 'no').at(-1) ?? null;
-          pickRecord.push({ ticker: t, side: e.side, price: e.ask, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: Math.round(e.pb * 1000) / 1000, mix: e.mix, gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
+          pickRecord.push({ ticker: t, side: e.side, price: e.ask ?? null, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: e.pb != null ? Math.round(e.pb * 1000) / 1000 : null, mix: e.mix, ...(e.fallback ? { fallback: e.fallback } : {}), gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
             ctx, sigma: lv.sigma ?? snap.sigmaMin, strikeType: lv.m.strike_type || 'greater', ...(ml < PICK.at - PICK.window ? { late: true } : {}), ...(orig ? { orig, lessons: applied.map((x) => x.label) } : {}) });
           seal(pickRecord, pickRecord.at(-1));
           if (pickRecord.length > 5000) pickRecord.splice(0, pickRecord.length - 5000);

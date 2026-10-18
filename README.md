@@ -271,6 +271,20 @@ Security:
 
 ## Version notes (newest first)
 
+### A call every round, guaranteed (v13.43.3)
+
+From 10:00 left the Deck always shows a side; there's no SIT OUT after the first 5 minutes.
+
+- **No fresh price yet:** if the round is loaded but there's no fresh price (only last visit's, marked DELAYED), the
+  Deck shows the round call and waits for a price only for buy calls. This state used to throw and blank the Deck.
+- **The bot's odds aren't ready:** if they can't be worked out yet (no price or volatility), the pick falls back to
+  Kalshi's favourite (its mid price), else the side price is on. It's marked as a fallback and never a buy
+  (`pickFallback`, `public/pick.js`). The phone replaces it with the bot's own pick as soon as it can.
+- **On the server:** the pick is given a minute after 10:00 left to use the bot's math. After that it locks the
+  fallback, or locks even when Kalshi shows no price to buy at. So every round's call is recorded, posted and graded.
+- **Scoring:** fallback picks stay out of the bot-vs-Kalshi score and the learned mix. A pick with no price counts no
+  money.
+
 ### The flip study (v13.43)
 
 Flip calls had never fired on the live record, so their accuracy couldn't be measured. `public/flipstudy.js` replays

@@ -90,10 +90,10 @@ export function pickMessage(e, { prev = null, stats = null, base = null } = {}) 
     embeds: [{
       author,
       title: `${tag(mk)}🔒 ROUND CALL · ${up ? '🐂' : '🐻'} ${sideName(e.side)}${e.buy ? ' · ✅ BUY' : ''}`,
-      description: `${mk.key} ${up ? 'above' : 'below'} ${e.strike ? px(e.strike, mk) : 'the target'} at the close, by the math: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}${e.orig ? `\n🧠 A lesson from past losses turned it from ${sideName(e.orig.side)}: ${(e.lessons || []).join(', ')}.` : ''}`,
+      description: `${mk.key} ${up ? 'above' : 'below'} ${e.strike ? px(e.strike, mk) : 'the target'} at the close, ${e.fallback ? `by ${e.fallback === 'kalshi' ? 'Kalshi\'s price' : 'where price is'} (the bot\'s own odds weren\'t ready)` : 'by the math'}: **${pc(e.p)}**${e.worst != null ? ` (${pc(e.worst)} even if the volatility is off)` : ''}.\n${e.buy ? `Worth buying at up to ${cents(e.price)}.` : `${e.why ? e.why.charAt(0).toUpperCase() + e.why.slice(1) : 'A pick, not a buy'}.`}${e.orig ? `\n🧠 A lesson from past losses turned it from ${sideName(e.orig.side)}: ${(e.lessons || []).join(', ')}.` : ''}`,
       color: e.buy ? (up ? 0x2ee6a6 : 0xff4d6d) : 0x5d6880,
       fields: [
-        { name: 'Kalshi', value: cents(e.price), inline: true },
+        ...(e.price != null ? [{ name: 'Kalshi', value: cents(e.price), inline: true }] : []),
         { name: 'Closes', value: ts(Date.parse(e.closeTime)), inline: true },
         ...(last ? [{ name: 'Last pick', value: last, inline: true }] : []),
         ...(stats?.graded ? [{ name: 'Picks so far', value: `${stats.wins}–${stats.graded - stats.wins} (${Math.round(stats.wins / stats.graded * 100)}%)`, inline: true }] : []),

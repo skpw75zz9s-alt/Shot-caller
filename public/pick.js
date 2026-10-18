@@ -32,7 +32,7 @@ export const mixOdds = (pBot, pKalshi, mix) => (pKalshi == null || mix >= 1 ? pB
 // The mix the pick uses: half and half until 30 graded picks have both odds stored, then the one whose combined odds had
 // the lowest log loss on them. Picks from before v13.28 stored the bot's odds as p.
 export function pickMix(picks) {
-  const xs = (picks || []).filter((e) => (e.result === 'yes' || e.result === 'no') && e.kalshi != null && (e.pb ?? e.p) != null);
+  const xs = (picks || []).filter((e) => (e.result === 'yes' || e.result === 'no') && e.kalshi != null && !e.fallback && (e.pb ?? e.p) != null);
   const won = (e) => e.side.toLowerCase() === e.result;
   const loss = (w) => xs.reduce((a, e) => { const q = clampP(mixOdds(e.pb ?? e.p, e.kalshi, w)); return a - Math.log(won(e) ? q : 1 - q); }, 0) / (xs.length || 1);
   if (xs.length < PICK.learnFrom) return { mix: PICK.mix, n: xs.length, learned: false };
@@ -65,13 +65,31 @@ export function pickNow({ row, snap, settings = {}, side: forced = null, mix = P
   return { side, p, pb, kalshi, mix: used ? mix : 1, worst, worstBot, ask, bid, gap, buy, why, official: side !== lean, strike: row.strike, spot: snap.mSpot ?? snap.spot, minutesLeft: ev.minutesLeft };
 }
 
+// The guaranteed pick (v13.43.3): every round gets a side after the first 5 minutes, even when the bot's own odds can't
+// be worked out yet (no fresh price or volatility): then Kalshi's favourite (its mid price), else the side price is on.
+// Marked fallback, never a buy; graded like any pick.
+export function pickFallback({ row, snap }) {
+  const ev = row?.ev, q = ev?.quote ?? {}, m = row?.m ?? {}, less = /^less/.test(m.strike_type || '');
+  const midYes = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : q.yesAsk ?? q.yesBid ?? null;
+  const spot = snap?.mSpot ?? snap?.spot ?? null;
+  let side = null, by = null;
+  if (midYes != null && midYes !== 0.5) { side = midYes > 0.5 ? 'YES' : 'NO'; by = 'kalshi'; }
+  else if (spot > 0 && row?.strike > 0 && spot !== row.strike) { side = (spot > row.strike) !== less ? 'YES' : 'NO'; by = 'price'; }
+  if (!side) return null;
+  const p = midYes != null ? (side === 'YES' ? midYes : 1 - midYes) : 0.5;
+  const ask = side === 'YES' ? q.yesAsk ?? null : q.noAsk ?? null, bid = side === 'YES' ? q.yesBid ?? null : q.noBid ?? null;
+  const why = by === 'kalshi' ? 'the bot\'s own odds weren\'t ready, so this is Kalshi\'s favourite; a pick, not a buy' : 'the bot\'s own odds weren\'t ready, so this is the side price is on; a pick, not a buy';
+  return { side, p, pb: null, kalshi: midYes != null ? p : null, mix: 0, worst: null, worstBot: null, ask, bid, gap: null, buy: false, why, official: false, fallback: by, strike: row?.strike ?? null, spot, minutesLeft: ev?.minutesLeft ?? null };
+}
+export const pickAlways = (args) => pickNow(args) ?? pickFallback(args);
+
 // The picks' scorecard: Brier score (mean squared error of the odds against what happened; lower is better, 0.25 =
 // always 50%) for the pick's odds, the bot's alone and Kalshi's mid at the same moment, on the picks that stored them,
 // and calibration by odds band (said vs won)
 export function pickScore(picks) {
   const graded = (picks || []).filter((e) => (e.result === 'yes' || e.result === 'no') && e.p != null);
   const won = (e) => (e.side.toLowerCase() === e.result ? 1 : 0);
-  const both = graded.filter((e) => e.kalshi != null);
+  const both = graded.filter((e) => e.kalshi != null && !e.fallback); // fallback picks are Kalshi's own side: no bot-vs-Kalshi test
   const brier = (xs, f) => (xs.length ? xs.reduce((a, e) => a + (f(e) - won(e)) ** 2, 0) / xs.length : null);
   const bands = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]].map(([lo, hi]) => {
     const xs = graded.filter((e) => e.p >= lo && e.p < hi);

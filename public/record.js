@@ -25,7 +25,7 @@ export function settleCalls(log, ticker, result) {
 }
 
 // Per $10 call held to settlement: whole contracts and Kalshi's exact fee on the order
-const usd10 = (e, won) => pnl10(e.price, won);
+const usd10 = (e, won) => (e.price > 0 ? pnl10(e.price, won) : 0); // a pick locked with no Kalshi price to buy at counts no money
 
 export function callStats(log) {
   const graded = log.filter((e) => e.result === 'yes' || e.result === 'no');
