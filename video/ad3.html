@@ -1,0 +1,372 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* The v13.45 update video (made from the v13.39 ad's look): 1920x1080. Every frame is drawn by render(t), so the recording is exact and can be supersampled
+     in time (adrender2.mjs renders 2 frames per output frame for real motion blur). */
+  * { box-sizing: border-box; margin: 0; transition: none !important; animation: none !important; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #03050b; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #eef2f8; }
+  #bgc, #fx { position: absolute; inset: 0; }
+  #stage { position: absolute; inset: 0; perspective: 1800px; }
+  #cam { position: absolute; inset: 0; transform-origin: 50% 50%; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .eyebrow { font: 700 20px 'DejaVu Sans Mono', monospace; letter-spacing: 6px; color: #22d3ee; text-transform: uppercase; }
+  .h { font-weight: 800; font-size: 84px; line-height: 1.02; letter-spacing: -2.5px; }
+  .h em { font-style: normal; background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 30px; line-height: 1.42; color: #b9c3d6; max-width: 900px; }
+  .left { position: absolute; left: 130px; top: 170px; width: 1000px; display: flex; flex-direction: column; gap: 22px; }
+  /* phones: a 3D device with a glass sheen */
+  .phone { position: absolute; width: 430px; height: 930px; border-radius: 58px; background: #000; transform-style: preserve-3d;
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; overflow: hidden; }
+  .phone .scr { position: absolute; left: 0; top: 0; width: 430px; transform-origin: 50% 0; }
+  .phone .gloss { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, #ffffff1c 45%, transparent 60%); mix-blend-mode: screen; pointer-events: none; }
+  .phone .notch { position: absolute; left: 50%; top: 14px; width: 130px; height: 36px; margin-left: -65px; border-radius: 20px; background: #000; }
+  .refl { position: absolute; width: 430px; height: 260px; border-radius: 58px; background: linear-gradient(180deg, #22d3ee18, transparent 70%); filter: blur(10px); }
+  .chip { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font: 800 26px 'DejaVu Sans Mono', monospace; background: #2a0d16; color: #ff6b85; border: 2px solid #ff4d6d77; box-shadow: 0 0 30px #ff4d6d33; }
+  .chip.ok { background: #062419; color: #4dfbb8; border-color: #2ee6a688; box-shadow: 0 0 30px #2ee6a633; }
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; }
+  /* intro */
+  #logo { position: absolute; left: 50%; top: 250px; width: 210px; height: 210px; margin-left: -105px; border-radius: 48px; box-shadow: 0 0 0 2px #22d3ee66, 0 30px 120px #22d3ee66; }
+  #brand { position: absolute; width: 100%; top: 510px; text-align: center; font-weight: 800; font-size: 104px; letter-spacing: 16px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #sweep { position: absolute; top: 500px; height: 140px; width: 260px; background: linear-gradient(90deg, transparent, #ffffff55, transparent); mix-blend-mode: overlay; transform: skewX(-20deg); }
+  #tag { position: absolute; width: 100%; top: 650px; text-align: center; font-size: 36px; color: #b9c3d6; }
+  #ver { position: absolute; left: 50%; top: 730px; transform: translateX(-50%); font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #22d3ee; border: 2px solid #22d3ee77; border-radius: 999px; padding: 8px 26px; }
+  /* s1 */
+  #sitout { position: absolute; left: 130px; top: 300px; font-weight: 800; font-size: 200px; letter-spacing: 6px; color: #5d6880; white-space: nowrap; }
+  #sitout span { display: inline-block; }
+  #strike { position: absolute; left: 120px; top: 405px; height: 16px; background: #ff4d6d; box-shadow: 0 0 30px #ff4d6d; border-radius: 8px; }
+  #ring { position: absolute; width: 230px; height: 230px; }
+  #ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 46px 'DejaVu Sans Mono', monospace; color: #eef2f8; }
+  #ring small { position: absolute; left: 0; width: 100%; top: 150px; text-align: center; font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #2ee6a6; }
+  /* s4 notes */
+  .note { position: absolute; width: 330px; height: 420px; border-radius: 10px; background: #f5f3ec; color: #1d2433; padding: 26px 26px 0 58px; overflow: hidden;
+    background-image: linear-gradient(90deg, transparent 44px, #e2707088 44px, #e2707088 46px, transparent 46px), repeating-linear-gradient(180deg, transparent 0 33px, #8fb4e055 33px 35px); box-shadow: 0 30px 70px #000b; }
+  .note h3 { font: italic 700 46px 'DejaVu Serif', serif; margin-bottom: 8px; }
+  .note p { font: italic 21px/35px 'DejaVu Serif', serif; color: #2b3550; }
+  .stamp { position: absolute; right: 18px; bottom: 30px; padding: 8px 16px; border: 5px solid #11a873; border-radius: 10px; color: #11a873; font: 800 34px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; transform: rotate(-12deg); background: #ffffffaa; }
+  /* s6 lock screen */
+  #lock { position: absolute; left: 1180px; top: 75px; width: 430px; height: 930px; border-radius: 58px; overflow: hidden; background: radial-gradient(120% 70% at 30% 0%, #1b3a6b, #070b16 70%);
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; }
+  #lock .time { position: absolute; width: 100%; top: 110px; text-align: center; font-weight: 300; font-size: 104px; letter-spacing: -2px; }
+  #lock .date { position: absolute; width: 100%; top: 90px; text-align: center; font-size: 22px; color: #c9d4ea; }
+  .ban { position: absolute; left: 16px; width: 398px; padding: 16px 18px; border-radius: 26px; background: #1c2537e6; backdrop-filter: blur(8px); display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; }
+  .ban img { width: 44px; height: 44px; border-radius: 11px; }
+  .ban b { font-size: 18px; display: block; } .ban span { font-size: 16px; color: #c3cde0; line-height: 1.3; display: block; } .ban i { font-style: normal; float: right; font-size: 14px; color: #8e9ab2; font-weight: 400; }
+  /* outro */
+  #o-logo { position: absolute; left: 50%; top: 190px; width: 170px; height: 170px; margin-left: -85px; border-radius: 40px; box-shadow: 0 30px 110px #22d3ee66; }
+  #o-h { position: absolute; width: 100%; top: 410px; text-align: center; font-size: 110px; }
+  #o-sub { position: absolute; width: 100%; top: 540px; text-align: center; max-width: none; }
+  #o-cta { position: absolute; left: 50%; top: 630px; transform: translateX(-50%); padding: 22px 50px; border-radius: 22px; background: linear-gradient(90deg, #22d3ee, #5ef2c8); color: #04121a; font: 800 34px 'DejaVu Sans', sans-serif; letter-spacing: 1px; box-shadow: 0 0 60px #22d3ee77; white-space: nowrap; }
+  #o-fine { position: absolute; left: 260px; right: 260px; bottom: 70px; text-align: center; font-size: 20px; line-height: 1.5; color: #7f8aa0; }
+  #flash { position: absolute; inset: 0; background: #e9fbff; opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%); pointer-events: none; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); box-shadow: 0 0 20px #22d3ee; }
+  #note { position: absolute; right: 30px; bottom: 18px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 2px; }
+  .coins { position: absolute; left: 130px; top: 560px; width: 820px; display: flex; flex-wrap: wrap; gap: 16px; }
+  .coin { padding: 14px 22px; border-radius: 16px; background: #0b1426e6; border: 2px solid #22d3ee44; font: 800 28px 'DejaVu Sans Mono', monospace; color: #eef2f8; box-shadow: 0 0 30px #22d3ee22; }
+  .coin b { color: #22d3ee; margin-right: 12px; }
+  .pill { display: inline-block; padding: 10px 18px; border-radius: 12px; font: 800 22px 'DejaVu Sans Mono', monospace; background: #2a0d2244; color: #f9a8d4; border: 2px solid #f472b688; box-shadow: 0 0 24px #f472b633; }
+  .pills { position: absolute; left: 130px; top: 840px; width: 1000px; display: flex; flex-wrap: wrap; gap: 12px; }
+  #ring3 { position: absolute; width: 230px; height: 230px; }
+  #ring3 b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 44px 'DejaVu Sans Mono', monospace; color: #eef2f8; }
+  #ring3 small { position: absolute; left: 0; width: 100%; top: 150px; text-align: center; font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #2ee6a6; }
+</style></head>
+<body>
+<canvas id="bgc" width="1920" height="1080"></canvas>
+<div id="stage"><div id="cam">
+
+<section class="scene" id="s0">
+  <img id="logo" src="../public/icon-512.png">
+  <div id="brand">SHOT<em>CALLER</em></div><div id="sweep"></div>
+  <div id="tag">What's new: it reads the chart, and a call stays locked.</div>
+  <div id="ver">v13.40 → v13.45</div>
+</section>
+
+<section class="scene" id="s1">
+  <div class="left" style="top:90px;width:1000px">
+    <div class="eyebrow a">New · chart patterns</div>
+    <div class="h a">It reads<br><em>the chart.</em></div>
+  </div>
+  <div class="pills" id="s1p">
+    <div class="pill k">Head &amp; shoulders</div><div class="pill k">Triangles</div><div class="pill k">Wedges</div><div class="pill k">Channels</div>
+    <div class="pill k">Flags</div><div class="pill k">Support / resistance</div><div class="pill k">Candlesticks</div>
+  </div>
+  <div class="sub a" id="s1s" style="position:absolute;left:130px;top:960px;max-width:1000px;font-size:24px">Each kind is graded on rounds it never saw. Only proven ones touch the calls.</div>
+  <div class="phone" id="p1" style="left:1240px;top:75px"><img class="scr" id="p1a" src="ad3/chart-patterns.png"><img class="scr" id="p1b" src="ad3/patterns-card.png" style="opacity:0"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s2">
+  <div class="left" style="top:110px">
+    <div class="eyebrow a">New · locked means locked</div>
+    <div class="h a">Once it locks,<br><em>it never switches.</em></div>
+    <div class="sub a">No flips. No call against the locked side. One side a round.</div>
+  </div>
+  <div class="phone" id="p2" style="left:1240px;top:75px"><img class="scr" src="ad3/deck-locked.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s3">
+  <div class="left" style="top:110px;width:1300px">
+    <div class="eyebrow a">Guaranteed</div>
+    <div class="h a">A call every round.<br><em>No sit outs after 5 minutes.</em></div>
+    <div class="sub a" style="max-width:1300px">Even when the price feed is slow: the first source that's ready makes the call.</div>
+  </div>
+  <div id="ring3" style="left:1530px;top:150px"><svg width="230" height="230" viewBox="0 0 230 230"><circle cx="115" cy="115" r="100" fill="#06101cdd" stroke="#1d2a44" stroke-width="12"/><circle id="ring3Arc" cx="115" cy="115" r="100" fill="none" stroke="#2ee6a6" stroke-width="12" stroke-linecap="round" transform="rotate(-90 115 115)" stroke-dasharray="628" stroke-dashoffset="628" style="filter:drop-shadow(0 0 10px #2ee6a6)"/></svg><b id="ring3T">10:00</b><small>LOCKS</small></div>
+</section>
+
+<section class="scene" id="s4">
+  <div class="left" style="top:150px;width:820px">
+    <div class="eyebrow a">New · Simple mode + signal board</div>
+    <div class="h a" style="font-size:76px">Just the call.<br><em>Or every factor.</em></div>
+    <div class="sub a" style="max-width:800px">Simple shows the call. Pro puts every factor on one board: in the calls, on probation, or context.</div>
+  </div>
+  <div class="phone" id="p4a" style="left:1000px;top:110px;height:900px"><img class="scr" src="ad3/simple.png"><div class="notch"></div><div class="gloss"></div></div>
+  <div class="phone" id="p4b" style="left:1460px;top:60px"><img class="scr" src="ad3/board.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s5">
+  <div class="left" style="top:110px">
+    <div class="eyebrow a">New · the line</div>
+    <div class="h a">How safe<br><em>is the lead?</em></div>
+    <div class="sub a">The lead next to how far price usually still moves, and how often history held at that cushion.</div>
+  </div>
+  <div class="phone" id="p5" style="left:1240px;top:75px"><img class="scr" src="ad3/line.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s6">
+  <div class="left" style="top:110px;width:840px">
+    <div class="eyebrow a">Every market</div>
+    <div class="h a" style="font-size:76px">Every coin.<br><em>Its own numbers.</em></div>
+  </div>
+  <div class="coins" id="s6c" style="top:420px">
+    <div class="coin c"><b>BTC</b>$100,248</div><div class="coin c"><b>ETH</b>$4,009.76</div><div class="coin c"><b>SOL</b>$200.49</div>
+    <div class="coin c"><b>XRP</b>$2.5064</div><div class="coin c"><b>DOGE</b>$0.25065</div>
+  </div>
+  <div class="sub a" id="s6s" style="position:absolute;left:130px;top:700px;max-width:820px">And Discord: paying members get their role automatically, and lose it when access ends.</div>
+  <div class="phone" id="p6a" style="left:1000px;top:110px;height:900px"><img class="scr" src="ad3/doge.png"><div class="notch"></div><div class="gloss"></div></div>
+  <div class="phone" id="p6b" style="left:1460px;top:60px"><img class="scr" src="ad3/discord.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s7">
+  <img id="o-logo" src="../public/icon-512.png">
+  <div id="o-h" class="h">Shot<em>Caller</em> v13.45</div>
+  <div id="o-sub" class="sub">Live now. Reopen the app to update.</div>
+  <div id="o-cta">Open Shot Caller</div>
+  <div id="o-fine">Signals, not guarantees: every call can lose, and a round call is a lean unless it says BUY. Patterns touch the calls only once proven. Not financial advice. Trade only what you can afford to lose. Screens show sample market data.</div>
+</section>
+
+</div></div>
+<canvas id="fx" width="1920" height="1080"></canvas>
+<div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
+const easeIO = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const pop = (x) => { x = clamp(x); const c = 1.7; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const SCENES = [['s0', 0, 3.8], ['s1', 3.8, 11.0], ['s2', 11.0, 17.5], ['s3', 17.5, 23.5], ['s4', 23.5, 30.0], ['s5', 30.0, 36.0], ['s6', 36.0, 42.5], ['s7', 42.5, 48.5]];
+window.DURATION = 48.5;
+window.CUTS = SCENES.map((s) => s[1]);
+const TR = 0.45; // transition length
+
+// deterministic randomness
+function rng(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32; }
+const R = rng(11), PARTS = Array.from({ length: 260 }, () => ({ x: R() * 1920, y: R() * 1080, z: 0.2 + R() * 0.8, s: R() * Math.PI * 2, hue: R() < 0.7 ? 188 : 160 }));
+const bg = $('bgc').getContext('2d'), fx = $('fx').getContext('2d');
+
+function drawBg(t) {
+  const g = bg;
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#03050b'; g.fillRect(0, 0, 1920, 1080);
+  g.globalCompositeOperation = 'lighter';
+  // aurora blobs
+  for (const [cx, cy, r, c, sp] of [[1400, 120, 900, '#0e3a6e', 0.11], [400, 900, 800, '#06304a', 0.08], [1000, 500, 700, '#0b2d3d', 0.06]]) {
+    const x = cx + Math.sin(t * sp * 6) * 140, y = cy + Math.cos(t * sp * 5) * 90, gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, c); gr.addColorStop(1, 'transparent'); g.fillStyle = gr; g.fillRect(0, 0, 1920, 1080);
+  }
+  // perspective floor grid
+  g.globalCompositeOperation = 'source-over';
+  const hz = 700, vx = 960 + Math.sin(t * 0.3) * 40;
+  g.strokeStyle = 'rgba(34,211,238,0.10)'; g.lineWidth = 1.2;
+  for (let i = -24; i <= 24; i++) { g.beginPath(); g.moveTo(vx + i * 22, hz); g.lineTo(vx + i * 260, 1080); g.stroke(); }
+  for (let k = 0; k < 14; k++) { const f = ((k + (t * 0.6) % 1) / 14), y = hz + Math.pow(f, 2.2) * 380; g.globalAlpha = f; g.beginPath(); g.moveTo(0, y); g.lineTo(1920, y); g.stroke(); }
+  g.globalAlpha = 1;
+  const fade = g.createLinearGradient(0, hz - 40, 0, hz + 140); fade.addColorStop(0, '#03050b'); fade.addColorStop(1, 'rgba(3,5,11,0)'); g.fillStyle = fade; g.fillRect(0, hz - 40, 1920, 180);
+  // particles (depth: size, speed, brightness)
+  g.globalCompositeOperation = 'lighter';
+  for (const p of PARTS) {
+    const x = (p.x + t * 30 * p.z) % 1960 - 20, y = (p.y - t * 18 * p.z + 1080 * 4) % 1100 - 10, a = 0.15 + 0.5 * p.z * (0.6 + 0.4 * Math.sin(t * 2 + p.s));
+    g.fillStyle = `hsla(${p.hue},90%,65%,${a})`; g.beginPath(); g.arc(x, y, 0.6 + p.z * 2.2, 0, 7); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+}
+
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+
+const MONO = 'DejaVu Sans Mono';
+function panel(g, x, y, w, h) { g.fillStyle = 'rgba(8,14,28,0.72)'; g.strokeStyle = 'rgba(34,211,238,0.25)'; g.lineWidth = 2; roundRect(g, x, y, w, h, 22); g.fill(); g.stroke(); }
+// s1: an ascending triangle forming on the candles (flat top, rising lows), then the breakout and its tag
+function patternViz(g, local) {
+  const X0 = 150, X1 = 1040, Y0 = 400, Y1 = 790, n = 34, T = 0.78, cw = (X1 - X0) / n;
+  panel(g, X0 - 30, Y0 - 40, X1 - X0 + 60, Y1 - Y0 + 70);
+  const low = (i) => 0.12 + 0.016 * i, path = [];
+  for (let i = 0; i < n; i++) {
+    const ph = (i % 8) / 8, top = T - 0.01, bot = low(i), base = i < 31 ? bot + (top - bot) * (ph < 0.5 ? ph * 2 : 2 - ph * 2) : T + 0.05 * (i - 30);
+    path.push(base);
+  }
+  const y = (v) => Y1 - 20 - (Y1 - Y0 - 40) * v, shown = Math.floor(clamp((local - 0.3) / 3.4) * n), R4 = rng(9);
+  for (let i = 0; i < shown; i++) {
+    const o = i ? path[i - 1] : path[0], c = path[i], up = c >= o, x = X0 + i * cw + cw * 0.2, h = Math.max(o, c) + 0.02 * R4(), l = Math.min(o, c) - 0.02 * R4();
+    g.strokeStyle = g.fillStyle = up ? '#2ee6a6' : '#ff4d6d'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + cw * 0.3, y(h)); g.lineTo(x + cw * 0.3, y(l)); g.stroke();
+    g.fillRect(x, y(Math.max(o, c)), cw * 0.6, Math.max(3, Math.abs(y(o) - y(c))));
+  }
+  // the two lines: dashed while forming, solid once it breaks
+  const lk = clamp((local - 1.6) / 1.0), broke = shown >= 32;
+  if (lk > 0) {
+    const xe = X0 + (X0 + (X1 - X0) * lk - X0);
+    g.setLineDash(broke ? [] : [12, 9]); g.lineWidth = 4; g.strokeStyle = '#f472b6'; g.shadowColor = '#f472b6'; g.shadowBlur = broke ? 22 : 8;
+    g.beginPath(); g.moveTo(X0, y(T)); g.lineTo(xe, y(T)); g.stroke();
+    g.beginPath(); g.moveTo(X0, y(low(0))); g.lineTo(xe, y(low(0) + 0.016 * n * lk)); g.stroke(); g.setLineDash([]); g.shadowBlur = 0;
+    g.fillStyle = '#f472b6'; g.font = `700 20px ${MONO}`; g.fillText(broke ? 'ASCENDING TRIANGLE · CONFIRMED' : 'ASCENDING TRIANGLE · FORMING', X0, Y0 - 10);
+  }
+  if (broke) {
+    const k = pop((local - 3.5) / 0.45), x = X0 + 32 * cw;
+    g.save(); g.translate(x, y(T) - 70); g.scale(k, k); g.fillStyle = '#f472b6'; g.shadowColor = '#f472b6'; g.shadowBlur = 24;
+    roundRect(g, -70, -30, 140, 56, 14); g.fill(); g.shadowBlur = 0; g.fillStyle = '#1a0612'; g.font = `800 30px ${MONO}`; g.textAlign = 'center'; g.fillText('Tri ↑', 0, 10); g.textAlign = 'left'; g.restore();
+  }
+}
+// s2: a locked UP; DOWN tries to switch it and bounces off
+function lockViz(g, local) {
+  const cx = 470, cy = 690;
+  panel(g, 120, 470, 960, 420);
+  g.fillStyle = '#2ee6a6'; g.font = `800 170px DejaVu Sans`; g.shadowColor = '#2ee6a6'; g.shadowBlur = 40; g.fillText('UP', 170, cy + 60); g.shadowBlur = 0;
+  // the padlock: its shackle comes down and locks
+  const px = 520, py = cy - 30, close = ease((local - 0.6) / 0.5), lift = (1 - close) * 36;
+  g.lineWidth = 16; g.strokeStyle = '#eef2f8'; g.beginPath(); g.arc(px + 50, py - 18 - lift, 34, Math.PI, 0); g.lineTo(px + 84, py - lift + 8); g.moveTo(px + 16, py - 18 - lift); g.lineTo(px + 16, py + 4 - lift); g.stroke();
+  g.fillStyle = close >= 1 ? '#22d3ee' : '#8b95a7'; g.shadowColor = '#22d3ee'; g.shadowBlur = close >= 1 ? 30 : 0; roundRect(g, px - 8, py, 116, 96, 14); g.fill(); g.shadowBlur = 0;
+  g.fillStyle = '#04121a'; g.beginPath(); g.arc(px + 50, py + 42, 11, 0, 7); g.fill(); g.fillRect(px + 45, py + 46, 10, 26);
+  if (close >= 1) { g.fillStyle = '#22d3ee'; g.font = `800 22px ${MONO}`; g.fillText('LOCKED AT 10:00', 170, 540); }
+  // a barrier, and three DOWN attempts bouncing off it
+  const bx = 720; g.strokeStyle = `rgba(34,211,238,${0.4 + 0.3 * Math.sin(local * 6)})`; g.lineWidth = 6; g.beginPath(); g.moveTo(bx, 520); g.lineTo(bx, 860); g.stroke();
+  [1.4, 2.4, 3.4].forEach((d, i) => {
+    const u = (local - d) / 1.1; if (u < 0 || u > 1) return;
+    const yy = 590 + i * 100, hit = 0.45, x = u < hit ? 1060 - (1060 - bx - 20) * (u / hit) : bx + 20 + (u - hit) * 260, a = u < hit ? 1 : 1 - (u - hit) / (1 - hit);
+    g.globalAlpha = a; g.fillStyle = '#ff4d6d'; g.font = `800 34px ${MONO}`; g.fillText('DOWN ↓', x, yy);
+    if (u > hit) { g.font = `800 22px ${MONO}`; g.fillText('✕ switch blocked', bx + 40, yy + 34); }
+    g.globalAlpha = 1;
+  });
+}
+// s3: the chain that guarantees the call
+function chainViz(g, local) {
+  const items = [['The bot\'s math', 'its odds + Kalshi\'s'], ['Kalshi\'s favourite', 'if the odds aren\'t ready'], ['Where price is', 'if Kalshi has no price']];
+  const y0 = 560, w = 470, h = 190, gap = 110;
+  items.forEach(([t, s], i) => {
+    const x = 130 + i * (w + gap), k = pop((local - 0.8 - i * 0.55) / 0.5), lit = local > 0.8 + i * 0.55;
+    g.save(); g.translate(x + w / 2, y0 + h / 2); g.scale(lit ? 0.85 + 0.15 * k : 0.85, lit ? 0.85 + 0.15 * k : 0.85); g.globalAlpha = lit ? 1 : 0.25;
+    g.fillStyle = 'rgba(8,14,28,0.85)'; g.strokeStyle = i === 0 ? '#2ee6a6' : '#22d3ee'; g.lineWidth = 3; g.shadowColor = g.strokeStyle; g.shadowBlur = 24; roundRect(g, -w / 2, -h / 2, w, h, 24); g.fill(); g.stroke(); g.shadowBlur = 0;
+    g.fillStyle = '#8b95a7'; g.font = `700 20px ${MONO}`; g.textAlign = 'center'; g.fillText(`${i + 1}`, 0, -50);
+    g.fillStyle = '#eef2f8'; g.font = '800 38px DejaVu Sans'; g.fillText(t, 0, 4); g.fillStyle = '#b9c3d6'; g.font = '24px DejaVu Sans'; g.fillText(s, 0, 46); g.textAlign = 'left'; g.restore();
+    if (i < 2 && local > 1.1 + i * 0.55) { const ax = x + w + 18, f = clamp((local - 1.1 - i * 0.55) / 0.4); g.strokeStyle = '#22d3ee'; g.lineWidth = 5; g.beginPath(); g.moveTo(ax, y0 + h / 2); g.lineTo(ax + (gap - 36) * f, y0 + h / 2); g.stroke(); if (f >= 1) { g.fillStyle = '#22d3ee'; g.beginPath(); g.moveTo(ax + gap - 36, y0 + h / 2 - 12); g.lineTo(ax + gap - 18, y0 + h / 2); g.lineTo(ax + gap - 36, y0 + h / 2 + 12); g.fill(); } }
+  });
+  const k = ease((local - 3.0) / 0.6); g.globalAlpha = k; g.fillStyle = '#2ee6a6'; g.font = `800 30px ${MONO}`; g.fillText('→ ROUND CALL: UP · locked for the round', 130, 860); g.globalAlpha = 1;
+}
+// s5: the cushion meter: the needle sweeps to 1.82× (strong)
+function cushionViz(g, local) {
+  const X0 = 150, X1 = 1040, y = 640;
+  panel(g, X0 - 30, 500, X1 - X0 + 60, 330);
+  const zones = [[0, 0.25, '#ff4d6d', 'razor'], [0.25, 0.75, '#fbbf24', 'thin'], [0.75, 1.5, '#22d3ee', 'solid'], [1.5, 3, '#2ee6a6', 'strong'], [3, 4, '#7dffd0', 'near-certain']];
+  const xOf = (v) => X0 + (X1 - X0) * Math.min(v, 4) / 4;
+  zones.forEach(([a, b, c, name], zi) => { g.fillStyle = c; g.globalAlpha = 0.85; roundRect(g, xOf(a) + 2, y, xOf(b) - xOf(a) - 4, 28, 8); g.fill(); g.globalAlpha = 1; g.fillStyle = '#b9c3d6'; g.font = `700 18px ${MONO}`; g.fillText(name, xOf(a) + 6, y + 56 + (zi % 2) * 24); });
+  const v = 1.82 * easeIO((local - 0.7) / 1.8), nx = xOf(v);
+  g.fillStyle = '#eef2f8'; g.shadowColor = '#eef2f8'; g.shadowBlur = 20; g.beginPath(); g.moveTo(nx, y - 8); g.lineTo(nx - 14, y - 34); g.lineTo(nx + 14, y - 34); g.fill(); g.shadowBlur = 0;
+  g.font = `800 44px ${MONO}`; g.fillText(`${v.toFixed(2)}×`, Math.min(nx - 50, X1 - 150), y - 50);
+  g.fillStyle = '#8b95a7'; g.font = `700 20px ${MONO}`; g.fillText('LEAD ÷ MOVE LEFT', X0, 540);
+  const k = ease((local - 2.8) / 0.6); g.globalAlpha = k; g.fillStyle = '#2ee6a6'; g.font = `800 28px ${MONO}`; g.fillText('UP is winning by $247 · history held 91%', X0, 790); g.globalAlpha = 1;
+}
+const els = (id, sel) => [...$(id).querySelectorAll(sel)];
+function enter(list, local, start, step = 0.12, dy = 34) { list.forEach((el, i) => { const k = ease((local - start - i * step) / 0.6); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`; el.style.filter = `blur(${(1 - k) * 8}px)`; }); }
+// a phone flying in on a 3D arc, then drifting
+function phone3d(el, local, dur, { ry = -16, rx = 5, from = 520, zoom = 0 } = {}) {
+  const k = ease(local / 0.9), drift = local / dur;
+  el.style.transform = `translateX(${(1 - k) * from}px) translateZ(${(1 - k) * -400 + zoom * drift}px) rotateY(${ry * (1 - 0.35 * drift) - (1 - k) * 30}deg) rotateX(${rx}deg) rotateZ(${(1 - k) * 4}deg)`;
+  el.style.opacity = clamp(local / 0.4);
+  const gl = el.querySelector('.gloss'); if (gl) gl.style.transform = `translateX(${-500 + ((local * 260) % 1400)}px)`;
+}
+
+window.render = (t) => {
+  drawBg(t);
+  fx.clearRect(0, 0, 1920, 1080);
+  $('bar').style.width = `${(t / window.DURATION) * 100}%`;
+  // the camera: a slow push in each scene, a short shake after each cut
+  let since = Infinity, cutIdx = 0; for (let i = 1; i < SCENES.length; i++) if (t >= SCENES[i][1]) { since = t - SCENES[i][1]; cutIdx = i; }
+  const shake = since < 0.35 ? (1 - since / 0.35) * 7 : 0, sc = SCENES[cutIdx], push = (t - sc[1]) / (sc[2] - sc[1]);
+  $('cam').style.transform = `scale(${1 + 0.035 * push}) translate(${Math.sin(t * 61) * shake}px, ${Math.cos(t * 47) * shake}px)`;
+  // the flash on each cut
+  $('flash').style.opacity = since < 0.3 ? (1 - since / 0.3) * 0.28 : 0;
+  for (const [id, a, b] of SCENES) {
+    const el = $(id), local = t - a, dur = b - a, on = t >= a - 0.001 && t < b + TR;
+    el.style.display = on ? 'block' : 'none';
+    if (!on) continue;
+    // whip: the outgoing scene slides left and blurs as the next comes in
+    const out = clamp((t - b) / TR), inn = id === 's0' ? 1 : ease(local / TR);
+    el.style.opacity = Math.min(inn, 1 - out);
+    el.style.transform = `translateX(${(1 - inn) * 160 - out * 260}px)`;
+    el.style.filter = out > 0 || inn < 1 ? `blur(${Math.max(out, 1 - inn) * 14}px)` : 'none';
+    el.style.zIndex = out > 0 ? 1 : 2;
+    if (out > 0) continue;
+    if (id === 's0') {
+      const k = pop(local / 0.9); $('logo').style.transform = `scale(${0.3 + 0.7 * k}) rotate(${(1 - k) * -20}deg)`; $('logo').style.opacity = clamp(local / 0.3);
+      enter([$('brand'), $('tag'), $('ver')], local, 0.7, 0.22, 26);
+      $('brand').style.letterSpacing = `${16 + (1 - ease((local - 0.7) / 1.4)) * 40}px`;
+      $('sweep').style.left = `${-300 + clamp((local - 1.4) / 1.0) * 2400}px`;
+      // a shockwave ring behind the logo
+      for (const d of [0.1, 0.35]) { const x = clamp((local - d) / 1.3); fx.strokeStyle = `rgba(34,211,238,${(1 - x) * 0.7})`; fx.lineWidth = 4 * (1 - x) + 1; fx.beginPath(); fx.arc(960, 355, 20 + x * 700, 0, 7); fx.stroke(); }
+    }
+    if (id === 's1') {
+      enter(els(id, '.a'), local, 0.1);
+      patternViz(fx, local);
+      els(id, '.k').forEach((c, i) => { const k = pop((local - 1.2 - i * 0.18) / 0.4); c.style.opacity = clamp((local - 1.2 - i * 0.18) / 0.2); c.style.transform = `scale(${0.6 + 0.4 * k})`; });
+      phone3d($('p1'), local, dur);
+      const sw = clamp((local - 4.4) / 0.6); $('p1b').style.opacity = sw; $('p1a').style.opacity = 1 - sw;
+    }
+    if (id === 's2') {
+      enter(els(id, '.a'), local, 0.1);
+      lockViz(fx, local);
+      phone3d($('p2'), local, dur);
+    }
+    if (id === 's3') {
+      enter(els(id, '.a'), local, 0.1);
+      chainViz(fx, local);
+      const rk = clamp((local - 0.5) / 2.2); $('ring3Arc').setAttribute('stroke-dashoffset', String(628 * (1 - rk)));
+      const secs = Math.round(600 + (1 - rk) * 20); $('ring3T').textContent = rk >= 1 ? 'LOCKED' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      $('ring3T').style.fontSize = rk >= 1 ? '32px' : '44px';
+      const rp = pop((local - 0.3) / 0.5); $('ring3').style.opacity = clamp((local - 0.3) / 0.3); $('ring3').style.transform = `scale(${0.6 + 0.4 * rp})`;
+    }
+    if (id === 's4') {
+      enter(els(id, '.a'), local, 0.1);
+      phone3d($('p4a'), local, dur, { ry: -10, from: 700 });
+      phone3d($('p4b'), Math.max(0, local - 0.5), dur, { ry: -18, from: 700 }); $('p4b').style.opacity = clamp((local - 0.5) / 0.4);
+    }
+    if (id === 's5') {
+      enter(els(id, '.a'), local, 0.1);
+      cushionViz(fx, local);
+      phone3d($('p5'), local, dur);
+    }
+    if (id === 's6') {
+      enter(els(id, '.a'), local, 0.1);
+      els(id, '.c').forEach((c, i) => { const k = pop((local - 0.7 - i * 0.22) / 0.45); c.style.opacity = clamp((local - 0.7 - i * 0.22) / 0.2); c.style.transform = `scale(${0.6 + 0.4 * k})`; });
+      const ss = $('s6s'), sk = ease((local - 2.6) / 0.6); ss.style.opacity = sk; ss.style.transform = `translateY(${(1 - sk) * 30}px)`;
+      phone3d($('p6a'), local, dur, { ry: -10, from: 700 });
+      phone3d($('p6b'), Math.max(0, local - 2.4), dur, { ry: -18, from: 700 }); $('p6b').style.opacity = clamp((local - 2.4) / 0.4);
+    }
+    if (id === 's7') {
+      const k = pop(local / 0.8); $('o-logo').style.transform = `scale(${0.4 + 0.6 * k})`; $('o-logo').style.opacity = clamp(local / 0.3);
+      enter([$('o-h'), $('o-sub'), $('o-fine')], local, 0.4, 0.2, 24);
+      const c = pop((local - 1.1) / 0.5); $('o-cta').style.opacity = clamp((local - 1.1) / 0.2); $('o-cta').style.transform = `translateX(-50%) scale(${0.8 + 0.2 * c + 0.025 * Math.sin(local * 5) * clamp(local - 1.8)})`;
+      for (const d of [0.05, 0.3]) { const x = clamp((local - d) / 1.4); fx.strokeStyle = `rgba(46,230,166,${(1 - x) * 0.5})`; fx.lineWidth = 3; fx.beginPath(); fx.arc(960, 275, 30 + x * 800, 0, 7); fx.stroke(); }
+    }
+  }
+  $('note').style.opacity = t > 3.8 && t < 42.5 ? 1 : 0;
+};
+Promise.all([...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => document.fonts.ready).then(() => { window.render(0); window.ready = true; });
+</script>
+</body></html>

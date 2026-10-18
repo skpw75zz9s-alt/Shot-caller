@@ -12,7 +12,8 @@ import numpy as np
 from scipy.signal import lfilter, butter, sosfilt
 
 SR, BPM = 48000, 124
-meta = json.load(open('ad2-cuts.json')) if os.path.exists('ad2-cuts.json') else {'duration': 47.0, 'cuts': [0, 3.8, 10.2, 17.0, 23.2, 29.4, 36.0, 41.0]}
+AD = os.environ.get('AD', 'ad2')  # AD=ad3: the v13.45 update video's cuts and soundtrack
+meta = json.load(open(f'{AD}-cuts.json')) if os.path.exists(f'{AD}-cuts.json') else {'duration': 47.0, 'cuts': [0, 3.8, 10.2, 17.0, 23.2, 29.4, 36.0, 41.0]}
 DUR, cuts = meta['duration'], meta['cuts']
 N = int(SR * DUR); t = np.arange(N) / SR
 beat = 60 / BPM; bar = 4 * beat
@@ -164,7 +165,7 @@ mix *= fade[:, None]
 # soft limiter to about -1 dBFS
 mix /= np.percentile(np.abs(mix), 99.9) / 0.8
 mix = 0.89 * np.tanh(mix * 1.1)
-with wave.open('ad2-music.wav', 'wb') as w:
+with wave.open(f'{AD}-music.wav', 'wb') as w:
     w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
     w.writeframes((np.clip(mix, -1, 1) * 32767).astype('<i2').tobytes())
-print('ad2-music.wav', DUR, 's')
+print(f'{AD}-music.wav', DUR, 's')
