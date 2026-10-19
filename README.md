@@ -1,6 +1,6 @@
 # Shot Caller
 
-A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M`). It's a phone-installable web app (PWA). It watches the open market, prices it with a volatility model and calls a shot: **YES** (BTC above the target at close), **NO** (below) or **PASS**. Each call comes with a suggested size.
+A mobile signal bot for **Kalshi's 15-minute markets**: Bitcoin by default (series `KXBTC15M`), and every other 15-minute market Kalshi lists (other coins, stock indexes, gold, oil), picked from the menu up top. It's a phone-installable web app (PWA). It watches the open round, prices it with a volatility model and calls a shot: **UP** (YES: above the target at close) or **DOWN** (NO: below). Buy calls come with a suggested size, and every round gets a locked round call once its first 5 minutes are up.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/skpw75zz9s-alt/Shot-caller)
 
@@ -9,7 +9,9 @@ A mobile signal bot for **Kalshi's 15-minute Bitcoin markets** (series `KXBTC15M
 
 ## The app
 
-Six tabs along the bottom:
+Along the top: the market picker, **Ask** (the chat button: type a question about the live round and get a deep dive from the live numbers, see v13.51), **Simple / Pro** (Simple shows just the call; Pro shows every card and tab) and split screen.
+
+Eight tabs along the bottom (Simple mode hides Radar and Learn):
 
 - **Deck.** The command deck:
   - **Status tiles:** live feed, a server-synced clock, the active contract, and the bot's verified record.
@@ -41,6 +43,7 @@ Six tabs along the bottom:
   - Toggleable overlays: target, EMA 9/21, RMA 9/21, Bollinger 20 ±2σ, VWAP from the round open, round floor/ceiling, the forecast cone, volume, RSI 14 and MACD 12/26/9 panes, call markers and price labels.
   - **Bull and bear:** a big faded bull or bear behind the candles shows the trend (EMA 9 above or below EMA 21). Small ones mark EMA crosses, and bull and bear heads mark the bot's UP and DOWN calls. Indicators warm up on the full history, so they're ready even at the start of a round.
   - The **forecast cone** is the bot's own: where BTC usually ends by the close at the bot's volatility, showing the middle 50% and 90% of outcomes.
+- **Radar.** The market radar: the next few minutes' likely path with 90% bands, its graded record, and every exchange in the round scan (see v13.2 and v13.10).
 - **Alerts.**
   - Sound and banner switches for every event, each with a Preview button.
   - Events covered:
@@ -69,6 +72,7 @@ Six tabs along the bottom:
   - It shows wins and losses, win rate, the current streak, the best win streak, and the confidence it claimed versus how often it won. It also shows $10 a call held to settlement after fees, a 14-day win/loss chart, results by confidence, and the latest calls (WIN / LOSS / LIVE).
   - The Deck's "Bot record" tile shows it too.
   - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
+- **Map.** The map to success: your stats, the road from first call to steady results with a tip per step, and the coach.
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 
@@ -1689,7 +1693,7 @@ Everything is enforced on the server: without access, it serves only the paywall
 
 ## Run it
 
-Needs Node 18+. One npm dependency, `@anthropic-ai/sdk`, used only by Ask's optional AI deep dive (`npm install`).
+Needs Node 22+ (the current long-term-support line; Railway picks it from `package.json`). One npm dependency, `@anthropic-ai/sdk`, used only by Ask's optional AI deep dive (`npm install`).
 
 ```bash
 npm start            # http://localhost:8080
