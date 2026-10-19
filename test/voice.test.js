@@ -34,6 +34,13 @@ test('ELEVENLABS_VOICE_ID swaps the voice; a malformed one keeps it off', async 
   assert.equal(createVoice({ apiKey: 'k', voiceId: '../x' }).on(), false);
 });
 
+test('ElevenLabs\' own reason is passed on, so the phone can say why it used its own voice', async () => {
+  const f = async () => ({ status: 404, ok: false, body: null, headers: new Map(), json: async () => ({ detail: { status: 'voice_not_found', message: 'A voice with the voice_id was not found.' } }) });
+  const out = await createVoice({ apiKey: 'k', fetchImpl: f }).speak({ owner: 'a', text: 'hi' });
+  assert.equal(out.status, 503); assert.equal(out.body.code, 'voice_not_found');
+  assert.match(out.body.error, /Voice Library/); assert.match(out.body.detail, /was not found/);
+});
+
 test('errors come back clearly, and each person has a limit', async () => {
   assert.equal((await createVoice({ apiKey: 'k', fetchImpl: fakeFetch(401) }).speak({ owner: 'a', text: 'hi' })).status, 503);
   assert.equal((await createVoice({ apiKey: 'k', fetchImpl: fakeFetch(404) }).speak({ owner: 'a', text: 'hi' })).status, 503);

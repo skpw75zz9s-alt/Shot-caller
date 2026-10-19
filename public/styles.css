@@ -1125,3 +1125,6 @@ body.split .ask-sheet { bottom: calc(50px + env(safe-area-inset-bottom)); }
 @media (max-width: 440px) { .ask-btn { padding: 0 7px; } .ask-btn span { display: none; } } /* phones: the mic alone, so the market pill keeps its room */
 header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width: 0; flex: 0 1 auto; } /* the header never overlaps: the market pill shrinks first */
 @media (max-width: 400px) { .hdr-r:has(.ask-btn) { gap: 6px; } header h1 em { letter-spacing: .5px; } }
+.ask-hint.warn { color: var(--amber); }
+.ask-chips .ask-test { border-color: #a78bfa55; background: #a78bfa12; }
+.ask-chips.used button[data-q] { display: none; }

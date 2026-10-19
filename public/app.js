@@ -38,7 +38,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '191'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '192'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2143,12 +2143,16 @@ function askSayLocal(text) {
   if (!window.speechSynthesis) return;
   try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; window.speechSynthesis.speak(u); } catch { /* no voice on this phone */ }
 }
+// which voice spoke the last answer, and why when it wasn't the bot's: shown under the input, never a silent switch
+function askVoiceNote(text, ok) { ask.voiceNote = { text, ok }; renderAsk(); }
 async function askSay(text) {
   if (!askSpeak || !text) return;
   askHush();
   const n = ask.sayN, t = sayable(text);
+  let why = ask.voice === false ? 'the server voice is off (no ELEVENLABS_API_KEY in Railway)' : !ask.audio ? 'this browser can\'t play the server voice' : null;
   if (ask.voice && ask.audio) {
     try {
+      if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
       const r = await fetch(`${API}/ask/voice`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
       if (r.status === 501) ask.voice = false;
       if (r.ok) {
@@ -2157,12 +2161,16 @@ async function askSay(text) {
         const src = ask.audio.createBufferSource();
         src.buffer = buf; src.connect(ask.audio.destination); src.start();
         ask.src = src;
+        askVoiceNote('🔊 Spoken in the bot\'s voice (ElevenLabs)', true);
         return;
       }
-    } catch { /* the phone's own voice below */ }
+      const d = await r.json().catch(() => ({}));
+      why = `${d.error || `the voice service answered ${r.status}`}${d.detail ? ` (${d.detail})` : ''}`;
+    } catch { why = why || 'the bot\'s voice didn\'t load or play on this phone'; }
     if (n !== ask.sayN) return;
   }
   askSayLocal(t);
+  askVoiceNote(`Phone voice, not the bot's: ${why}`, false);
 }
 async function askQuestion(q) {
   q = String(q || '').trim();
@@ -2209,11 +2217,12 @@ function renderAsk() {
   mic.classList.toggle('on', ask.listening);
   mic.setAttribute('aria-pressed', String(ask.listening));
   mic.setAttribute('aria-label', ask.listening ? 'Stop listening' : 'Ask by voice');
-  setText($('askHint'), ask.listening ? 'Listening… ask about the round' : `Ask about ${MKT.key}'s live round: tap the mic or type`);
+  setText($('askHint'), ask.listening ? 'Listening… ask about the round' : ask.voiceNote?.text ?? `Ask about ${MKT.key}'s live round: tap the mic or type`);
+  setClass($('askHint'), `ask-hint${ask.voiceNote && !ask.voiceNote.ok ? ' warn' : ''}`);
   setText($('askMode'), [ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '', ask.voice ? 'bot voice' : ''].filter(Boolean).join(' · '));
   $('askSpeak').setAttribute('aria-pressed', String(askSpeak));
   setText($('askSpeak'), askSpeak ? '🔊 Read aloud' : '🔇 Muted');
-  setHidden($('askChips'), ask.log.length > 0);
+  $('askChips').classList.toggle('used', ask.log.length > 0); // after the first question only the voice test stays
   setHTML($('askLog'), ask.log.map((x) => {
     const b = x.built, ago = Math.round((Date.now() - x.at) / 60000);
     const ai = x.aiState === 'done' ? `<div class="ask-ai"><span class="ask-tag">AI deep dive</span>${x.ai.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`
@@ -2229,7 +2238,11 @@ $('askBtn').addEventListener('click', () => { askUnlock(); askOpen($('askSheet')
 $('askClose').addEventListener('click', () => askOpen(false));
 $('askMic').addEventListener('click', () => { askUnlock(); askListen(); });
 $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askUnlock(); askStopListening(); askQuestion($('askInput').value); });
-$('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) { askUnlock(); askQuestion(b.dataset.q); } });
+$('askChips').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-q], button[data-say]'); if (!b) return;
+  askUnlock();
+  if (b.dataset.say) { if (!askSpeak) { askSpeak = true; store.set('askSpeak', true); } askSay(b.dataset.say); } else askQuestion(b.dataset.q);
+});
 $('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) askHush(); renderAsk(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 

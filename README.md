@@ -271,11 +271,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The bot's voice, checked (v13.48.1)
+
+- The voice is Adam Stone, "Warm, Upbeat & Confident" (`DEFpwxCUkrj3WAbTDRTZ`), now read with ElevenLabs' `eleven_multilingual_v2` model by default, which sounds like the voice's own preview (the faster `eleven_flash_v2_5` sounded flatter; set `ELEVENLABS_MODEL` to it if you'd rather it start sooner).
+- No more silent switching: under the question box, the sheet says "Spoken in the bot's voice" or "Phone voice, not the bot's" plus the reason (no `ELEVENLABS_API_KEY`, ElevenLabs refused the key or the voice, out of characters…), with ElevenLabs' own message.
+- **🔊 Test the voice** in the sheet speaks one line, so you can check it without asking a question.
+
 ### The bot's voice (v13.48)
 
 Ask's spoken answers now use one chosen ElevenLabs voice (`DEFpwxCUkrj3WAbTDRTZ`) instead of whatever voice the phone has. The phone sends the answer's text to `/api/ask/voice` (`voice.js`), the server has ElevenLabs read it and streams the MP3 back, and the phone plays it through Web Audio, unlocked by the tap that asked so iPhones play it when it arrives.
 
-- Set `ELEVENLABS_API_KEY` in Railway to turn it on; the key never reaches the phone. `ELEVENLABS_VOICE_ID` swaps the voice, `ELEVENLABS_MODEL` the speech model (default: a fast one, so it starts talking quickly).
+- Set `ELEVENLABS_API_KEY` in Railway to turn it on; the key never reaches the phone. `ELEVENLABS_VOICE_ID` swaps the voice, `ELEVENLABS_MODEL` the speech model.
 - Without the key, or if ElevenLabs fails or runs out of characters, the phone reads the answer in its own voice, as before.
 - Each answer is capped at 1,500 characters, and each person at 6 spoken answers a minute and 60 an hour (ElevenLabs bills by character). The 🔊 button still mutes it; a new question, mute or closing the sheet stops the current answer.
 
