@@ -73,7 +73,7 @@ Nine tabs along the bottom (Simple mode hides Radar, X-ray and Learn):
   - The Deck's "Bot record" tile shows it too.
   - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
 - **Map.** The map to success: your stats, the road from first call to steady results with a tip per step, and the coach.
-- **X-ray.** A scanner sweeps the live round like an x-ray film and reveals the stats that help but nobody looks at (see v13.57).
+- **X-ray.** A scanner sweeps the live round like an x-ray film, hunts for breaks in the market (marking each with a crack) and shows the stats that help but nobody looks at (see v13.58).
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 
@@ -276,9 +276,32 @@ Security:
 
 ## Version notes (newest first)
 
+### X-ray break finder (v13.58)
+
+The X-ray now hunts for **breaks in the market**: places where it's out of line with itself. Every 2 seconds while the tab is open it checks:
+
+| Break | Found when | Severity |
+|---|---|---|
+| Jump | a one-minute move of 3+ typical one-minute moves | 2 (5+ moves: 3) |
+| Spike | the last 15 seconds moved 2.5+ typical 15-second moves (crypto, from the exchange trades) | 2-3 |
+| Breakout | the round's price closed beyond the 15 minutes before it, high or low | 1 |
+| Kalshi lagging | the price moved the bot's odds 8+ points in 30 seconds while Kalshi's quote moved 2 or less | 2 |
+| Kalshi far from fair | Kalshi's mid 15+ points from the bot's odds | 2 (25+: 3) |
+| Broken book | Kalshi's bid at or above its ask (crossed), or a spread of 10¢+ (thin) | 3 / 1 |
+| Exchange split | one exchange 1.5+ typical one-minute moves (and 0.05%+) from the others' median (crypto) | 2 |
+| One-sided flow | 80%+ of the last minute's exchange dollars on one side, at 2x the usual pace (crypto) | 2 |
+| Volatility shift | volatility at 2x normal | 1 |
+| Big Kalshi order | one order 35%+ of the round's Kalshi dollars ($500+) | 1 |
+| Liquidation burst | $2M+ of forced closes in 30 minutes (crypto; $6M+: 2) | 1-2 |
+
+- **On the film:** each break is a jagged crack where it happened, red and pulsing while open, faint once healed. The scanner beam turns red and the film says how many breaks are open.
+- **Breaks found:** the round's log, open ones first: what broke, when, the numbers, and what it usually means. A break not seen for 20 seconds has healed; a new round starts a new log.
+- **Honest limits:** breaks are places to look, not trades. They aren't graded yet and the bot's calls don't use them. The scanner runs only while the X-ray tab is open (on the phone; nothing extra on the server).
+- The thresholds are in `BREAKS` in `public/xray.js` (`findBreaks`, `trackBreaks`).
+
 ### X-ray scanner (v13.57)
 
-The **X-ray** tab (Pro) is now an x-ray animation of the live round, with the stats that help but nobody looks at. (It replaces v13.56's layer list, which replaced v13.55's insider trades.)
+The **X-ray** tab (Pro) became an x-ray animation of the live round, with the stats that help but nobody looks at. (It replaces v13.56's layer list, which replaced v13.55's insider trades.)
 
 - **The film:** the round's price drawn like an x-ray. The price path is the glowing spine, each minute a rib, the dashed line the target, and the haze the typical move left before the close. Glowing dots mark target crossings (amber), the high, the low and the live price (pulsing). A scanner beam sweeps across it on a loop.
 - **The hidden stats** develop out of a blur as the beam passes when the tab opens or a new round starts, then keep their numbers fresh every 2 seconds:

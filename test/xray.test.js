@@ -59,3 +59,57 @@ test('the film: ribs per minute, the target, the spine, crossing bones, the cone
   assert.doesNotMatch(svg, /NaN/);
   assert.equal(xraySvg({ open, close: open, strike: 1 }).ok, false);
 });
+
+// ---------- breaks ----------
+import { BREAKS, findBreaks, trackBreaks } from '../public/xray.js';
+const kinds = (xs) => xs.map((b) => b.kind).sort();
+
+test('breaks: a jump, a breakout, Kalshi lagging and far from fair, a thin book', () => {
+  const t0 = now - 5 * 60000, typ = 100100 * 0.0005; // a typical minute: ~$50
+  const bars = [{ t: t0, c: 100000 }, { t: t0 + 60000, c: 100020 }, { t: t0 + 120000, c: 100300 }, { t: now, c: 100100 }];
+  const preBars = Array.from({ length: 8 }, (_, i) => ({ t: t0 - (i + 1) * 60000, c: 100000, h: 100150, l: 99900 }));
+  const quoteLog = [{ t: now - 30000, p: 0.6, yesAsk: 0.6, noAsk: 0.42 }, { t: now - 2000, p: 0.7, yesAsk: 0.62, noAsk: 0.42 }];
+  const b = findBreaks({ now, kind: 'index', live: { ...live, yesBid: 0.3, yesAsk: 0.44, pYes: 0.7 }, bars, preBars, quoteLog });
+  assert.deepEqual(kinds(b), ['book', 'breakout', 'gap', 'jump', 'jump', 'lag']);
+  const j = b.find((x) => x.kind === 'jump' && x.price === 100300);
+  assert.equal(j.sev, 3, `$280 is ${(280 / typ).toFixed(1)}x a typical minute`); assert.match(j.title, /Jump up of \$280\.00 in a minute/);
+  assert.match(b.find((x) => x.kind === 'breakout').title, /Broke above the last 15 minutes' high \(\$100150\.00\)/);
+  assert.match(b.find((x) => x.kind === 'lag').detail, /10 points toward UP in 28 seconds; Kalshi's quote moved 1/);
+  assert.equal(b.find((x) => x.kind === 'gap').title, 'Kalshi 33 points from fair'); assert.equal(b.find((x) => x.kind === 'gap').sev, 3);
+  assert.match(b.find((x) => x.kind === 'book').title, /Thin book: 14¢ spread/);
+});
+
+test('breaks (crypto): a 15-second spike, an exchange split, one-sided flow, a big Kalshi order, a liquidation burst, a volatility shift', () => {
+  const trades = [];
+  for (let i = 0; i < 100; i++) trades.push({ t: now - 590000 + i * 5000, ex: 'Coinbase', price: 100000, size: 0.01, side: i % 2 ? 'buy' : 'sell' });
+  for (let i = 0; i < 3; i++) trades.push({ t: now - 17000 + i * 500, ex: 'Coinbase', price: 99900, size: 0.01, side: 'sell' }); // 15 seconds ago
+  for (let i = 0; i < 20; i++) trades.push({ t: now - 4000 + i * 100, ex: ['Coinbase', 'Kraken', 'Bitstamp', 'OKX'][i % 4], price: i % 4 === 3 ? 99800 : 100100, size: 1, side: 'buy' });
+  const b = findBreaks({ now, kind: 'crypto', live: { ...live, sigmaMin: 0.0009, sigmaLong: 0.0004 }, trades,
+    kalshiTrades: [{ t: now - 1, side: 'NO', usd: 900, price: 0.4 }, { t: now - 2, side: 'YES', usd: 300, price: 0.6 }],
+    srv: { liqs: { n: 9, long: 7e6, short: 1e6, minutes: 30 } } });
+  assert.deepEqual(kinds(b), ['flow', 'liqs', 'order', 'regime', 'spike', 'split']);
+  assert.match(b.find((x) => x.kind === 'split').title, /^OKX split from the other exchanges/);
+  assert.match(b.find((x) => x.kind === 'flow').title, /One-sided buying: 100%/);
+  assert.equal(b.find((x) => x.kind === 'liqs').sev, 2); assert.match(b.find((x) => x.kind === 'liqs').means, /pushes the price down/);
+  assert.match(b.find((x) => x.kind === 'order').title, /75% of the round/);
+  assert.deepEqual(findBreaks({ now, kind: 'crypto', live: null }), [], 'nothing to scan, nothing found');
+  assert.ok(BREAKS.jump > 0);
+});
+
+test('the break log: open while found, healed after 20 seconds, the crack stays where it opened, a new round starts over', () => {
+  const g = (at) => ({ key: 'gap', kind: 'gap', at, price: null, sev: 2, title: 'gap' });
+  let log = trackBreaks(null, [g(now)], now, 'T1');
+  log = trackBreaks(log, [g(now + 10000)], now + 10000, 'T1');
+  assert.equal(log.items.length, 1); assert.equal(log.items[0].open, true); assert.equal(log.items[0].at, now); assert.equal(log.items[0].first, now);
+  log = trackBreaks(log, [], now + 31000, 'T1');
+  assert.equal(log.items[0].open, false); assert.equal(log.items[0].last, now + 10000);
+  assert.deepEqual(trackBreaks(log, [], now + 40000, 'T2').items, []);
+});
+
+test('the film draws a crack for each break in the round', () => {
+  const open = now - 5 * 60000, close = now + 10 * 60000;
+  const { svg } = xraySvg({ bars: [{ t: open + 60000, c: 100000 }], spot: 100050, strike: 100000, open, close, now, sigmaMin: 0.0005,
+    breaks: [{ at: now - 1000, sev: 3, open: true }, { at: open + 60000, price: 100000, sev: 1, open: false }, { at: open - 1, sev: 2 }] });
+  assert.equal((svg.match(/class="crack s3 open"/g) || []).length, 1); assert.equal((svg.match(/class="crack s1"/g) || []).length, 1);
+  assert.doesNotMatch(svg, /crack s2/, 'a break from before the round is off the film');
+});

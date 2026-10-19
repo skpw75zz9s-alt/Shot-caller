@@ -1125,7 +1125,7 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .tu-m { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); }
 .tu-m b { font-size: 12.5px; }
 .tu-m small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-/* the X-ray tab (v13.57): the scanner film and the hidden stats */
+/* the X-ray tab (v13.58): the scanner film, the breaks and the hidden stats */
 .xr-film { position: relative; height: 170px; margin: 8px 0 6px; border-radius: 10px; overflow: hidden; border: 1px solid #1d3a55;
   background: radial-gradient(120% 90% at 50% 40%, #0c2236 0%, #061220 60%, #03080f 100%); box-shadow: inset 0 0 40px #000c; }
 .xr-film svg { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -1144,6 +1144,24 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
   background: repeating-linear-gradient(0deg, #ffffff05 0 1px, transparent 1px 3px); }
 @keyframes xr-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(385%); } }
 @keyframes xr-pulse { 50% { r: 6; opacity: .6; } }
+.xr-film .crack { fill: none; stroke-width: 2; stroke-linejoin: miter; color: #ffb35c; stroke: currentColor; stroke-opacity: .35; }
+.xr-film .crack.s3 { color: #ff4d6d; } .xr-film .crack.s2 { color: #ff7a45; }
+.xr-film .crack.open { stroke-opacity: 1; filter: drop-shadow(0 0 4px currentColor); animation: xr-crack 1.2s ease-in-out infinite; }
+@keyframes xr-crack { 50% { stroke-opacity: .45; } }
+.xr-status { position: absolute; right: 8px; top: 7px; z-index: 2; font: 700 9.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #7fd6ffaa; }
+.xr-film.alert { border-color: #ff4d6d77; box-shadow: inset 0 0 40px #000c, 0 0 18px #ff4d6d22; }
+.xr-film.alert .xr-status { color: var(--no); animation: xr-crack 1.2s ease-in-out infinite; }
+.xr-film.alert .xr-beam { background: linear-gradient(90deg, transparent 0%, #ff4d6d10 60%, #ff8fa355 96%, #ffd6ddaa 100%); }
+.xr-breaks ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.xr-breaks li { display: grid; grid-template-columns: 10px 1fr; gap: 8px; padding: 8px 9px; border-radius: 10px; background: var(--panel-2); opacity: .6; }
+.xr-breaks li.open { opacity: 1; }
+.xr-breaks li i { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; color: #ffb35c; background: currentColor; }
+.xr-breaks li.s2 i { color: #ff7a45; } .xr-breaks li.s3 i { color: var(--no); }
+.xr-breaks li.open i { box-shadow: 0 0 8px currentColor; animation: xr-crack 1.2s ease-in-out infinite; }
+.xr-breaks li b { display: block; font-size: 13px; }
+.xr-breaks li small { color: var(--dim); font: 500 10.5px var(--mono); }
+.xr-breaks li p { margin: 3px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.xr-breaks li p.xr-means { color: var(--dim); font-size: 11.5px; }
 .xr-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
 .xr-stat { position: relative; overflow: hidden; padding: 10px 11px; border-radius: 12px; border: 1px solid #1d3a55; background: linear-gradient(180deg, #0a1a2a, #07111c);
   opacity: 0; animation: xr-develop .9s ease-out forwards; animation-delay: var(--d, 0s); }
@@ -1157,6 +1175,6 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 @keyframes xr-develop { 0% { opacity: 0; filter: blur(6px) brightness(2.2); } 60% { opacity: 1; filter: blur(1px) brightness(1.3); } 100% { opacity: 1; filter: none; } }
 @keyframes xr-pass { to { transform: translateX(100%); } }
 @media (max-width: 360px) { .xr-stats { grid-template-columns: 1fr; } }
-@media (prefers-reduced-motion: reduce) { .xr-beam, .xr-film .bone.now { animation: none; } .xr-beam { display: none; } .xr-stat, .xr-stat::after { animation: none; opacity: 1; } .xr-stat::after { display: none; } }
+@media (prefers-reduced-motion: reduce) { .xr-beam, .xr-film .bone.now, .xr-film .crack.open, .xr-film.alert .xr-status, .xr-breaks li.open i { animation: none; } .xr-beam { display: none; } .xr-stat, .xr-stat::after { animation: none; opacity: 1; } .xr-stat::after { display: none; } }
 /* nine tabs in Pro on a phone: tighter labels so every label fits */
 @media (max-width: 440px) { body:not(.simple) nav { gap: 2px; padding-left: 4px; padding-right: 4px; } body:not(.simple) nav button { font-size: 8.5px; letter-spacing: 0; text-transform: none; } }

@@ -1,4 +1,6 @@
-// The X-ray tab (v13.57): a scanner sweeps the live round like an x-ray film and shows the stats under the surface:
+// The X-ray tab (v13.58): a scanner sweeps the live round like an x-ray film, hunts for breaks in the market (places
+// where it is out of line with itself: a jump, a breakout, Kalshi lagging or far from fair, a broken book, one exchange
+// splitting from the rest, one-sided flow, a volatility shift, a liquidation burst) and shows the stats under the surface:
 // numbers that help but nobody looks at (how often the price crosses the target on the way, how much the clock is worth,
 // what a contract really costs to get in and out of, how much of the settlement is already locked in…). Pure: the tab
 // (app.js renderXray) passes what the phone and the server already collect. Context only; none of it is a call.
@@ -120,7 +122,7 @@ export function hiddenStats(x) {
 // ---------- the film ----------
 // The round as an x-ray: the price path is the spine, each minute a rib, the target a dashed line, the typical move to
 // the close a soft-tissue cone, and the bones (crossings, high, low, now) glow. bars: [{ t, c }] one-minute closes.
-export function xraySvg({ bars = [], spot, strike, open, close, now, sigmaMin, W = 320, H = 170 }) {
+export function xraySvg({ bars = [], spot, strike, open, close, now, sigmaMin, breaks = [], W = 320, H = 170 }) {
   if (!(close > open) || !(strike > 0)) return { svg: '', ok: false };
   const pts = [...bars.filter((b) => b && b.t >= open && b.t <= now && b.c > 0).map((b) => ({ t: b.t, c: b.c })), ...(spot > 0 ? [{ t: Math.min(now, close), c: spot }] : [])];
   const left = Math.max(0, close - now) / 60000, cone = spot > 0 && sigmaMin > 0 && left > 0 ? spot * sigmaMin * Math.sqrt(left) : 0;
@@ -142,7 +144,132 @@ export function xraySvg({ bars = [], spot, strike, open, close, now, sigmaMin, W
   }
   const last = pts.at(-1);
   const tissue = cone && last ? `<path class="tissue" d="M${f(X(last.t))},${f(Y(spot))}L${f(W)},${f(Y(spot + cone))}L${f(W)},${f(Y(spot - cone))}Z"/>` : '';
+  // a fracture where each break was found: a jagged crack across the spine, open ones red, healed ones faint
+  const cracks = breaks.filter((b) => b.at >= open && b.at <= close).map((b) => {
+    const near = pts.reduce((a, p) => (!a || Math.abs(p.t - b.at) < Math.abs(a.t - b.at) ? p : a), null);
+    const cx = X(b.at), cy = Y(b.price > 0 ? b.price : near?.c ?? strike), h = 7 + b.sev * 3;
+    return `<path class="crack s${b.sev}${b.open ? ' open' : ''}" d="M${f(cx - 2)},${f(cy - h)}L${f(cx + 2)},${f(cy - h / 3)}L${f(cx - 2)},${f(cy + h / 3)}L${f(cx + 2)},${f(cy + h)}"/>`;
+  });
   const svg = `${ribs.join('')}${tissue}<line class="target" x1="0" x2="${W}" y1="${f(Y(strike))}" y2="${f(Y(strike))}"/>${path}${bones.join('')}`
-    + (last ? `<circle class="bone now" cx="${f(X(last.t))}" cy="${f(Y(last.c))}" r="4"/>` : '');
+    + cracks.join('') + (last ? `<circle class="bone now" cx="${f(X(last.t))}" cy="${f(Y(last.c))}" r="4"/>` : '');
   return { svg, ok: pts.length > 0 };
+}
+
+// ---------- breaks ----------
+// Each detector looks for one way the market can be out of line with itself, right now or earlier in the round.
+// A break: { key (one per kind and time, so a log can follow it), kind, at, price, sev 1-3, title, detail, means }.
+// None of them is graded yet: they're places to look, not trades.
+export const BREAKS = {
+  jump: 3,          // a one-minute move of 3+ typical one-minute moves (5+ is severe)
+  spike: 2.5,       // the last 15 seconds moved 2.5+ typical 15-second moves
+  lagMove: 0.08,    // the bot's odds moved 8+ points in 30 seconds…
+  lagStill: 0.02,   // …while Kalshi's quote moved 2 or less
+  gap: 0.15,        // Kalshi 15+ points from the bot's odds (25+ severe)
+  thin: 0.1,        // a spread of 10 cents or more
+  split: 1.5,       // one exchange 1.5+ typical one-minute moves away from the others' median
+  flowShare: 0.8,   // 80%+ of the last minute's dollars on one side…
+  flowBurst: 2,     // …with 2x the usual dollars a minute
+  regime: 2,        // volatility at 2x normal
+  bigOrder: 0.35,   // one Kalshi order 35%+ of the round's dollars ($500+)
+  liqs: 2e6,        // $2M+ of forced closes in 30 minutes
+};
+const median = (xs) => { const a = [...xs].sort((p, q) => p - q), m = a.length >> 1; return a.length ? (a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2) : null; };
+const minuteKey = (t) => Math.floor(t / 60000);
+export function findBreaks(x) {
+  const out = [], lv = x.live, now = x.now, fmt = x.fmt || ((v) => `$${Number(v).toFixed(2)}`), crypto = x.kind === 'crypto';
+  const spot = lv?.spot, typ = spot > 0 && lv?.sigmaMin > 0 ? spot * lv.sigmaMin : null; // a typical one-minute move, in $
+  const bars = (x.bars || []).filter((b) => b && b.c > 0);
+  // jumps: one-minute closes that moved far more than a typical minute
+  if (typ) for (let i = 1; i < bars.length; i++) {
+    const mv = bars[i].c - bars[i - 1].c, k = Math.abs(mv) / typ;
+    if (k >= BREAKS.jump) out.push({ key: `jump:${minuteKey(bars[i].t)}`, kind: 'jump', at: bars[i].t, price: bars[i].c, sev: k >= 5 ? 3 : 2,
+      title: `${mv > 0 ? 'Jump up' : 'Drop'} of ${fmt(Math.abs(mv))} in a minute`, detail: `${k.toFixed(1)}× a typical minute's move.`,
+      means: 'A jump this size usually comes from news, a big order or a burst of liquidations; the next minutes often stay jumpy.' });
+  }
+  // a spike right now, from the exchange trades (crypto)
+  if (typ && crypto && Array.isArray(x.trades)) {
+    const at = (t0) => median(x.trades.filter((t) => t.t >= t0 - 5000 && t.t <= t0).map((t) => t.price));
+    const a = at(now - 15000), b = at(now), lim = BREAKS.spike * typ * Math.sqrt(0.25);
+    if (a && b && Math.abs(b - a) >= lim) out.push({ key: `spike:${minuteKey(now)}`, kind: 'spike', at: now, price: b, sev: Math.abs(b - a) >= 2 * lim ? 3 : 2,
+      title: `${b > a ? 'Spiking up' : 'Plunging'}: ${fmt(Math.abs(b - a))} in 15 seconds`, detail: `${(Math.abs(b - a) / (typ * 0.5)).toFixed(1)}× a typical 15 seconds.`,
+      means: 'A move this fast is often an order sweeping the book. Kalshi\'s prices can lag it for a few seconds.' });
+  }
+  // a breakout: the round's price beyond the 15 minutes before it
+  const pre = (x.preBars || []).filter((b) => b && b.c > 0);
+  if (pre.length >= 5 && bars.length) {
+    const hi = Math.max(...pre.map((b) => b.h ?? b.c)), lo = Math.min(...pre.map((b) => b.l ?? b.c));
+    const up = bars.find((b) => b.c > hi), dn = bars.find((b) => b.c < lo);
+    if (up) out.push({ key: `breakout:up`, kind: 'breakout', at: up.t, price: up.c, sev: 1, title: `Broke above the last 15 minutes' high (${fmt(hi)})`, detail: `Closed at ${fmt(up.c)}.`,
+      means: 'A breakout either runs (new buyers) or fails back into the range (a trap). Watch whether it holds.' });
+    if (dn) out.push({ key: `breakout:down`, kind: 'breakout', at: dn.t, price: dn.c, sev: 1, title: `Broke below the last 15 minutes' low (${fmt(lo)})`, detail: `Closed at ${fmt(dn.c)}.`,
+      means: 'A breakdown either runs (new sellers) or snaps back into the range (a trap). Watch whether it holds.' });
+  }
+  // Kalshi: lagging, far from fair, or a broken book
+  const q = lv && lv.yesAsk != null && lv.yesBid != null ? lv : null, mid = q ? (q.yesAsk + q.yesBid) / 2 : null;
+  const log = (x.quoteLog || []).filter((e) => e && e.t >= now - 32000 && e.p != null && e.yesAsk != null && e.noAsk != null);
+  if (log.length >= 2) {
+    const a = log[0], b = log.at(-1), mA = (a.yesAsk + 1 - a.noAsk) / 2, mB = (b.yesAsk + 1 - b.noAsk) / 2, dp = b.p - a.p, dm = mB - mA;
+    if (Math.abs(dp) >= BREAKS.lagMove && Math.abs(dm) <= BREAKS.lagStill) out.push({ key: 'lag', kind: 'lag', at: now, price: null, sev: 2,
+      title: 'Kalshi is lagging the price', detail: `The price moved the odds ${Math.round(Math.abs(dp) * 100)} points ${dp > 0 ? 'toward UP' : 'toward DOWN'} in ${Math.round((b.t - a.t) / 1000)} seconds; Kalshi's quote moved ${Math.round(Math.abs(dm) * 100)}.`,
+      means: 'Kalshi usually catches up within seconds to a minute. Until it does, its price is stale.' });
+  }
+  if (q && lv.pYes != null) {
+    const g = lv.pYes - mid;
+    if (Math.abs(g) >= BREAKS.gap) out.push({ key: 'gap', kind: 'gap', at: now, price: null, sev: Math.abs(g) >= 0.25 ? 3 : 2,
+      title: `Kalshi ${Math.round(Math.abs(g) * 100)} points from fair`, detail: `The bot says ${Math.round(lv.pYes * 100)}% UP; Kalshi's traders ${Math.round(mid * 100)}%.`,
+      means: 'Either Kalshi is slow or it knows something the price doesn\'t show yet. A gap this wide is a place to be careful, not a sure thing.' });
+    if (q.yesBid >= q.yesAsk) out.push({ key: 'crossed', kind: 'book', at: now, price: null, sev: 3, title: 'Kalshi\'s book is crossed', detail: `Bid ${cents(q.yesBid)} at or above ask ${cents(q.yesAsk)}.`,
+      means: 'A crossed book is a glitch or a quote in flight; it rarely lasts more than a moment.' });
+    else if (q.yesAsk - q.yesBid >= BREAKS.thin) out.push({ key: 'thin', kind: 'book', at: now, price: null, sev: 1, title: `Thin book: ${cents(q.yesAsk - q.yesBid)} spread`, detail: `Bid ${cents(q.yesBid)}, ask ${cents(q.yesAsk)}.`,
+      means: 'Few orders resting: getting in and out costs more, and one order can move the price.' });
+  }
+  // one exchange splitting from the rest (crypto)
+  if (typ && crypto && Array.isArray(x.trades)) {
+    const lastBy = {};
+    for (const t of x.trades) if (t.t >= now - 20000 && t.ex && t.price > 0 && (!lastBy[t.ex] || t.t > lastBy[t.ex].t)) lastBy[t.ex] = t;
+    const exs = Object.values(lastBy);
+    if (exs.length >= 3) for (const e of exs) {
+      const others = median(exs.filter((o) => o !== e).map((o) => o.price)), off = e.price - others;
+      if (Math.abs(off) >= BREAKS.split * typ && Math.abs(off) / others >= 0.0005) out.push({ key: `split:${e.ex}`, kind: 'split', at: now, price: null, sev: 2,
+        title: `${e.ex.replace('.US', '')} split from the other exchanges`, detail: `${fmt(Math.abs(off))} ${off > 0 ? 'above' : 'below'} the others' median.`,
+        means: 'One venue out of line: a big order there, a stuck feed, or traders about to close the gap. Kalshi settles on an average across venues.' });
+    }
+  }
+  // one-sided flow in the last minute (crypto)
+  if (crypto && Array.isArray(x.trades)) {
+    let b = 0, sl = 0, ten = 0;
+    for (const t of x.trades) { const u = t.price * t.size; if (!(u > 0)) continue; if (t.t >= now - 600000) ten += u; if (t.t >= now - 60000) { if (t.side === 'buy') b += u; else if (t.side === 'sell') sl += u; } }
+    const tot = b + sl, sh = tot ? b / tot : 0.5;
+    if (ten > 0 && tot >= BREAKS.flowBurst * (ten / 10) && (sh >= BREAKS.flowShare || sh <= 1 - BREAKS.flowShare)) out.push({ key: `flow:${sh >= 0.5 ? 'buy' : 'sell'}`, kind: 'flow', at: now, price: null, sev: 2,
+      title: `One-sided ${sh >= 0.5 ? 'buying' : 'selling'}: ${Math.round(Math.max(sh, 1 - sh) * 100)}% of ${money(tot)}`, detail: `In the last minute, at ${(tot / (ten / 10)).toFixed(1)}× the usual dollars a minute.`,
+      means: 'A rush to one side. It moves the price while it lasts; when it stops, the price often gives some back.' });
+  }
+  // volatility shift
+  if (lv?.sigmaMin > 0 && lv.sigmaLong > 0 && lv.sigmaMin / lv.sigmaLong >= BREAKS.regime) out.push({ key: 'regime', kind: 'regime', at: now, price: null, sev: 1,
+    title: `Volatility at ${(lv.sigmaMin / lv.sigmaLong).toFixed(1)}× normal`, detail: 'The market switched into a faster gear.',
+    means: 'Leads flip more easily now: the odds already widen for it, but a lead is worth less than usual.' });
+  // one Kalshi order that is a big share of the round
+  const k = kalshiBig(x.kalshiTrades), top = (x.kalshiTrades || []).reduce((a, t) => (t && t.usd > (a?.usd || 0) ? t : a), null);
+  if (top && top.usd >= 500 && k.total > 0 && top.usd / k.total >= BREAKS.bigOrder) out.push({ key: `kbig:${top.t || 0}`, kind: 'order', at: top.t || now, price: null, sev: 1,
+    title: `One Kalshi order is ${Math.round(top.usd / k.total * 100)}% of the round`, detail: `${top.side === 'YES' ? 'UP' : 'DOWN'} ${money(top.usd)} at ${cents(top.price)}.`,
+    means: 'A single big trader can move Kalshi\'s price without the market moving. Their conviction isn\'t proof.' });
+  // a liquidation burst (crypto)
+  const lq = x.srv?.liqs;
+  if (crypto && lq && lq.long + lq.short >= BREAKS.liqs) out.push({ key: `liqs:${Math.floor(now / 600000)}`, kind: 'liqs', at: now, price: null, sev: lq.long + lq.short >= 3 * BREAKS.liqs ? 2 : 1,
+    title: `Liquidation burst: ${money(lq.long + lq.short)}`, detail: `In ${lq.minutes} minutes: longs ${money(lq.long)}, shorts ${money(lq.short)}.`,
+    means: `Forced ${lq.long > lq.short ? 'selling' : 'buying'} cascades: it pushes the price ${lq.long > lq.short ? 'down' : 'up'} until it runs out.` });
+  return out;
+}
+// The round's break log: a break found again stays open; one not found for 20 seconds has healed (its last state kept).
+// A new round starts a new log. log: { ticker, items: [{ ...break, first, last, open }] }
+export function trackBreaks(log, found, now, ticker, healMs = 20000) {
+  const items = log?.ticker === ticker ? log.items.map((b) => ({ ...b })) : [];
+  for (const b of found) {
+    const old = items.find((x) => x.key === b.key);
+    if (old) Object.assign(old, b, { first: old.first, at: old.at, price: old.price ?? b.price, last: now }); // the crack stays where it opened
+    else items.push({ ...b, first: now, last: now });
+  }
+  for (const b of items) b.open = now - b.last <= healMs;
+  items.sort((a, b) => (b.open - a.open) || b.sev - a.sev || b.last - a.last);
+  return { ticker, items: items.slice(0, 30) };
 }

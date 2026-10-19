@@ -38,8 +38,8 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-import { hiddenStats, xraySvg } from './xray.js';
-window.SC_BOOT = '205'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
+window.SC_BOOT = '206'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2173,10 +2173,11 @@ $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion
 $('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
-// ---------- X-ray (public/xray.js, /api/xray): a scanner sweeps the round and shows the stats under the surface ----------
-// The film is the round's price path drawn like an x-ray; the stat cards develop as the beam passes, then keep their
-// values fresh every 2 seconds without replaying (they replay on a new round). Liquidations and funding come from the server.
-const xr = { srv: null, at: 0, shape: '' };
+// ---------- X-ray (public/xray.js, /api/xray): a scanner sweeps the round, hunts for breaks, shows the hidden stats ----------
+// The film is the round's price path drawn like an x-ray, with a crack wherever a break was found; the break log keeps
+// each one (open, or healed once it's gone for 20 seconds) for the round. The stat cards develop as the beam passes,
+// then keep their values fresh every 2 seconds without replaying. Liquidations and funding come from the server.
+const xr = { srv: null, at: 0, shape: '', log: null };
 async function refreshXray(force = false) {
   if (document.hidden || (!force && !shownViews.has('xray'))) return;
   try { xr.srv = await getJSON(api('xray')); xr.at = Date.now(); } catch { /* next time */ }
@@ -2191,10 +2192,23 @@ function renderXray() {
   const bars = lv ? (snap.bars || []).filter((b) => b.t >= open && b.t < now).map((b) => ({ t: Math.min(b.t + 60000, now), c: b.c })) : [];
   const live = lv ? { pYes: lv.ev.pYes, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
   setText($('xrWhen'), lv ? `${roundName(lv.m.ticker)} · closes in ${mmss(lv.ev.minutesLeft)}` : 'no open round');
-  const film = lv ? xraySvg({ bars, spot, strike: lv.strike, open, close, now, sigmaMin: live.sigmaMin }) : { svg: '', ok: false };
+  const fmt = (v) => usd(v, Math.max(0, MKT.digits ?? 2));
+  if (lv) {
+    const preBars = (snap.bars || []).filter((b) => b.t < open && b.t >= open - 15 * 60000);
+    const found = findBreaks({ now, kind: MKT.kind, live, bars, preBars, quoteLog: snap.quoteLog?.[lv.m.ticker], trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt });
+    xr.log = trackBreaks(xr.log, found, now, lv.m.ticker);
+  }
+  const breaks = lv && xr.log?.ticker === lv.m.ticker ? xr.log.items : [], openN = breaks.filter((b) => b.open).length;
+  const film = lv ? xraySvg({ bars, spot, strike: lv.strike, open, close, now, sigmaMin: live.sigmaMin, breaks }) : { svg: '', ok: false };
   setHTML($('xrSvg'), film.svg);
   $('xrFilm').classList.toggle('empty', !film.ok);
-  const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt: (v) => usd(v, Math.max(0, MKT.digits ?? 2)) });
+  $('xrFilm').classList.toggle('alert', openN > 0);
+  setText($('xrStatus'), !lv ? '' : openN ? `⚠ ${openN} break${openN === 1 ? '' : 's'} found` : breaks.length ? `scanning · ${breaks.length} healed` : 'scanning · no breaks');
+  setHTML($('xrBreaks'), !lv ? '' : `<div class="card xr-breaks"><div class="deep-head"><span>Breaks found</span><small class="muted">${breaks.length ? `${openN} open · ${breaks.length - openN} healed` : 'none this round'}</small></div>`
+    + (breaks.length ? `<ul>${breaks.map((b) => `<li class="s${b.sev}${b.open ? ' open' : ''}"><i></i><div><b>${esc(b.title)}</b><small>${clock(b.at)} · ${b.open ? 'open' : `healed ${clock(b.last)}`}</small><p>${esc(b.detail)}</p><p class="xr-means">${esc(b.means)}</p></div></li>`).join('')}</ul>`
+      : '<p class="muted">The scanner checks every 2 seconds for jumps, breakouts, Kalshi lagging or far from fair, a broken book, an exchange splitting from the rest, one-sided flow, volatility shifts and liquidation bursts.</p>')
+    + '<p class="fine-left muted">Places to look, not trades: breaks aren\'t graded yet, and the bot\'s calls don\'t use them.</p></div>');
+  const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt });
   // a new round or a new set of stats: build the cards and let them develop; otherwise just update the numbers
   const shape = `${lv?.m.ticker || ''}|${stats.map((x) => x.key).join(',')}`;
   if (shape !== xr.shape) {
