@@ -69,7 +69,7 @@ export function createAskTools({ book, discovery, stacks, marketOf, listed, isHo
     market_now({ series }) {
       const r = resolve(series); if (r.error) return r;
       const b = book.get(r.series), snap = b?.snap, lv = liveRow(snap), now = clock();
-      if (!snap) return { market: r.mk.name, error: 'no snapshot yet: the bot has just started' };
+      if (!snap) return { market: r.mk.name, error: 'no live reading yet: its bot hasn\'t taken a reading (it has just started, or the server runs it only while phones are subscribed)' };
       if (!lv) return { market: r.mk.name, series: r.series, openRound: null, note: 'no round open right now (between rounds, or the market is closed)', price: snap.mSpot ?? snap.spot ?? null };
       const q = lv.ev.quote || {}, spot = snap.mSpot ?? snap.spot, sig = b.sig, d = distance({ spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, minutesLeft: lv.ev.minutesLeft });
       const pick = botOf(r.series).pick?.(), deb = council?.api?.(r.series), open = breakLab?.open?.(r.series) || [];

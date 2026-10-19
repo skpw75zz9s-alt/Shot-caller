@@ -14,6 +14,7 @@ import { createCouncil } from './council.js';
 import { createBreakLab } from './breaklab.js';
 import { createStrength } from './strength.js';
 import { createAskTools, createMarketBook } from './asktools.js';
+import { createFreeAsk } from './freeask.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -60,7 +61,10 @@ export const access = createAccess({
 });
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
-export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on once ANTHROPIC_API_KEY is set
+// Ask the bot (askai.js): the AI market chatbot once ANTHROPIC_API_KEY is set; ASK_AI=off keeps it off (no credits) even with a key
+export const askAI = createAskAI(process.env.ASK_AI === 'off' ? { apiKey: '' } : {});
+let freeAsk = null; // Ask, free (freeask.js): the same lookups, answered without an AI, whenever the AI is off
+const freeHits = new Map(); // owner -> [times]: free answers cost nothing, but a runaway script still shouldn't hammer the server
 // the tune-up (tuneup.js): an on-demand accuracy check; the round calls use the blend and calibration it has proven
 export const tuneUp = createTuneUp({ file: join(DATA_DIR, 'tuneup.json') });
 // the council (council.js, public/council.js): every proven nudge argues its case before it reaches a call
@@ -150,7 +154,9 @@ export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs
 export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 // Ask's lookups: any market, live, from the server's own readers (asktools.js)
-askAI.setTools(createAskTools({ book: marketBook, discovery, stacks, marketOf, listed: () => true, isHome, home: { bot, scanFeed, futures }, council, breakLab, strength, crossFeed }));
+const askTools = createAskTools({ book: marketBook, discovery, stacks, marketOf, listed: () => true, isHome, home: { bot, scanFeed, futures }, council, breakLab, strength, crossFeed });
+askAI.setTools(askTools);
+freeAsk = createFreeAsk({ tools: askTools });
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
@@ -469,9 +475,18 @@ export const server = http.createServer(async (req, res) => {
     if (ka) return await kalshiAuth(req, res, ka[1], url);
     // Ask the bot (askai.js): the phone's question and the facts it shows, answered by the AI; 501 when it's off
     if (path === '/api/ask') {
-      if (req.method === 'GET') return send(res, 200, askAI.status());
+      if (req.method === 'GET') return send(res, 200, { ...askAI.status(), free: !askAI.on() });
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
       const b = await readBody(req);
+      if (!askAI.on()) { // no AI: the free market answers (freeask.js), from the same live lookups
+        const who = ownerOf(token) ?? clientIp(req), t = Date.now(), recent = (freeHits.get(who) || []).filter((x) => t - x < 60000);
+        if (recent.length >= 20) return send(res, 429, { error: 'Too many questions in a minute. Give it a few seconds.' });
+        freeHits.set(who, [...recent, t]); if (freeHits.size > 5000) freeHits.clear();
+        const q = typeof b?.q === 'string' ? b.q.trim().slice(0, 500) : '';
+        if (!q) return send(res, 400, { error: 'ask a question' });
+        try { const a = await freeAsk.answer(q, { series: url.searchParams.get('m') || HOME.series }); return send(res, 200, { answer: a.answer, free: true, intent: a.intent }); }
+        catch (e) { return send(res, 502, { error: 'Couldn\'t look that up right now.', free: true }); }
+      }
       const out = await askAI.ask({ owner: ownerOf(token) ?? clientIp(req), question: b?.q, facts: b?.facts, history: b?.history, series: url.searchParams.get('m') || HOME.series });
       return send(res, out.status, out.body);
     }

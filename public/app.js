@@ -42,7 +42,7 @@ import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
-window.SC_BOOT = '211'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '212'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2135,7 +2135,7 @@ function askOpen(on = true) {
   setHidden($('askSheet'), !on);
   document.body.classList.toggle('asking', on);
   if (on) {
-    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; renderAsk(); }).catch(() => { ask.ai = false; renderAsk(); });
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.free = !!d?.free; renderAsk(); }).catch(() => { ask.ai = false; renderAsk(); });
     renderAsk();
     if (!ask.log.length) $('askInput').focus({ preventScroll: true });
   }
@@ -2144,7 +2144,7 @@ async function askQuestion(q) {
   q = String(q || '').trim();
   if (!q || ask.busy) return;
   const facts = askFacts(), built = askAnswer(q, facts);
-  const item = { q, at: Date.now(), built, ai: null, aiState: ask.ai === false ? 'off' : 'thinking', aiErr: null };
+  const item = { q, at: Date.now(), built, ai: null, aiState: ask.ai === false && !ask.free ? 'off' : 'thinking', aiErr: null, free: !ask.ai && !!ask.free };
   ask.log.unshift(item); if (ask.log.length > 20) ask.log.length = 20;
   $('askInput').value = '';
   renderAsk();
@@ -2156,7 +2156,7 @@ async function askQuestion(q) {
     paywalled(r);
     const d = await r.json().catch(() => ({}));
     if (r.status === 501) { ask.ai = false; item.aiState = 'off'; }
-    else if (r.ok && d.answer) { item.ai = d.answer; item.aiState = 'done'; }
+    else if (r.ok && d.answer) { item.ai = d.answer; item.aiState = 'done'; item.free = !!d.free; }
     else { item.aiState = 'error'; item.aiErr = d.error || `The AI couldn't answer (${r.status}).`; }
   } catch {
     item.aiState = 'error'; item.aiErr = 'Couldn\'t reach the server. Here\'s the built-in answer.';
@@ -2164,13 +2164,14 @@ async function askQuestion(q) {
 }
 function renderAsk() {
   if ($('askSheet').hidden) return;
-  setText($('askHint'), ask.ai ? `Ask about any market: ${MKT.key} is open here, the AI looks up the rest live` : ask.ai === false ? `Built-in answers about ${MKT.key}'s live round (the AI, for any market, needs ANTHROPIC_API_KEY)` : `Ask about ${MKT.key}'s live round`);
-  setText($('askMode'), ask.ai ? 'Market chatbot' : ask.ai === false ? 'Built-in answers' : '');
+  setText($('askHint'), ask.ai ? `Ask about any market: ${MKT.key} is open here, the AI looks up the rest live` : ask.free ? `Free answers about any market, from the live numbers (no AI, no credits)` : ask.ai === false ? `Built-in answers about ${MKT.key}'s live round` : `Ask about ${MKT.key}'s live round`);
+  setText($('askMode'), ask.ai ? 'Market chatbot' : ask.free ? 'Free market answers' : ask.ai === false ? 'Built-in answers' : '');
   setHidden($('askChips'), ask.log.length > 0);
   setHTML($('askLog'), ask.log.map((x) => {
     const b = x.built, ago = Math.round((Date.now() - x.at) / 60000);
-    const ai = x.aiState === 'done' ? `<div class="ask-ai"><span class="ask-tag">AI deep dive</span>${x.ai.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`
-      : x.aiState === 'thinking' ? '<div class="ask-ai thinking"><span class="ask-tag">AI deep dive</span><p><i class="ask-dots"><b></b><b></b><b></b></i> Weighing everything…</p></div>'
+    const tag = x.free ? 'Live numbers · free' : 'AI deep dive';
+    const ai = x.aiState === 'done' ? `<div class="ask-ai${x.free ? ' free' : ''}"><span class="ask-tag">${tag}</span>${x.ai.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`
+      : x.aiState === 'thinking' ? `<div class="ask-ai thinking"><span class="ask-tag">${tag}</span><p><i class="ask-dots"><b></b><b></b><b></b></i> ${x.free ? 'Looking it up…' : 'Weighing everything…'}</p></div>`
       : x.aiState === 'error' ? `<div class="ask-ai err"><small>${esc(x.aiErr)}</small></div>` : '';
     const parts = b.parts.map((p) => `<li><b>${esc(p.title)}</b><span>${esc(p.text)}</span></li>`).join('');
     const nums = `${b.note ? `<p class="ask-note">${esc(b.note)}</p>` : ''}<p class="ask-bottom">${esc(b.bottom)}</p>${parts ? `<ul class="ask-parts">${parts}</ul>` : ''}${b.tail ? `<small class="ask-tail">${esc(b.tail)}</small>` : ''}`;

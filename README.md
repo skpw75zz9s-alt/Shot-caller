@@ -276,6 +276,25 @@ Security:
 
 ## Version notes (newest first)
 
+### Ask for free (v13.64)
+
+Ask answers questions about **any market without an AI, and without spending any credits.** Whenever the server has no `ANTHROPIC_API_KEY` (or `ASK_AI=off` is set, which keeps the AI off even with a key), questions go to `freeask.js`: it reads which markets the question names (Bitcoin, ETH, Solana, XRP, Doge, the S&P, Nasdaq, the Dow, gold, silver, oil, "the coins", "every market"; none named means the market open on the phone) and what kind of question it is, runs the same live lookups the AI uses (v13.63), and writes the answer from the numbers:
+
+| Ask something like | It answers with |
+|---|---|
+| Should I buy? | the buy signal (side, price, worst-case odds, confidence), the locked round call, the odds and Kalshi's price |
+| Is the lead safe? / Will it flip? | the lead in typical moves and on the price, how safe that is, the chance the price math gives the leader, volatility, a flip-risk break |
+| Which market has the safest lead? | every running market ranked by its lead (with the reminder that the safest lead isn't the best buy) |
+| Compare Bitcoin and Ethereum | each market's lead, odds and Kalshi's price side by side, and any buy signal |
+| What's the record? | the official calls won, the win rate, the result on $10 a call, the round calls' record |
+| How accurate is it? | the strength meter's verdicts |
+| What has it learned? | which learners are proven and shape the calls, which are still being tested |
+| Any breaks? | the breaks open and which kinds of break are proven |
+| Why is it moving? | the drivers (stock indexes, gold, oil), or the last 15 minutes and the council's arguments (crypto) |
+| Bitcoin last 30 minutes | the change, the high and the low |
+
+It doesn't understand free-form chat the way the AI does: when it can't tell the market or the question, it says what it can answer instead of guessing. The answers are labelled **Live numbers · free** on the phone; the AI's stay **AI deep dive**. Free answers have a light limit (20 a minute) so a runaway script can't hammer the server.
+
 ### Ask: the market chatbot (v13.63)
 
 **Ask the bot** now answers any question about **any market, at any time**, not just the round on screen. With `ANTHROPIC_API_KEY` set, the AI looks things up live on the server before it answers, with read-only tools over the app's own readers (`asktools.js`):

@@ -169,10 +169,12 @@ test('Discord role routes: status says off without config, linking needs a membe
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /^\/\?discord=error&msg=/);
 });
 
-test('Ask without an API key: the status says off and a question gets 501, so the phone answers on its own', async () => {
-  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null, markets: true });
+test('Ask without an API key: the free market answers, from the live lookups, at no cost', async () => {
+  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null, markets: true, free: true });
   const r = await fetch(`${app}/api/ask`, { method: 'POST', body: JSON.stringify({ q: 'should I buy?', facts: { coin: 'BTC' } }) });
-  assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
+  assert.equal(r.status, 200); const d = await r.json();
+  assert.equal(d.free, true); assert.equal(d.intent, 'buy'); assert.match(d.answer, /Bitcoin/); assert.match(d.answer, /not financial advice/);
+  assert.equal((await fetch(`${app}/api/ask`, { method: 'POST', body: JSON.stringify({ q: '  ' }) })).status, 400);
 });
 
 test('the X-ray tab\'s server stats: forced closes and funding for crypto', async () => {
