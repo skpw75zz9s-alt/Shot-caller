@@ -40,7 +40,8 @@ import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './
 import { slotLabel } from './learner.js';
 import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
-window.SC_BOOT = '208'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { blip } from './blip.js';
+window.SC_BOOT = '209'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1610,6 +1611,9 @@ function renderNow() {
   renderDeep(live, sig);
   state.liveCall = sig?.callSide ? { ...live, sig } : null;
   const showBuy = !!state.liveCall && !block && !state.positions.some((p) => p.ticker === live.m.ticker);
+  // the blip under the header (public/blip.js): lit only when this buy signal is on; amber while Market Watch holds calls
+  const bl = blip({ live, sig, showBuy, block, watchHold: snap.watchHold, now });
+  setHidden($('blip'), bl.tone === 'off'); setClass($('blip'), `blip ${bl.tone}`); setText($('blipText'), bl.text); if ($('blip').title !== bl.title) $('blip').title = bl.title;
   setHidden($('boughtBtn'), !showBuy || !!state.kalshi.key); // linked: buys arrive from Kalshi on their own
   setHidden($('autoNote'), !showBuy || !state.kalshi.key);
   const card = $('callCard'), callEl = $('call'), entry = $('entry');
@@ -2174,6 +2178,8 @@ function renderAsk() {
   }).join(''));
 }
 $('askBtn').addEventListener('click', () => askOpen($('askSheet').hidden));
+// the blip takes you to the call on the Deck
+$('blip').addEventListener('click', () => { document.querySelector('nav button[data-view="live"]')?.click(); setTimeout(() => $('callCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80); });
 $('askClose').addEventListener('click', () => askOpen(false));
 $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion($('askInput').value); });
 $('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
@@ -2195,6 +2201,14 @@ async function refreshXray(force = false) {
 }
 setInterval(() => refreshXray(), 15000);
 setInterval(() => { if (!document.hidden && shownViews.has('xray')) renderXray(); }, 2000);
+// a break's proof (breaklab.js, public/breakproof.js): proven, proven wrong, noise, still testing, a plain fact, or untested
+const PROOF_TAG = { proven: 'PROVEN', opposite: 'PROVEN WRONG', noise: 'NOISE', testing: 'TESTING', fact: 'FACT', untested: 'UNTESTED' };
+function proofLine(b) {
+  const v = xr.srv?.proof?.kinds?.[b.proof];
+  if (!v) return '<p class="xr-proof testing"><em>TESTING</em> Waiting for the server\'s record of this kind of break.</p>';
+  const tag = v.status === 'testing' ? `TESTING ${v.n}/${v.need}` : PROOF_TAG[v.status] || v.status.toUpperCase();
+  return `<p class="xr-proof ${v.status}"><em>${tag}</em> ${esc(v.text[0].toUpperCase() + v.text.slice(1))}</p>`;
+}
 function renderXray() {
   if (!$('xrStats')) return;
   const now = Date.now(), snap = state.snapNow, lv = snap?.live && snap.live.ev?.minutesLeft > 0 ? snap.live : null;
@@ -2216,9 +2230,9 @@ function renderXray() {
   $('xrFilm').classList.toggle('alert', openN > 0);
   setText($('xrStatus'), !lv ? '' : openN ? `⚠ ${openN} break${openN === 1 ? '' : 's'} found` : breaks.length ? `scanning · ${breaks.length} healed` : 'scanning · no breaks');
   setHTML($('xrBreaks'), !lv ? '' : `<div class="card xr-breaks"><div class="deep-head"><span>Breaks found</span><small class="muted">${breaks.length ? `${openN} open · ${breaks.length - openN} healed` : 'none this round'}</small></div>`
-    + (breaks.length ? `<ul>${breaks.map((b) => `<li class="s${b.sev}${b.open ? ' open' : ''}"><i></i><div><b>${esc(b.title)}</b><small>${clock(b.at)} · ${b.open ? 'open' : `healed ${clock(b.last)}`}</small><p>${esc(b.detail)}</p><p class="xr-means">${esc(b.means)}</p></div></li>`).join('')}</ul>`
+    + (breaks.length ? `<ul>${breaks.map((b) => `<li class="s${b.sev}${b.open ? ' open' : ''}"><i></i><div><b>${esc(b.title)}</b><small>${clock(b.at)} · ${b.open ? 'open' : `healed ${clock(b.last)}`}</small><p>${esc(b.detail)}</p>${proofLine(b)}</div></li>`).join('')}</ul>`
       : '<p class="muted">The scanner checks every 2 seconds for jumps, breakouts, high flip risk, market shifts (odds swings, lead changes, the price and Kalshi pulling apart), Kalshi lagging or disagreeing with the bot, UP and DOWN prices that don\'t add up, an exchange splitting from the rest, one-sided flow, volatility shifts and liquidation bursts.</p>')
-    + '<p class="fine-left muted">Places to look, not trades: breaks aren\'t graded yet, and the bot\'s calls don\'t use them.</p></div>');
+    + '<p class="fine-left muted">Each break is a measurement; what it means is a claim, graded on the server against what happened next (and against ordinary moments) before it\'s shown as fact. Breaks don\'t move the bot\'s calls.</p></div>');
   renderDebate(lv, now);
   const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt });
   // a new round or a new set of stats: build the cards and let them develop; otherwise just update the numbers

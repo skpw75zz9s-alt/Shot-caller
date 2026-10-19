@@ -276,6 +276,23 @@ Security:
 
 ## Version notes (newest first)
 
+### Proven breaks and the blip (v13.61)
+
+**Every break in the X-ray is now proven or labelled.** A break is a measurement (a $280 minute is arithmetic); what it *means* was a claim, and claims are now graded. The server (`breaklab.js`) runs the break finder on every market every second, records each new break with the facts at that moment, and grades its claim when its horizon passes or its round settles. Where it makes sense it also samples an ordinary moment every minute and grades the same outcome there, so a break is compared with "no break", not with a guess. Each break in the list shows its badge:
+
+| Badge | Meaning |
+|---|---|
+| PROVEN | the claim held clearly more often than ordinary moments (or a coin flip): z ≥ 2 on 30+ graded cases |
+| PROVEN WRONG | the opposite held clearly; the X-ray says what really happens |
+| NOISE | 30+ cases, no clear difference: the break shows, its claim doesn't |
+| TESTING n/30 | still being graded |
+| FACT | nothing to prove (the UP and DOWN prices added up) |
+| UNTESTED | the server can't grade it: exchange splits (it doesn't keep each exchange's later price) and big Kalshi orders (only the phone sees Kalshi's trades) |
+
+The claims: a jump or spike is followed by a bigger-than-usual 5-minute move (vs ordinary moments); a breakout still holds 5 minutes later (vs a coin flip); Kalshi catches up to a lag within a minute (vs an ordinary minute); in a bot-vs-Kalshi disagreement, who was closer to the result; high flip risk, a volatility shift and a lead change: the side ahead loses more often (vs ordinary moments); an odds or Kalshi swing holds a minute later; when the bot and Kalshi move apart, whose side won; one-sided flow and liquidation bursts: does the price keep going that way for 5 minutes. Two-sided claims say which way the evidence points (for example "Kalshi has been right more often: trust Kalshi"). The definitions and verdicts are in `public/breakproof.js`; the graded cases (the last 400 per claim per market) in `breaks.json` in `DATA_DIR`; `/api/xray` sends the verdicts. The server grades flip risk from late toss-ups (the phone also flags it from the hold odds).
+
+**The blip** is a small light under the header, on every tab, for Market Watch and the buy signal. It lights green (**BUY UP 62¢ · +$1.20/$10**) only when the Deck's buy signal is on, with the profit per $10 worked out from the bot's worst-case odds after the fee: the cautious number, and still an estimate. It turns amber while Market Watch holds new calls (with the reason), gray when calls are paused (loss limit or profit guard), and otherwise says Watching. Tap it to jump to the call. (`public/blip.js`)
+
 ### The council (v13.60)
 
 Every feature that can move the bot's odds now **argues its case to a council** before anything reaches a call, instead of all the proven nudges simply being added up. The council rules on each argument, on the server (`council.js`) and on the phone with the same rules (`public/council.js`):

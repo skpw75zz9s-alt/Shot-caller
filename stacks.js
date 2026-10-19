@@ -8,6 +8,7 @@
 //                                futures here, so their Round scan, futures and liquidations are empty (never made up);
 //                                the rest runs on their candles and Kalshi's own book and trades
 // New markets start one at a time (a minute apart), so a fresh server doesn't hit every exchange and Kalshi at once.
+import { liqSummary } from './public/xray.js';
 import { join } from 'node:path';
 import { createBot } from './bot.js';
 import { createScanFeed } from './scanfeed.js';
@@ -29,7 +30,7 @@ export const nullScan = () => ({ load: async () => {}, start() {}, stop() {}, ob
 const mergeShifts = (...all) => { const out = {}; for (const m of all) for (const [k, v] of Object.entries(m || {})) out[k] = (out[k] || 0) + v; return Object.keys(out).length ? out : null; };
 
 // home: Bitcoin's stack from server.js { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts }
-export function createStacks({ home, dataDir, kalshi, coinbase, prices, discovery, discord, canNotify, crossFeed = null, council = null, tuned = () => null, env = process.env, log = console, clock = () => Date.now() }) {
+export function createStacks({ home, dataDir, kalshi, coinbase, prices, discovery, discord, canNotify, crossFeed = null, council = null, breakLab = null, tuned = () => null, env = process.env, log = console, clock = () => Date.now() }) {
   const assets = new Map([['BTC', home]]), bots = new Map([[HOME.series, home.bot]]), starting = new Set();
   const alertsFor = new Set(String(env.DISCORD_ALERT_MARKETS || 'BTC').split(',').map((x) => x.trim().toUpperCase()));
   const say = (key) => alertsFor.has('ALL') || alertsFor.has(key);
@@ -69,7 +70,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         vapidFrom: () => home.bot.vapidKeys(), log, env, tuned: () => tuned(series), // the tune-up's proven settings (tuneup.js)
         onObserve: (o) => {
           for (const [name, f] of [['round scan', () => st.scanFeed.observe(o)], ['market watch', () => st.marketWatch.observe(o)], ['micro model', () => st.microFeed.observe(o)],
-            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['money flows', () => st.flowsFeed?.observe(o)], ['council', () => council?.observe(series, o.snap, mk.settle)], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
+            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['money flows', () => st.flowsFeed?.observe(o)], ['council', () => council?.observe(series, o.snap, mk.settle)], ['break lab', () => { const now = clock(); breakLab?.observe(series, o.snap, { kind: mk.kind, tape: st.scanFeed.tape?.(now - 600000), liqs: st.scanFeed.liqs ? liqSummary(st.scanFeed.liqs(), now) : null }); }], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
             try { f(); } catch (e) { log.error?.(`${series} ${name} step failed`, e.message); }
           }
         },
@@ -86,7 +87,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         onCall: (e, o) => discord.call(e, o),
         onSettle: (e, stats) => discord.result(e, stats),
         onTick: (o) => st.discordAlerts.tick(o),
-        onRound: (r) => { st.discordAlerts.settled(r); council?.settle(series, r.ticker, r.result); },
+        onRound: (r) => { st.discordAlerts.settled(r); council?.settle(series, r.ticker, r.result); breakLab?.settle(series, r.ticker, r.result); },
         onPick: (e, o) => discord.pick(e, o),
       });
       await b.load();

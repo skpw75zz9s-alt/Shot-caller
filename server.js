@@ -11,6 +11,7 @@ import { createAccess } from './access.js';
 import { createAskAI } from './askai.js';
 import { createTuneUp } from './tuneup.js';
 import { createCouncil } from './council.js';
+import { createBreakLab } from './breaklab.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -62,6 +63,8 @@ export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on
 export const tuneUp = createTuneUp({ file: join(DATA_DIR, 'tuneup.json') });
 // the council (council.js, public/council.js): every proven nudge argues its case before it reaches a call
 export const council = createCouncil({ file: join(DATA_DIR, 'council.json') });
+// the break lab (breaklab.js, public/breakproof.js): every X-ray break, graded against what happened next
+export const breakLab = createBreakLab({ file: join(DATA_DIR, 'breaks.json') });
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -105,6 +108,7 @@ export const bot = createBot({
     try { flipFeed.observe(o); } catch (e) { console.error('flip check step failed', e.message); }
     try { flowsFeed.observe(o); } catch (e) { console.error('money flows step failed', e.message); }
     try { council.observe(HOME.series, o.snap, HOME.settle); } catch (e) { console.error('council step failed', e.message); }
+    try { const now = Date.now(); breakLab.observe(HOME.series, o.snap, { kind: HOME.kind, tape: scanFeed.tape(now - 600000), liqs: liqSummary(scanFeed.liqs(), now) }); } catch (e) { console.error('break lab step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
     try { crossFeed?.observe('BTC', o); } catch (e) { console.error('related markets step failed', e.message); }
@@ -123,7 +127,7 @@ export const bot = createBot({
   onCall: (e, o) => discord.call(e, o),
   onSettle: (e, stats) => discord.result(e, stats),
   onTick: (o) => discordAlerts.tick(o),
-  onRound: (r) => { discordAlerts.settled(r); council.settle(HOME.series, r.ticker, r.result); },
+  onRound: (r) => { discordAlerts.settled(r); council.settle(HOME.series, r.ticker, r.result); breakLab.settle(HOME.series, r.ticker, r.result); },
   onPick: (e, o) => discord.pick(e, o),
 });
 setInterval(() => access.prune(), 3600000).unref();
@@ -135,7 +139,7 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -272,7 +276,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([tuneUp.load(), council.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([tuneUp.load(), council.load(), breakLab.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -496,9 +500,9 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/tune') return send(res, 200, mTune.api());
     if (path === '/api/flip') return send(res, 200, mFlip.api()); // the flip check (flipfeed.js)
     if (path === '/api/voltune') return send(res, 200, mVol.api());
-    if (path === '/api/xray') { // the X-ray tab's server stats: forced closes and the cost of leverage (public/xray.js)
+    if (path === '/api/xray') { // the X-ray tab's server side: forced closes, the cost of leverage, and the proof for each kind of break
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
-      return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, at: now });
+      return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
     if (path === '/api/council') return send(res, 200, council.api(mq || HOME.series)); // the debate behind the calls (council.js)
     if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)

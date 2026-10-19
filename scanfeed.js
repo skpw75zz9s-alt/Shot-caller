@@ -122,6 +122,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
   const feedTimes = () => Object.fromEntries(Object.entries(status).filter(([k, v]) => v.lastAt && usdNames.has(k)).map(([k, v]) => [k, v.lastAt]));
   // takers' buy share of the dollars since t, as -1 (all selling) .. +1 (all buying); null with no trades
   function imbalance(since) { let b = 0, all = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > since; i--) { const u = trades[i].price * trades[i].size; all += u; if (trades[i].side === 'buy') b += u; } return all > 0 ? (b / all - 0.5) * 2 : null; }
+  function tape(since) { let i = trades.length; while (i > 0 && trades[i - 1].t > since) i--; return trades.slice(i); }
   function flowSince(t) { let usd = 0; for (let i = trades.length - 1; i >= 0 && trades[i].t > t; i--) usd += trades[i].price * trades[i].size; return usd; }
   // a liquidation feed is live if it connected (liquidations come in bursts: quiet minutes are normal)
   const liveLiq = (now) => LIQ_FEEDS.some((f) => status[`${f.name} liquidations`]?.state === 'live') || liqs.some((x) => x.t > now - 30 * 60000);
@@ -178,7 +179,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds, agreement: pressureAgreement(data.samples),
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
-  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data, liqs: () => liqs }; // liqs: the last 30 minutes' liquidations (the X-ray tab)
+  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data, liqs: () => liqs, tape }; // liqs: the last 30 minutes' liquidations, tape: the round's trades since a time (the X-ray and its break lab) // liqs: the last 30 minutes' liquidations (the X-ray tab)
 }
 const round3 = (v) => Math.round(v * 1000) / 1000;
 // The scan without what the phone doesn't need

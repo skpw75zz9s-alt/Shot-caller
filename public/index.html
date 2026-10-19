@@ -69,6 +69,7 @@
   <link rel="modulepreload" href="pick.js">
   <link rel="modulepreload" href="xray.js">
   <link rel="modulepreload" href="council.js">
+  <link rel="modulepreload" href="blip.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -97,6 +98,7 @@
     <div class="hdr-r"><button type="button" id="askBtn" class="ask-btn" aria-label="Ask the bot" title="Ask the bot about the market"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A2.5 2.5 0 0 1 4 13.5z"/></svg><span>Ask</span></button><button type="button" id="modeBtn" class="mode-btn" aria-pressed="false" title="Simple shows just the call; Pro shows everything">Simple</button><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
     <div id="splitMenu" class="split-menu" hidden></div>
   </header>
+  <button type="button" id="blip" class="blip watch" hidden aria-live="polite"><i></i><span id="blipText"></span></button>
   <div class="ticker" id="ticker">
     <div class="tk-left">
       <span class="tk-badge" id="liveBadge">…</span>
@@ -626,7 +628,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.60 · The council</p>
+      <p class="fine" id="version">Shot Caller v13.61 · Proven breaks</p>
     </section>
   </main>
 
@@ -664,7 +666,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '208';
+    window.SC_BUILD = '209';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
