@@ -271,6 +271,18 @@ Security:
 
 ## Version notes (newest first)
 
+### Why it's on probation (v13.46)
+
+Every factor on the signal board's probation list now says why it isn't used, in plain words. The rows are grouped:
+
+- **Close:** a real edge so far (z 2+) that hasn't cleared the bar. The row says how often luck alone would do as
+  well, and what it takes to go in.
+- **Gathering data:** how much graded data it has and how much it needs.
+- **No edge:** about a coin flip on data it never trained on, or a test it passed only when training disagreed.
+- **Reversed:** what it learned went the other way on new data. It's noise.
+
+Unproven factors stay out of the calls: one with no edge only adds noise to odds that are already priced.
+
 ### Locked means locked (v13.45)
 
 Once a round's call locks, its side never changes for the rest of the round:

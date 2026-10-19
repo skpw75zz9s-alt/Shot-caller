@@ -30,14 +30,14 @@ import { DRV, chartSvg, explain as explainDrivers, moveText } from './drivers.js
 import { lessonsNow } from './lessons.js';
 import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
-import { signalBoard } from './signals.js';
+import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '188'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '189'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2030,13 +2030,13 @@ function renderBoard(live, sig, now) {
     : !b.side ? `${c.in} proven factor${c.in === 1 ? ' feeds' : 's feed'} the calls. No side on the card yet.`
     : !(c.with + c.against) ? `${c.in} proven factor${c.in === 1 ? ' feeds' : 's feed'} the calls; none has a read on this round right now.`
     : `${nm(b.side)}: ${c.with} proven factor${c.with === 1 ? '' : 's'} with it, ${c.against} against${c.against > c.with ? ' (the price math still outweighs them, but be careful)' : ''}.`);
-  const chip = (r) => (r.status === 'in' ? '<em class="in">in calls</em>' : r.status === 'context' ? '<em class="ctx">context</em>' : '<em class="pr">probation</em>');
+  const chip = (r) => (r.status === 'in' ? '<em class="in">in calls</em>' : r.status === 'context' ? '<em class="ctx">context</em>' : `<em class="pr v-${r.verdict}">${esc(VERDICTS[r.verdict] ?? 'probation')}</em>`);
   const row = (r) => `<li class="sb-${r.status}${r.vs ? ` vs-${r.vs}` : ''}"><span class="sb-name"><b>${esc(r.name)}</b><small>${esc(r.note || '')}</small>`
-    + `${r.progress != null ? `<span class="sb-prog" aria-label="${Math.round(r.progress * 100)}% of the way to proven"><i style="width:${Math.round(r.progress * 100)}%"></i></span>` : ''}</span>`
+    + `${r.why ? `<small class="sb-why">${esc(r.why)}</small>` : ''}${r.progress != null ? `<span class="sb-prog" aria-label="${Math.round(r.progress * 100)}% of the way to proven"><i style="width:${Math.round(r.progress * 100)}%"></i></span>` : ''}</span>`
     + `<span class="sb-right">${chip(r)}${r.lean ? `<b class="sb-lean ${r.lean === 'YES' ? 'up' : 'dn'}">${nm(r.lean)}${r.pts != null ? ` ${r.pts >= 0 ? '+' : '−'}${Math.abs(Math.round(r.pts * 1000) / 10)}` : ''}</b>` : '<b class="sb-lean">—</b>'}${r.vs ? `<small>${r.vs}</small>` : ''}</span></li>`;
   // the proven ones up front; the ones still being tested folded under them (there can be a dozen or more)
   const on = b.rows.filter((r) => r.status !== 'probation'), pr = b.rows.filter((r) => r.status === 'probation');
-  setHTML($('sbList'), on.map(row).join('') + (pr.length ? `<li class="sb-fold"><details${state.sbOpen ? ' open' : ''}><summary>${pr.length} on probation · tested, not used yet</summary><ul class="sb-list">${pr.map(row).join('')}</ul></details></li>` : ''));
+  setHTML($('sbList'), on.map(row).join('') + (pr.length ? `<li class="sb-fold"><details${state.sbOpen ? ' open' : ''}><summary>${pr.length} on probation · ${Object.entries(b.byVerdict).filter(([, n]) => n).map(([v, n]) => `${n} ${VERDICTS[v]}`).join(', ')}</summary><p class="sb-fold-note">Not used in the calls until each proves itself on data it never trained on. Switching on a factor with no edge would make the calls worse, not better: it adds noise to odds that are already priced.</p><ul class="sb-list">${pr.map(row).join('')}</ul></details></li>` : ''));
 }
 
 $('sbList').addEventListener('toggle', (e) => { state.sbOpen = e.target.open; }, true); // stays open across re-renders

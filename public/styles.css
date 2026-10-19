@@ -1063,3 +1063,11 @@ details.chart-more summary::-webkit-details-marker { display: none; } details.ch
 .cp-list .cp-hist { color: var(--dim); }
 .cp-list li i { font-style: normal; font-size: 14px; } .cp-list li.up i { color: var(--yes); } .cp-list li.dn i { color: var(--no); }
 .cp-list li.empty { display: block; color: var(--muted); font-size: 12px; }
+
+/* ---------- v13.46 why each factor is on probation ---------- */
+.sb-why { color: var(--text) !important; opacity: .82; font-size: 11.5px !important; line-height: 1.4; margin-top: 2px; }
+.sb-right em.v-close { color: var(--amber); border-color: #fbbf2466; }
+.sb-right em.v-gathering { color: var(--accent); border-color: #22d3ee44; }
+.sb-right em.v-noedge { color: var(--dim); border-color: var(--line-2); }
+.sb-right em.v-reversed { color: #fb7185; border-color: #fb718555; }
+.sb-fold-note { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); line-height: 1.45; }

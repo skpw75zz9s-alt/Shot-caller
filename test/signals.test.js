@@ -44,3 +44,21 @@ test('signal board: missing sources make an empty board, not an error', () => {
   assert.deepEqual(b.rows, []);
   assert.deepEqual(b.counts, { in: 0, probation: 0, with: 0, against: 0 });
 });
+
+test('every factor on probation says why it isn\'t used, grouped close / gathering / no edge / reversed', () => {
+  const b = signalBoard({ ticker: 'T', tune: { report: { families: [
+    { name: 'A', setting: 'a', proven: false, dir: 1, test: { z: 2.4, rounds: 400, hit: 0.56 }, train: { z: 3 } },
+    { name: 'B', setting: 'b', proven: false, dir: 1, test: { z: 0.3, rounds: 400, hit: 0.51 }, train: { z: 2.5 } },
+    { name: 'C', setting: 'c', proven: false, dir: 1, test: { z: -1.2, rounds: 400, hit: 0.47 }, train: { z: 2.2 } },
+    { name: 'D', setting: 'd', proven: false, dir: 1, test: { z: 1, rounds: 60, hit: 0.55 }, train: { z: 1 } },
+    { name: 'E', setting: 'e', proven: false, dir: 1, test: { z: 3.4, rounds: 400, hit: 0.6 }, train: { z: 0.5 } },
+  ] } } });
+  const v = Object.fromEntries(b.rows.map((r) => [r.name, r]));
+  assert.equal(v.A.verdict, 'close'); assert.match(v.A.why, /z 2\.4 of the 3 needed: luck alone does this about 1 time in \d+/);
+  assert.equal(v.B.verdict, 'noedge'); assert.match(v.B.why, /coin flip/);
+  assert.equal(v.C.verdict, 'reversed'); assert.match(v.C.why, /other way on new data/);
+  assert.equal(v.D.verdict, 'gathering'); assert.match(v.D.why, /60 of the 150 unseen rounds/);
+  assert.equal(v.E.verdict, 'noedge'); assert.match(v.E.why, /training didn't agree/);
+  assert.deepEqual(b.byVerdict, { close: 1, gathering: 1, noedge: 2, reversed: 1 });
+  assert.deepEqual(b.rows.map((r) => r.name), ['A', 'D', 'B', 'E', 'C'], 'close first, then gathering, no edge, reversed');
+});
