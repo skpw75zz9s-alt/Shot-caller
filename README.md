@@ -9,7 +9,7 @@ A mobile signal bot for **Kalshi's 15-minute markets**: Bitcoin by default (seri
 
 ## The app
 
-Along the top: the market picker, **Ask** (the chat button: type a question about the live round and get a deep dive from the live numbers, see v13.51), **Simple / Pro** (Simple shows just the call; Pro shows every card and tab) and split screen.
+Along the top: the market picker, **Ask** (the chat button: type a question about the live round and get a deep dive from the live numbers, see v13.47), **Simple / Pro** (Simple shows just the call; Pro shows every card and tab) and split screen.
 
 Eight tabs along the bottom (Simple mode hides Radar and Learn):
 
@@ -275,83 +275,16 @@ Security:
 
 ## Version notes (newest first)
 
-### Ask, typed (v13.51)
-
-**All voice features are removed for now.** Ask is typed only: tap the chat button up top, type a question or tap a suggestion, and read the answer (the built-in deep dive, plus the AI one if `ANTHROPIC_API_KEY` is set).
-
-- Gone: the mic, Hey Shot, reading answers aloud, the voice picker, the server-run voice (George / Kokoro: `freevoice.js`, `ttsworker.js`, `kokoro.js`), Adam Stone via ElevenLabs (`voice.js`), and their routes (`/api/ask/say`, `/api/ask/voice`). The `onnxruntime-node` and `phonemizer` dependencies and `.npmrc` are removed too, so the server installs only `@anthropic-ai/sdk` again.
-- Nothing about voice runs, downloads or listens. Railway variables that are no longer read: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`, `FREE_VOICE`, `KOKORO_*`.
-- The voice notes below (v13.47–v13.50.2) are history. That code is in git (up to commit e8da382) if voice comes back.
-
-### The free voice (v13.50.2)
-
-The voice now costs nothing anywhere by default: **answers are read by the phone's own voice**, with no server memory, no downloads and no credits. George, the server-run voice, is **off unless `FREE_VOICE=on`** is set in Railway, because it holds about 0.56 GB of memory while loaded and about 1.1 GB at its peak while reading.
-
-- The phone reads a sentence or two at a time, because some phones cut a long single utterance off partway, and shorter pieces sound more natural.
-- The best voice is picked automatically (natural "Premium"/"Enhanced" downloads first, British male first). When a basic voice reads, the sheet says once where to get the phone's free natural voices:
-  - **iPhone:** Settings → Accessibility → Read & Speak → Voices → English → download one marked **Premium** (e.g. Arthur, UK).
-  - **Android:** Settings → Text-to-speech → Google → install voice data → English (UK).
-- Everything else in Ask is free too: built-in answers, voice input and Hey Shot use the phone's own speech recognition. Only the optional AI deep dive (`ANTHROPIC_API_KEY`) and Adam Stone (`ELEVENLABS_API_KEY`) cost money, and only when those keys are set.
-
-### George, steadier (v13.50.1)
-
-On Railway, George stopped partway through an answer ("the voice stopped") and the phone's voice took over. Measured here: the voice's memory grows with the length of each piece it reads, and the 220-character pieces peaked at **1.8 GB**, more than many Railway plans allow a service.
-
-- Pieces are now at most about 90 characters, split at a comma or between words when a sentence is long, never at a decimal point (`speechChunks`, shared by the phone and the server). The worker also splits anything it's sent, and the server accepts at most 200 characters a request. The model runs without a memory arena and at the lighter "basic" optimisation level, which is also faster here. **Peak is now about 1.1 GB, idle-loaded about 560 MB.**
-- If the worker dies anyway, the reason is shown: "ran out of memory (it was killed)" for a system kill, otherwise the exit code and its last error line, which also goes to the server log. Two crashes in ten minutes pause the free voice for half an hour, so it can't keep pushing the server over its limit; the phone's voice reads meanwhile.
-- If your Railway plan caps memory below about 1.5 GB (the voice plus the app), raise the service's memory limit, or set `FREE_VOICE=off`.
-- Ask's odds are now given for the side being called ("DOWN 99%+", not "UP 0%"), and never as a flat 0% or 100%.
-
-### Hey Shot (v13.50)
-
-Hands-free asking. Turn on **👂 Hey Shot** in the Ask sheet, then anywhere in the app say **"Hey Shot"** and your question: "Hey Shot, is the lead safe?", "Hey Shot, should I buy?". The sheet opens and the answer is read aloud. A bare "Hey Shot" plays a chime and takes the next thing you say (within 8 seconds) as the question.
-
-- Listens only while the app is open and on screen, and pauses while the bot is talking, so it never hears itself. A green dot on the header mic shows it's on; it pulses while listening. Off by default; the switch is remembered.
-- The browser's own speech recognition does the listening (`parseWake` in `public/ask.js` finds the wake phrase). It accepts common mishearings ("hey shop", "okay shot", "hey shotcaller", "a shot…" at the start) but not "shot" in ordinary talk ("a shot of espresso").
-- **Privacy:** while it's on, what you say near the phone goes to your browser's speech service (Google's for Chrome, Apple's for Safari) to be turned into text, as with the 🎤 button. The app only acts on what follows "Hey Shot".
-- Works best in Chrome (Android or desktop). Safari on iPhone supports it, but may ask for the mic more often and stop listening on its own. Android Chrome may beep when listening restarts after the bot speaks.
-
-### George, a natural free voice (v13.49)
-
-Ask now reads its answers in **George**, a warm British male voice that sounds like a person, not a robot, at **no per-character cost**. It's Kokoro (an open text-to-speech model, Apache-2.0) running on this server: no API, no credits, no account.
-
-- **How it runs** (`kokoro.js`, `ttsworker.js`, `freevoice.js`): at startup the server downloads the model once (177 MB, plus 28 MB of voices) from the kokoro-onnx release on GitHub into `DATA_DIR/kokoro`. Nothing is loaded until someone opens Ask. The model then runs in its own process, using about 0.56 GB of memory loaded and 1.1 GB at its peak while reading, and stops after 10 quiet minutes so that memory is given back. Opening the Ask sheet warms it up, so the first answer starts in about 4 seconds; later ones start sooner.
-- The phone sends the answer a sentence or two at a time (`/api/ask/say`) and plays the pieces back to back as they arrive, so it starts talking before the whole answer is read. On this machine the model reads about 2–3× faster than real time.
-- If the free voice is still downloading, off, or fails, the phone reads the answer in its own voice and says why. The Voice picker still offers the phone's voices and Adam Stone (ElevenLabs, uses credits).
-- Settings: `FREE_VOICE=off` turns it off. `KOKORO_VOICE` swaps the voice: `bm_lewis`, `bm_daniel`, `bm_fable` (British), or `am_michael`, `am_adam`, `am_puck`, `am_onyx` (American). `KOKORO_THREADS` (default 4) and `KOKORO_SPEED` (default 1) tune it.
-- New dependencies: `onnxruntime-node` and `phonemizer`. `.npmrc` skips onnxruntime's 700 MB GPU download, which this server doesn't use. Without a Railway volume, the model is downloaded again after each deploy (about 205 MB from GitHub, in the background).
-
-### A free voice (v13.48.3)
-
-ElevenLabs' free plan can't use Voice Library voices (Adam Stone) through the API, so answers are now read in **your phone's own voice by default: free, unlimited, offline, no credits**. `pickVoice` (`public/ask.js`) picks the best English voice the phone has, British and male first, as the closest match to Adam: high-quality downloads (Premium / Enhanced) ahead of compact ones, joke voices never. Examples: Arthur or Daniel on iPhone, Google UK English Male on Android.
-
-- **Voice** picker in the Ask sheet: Auto (the best one), any English voice on the phone, or "Adam Stone · ElevenLabs (credits)" when the server has a key. ElevenLabs is only called when you pick Adam.
-- If Adam is picked and ElevenLabs refuses (plan, key, voice), the phone reads in its own voice, says why, and stops asking ElevenLabs for the rest of the session, so nothing is wasted.
-- Better voices are free downloads. **iPhone:** Settings → Accessibility → Read & Speak (Spoken Content on older iOS) → Voices → English → pick one marked Enhanced or Premium (e.g. Arthur, UK). **Android:** Settings → Text-to-speech → Google → install voice data → English (UK).
-- The flip line now uses how rounds at this cushion actually ended (when the server has that history) instead of a rule of thumb, so "thin cushion" with 20 seconds left no longer reads as "often flips" when 85% held.
-
-### The bot's voice, checked (v13.48.1)
-
-- The voice is Adam Stone, "Warm, Upbeat & Confident" (`DEFpwxCUkrj3WAbTDRTZ`), now read with ElevenLabs' `eleven_multilingual_v2` model by default, which sounds like the voice's own preview (the faster `eleven_flash_v2_5` sounded flatter; set `ELEVENLABS_MODEL` to it if you'd rather it start sooner).
-- No more silent switching: under the question box, the sheet says "Spoken in the bot's voice" or "Phone voice, not the bot's" plus the reason (no `ELEVENLABS_API_KEY`, ElevenLabs refused the key or the voice, out of characters…), with ElevenLabs' own message.
-- **🔊 Test the voice** in the sheet speaks one line, so you can check it without asking a question.
-
-### The bot's voice (v13.48)
-
-Ask's spoken answers now use one chosen ElevenLabs voice (`DEFpwxCUkrj3WAbTDRTZ`) instead of whatever voice the phone has. The phone sends the answer's text to `/api/ask/voice` (`voice.js`), the server has ElevenLabs read it and streams the MP3 back, and the phone plays it through Web Audio, unlocked by the tap that asked so iPhones play it when it arrives.
-
-- Set `ELEVENLABS_API_KEY` in Railway to turn it on; the key never reaches the phone. `ELEVENLABS_VOICE_ID` swaps the voice, `ELEVENLABS_MODEL` the speech model.
-- Without the key, or if ElevenLabs fails or runs out of characters, the phone reads the answer in its own voice, as before.
-- Each answer is capped at 1,500 characters, and each person at 6 spoken answers a minute and 60 an hour (ElevenLabs bills by character). The 🔊 button still mutes it; a new question, mute or closing the sheet stops the current answer.
-
 ### Ask the bot (v13.47)
 
-Tap the **mic** up top and ask out loud ("should I buy?", "is the lead safe?", "why is it dumping?", "any patterns?", "deep dive"), or type. The sheet answers from everything the app already knows about the live round, and can read the answer aloud (🔊, on by default; tap to mute).
+Tap the **chat button** up top and type a question ("should I buy?", "is the lead safe?", "why is it dumping?", "any patterns?", "deep dive"), or tap a suggestion. The sheet answers from everything the app already knows about the live round.
 
 - **Built-in answers, no setup** (`public/ask.js`): the question is matched to what it's about (the call, the lead, flip risk, why it moved, buyers and sellers, chart patterns, the signal board, market mood, the record, your position, sessions), and each part is written from the live numbers: the bottom line first, then the parts. Nothing new is guessed: it reads the Deck's last render, the round call, the cushion, the flip check, the scan, the pattern reader, the board and the record. Ask about another coin and it tells you to switch markets.
-- **AI deep dive, optional** (`askai.js`): set `ANTHROPIC_API_KEY` in Railway and the server sends Claude the same facts with the question. It weighs them and answers in a few spoken-style sentences: bottom line first, only the snapshot's numbers, honest about uncertainty, unproven factors as context only, never financial advice. The built-in answer shows instantly and folds under "The numbers behind it" when the AI's arrives. `ASK_MODEL` picks the model; without it the server uses the newest Opus model the key can use (from the Models API). Members and admins only; 4 questions a minute and 40 an hour each, since every answer costs API tokens. Without a key, `/api/ask` returns 501 and the phone uses the built-in answer.
-- **Voice**: the browser's own speech recognition (Chrome, Edge, Safari 14.5+). Where it isn't available, the mic focuses the text box: use the keyboard's dictation mic. The audio never reaches the server, only the transcribed text.
-- Adds the server's first npm dependency, `@anthropic-ai/sdk`, loaded only when the first AI question comes in.
+  - "Is the lead safe?" and "will it flip?" open with the verdict: how safe the lead is, the chance it flips by the close, and how rounds at this cushion ended.
+  - With no live flip check, the flip chance comes from how rounds at this cushion and time left actually finished (when the server has that history), not a rule of thumb.
+  - Odds are given for the side being called ("DOWN 99%+", not "UP 0%"), and never as a flat 0% or 100%.
+- **AI deep dive, optional** (`askai.js`): set `ANTHROPIC_API_KEY` in Railway and the server sends Claude the same facts with the question. It weighs them and answers in a few short plain sentences: bottom line first, only the snapshot's numbers, honest about uncertainty, unproven factors as context only, never financial advice. The built-in answer shows instantly and folds under "The numbers behind it" when the AI's arrives. `ASK_MODEL` picks the model; without it the server uses the newest Opus model the key can use (from the Models API). A key pasted with stray spaces, a line break or quotes still works. Members and admins only; 4 questions a minute and 40 an hour each, since every answer costs API tokens. Without a key, `/api/ask` returns 501 and the phone uses the built-in answer.
+- Adds the server's only npm dependency, `@anthropic-ai/sdk`, loaded only when the first AI question comes in.
 
 ### Why it's on probation (v13.46)
 
