@@ -85,6 +85,8 @@ const PARTS = {
       return x.used ? `Flip check: ${nm(x.lead)} leads, with a ${pc(x.p)} chance it loses by the close (the price math alone says ${pc(x.base)})${why ? `; ${why}` : ''}.`
         : `Flip check: ${nm(x.lead)} leads, and the price math gives it a ${pc(x.base)} chance to lose. The extra flip reads are still being tested, so they don't change that.`;
     }
+    // history at this cushion beats the rule of thumb (a thin cushion with seconds left still holds most of the time)
+    if (l.hist) return `No live flip check yet. At this cushion and time left, the side ahead held ${pc(l.hist.rate)} of the time, so it flips about ${pc(1 - l.hist.rate)}: the other side needs ${money(l.lead, f.digits)} in ${mmss(f.round.minutesLeft)}.`;
     const lose = l.ratio >= 2 ? 'rarely' : l.ratio >= 1 ? 'sometimes' : 'often';
     return `No live flip check yet. From the cushion alone, a lead like this ${lose} flips: the other side needs ${money(l.lead, f.digits)} in ${mmss(f.round.minutesLeft)}.`;
   },
@@ -190,7 +192,7 @@ function bottomLine(f, asked) {
   // "is the lead safe?" / "will it flip?": answered first, the call after it in the parts
   const l = f.line, x = f.flip;
   if (!buyQ && l && (asked.includes('line') || asked.includes('flip'))) {
-    const lose = x?.lead && nm(x.lead) === l.leadSide ? (x.used ? x.p : x.base) : null;
+    const lose = x?.lead && nm(x.lead) === l.leadSide ? (x.used ? x.p : x.base) : l.hist ? 1 - l.hist.rate : null;
     const verdict = l.razor || l.ratio < 0.5 ? 'Not safe' : l.ratio < 1 ? 'Not very safe' : l.ratio < 2 ? 'Fairly safe, not locked' : 'Safe by the numbers';
     return `${verdict}: ${l.leadSide} leads by ${money(l.lead, f.digits)}, ${l.ratio.toFixed(2)} times the move still likely, a ${l.word} cushion${lose != null ? `, with a ${pc(lose)} chance it flips by the close` : ''}${l.hist ? `. Rounds like this finished ${l.leadSide} ${pc(l.hist.rate)} of the time` : ''}.`;
   }
@@ -238,3 +240,21 @@ export function factsForAI(f) {
   if (x.positions) x.positions = x.positions.slice(0, 6).map(({ ticker, side, price, contracts, bid }) => ({ ticker, side, price, contracts, bid }));
   return x;
 }
+
+// The phone's own voice, free and offline (v13.48.3): the best English voice it has, British and male first (the closest
+// to the bot's Adam Stone), high-quality downloads ahead of the compact ones, joke voices never. pref: a voice's name.
+const NAMED = [/google uk english male/i, /\barthur\b/i, /\bdaniel\b/i, /\boliver\b/i, /\bjamie\b/i, /\bmalcolm\b/i, /\bgeorge\b/i, /\bharry\b/i, /\bryan\b/i, /\bthomas\b/i];
+const NOVELTY = /\b(bad news|good news|bells|bubbles|cellos|organ|jester|superstar|wobble|boing|bahh|whisper|zarvox|trinoids|albert|fred|junior|ralph|kathy|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley|hysterical|deranged|pipe organ)\b/i;
+const FEMALE = /\b(female|samantha|serena|kate|stephanie|martha|karen|moira|tessa|fiona|victoria|allison|ava|susan|zoe|catherine|siri female|google uk english female|libby|sonia|maisie|hazel)\b/i;
+const usable = (v) => !!v && /^en/i.test(v.lang || '') && !NOVELTY.test(v.name || '');
+export function voiceScore(v) {
+  if (!usable(v)) return -Infinity;
+  const named = NAMED.findIndex((r) => r.test(v.name));
+  return (/premium/i.test(v.name) ? 40 : /enhanced|neural|natural|online/i.test(v.name) ? 25 : 0) + (/^en[-_]gb/i.test(v.lang) ? 15 : 0)
+    + (named >= 0 ? 20 - named : 0) + (FEMALE.test(v.name) ? -12 : 0) + (v.localService === false ? 2 : 0);
+}
+export function pickVoice(voices, pref = '') {
+  const list = (voices || []).filter(usable);
+  return (pref && list.find((v) => v.name === pref)) || list.sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
+}
+export const englishVoices = (voices) => (voices || []).filter(usable).sort((a, b) => voiceScore(b) - voiceScore(a));

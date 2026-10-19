@@ -606,7 +606,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.48.2 · Straight answers</p>
+      <p class="fine" id="version">Shot Caller v13.48.3 · A free voice</p>
     </section>
   </main>
 
@@ -620,6 +620,7 @@
       <button type="button" data-q="Any patterns on the chart?">Chart patterns?</button>
       <button type="button" data-q="Give me a deep dive on this round">Deep dive</button>
       <button type="button" data-say="Shot Caller here. This is the voice your answers will be read in." class="ask-test">🔊 Test the voice</button>
+      <label class="ask-vsel">Voice <select id="askVoiceSel" aria-label="The voice answers are read in"><option value="">Auto (free)</option></select></label>
     </div>
     <div id="askLog" class="ask-log" aria-live="polite"></div>
     <form id="askForm" class="ask-form" autocomplete="off">
@@ -645,7 +646,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '193';
+    window.SC_BUILD = '194';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

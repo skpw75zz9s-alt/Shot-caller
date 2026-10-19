@@ -1128,3 +1128,6 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .ask-hint.warn { color: var(--amber); }
 .ask-chips .ask-test { border-color: #a78bfa55; background: #a78bfa12; }
 .ask-chips.used button[data-q] { display: none; }
+.ask-vsel { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: 600 11px var(--mono); }
+.ask-vsel select { width: auto; max-width: 190px; margin: 0; height: 32px; padding: 0 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line-2); color: var(--text); font: 500 12px var(--sans); text-overflow: ellipsis; }
+.ask-chips.used .ask-vsel { display: inline-flex; }

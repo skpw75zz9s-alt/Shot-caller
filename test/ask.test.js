@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answer, factsForAI, route } from '../public/ask.js';
+import { answer, englishVoices, factsForAI, pickVoice, route } from '../public/ask.js';
 
 const FACTS = {
   coin: 'BTC', digits: 0, crypto: true,
@@ -90,4 +90,24 @@ test('the facts sent to the AI are trimmed copies, positions without anything ex
   const x = factsForAI(f);
   assert.equal(x.moves.length, 5); assert.deepEqual(Object.keys(x.positions[0]).sort(), ['bid', 'contracts', 'price', 'side', 'ticker']);
   assert.equal(f.moves.length, 9, 'the original is untouched');
+});
+
+test('the free phone voice: the best British male voice it has, never a joke voice, a picked one honoured', () => {
+  const iphone = [{ name: 'Samantha', lang: 'en-US' }, { name: 'Bad News', lang: 'en-US' }, { name: 'Daniel', lang: 'en-GB' }, { name: 'Arthur (Enhanced)', lang: 'en-GB' }, { name: 'Thomas', lang: 'fr-FR' }, { name: 'Karen', lang: 'en-AU' }];
+  assert.equal(pickVoice(iphone).name, 'Arthur (Enhanced)', 'a high-quality British male first');
+  assert.equal(pickVoice(iphone.filter((v) => !/Arthur/.test(v.name))).name, 'Daniel');
+  assert.equal(pickVoice(iphone, 'Samantha').name, 'Samantha', 'the one picked in the sheet');
+  assert.equal(pickVoice(iphone, 'Gone').name, 'Arthur (Enhanced)', 'a picked voice that is gone falls back to the best');
+  const android = [{ name: 'Google US English', lang: 'en-US' }, { name: 'Google UK English Female', lang: 'en-GB' }, { name: 'Google UK English Male', lang: 'en-GB' }];
+  assert.equal(pickVoice(android).name, 'Google UK English Male');
+  assert.deepEqual(englishVoices(iphone).map((v) => v.name).includes('Bad News'), false);
+  assert.equal(englishVoices(iphone).some((v) => v.lang.startsWith('fr')), false);
+  assert.equal(pickVoice([]), null);
+});
+
+test('with no flip check, the flip chance comes from how rounds at this cushion ended, not a rule of thumb', () => {
+  const f = { ...FACTS, flip: null, round: { ...FACTS.round, minutesLeft: 0.33 }, line: { leadSide: 'UP', lead: 0.0003, move: 0.0004, ratio: 0.57, word: 'thin', razor: false, hist: { rate: 0.85, n: 98 } }, digits: 4 };
+  const a = answer('Is the lead safe?', f);
+  assert.match(a.parts.find((p) => p.key === 'flip').text, /held 85% of the time, so it flips about 15%/);
+  assert.match(a.bottom, /15% chance it flips by the close\. Rounds like this finished UP 85%/);
 });

@@ -32,13 +32,13 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
-import { answer as askAnswer, factsForAI } from './ask.js';
+import { answer as askAnswer, englishVoices, factsForAI, pickVoice } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '193'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '194'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2123,7 +2123,8 @@ function askOpen(on = true) {
   setHidden($('askSheet'), !on);
   document.body.classList.toggle('asking', on);
   if (on) {
-    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; renderVoicePicker(); renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
+    renderVoicePicker();
     renderAsk();
   } else { askStopListening(); askHush(); }
 }
@@ -2139,39 +2140,66 @@ function askHush() {
   window.speechSynthesis?.cancel();
 }
 const sayable = (t) => t.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent').replace(/\s+/g, ' ').trim();
+// The voice: the phone's own by default (free, offline, no credits: the best British male voice it has, ask.js
+// pickVoice), or Adam Stone through ElevenLabs when it's set up on the server and picked in the sheet (uses credits)
+let askVoicePref = store.get('askVoice', ''); // '' = the best phone voice, 'bot' = ElevenLabs, else a phone voice's name
+const phoneVoices = () => { try { return window.speechSynthesis?.getVoices() || []; } catch { return []; } };
 function askSayLocal(text) {
-  if (!window.speechSynthesis) return;
-  try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; window.speechSynthesis.speak(u); } catch { /* no voice on this phone */ }
+  if (!window.speechSynthesis) return null;
+  try {
+    const u = new SpeechSynthesisUtterance(text), v = pickVoice(phoneVoices(), askVoicePref === 'bot' ? '' : askVoicePref);
+    let named = null;
+    if (v) { try { u.voice = v; u.lang = v.lang; named = v.name; } catch { /* that voice can't be set here: the default reads it */ } }
+    u.rate = 1; u.pitch = 0.95;
+    window.speechSynthesis.speak(u);
+    return named || 'the default voice';
+  } catch { return null; } // no voice on this phone
 }
-// which voice spoke the last answer, and why when it wasn't the bot's: shown under the input, never a silent switch
+// which voice spoke the last answer, and why when it wasn't the one picked: shown under the input, never a silent switch
 function askVoiceNote(text, ok) { ask.voiceNote = { text, ok }; renderAsk(); }
 async function askSay(text) {
   if (!askSpeak || !text) return;
   askHush();
   const n = ask.sayN, t = sayable(text);
-  let why = ask.voice === false ? 'the server voice is off (no ELEVENLABS_API_KEY in Railway)' : !ask.audio ? 'this browser can\'t play the server voice' : null;
-  if (ask.voice && ask.audio) {
-    try {
-      if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
-      const r = await fetch(`${API}/ask/voice`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
-      if (r.status === 501) ask.voice = false;
-      if (r.ok) {
-        const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
-        if (n !== ask.sayN || !askSpeak) return; // a newer answer, mute or close came first
-        const src = ask.audio.createBufferSource();
-        src.buffer = buf; src.connect(ask.audio.destination); src.start();
-        ask.src = src;
-        askVoiceNote('🔊 Spoken in the bot\'s voice (ElevenLabs)', true);
-        return;
-      }
-      const d = await r.json().catch(() => ({}));
-      why = `${d.error || `the voice service answered ${r.status}`}${d.detail ? ` (${d.detail})` : ''}`;
-    } catch { why = why || 'the bot\'s voice didn\'t load or play on this phone'; }
-    if (n !== ask.sayN) return;
+  let why = null;
+  if (askVoicePref === 'bot') {
+    why = !ask.voice ? (ask.voiceWhy || 'the bot\'s voice isn\'t set up on the server') : !ask.audio ? 'this browser can\'t play the bot\'s voice' : null;
+    if (!why) {
+      try {
+        if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
+        const r = await fetch(`${API}/ask/voice`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
+        if (r.ok) {
+          const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
+          if (n !== ask.sayN || !askSpeak) return; // a newer answer, mute or close came first
+          const src = ask.audio.createBufferSource();
+          src.buffer = buf; src.connect(ask.audio.destination); src.start();
+          ask.src = src;
+          askVoiceNote('🔊 Adam Stone (ElevenLabs, uses credits)', true);
+          return;
+        }
+        const d = await r.json().catch(() => ({}));
+        why = `${d.error || `the voice service answered ${r.status}`}${d.detail ? ` (${d.detail})` : ''}`;
+        // a refusal (plan, key, voice) won't fix itself this session: stop asking, so nothing is wasted on it
+        if (r.status !== 429) { ask.voice = false; ask.voiceWhy = why; }
+      } catch { why = 'the bot\'s voice didn\'t load or play on this phone'; }
+      if (n !== ask.sayN) return;
+    }
   }
-  askSayLocal(t);
-  askVoiceNote(`Phone voice, not the bot's: ${why}`, false);
+  const used = askSayLocal(t);
+  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not Adam: ${why}` : `🔊 ${used} · your phone's voice, free`, !why && !!used);
 }
+// the voice picker: the best phone voice (auto), every English voice the phone has, and Adam when the server has him
+function renderVoicePicker() {
+  const sel = $('askVoiceSel');
+  if (!sel) return;
+  const vs = englishVoices(phoneVoices()), best = vs[0];
+  const opts = [['', `Auto${best ? `: ${best.name}` : ''} (free)`], ...vs.map((v) => [v.name, `${v.name} (${v.lang})`]), ...(ask.voice ? [['bot', 'Adam Stone · ElevenLabs (credits)']] : [])];
+  const html = opts.map(([v, l]) => `<option value="${esc(v)}"${v === askVoicePref ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  setHTML(sel, html);
+  sel.value = opts.some(([v]) => v === askVoicePref) ? askVoicePref : '';
+}
+window.speechSynthesis?.addEventListener?.('voiceschanged', () => renderVoicePicker());
+$('askVoiceSel')?.addEventListener('change', (e) => { askVoicePref = e.target.value; store.set('askVoice', askVoicePref); askUnlock(); askSay('This is the voice your answers will be read in.'); });
 async function askQuestion(q) {
   q = String(q || '').trim();
   if (!q || ask.busy) return;
@@ -2219,7 +2247,7 @@ function renderAsk() {
   mic.setAttribute('aria-label', ask.listening ? 'Stop listening' : 'Ask by voice');
   setText($('askHint'), ask.listening ? 'Listening… ask about the round' : ask.voiceNote?.text ?? `Ask about ${MKT.key}'s live round: tap the mic or type`);
   setClass($('askHint'), `ask-hint${ask.voiceNote && !ask.voiceNote.ok ? ' warn' : ''}`);
-  setText($('askMode'), [ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '', ask.voice ? 'bot voice' : ''].filter(Boolean).join(' · '));
+  setText($('askMode'), ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '');
   $('askSpeak').setAttribute('aria-pressed', String(askSpeak));
   setText($('askSpeak'), askSpeak ? '🔊 Read aloud' : '🔇 Muted');
   $('askChips').classList.toggle('used', ask.log.length > 0); // after the first question only the voice test stays

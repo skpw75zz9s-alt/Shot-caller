@@ -271,6 +271,15 @@ Security:
 
 ## Version notes (newest first)
 
+### A free voice (v13.48.3)
+
+ElevenLabs' free plan can't use Voice Library voices (Adam Stone) through the API, so answers are now read in **your phone's own voice by default: free, unlimited, offline, no credits**. `pickVoice` (`public/ask.js`) picks the best English voice the phone has, British and male first, as the closest match to Adam: high-quality downloads (Premium / Enhanced) ahead of compact ones, joke voices never. Examples: Arthur or Daniel on iPhone, Google UK English Male on Android.
+
+- **Voice** picker in the Ask sheet: Auto (the best one), any English voice on the phone, or "Adam Stone · ElevenLabs (credits)" when the server has a key. ElevenLabs is only called when you pick Adam.
+- If Adam is picked and ElevenLabs refuses (plan, key, voice), the phone reads in its own voice, says why, and stops asking ElevenLabs for the rest of the session, so nothing is wasted.
+- Better voices are free downloads. **iPhone:** Settings → Accessibility → Read & Speak (Spoken Content on older iOS) → Voices → English → pick one marked Enhanced or Premium (e.g. Arthur, UK). **Android:** Settings → Text-to-speech → Google → install voice data → English (UK).
+- The flip line now uses how rounds at this cushion actually ended (when the server has that history) instead of a rule of thumb, so "thin cushion" with 20 seconds left no longer reads as "often flips" when 85% held.
+
 ### The bot's voice, checked (v13.48.1)
 
 - The voice is Adam Stone, "Warm, Upbeat & Confident" (`DEFpwxCUkrj3WAbTDRTZ`), now read with ElevenLabs' `eleven_multilingual_v2` model by default, which sounds like the voice's own preview (the faster `eleven_flash_v2_5` sounded flatter; set `ELEVENLABS_MODEL` to it if you'd rather it start sooner).
