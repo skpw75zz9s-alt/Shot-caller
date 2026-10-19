@@ -38,7 +38,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '197'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '198'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2152,13 +2152,26 @@ const phoneVoices = () => { try { return window.speechSynthesis?.getVoices() || 
 function askSayLocal(text) {
   if (!window.speechSynthesis) return null;
   try {
-    const u = new SpeechSynthesisUtterance(text), v = pickVoice(phoneVoices(), askVoicePref === 'bot' ? '' : askVoicePref);
+    // a sentence or two at a time: some phones cut a long utterance off partway, and short ones sound more natural
+    const v = pickVoice(phoneVoices(), askVoicePref === 'bot' || askVoicePref === 'free' ? '' : askVoicePref);
     let named = null;
-    if (v) { try { u.voice = v; u.lang = v.lang; named = v.name; } catch { /* that voice can't be set here: the default reads it */ } }
-    u.rate = 1; u.pitch = 0.95;
-    window.speechSynthesis.speak(u);
+    for (const part of speechChunks(text, 160)) {
+      const u = new SpeechSynthesisUtterance(part);
+      if (v) { try { u.voice = v; u.lang = v.lang; named = v.name; } catch { /* that voice can't be set here: the default reads it */ } }
+      u.rate = 1; u.pitch = 1;
+      window.speechSynthesis.speak(u);
+    }
     return named || 'the default voice';
   } catch { return null; } // no voice on this phone
+}
+// a basic voice read it: say where the phone's free natural (neural) voices are, once a session
+function voiceTip(name) {
+  if (ask.tipShown || /premium|enhanced|neural|natural|online|google/i.test(name || '')) return '';
+  ask.tipShown = true;
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod|Macintosh/.test(ua) ? '. For a natural free voice: Settings → Accessibility → Read & Speak → Voices → English → download one marked Premium (e.g. Arthur, UK), then pick it under Voice.'
+    : /Android/.test(ua) ? '. For a natural free voice: Settings → Text-to-speech → Google → install voice data → English (UK), then pick it under Voice.'
+    : '. Your device may have free natural voices to download in its speech settings.';
 }
 // which voice spoke the last answer, and why when it wasn't the one picked: shown under the input, never a silent switch
 function askVoiceNote(text, ok) { ask.voiceNote = { text, ok }; renderAsk(); }
@@ -2198,7 +2211,7 @@ async function askSay(text) {
     why = out.why; rest = out.rest ? sayable(out.rest) : t;
   }
   const used = askSayLocal(rest);
-  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not ${whose}: ${why}` : `🔊 ${used} · your phone's voice, free`, !why && !!used);
+  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not ${whose}: ${why}` : `🔊 ${used} · your phone's voice, free${voiceTip(used)}`, !why && !!used);
 }
 // the server's free voice: the answer a piece at a time, each fetched while the one before plays, queued back to back
 const freeName = () => { const v = ask.freeVoice || 'bm_george'; return v.slice(3, 4).toUpperCase() + v.slice(4); };

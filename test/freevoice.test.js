@@ -7,6 +7,18 @@ import { join } from 'node:path';
 import { KOKORO } from '../kokoro.js';
 import { createFreeVoice } from '../freevoice.js';
 
+const wasOn = process.env.FREE_VOICE;
+delete process.env.FREE_VOICE;
+let fetched = 0;
+const byDefault = createFreeVoice({ dir: mkdtempSync(join(tmpdir(), 'kokoro-')), fetchImpl: () => { fetched++; } }); // made before the switch below
+test('off unless FREE_VOICE=on: by default it uses no server memory and downloads nothing', async () => {
+  const v = byDefault;
+  v.prefetch();
+  assert.equal(v.status().free, false); assert.equal((await v.speak({ owner: 'a', text: 'hi' })).status, 501); assert.equal(fetched, 0);
+});
+process.env.FREE_VOICE = 'on'; // the rest test it switched on
+test.after(() => { if (wasOn == null) delete process.env.FREE_VOICE; else process.env.FREE_VOICE = wasOn; });
+
 // a stand-in worker: answers warm-up and each request (or fails/hangs on cue) without loading any model
 function fakeFork({ fail = null, die = false, signal = null } = {}) {
   const made = [];

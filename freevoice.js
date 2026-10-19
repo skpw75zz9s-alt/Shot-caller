@@ -1,6 +1,7 @@
 // The free natural voice's manager (v13.49): downloads the model once (to DATA_DIR/kokoro, from GitHub), starts the
 // worker (ttsworker.js) on the first spoken answer and stops it after 10 quiet minutes, so the server only holds the
-// model's memory while people are listening. FREE_VOICE=off turns it off; KOKORO_VOICE picks the voice.
+// model's memory while people are listening. Off unless FREE_VOICE=on (v13.50.2: it costs server memory, ~1.1 GB at
+// its peak, so the free default is the phone's own voice); KOKORO_VOICE picks the voice.
 import { fork } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rename, stat, unlink } from 'node:fs/promises';
@@ -12,7 +13,7 @@ import { KOKORO, voiceOk } from './kokoro.js';
 
 const WORKER = fileURLToPath(new URL('./ttsworker.js', import.meta.url));
 
-export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off', voice = voiceOk(process.env.KOKORO_VOICE) ? process.env.KOKORO_VOICE : KOKORO.voice,
+export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE === 'on', voice = voiceOk(process.env.KOKORO_VOICE) ? process.env.KOKORO_VOICE : KOKORO.voice,
   idleMs = 600000, timeoutMs = 60000, fetchImpl = fetch, forkImpl = fork, perMin = 60, perHour = 900, maxChars = 200, now = () => Date.now() } = {}) {
   let files = null, filesErr = null, child = null, warm = null, warmFail = null, idle = null, seq = 0, busy = 0;
   let lastExit = null, crashes = [], pausedUntil = 0; // why the worker last died, and a pause after repeated crashes
@@ -95,7 +96,7 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
 
   // one piece of an answer (the phone sends them a sentence or two at a time, so speech starts quickly)
   async function speak({ owner, text, voice: v }) {
-    if (!enabled) return { status: 501, body: { error: 'the free voice is off on this server (FREE_VOICE=off)', free: false } };
+    if (!enabled) return { status: 501, body: { error: 'the server voice is off (set FREE_VOICE=on to use it)', free: false } };
     const t = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, maxChars) : '';
     if (!t) return { status: 400, body: { error: 'nothing to say' } };
     if (limited(owner || 'anon')) return { status: 429, body: { error: 'too many spoken answers for now' } };

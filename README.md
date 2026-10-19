@@ -271,6 +271,16 @@ Security:
 
 ## Version notes (newest first)
 
+### The free voice (v13.50.2)
+
+The voice now costs nothing anywhere by default: **answers are read by the phone's own voice**, with no server memory, no downloads and no credits. George, the server-run voice, is **off unless `FREE_VOICE=on`** is set in Railway, because it holds about 0.56 GB of memory while loaded and about 1.1 GB at its peak while reading.
+
+- The phone reads a sentence or two at a time, because some phones cut a long single utterance off partway, and shorter pieces sound more natural.
+- The best voice is picked automatically (natural "Premium"/"Enhanced" downloads first, British male first). When a basic voice reads, the sheet says once where to get the phone's free natural voices:
+  - **iPhone:** Settings → Accessibility → Read & Speak → Voices → English → download one marked **Premium** (e.g. Arthur, UK).
+  - **Android:** Settings → Text-to-speech → Google → install voice data → English (UK).
+- Everything else in Ask is free too: built-in answers, voice input and Hey Shot use the phone's own speech recognition. Only the optional AI deep dive (`ANTHROPIC_API_KEY`) and Adam Stone (`ELEVENLABS_API_KEY`) cost money, and only when those keys are set.
+
 ### George, steadier (v13.50.1)
 
 On Railway, George stopped partway through an answer ("the voice stopped") and the phone's voice took over. Measured here: the voice's memory grows with the length of each piece it reads, and the 220-character pieces peaked at **1.8 GB**, more than many Railway plans allow a service.

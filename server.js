@@ -57,7 +57,7 @@ export const access = createAccess({
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on once ANTHROPIC_API_KEY is set
 export const askVoice = createVoice(); // its answers read aloud in one voice (voice.js): on once ELEVENLABS_API_KEY is set
-export const askFree = createFreeVoice({ dir: join(DATA_DIR, 'kokoro') }); // or free, in a natural voice run here (freevoice.js)
+export const askFree = createFreeVoice({ dir: join(DATA_DIR, 'kokoro') }); // or a natural voice run here, only with FREE_VOICE=on (freevoice.js)
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
