@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The council (v13.60)
+
+Every feature that can move the bot's odds now **argues its case to a council** before anything reaches a call, instead of all the proven nudges simply being added up. The council rules on each argument, on the server (`council.js`) and on the phone with the same rules (`public/council.js`):
+
+1. **The facts beat opinions.** When the lead is 2.5+ typical moves for the time left, or the 60-second settlement average is mostly in (crypto, the last 15 seconds), an argument against the leader is vetoed.
+2. **Track record.** The council grades every argument it heard (each feature's last word before a round's final minute) against Kalshi's result, keeping the last 60 per feature and market. A feature clearly wrong lately (20+ graded, z ≤ −1.5 against a coin flip) is **vetoed**; a shaky one (below 50%, shrunk toward 50% while its record is short) is **discounted**, down to half weight. A good record never adds weight: proof gets a feature in, results can only take it out.
+3. **No echoes.** Features reading the same data form a family: buyers and sellers (Round scan, micro model, flip check), the chart (tuned indicators, reversal checklist), related markets, money flows. If a family agrees, only its strongest argument counts (the rest are echoes); if it contradicts itself, its data is split and all of it is vetoed.
+4. **The debate.** What's left is netted across families by weight, capped at 10 points.
+
+So the council can only shrink or remove a nudge, never grow it: the "only proven things touch the calls" rule holds. The **X-ray** tab has a new **The debate** section: the verdict, each argument with its side, size and ruling (counted, discounted ×weight, or vetoed with the reason), features still on probation listed as heard but not admitted, and every feature's graded record. `/api/council?m=SERIES` serves it; the records live in `council.json` in `DATA_DIR`.
+
 ### More breaks (v13.59)
 
 The break finder also looks for **high flip risk**, **market shifts** (odds swings on the bot or Kalshi, a lead change, the price and Kalshi moving opposite ways) and **UP and DOWN prices that disagree** (or cost less than $1 together, a crossed book). The thin-book check became the UP/DOWN check, and "Kalshi far from fair" is now "Bot and Kalshi disagree". The full list is in the table under v13.58.

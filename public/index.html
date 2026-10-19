@@ -68,6 +68,7 @@
   <link rel="modulepreload" href="losslab.js">
   <link rel="modulepreload" href="pick.js">
   <link rel="modulepreload" href="xray.js">
+  <link rel="modulepreload" href="council.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -516,6 +517,7 @@
         <p class="fine-left muted">The round under the scanner: the price path is the spine, each minute a rib, the dashed line the target, the haze the typical move to the close; glowing dots mark crossings, the high, the low and now. The scanner hunts for breaks in the market and marks each with a crack (red while open). Below, the breaks it found and the stats that help but nobody looks at.</p>
       </div>
       <div id="xrBreaks"></div>
+      <div id="xrDebate"></div>
       <div id="xrStats" class="xr-stats"></div>
     </section>
     <section id="view-success" class="view">
@@ -624,7 +626,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.59 · More breaks</p>
+      <p class="fine" id="version">Shot Caller v13.60 · The council</p>
     </section>
   </main>
 
@@ -662,7 +664,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '207';
+    window.SC_BUILD = '208';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

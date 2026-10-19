@@ -39,7 +39,8 @@ import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
 import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
-window.SC_BOOT = '207'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { councilFacts, debate } from './council.js';
+window.SC_BOOT = '208'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -430,8 +431,11 @@ const compute = () => {
   const nudges = [state.scanSrv?.inCalls && Date.now() - (state.scanFetchAt || 0) < 30000 ? state.scanSrv.inCalls : null, state.micro?.read && Date.now() - state.micro.read.at < 20000 ? state.micro.inCalls : null,
     state.tune?.inCalls && Date.now() - (state.tuneAt || 0) < 30000 ? state.tune.inCalls : null,
     state.playbook?.inCalls && Date.now() - (state.playbookAt || 0) < 30000 ? state.playbook.inCalls : null];
-  let shifts = null;
-  for (const n of nudges) for (const [k, v] of Object.entries(n || {})) (shifts ||= {})[k] = (shifts[k] || 0) + v;
+  // each nudge argues its case to the council (public/council.js) with the server's records of who's been right; the
+  // invalid ones are vetoed and the rest netted, the same rules the server's bot uses (the facts: the last snapshot's)
+  let shifts = null; const byT = {}, prev = state.snapNow;
+  ['scan', 'micro', 'tune', 'playbook'].forEach((key, i) => { for (const [k, v] of Object.entries(nudges[i] || {})) if (v) (byT[k] ||= []).push({ key, pts: v }); });
+  for (const [t, args] of Object.entries(byT)) { const d = debate(args, councilFacts(prev?.rows?.find((r) => r.m.ticker === t), prev, MKT.settle), state.council?.records || {}); if (d.net) (shifts ||= {})[t] = d.net; }
   const snap = snapshot({ markets: state.markets, candles: state.candles, spot: state.priceDelayed ? null : modelSpot(), settings, strikes: state.strikes, quoteLog: state.quoteLog, learned: state.memory?.learned ?? null, shifts, chosen: state.chosen }); // this market's own learning (the server's copy for it)
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
@@ -2032,6 +2036,7 @@ function renderBoard(live, sig, now) {
   const t = live?.m?.ticker ?? null, fresh = (at, ms) => now - (at || 0) < ms;
   const b = signalBoard({ ticker: t, side: boardSide, crypto: CRYPTO, scan: fresh(state.scanFetchAt, 60000) ? state.scanSrv : null, micro: state.micro, tune: state.tune, playbook: state.playbook,
     cross: state.cross, flip: fresh(state.flipChkAt, 30000) ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab, flows: state.flowsApi });
+  state.boardRows = b.rows; // the X-ray's debate hears the features still on probation
   const c = b.counts, nm = (x) => (x === 'YES' ? 'UP' : 'DOWN');
   setText($('sbSum'), `${c.in} in calls · ${c.probation} on probation`);
   setHTML($('sbMeter'), b.side && c.with + c.against ? `${c.with ? `<i class="w" style="flex:${c.with}"></i>` : ''}${c.against ? `<i class="a" style="flex:${c.against}"></i>` : ''}` : '<i class="n" style="flex:1"></i>');
@@ -2179,6 +2184,10 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askS
 // each one (open, or healed once it's gone for 20 seconds) for the round. The stat cards develop as the beam passes,
 // then keep their values fresh every 2 seconds without replaying. Liquidations and funding come from the server.
 const xr = { srv: null, at: 0, shape: '', log: null };
+// the council's records (who's been right) for this phone's calls, and the live debate for the X-ray
+async function refreshCouncil() { if (document.hidden) return; try { state.council = await getJSON(api('council')); state.councilAt = Date.now(); } catch { /* next time */ } }
+setInterval(() => { if (shownViews.has('xray') || Date.now() - (state.councilAt || 0) > 30000) refreshCouncil(); }, 5000);
+setTimeout(refreshCouncil, 3000);
 async function refreshXray(force = false) {
   if (document.hidden || (!force && !shownViews.has('xray'))) return;
   try { xr.srv = await getJSON(api('xray')); xr.at = Date.now(); } catch { /* next time */ }
@@ -2210,6 +2219,7 @@ function renderXray() {
     + (breaks.length ? `<ul>${breaks.map((b) => `<li class="s${b.sev}${b.open ? ' open' : ''}"><i></i><div><b>${esc(b.title)}</b><small>${clock(b.at)} · ${b.open ? 'open' : `healed ${clock(b.last)}`}</small><p>${esc(b.detail)}</p><p class="xr-means">${esc(b.means)}</p></div></li>`).join('')}</ul>`
       : '<p class="muted">The scanner checks every 2 seconds for jumps, breakouts, high flip risk, market shifts (odds swings, lead changes, the price and Kalshi pulling apart), Kalshi lagging or disagreeing with the bot, UP and DOWN prices that don\'t add up, an exchange splitting from the rest, one-sided flow, volatility shifts and liquidation bursts.</p>')
     + '<p class="fine-left muted">Places to look, not trades: breaks aren\'t graded yet, and the bot\'s calls don\'t use them.</p></div>');
+  renderDebate(lv, now);
   const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt });
   // a new round or a new set of stats: build the cards and let them develop; otherwise just update the numbers
   const shape = `${lv?.m.ticker || ''}|${stats.map((x) => x.key).join(',')}`;
@@ -2223,6 +2233,22 @@ function renderXray() {
     setText(el.querySelector('[data-v]'), x.value); setClass(el.querySelector('[data-v]'), x.tone);
     setText(el.querySelector('[data-n]'), x.note);
   }
+}
+
+// The debate: every feature that wants to move the odds, what it argued and the council's ruling. Proven features are
+// heard and ruled on (the server's council); features still on probation are heard but not admitted (the signal board)
+function renderDebate(lv, now) {
+  const c = state.council, d = lv && c?.ticker === lv.m.ticker && now - (state.councilAt || 0) < 60000 ? c.debate : null, nm = (x) => (x === 'YES' ? 'UP' : 'DOWN');
+  const heard = (state.boardRows || []).filter((r) => r.status === 'probation' && r.lean);
+  if (!lv) return setHTML($('xrDebate'), '');
+  const ruled = (d?.rulings || []).map((r) => `<li class="${r.status}"><b>${esc(r.name)}</b><span class="${r.side === 'YES' ? 'pos' : 'neg'}">${nm(r.side)} ${(Math.abs(r.pts) * 100).toFixed(1)} pts</span>`
+    + `<em>${r.status === 'vetoed' ? 'VETOED' : r.weight < 1 ? `×${r.weight.toFixed(2)}` : 'COUNTED'}</em><small>${esc(r.why)}</small></li>`).join('');
+  const unheard = heard.map((r) => `<li class="probation"><b>${esc(r.name)}</b><span class="${r.lean === 'YES' ? 'pos' : 'neg'}">${nm(r.lean)}</span><em>NOT ADMITTED</em><small>still on probation: it hasn't proven itself on unseen data</small></li>`).join('');
+  const recs = Object.entries(c?.records || {}).filter(([, x]) => x.n).map(([, x]) => `${esc(x.name)} ${x.hits}/${x.n}`).join(' · ');
+  setHTML($('xrDebate'), `<div class="card xr-debate"><div class="deep-head"><span>The debate</span><small class="muted">${d ? `${d.rulings.length - d.vetoed} counted · ${d.vetoed} vetoed` : 'no proven argument'}</small></div>`
+    + `<p class="xr-verdict-line">${esc(d?.verdict || 'No proven feature is arguing right now: the call is the bot\'s own price math.')}${d && d.net ? ` <b class="${d.net > 0 ? 'pos' : 'neg'}">Net ${d.net > 0 ? '+' : '−'}${(Math.abs(d.net) * 100).toFixed(1)} pts on UP.</b>` : ''}</p>`
+    + (ruled || unheard ? `<ul>${ruled}${unheard}</ul>` : '')
+    + `<p class="fine-left muted">The rules: the facts beat opinions (a big lead or a mostly-settled average can't be argued with); a feature clearly wrong lately is vetoed, a shaky one discounted; features reading the same data count once, and if they contradict each other they're all vetoed; the rest are netted, capped at 10 points. The council can only shrink a nudge, never grow it.${recs ? ` Graded arguments: ${recs}.` : ''}</p></div>`);
 }
 
 // ---------- Simple mode ----------

@@ -29,7 +29,7 @@ export const nullScan = () => ({ load: async () => {}, start() {}, stop() {}, ob
 const mergeShifts = (...all) => { const out = {}; for (const m of all) for (const [k, v] of Object.entries(m || {})) out[k] = (out[k] || 0) + v; return Object.keys(out).length ? out : null; };
 
 // home: Bitcoin's stack from server.js { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts }
-export function createStacks({ home, dataDir, kalshi, coinbase, prices, discovery, discord, canNotify, crossFeed = null, tuned = () => null, env = process.env, log = console, clock = () => Date.now() }) {
+export function createStacks({ home, dataDir, kalshi, coinbase, prices, discovery, discord, canNotify, crossFeed = null, council = null, tuned = () => null, env = process.env, log = console, clock = () => Date.now() }) {
   const assets = new Map([['BTC', home]]), bots = new Map([[HOME.series, home.bot]]), starting = new Set();
   const alertsFor = new Set(String(env.DISCORD_ALERT_MARKETS || 'BTC').split(',').map((x) => x.trim().toUpperCase()));
   const say = (key) => alertsFor.has('ALL') || alertsFor.has(key);
@@ -69,12 +69,14 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         vapidFrom: () => home.bot.vapidKeys(), log, env, tuned: () => tuned(series), // the tune-up's proven settings (tuneup.js)
         onObserve: (o) => {
           for (const [name, f] of [['round scan', () => st.scanFeed.observe(o)], ['market watch', () => st.marketWatch.observe(o)], ['micro model', () => st.microFeed.observe(o)],
-            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['money flows', () => st.flowsFeed?.observe(o)], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
+            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['money flows', () => st.flowsFeed?.observe(o)], ['council', () => council?.observe(series, o.snap, mk.settle)], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
             try { f(); } catch (e) { log.error?.(`${series} ${name} step failed`, e.message); }
           }
         },
         liveSpot: () => st.scanFeed.spot(),
-        shifts: () => mergeShifts(st.scanFeed.shifts(), st.microFeed?.shifts(), st.tuneFeed.shifts(), st.playbook.shifts(), crossFeed?.shifts(mk.asset), st.flipFeed?.shifts(), st.flowsFeed?.shifts()), // every proven nudge, related markets included
+        // every proven nudge, related markets included, argues its case to the council (council.js) before it reaches a call
+        shifts: () => { const v = [['scan', st.scanFeed.shifts()], ['micro', st.microFeed?.shifts()], ['tune', st.tuneFeed.shifts()], ['playbook', st.playbook.shifts()], ['cross', crossFeed?.shifts(mk.asset)], ['flip', st.flipFeed?.shifts()], ['flows', st.flowsFeed?.shifts()]];
+          return council ? council.decide(series, v) : mergeShifts(...v.map((x) => x[1])); },
         shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts(), flows: !!st.flowsFeed?.shifts() }),
         watch: () => st.marketWatch.status(),
         flipCheck: () => st.flipFeed?.check() ?? null,
@@ -84,7 +86,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         onCall: (e, o) => discord.call(e, o),
         onSettle: (e, stats) => discord.result(e, stats),
         onTick: (o) => st.discordAlerts.tick(o),
-        onRound: (r) => st.discordAlerts.settled(r),
+        onRound: (r) => { st.discordAlerts.settled(r); council?.settle(series, r.ticker, r.result); },
         onPick: (e, o) => discord.pick(e, o),
       });
       await b.load();

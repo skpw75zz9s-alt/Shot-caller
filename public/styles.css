@@ -1162,6 +1162,15 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .xr-breaks li small { color: var(--dim); font: 500 10.5px var(--mono); }
 .xr-breaks li p { margin: 3px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
 .xr-breaks li p.xr-means { color: var(--dim); font-size: 11.5px; }
+.xr-verdict-line { margin: 6px 0 8px; font-size: 13.5px; line-height: 1.45; }
+.xr-debate ul { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.xr-debate li { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px; align-items: baseline; padding: 7px 9px; border-radius: 10px; background: var(--panel-2); border-left: 3px solid var(--yes); }
+.xr-debate li.vetoed { border-left-color: var(--no); opacity: .75; } .xr-debate li.vetoed b { text-decoration: line-through; text-decoration-color: var(--no); }
+.xr-debate li.probation { border-left-color: var(--dim); opacity: .6; }
+.xr-debate li b { font-size: 12.5px; } .xr-debate li span { font: 700 11px var(--mono); }
+.xr-debate li em { font: 700 9.5px var(--mono); font-style: normal; letter-spacing: .06em; color: var(--yes); }
+.xr-debate li.vetoed em { color: var(--no); } .xr-debate li.probation em { color: var(--dim); }
+.xr-debate li small { grid-column: 1 / -1; color: var(--dim); font-size: 11px; line-height: 1.35; }
 .xr-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
 .xr-stat { position: relative; overflow: hidden; padding: 10px 11px; border-radius: 12px; border: 1px solid #1d3a55; background: linear-gradient(180deg, #0a1a2a, #07111c);
   opacity: 0; animation: xr-develop .9s ease-out forwards; animation-delay: var(--d, 0s); }
