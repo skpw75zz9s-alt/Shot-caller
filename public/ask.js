@@ -258,3 +258,17 @@ export function pickVoice(voices, pref = '') {
   return (pref && list.find((v) => v.name === pref)) || list.sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
 }
 export const englishVoices = (voices) => (voices || []).filter(usable).sort((a, b) => voiceScore(b) - voiceScore(a));
+
+// an answer in pieces for the server's free voice (v13.49): the first sentence alone so speech starts sooner, then
+// sentences packed up to max characters (the server reads each piece in a second or two); never split at a decimal
+export function speechChunks(text, max = 220) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean), out = [];
+  for (const x of s) {
+    for (let i = 0; i < x.length; i += max) {
+      const piece = x.slice(i, i + max), last = out[out.length - 1];
+      if (last && out.length > 1 && last.length + piece.length + 1 <= max) out[out.length - 1] = `${last} ${piece}`;
+      else out.push(piece);
+    }
+  }
+  return out;
+}

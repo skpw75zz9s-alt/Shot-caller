@@ -10,6 +10,7 @@ import { createBot } from './bot.js';
 import { createAccess } from './access.js';
 import { createAskAI } from './askai.js';
 import { createVoice } from './voice.js';
+import { createFreeVoice } from './freevoice.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -56,6 +57,7 @@ export const access = createAccess({
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on once ANTHROPIC_API_KEY is set
 export const askVoice = createVoice(); // its answers read aloud in one voice (voice.js): on once ELEVENLABS_API_KEY is set
+export const askFree = createFreeVoice({ dir: join(DATA_DIR, 'kokoro') }); // or free, in a natural voice run here (freevoice.js)
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -439,11 +441,19 @@ export const server = http.createServer(async (req, res) => {
     if (ka) return await kalshiAuth(req, res, ka[1], url);
     // Ask the bot (askai.js): the phone's question and the facts it shows, answered by the AI; 501 when it's off
     if (path === '/api/ask') {
-      if (req.method === 'GET') return send(res, 200, { ...askAI.status(), ...askVoice.status() });
+      if (req.method === 'GET') return send(res, 200, { ...askAI.status(), ...askVoice.status(), ...askFree.status() });
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
       const b = await readBody(req);
       const out = await askAI.ask({ owner: ownerOf(token) ?? clientIp(req), question: b?.q, facts: b?.facts, history: b?.history });
       return send(res, out.status, out.body);
+    }
+    if (path === '/api/ask/say') { // a piece of an answer in, its WAV out, in the free voice (freevoice.js); 501 when it's off
+      if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+      const b = await readBody(req);
+      if (b?.warm) return send(res, 200, { warming: await askFree.warmUp() }); // the sheet opened: get ready
+      const out = await askFree.speak({ owner: ownerOf(token) ?? clientIp(req), text: b?.text, voice: b?.voice });
+      if (!out.audio) return send(res, out.status, out.body);
+      return send(res, 200, out.audio, out.type);
     }
     if (path === '/api/ask/voice') { // the answer's text in, its MP3 out (voice.js); 501 when the server voice is off
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
@@ -504,6 +514,7 @@ export const server = http.createServer(async (req, res) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
+  askFree.prefetch(); // Ask's free voice: download the model now (nothing is loaded until someone listens)
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();

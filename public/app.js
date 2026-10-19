@@ -32,13 +32,13 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
-import { answer as askAnswer, englishVoices, factsForAI, pickVoice } from './ask.js';
+import { answer as askAnswer, englishVoices, factsForAI, pickVoice, speechChunks } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '194'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '195'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2116,14 +2116,19 @@ function askFacts(now = Date.now()) {
   return f;
 }
 
-const ask = { log: [], busy: false, ai: null, voice: null, rec: null, listening: false, audio: null, src: null, sayN: 0 };
+const ask = { log: [], busy: false, ai: null, voice: null, free: false, freeVoice: null, rec: null, listening: false, audio: null, src: null, srcs: [], sayN: 0 };
 let askSpeak = store.get('askSpeak', true);
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+// the sheet opened and the free voice will read: have the server load it now, not when the first answer is ready
+function askWarm() {
+  if (askSpeak && ask.free && (askVoicePref === '' || askVoicePref === 'free')) fetch(`${API}/ask/say`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{"warm":true}' }).catch(() => {});
+}
 function askOpen(on = true) {
   setHidden($('askSheet'), !on);
   document.body.classList.toggle('asking', on);
   if (on) {
-    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; renderVoicePicker(); renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; ask.free = !!d?.free; ask.freeVoice = d?.freeVoice || null; askWarm(); renderVoicePicker(); renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
+    else askWarm();
     renderVoicePicker();
     renderAsk();
   } else { askStopListening(); askHush(); }
@@ -2135,14 +2140,14 @@ function askUnlock() {
 }
 function askHush() {
   ask.sayN++;
-  try { ask.src?.stop(); } catch { /* already done */ }
-  ask.src = null;
+  for (const x of [ask.src, ...ask.srcs]) { try { x?.stop(); } catch { /* already done */ } }
+  ask.src = null; ask.srcs = [];
   window.speechSynthesis?.cancel();
 }
 const sayable = (t) => t.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent').replace(/\s+/g, ' ').trim();
-// The voice: the phone's own by default (free, offline, no credits: the best British male voice it has, ask.js
-// pickVoice), or Adam Stone through ElevenLabs when it's set up on the server and picked in the sheet (uses credits)
-let askVoicePref = store.get('askVoice', ''); // '' = the best phone voice, 'bot' = ElevenLabs, else a phone voice's name
+// The voice (v13.49): the server's free natural voice by default (Kokoro, freevoice.js: no credits), else the phone's own
+// (the best British male voice it has, ask.js pickVoice), or Adam Stone through ElevenLabs when picked (uses credits)
+let askVoicePref = store.get('askVoice', ''); // '' = auto (the server's free voice, else the phone's best), 'free', 'bot' = ElevenLabs, else a phone voice's name
 const phoneVoices = () => { try { return window.speechSynthesis?.getVoices() || []; } catch { return []; } };
 function askSayLocal(text) {
   if (!window.speechSynthesis) return null;
@@ -2185,15 +2190,56 @@ async function askSay(text) {
       if (n !== ask.sayN) return;
     }
   }
-  const used = askSayLocal(t);
-  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not Adam: ${why}` : `🔊 ${used} · your phone's voice, free`, !why && !!used);
+  let rest = t, whose = 'Adam';
+  if (askVoicePref === 'free' || (askVoicePref === '' && ask.free)) {
+    whose = freeName();
+    const out = await askSayFree(text, n);
+    if (out === 'done' || n !== ask.sayN) return;
+    why = out.why; rest = out.rest ? sayable(out.rest) : t;
+  }
+  const used = askSayLocal(rest);
+  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not ${whose}: ${why}` : `🔊 ${used} · your phone's voice, free`, !why && !!used);
+}
+// the server's free voice: the answer a piece at a time, each fetched while the one before plays, queued back to back
+const freeName = () => { const v = ask.freeVoice || 'bm_george'; return v.slice(3, 4).toUpperCase() + v.slice(4); };
+async function askSayFree(text, n) {
+  const parts = speechChunks(text);
+  if (!ask.audio || !parts.length) return { why: 'this browser can\'t play the server\'s voice', rest: text };
+  if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
+  let at = 0;
+  for (let i = 0; i < parts.length; i++) {
+    let why = null;
+    try {
+      const r = await fetch(`${API}/ask/say`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: parts[i] }) });
+      if (r.ok) {
+        const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
+        if (n !== ask.sayN || !askSpeak) return 'done'; // a newer answer, mute or close came first
+        const src = ask.audio.createBufferSource();
+        src.buffer = buf; src.connect(ask.audio.destination);
+        at = Math.max(at, ask.audio.currentTime + 0.05); src.start(at); at += buf.duration;
+        ask.srcs.push(src);
+        if (i === 0) askVoiceNote(`🔊 ${freeName()} · natural voice, free`, true);
+        continue;
+      }
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 501) ask.free = false;
+      why = d.error || `the free voice answered ${r.status}`;
+    } catch { why = 'the free voice didn\'t load on this phone'; }
+    if (n !== ask.sayN) return 'done';
+    // what's left is read by the phone, after what George already said
+    const rest = parts.slice(i).join(' ');
+    if (i && at > ask.audio.currentTime) await new Promise((res) => setTimeout(res, (at - ask.audio.currentTime) * 1000));
+    return { why, rest };
+  }
+  return 'done';
 }
 // the voice picker: the best phone voice (auto), every English voice the phone has, and Adam when the server has him
 function renderVoicePicker() {
   const sel = $('askVoiceSel');
   if (!sel) return;
   const vs = englishVoices(phoneVoices()), best = vs[0];
-  const opts = [['', `Auto${best ? `: ${best.name}` : ''} (free)`], ...vs.map((v) => [v.name, `${v.name} (${v.lang})`]), ...(ask.voice ? [['bot', 'Adam Stone · ElevenLabs (credits)']] : [])];
+  const opts = [['', ask.free ? `Auto: ${freeName()}, natural (free)` : `Auto${best ? `: ${best.name}` : ''} (free)`], ...(ask.free ? [['free', `${freeName()} · natural voice (free)`]] : []),
+    ...vs.map((v) => [v.name, `${v.name} · phone (${v.lang})`]), ...(ask.voice ? [['bot', 'Adam Stone · ElevenLabs (credits)']] : [])];
   const html = opts.map(([v, l]) => `<option value="${esc(v)}"${v === askVoicePref ? ' selected' : ''}>${esc(l)}</option>`).join('');
   setHTML(sel, html);
   sel.value = opts.some(([v]) => v === askVoicePref) ? askVoicePref : '';

@@ -271,6 +271,16 @@ Security:
 
 ## Version notes (newest first)
 
+### George, a natural free voice (v13.49)
+
+Ask now reads its answers in **George**, a warm British male voice that sounds like a person, not a robot, at **no per-character cost**. It's Kokoro (an open text-to-speech model, Apache-2.0) running on this server: no API, no credits, no account.
+
+- **How it runs** (`kokoro.js`, `ttsworker.js`, `freevoice.js`): at startup the server downloads the model once (177 MB, plus 28 MB of voices) from the kokoro-onnx release on GitHub into `DATA_DIR/kokoro`. Nothing is loaded until someone opens Ask. The model then runs in its own process, using about 0.65–0.85 GB of memory, and stops after 10 quiet minutes so that memory is given back. Opening the Ask sheet warms it up, so the first answer starts in about 4 seconds; later ones start sooner.
+- The phone sends the answer a sentence or two at a time (`/api/ask/say`) and plays the pieces back to back as they arrive, so it starts talking before the whole answer is read. On this machine the model reads about 2–3× faster than real time.
+- If the free voice is still downloading, off, or fails, the phone reads the answer in its own voice and says why. The Voice picker still offers the phone's voices and Adam Stone (ElevenLabs, uses credits).
+- Settings: `FREE_VOICE=off` turns it off. `KOKORO_VOICE` swaps the voice: `bm_lewis`, `bm_daniel`, `bm_fable` (British), or `am_michael`, `am_adam`, `am_puck`, `am_onyx` (American). `KOKORO_THREADS` (default 4) and `KOKORO_SPEED` (default 1) tune it.
+- New dependencies: `onnxruntime-node` and `phonemizer`. `.npmrc` skips onnxruntime's 700 MB GPU download, which this server doesn't use. Without a Railway volume, the model is downloaded again after each deploy (about 205 MB from GitHub, in the background).
+
 ### A free voice (v13.48.3)
 
 ElevenLabs' free plan can't use Voice Library voices (Adam Stone) through the API, so answers are now read in **your phone's own voice by default: free, unlimited, offline, no credits**. `pickVoice` (`public/ask.js`) picks the best English voice the phone has, British and male first, as the closest match to Adam: high-quality downloads (Premium / Enhanced) ahead of compact ones, joke voices never. Examples: Arthur or Daniel on iPhone, Google UK English Male on Android.
