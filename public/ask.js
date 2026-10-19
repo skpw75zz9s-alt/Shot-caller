@@ -1,4 +1,4 @@
-// Ask the bot (v13.47): a question, typed or spoken, answered from everything the app knows about the live round.
+// Ask the bot (v13.47): a typed question, answered from everything the app knows about the live round.
 // app.js gathers the facts (askFacts: plain numbers, nothing fetched here); this file picks what the question is about
 // and writes the answer: the bottom line first, then each part with its real numbers. Pure, so it is tested.
 // The server's AI deep dive (askai.js) reads the same facts; this is the answer when it's off or unreachable.
@@ -215,7 +215,7 @@ function bottomLine(f, asked) {
   return `${buyQ ? 'Not right now. ' : ''}${f.card?.label ? `${cap(f.card.label.toLowerCase())}.` : 'No call right now.'}`;
 }
 
-// the whole answer: { title, bottom, parts: [{ key, title, text }], speak, keys }
+// the whole answer: { title, bottom, parts: [{ key, title, text }], keys }
 export function answer(question, facts) {
   const f = facts || {};
   const { keys, deep, asked } = route(question);
@@ -229,10 +229,7 @@ export function answer(question, facts) {
     if (text) parts.push({ key: k, title: TITLES[k], text });
   }
   const tail = asked.includes('buy') || asked.includes('mine') ? 'These are the bot\'s reads, not financial advice: a likely side still loses sometimes.' : null;
-  // read aloud: the bottom line and the parts the question asked for (a deep dive: the first three)
-  const said = parts.filter((p) => asked.includes(p.key)).slice(0, 2);
-  const speak = [note, bottom, ...(said.length ? said : parts.slice(0, deep ? 3 : 1)).map((p) => p.text), tail].filter(Boolean).join(' ');
-  return { title: deep && !asked.length ? 'Deep dive' : asked.map((k) => TITLES[k]).slice(0, 2).join(' · ') || 'Deep dive', note, bottom, parts, tail, speak, keys };
+  return { title: deep && !asked.length ? 'Deep dive' : asked.map((k) => TITLES[k]).slice(0, 2).join(' · ') || 'Deep dive', note, bottom, parts, tail, keys };
 }
 
 // trim the facts the server's AI reads to what fits a short prompt (and never anything private: no keys, no codes)
@@ -244,63 +241,4 @@ export function factsForAI(f) {
   if (x.patterns?.recent) x.patterns.recent = x.patterns.recent.slice(0, 6);
   if (x.positions) x.positions = x.positions.slice(0, 6).map(({ ticker, side, price, contracts, bid }) => ({ ticker, side, price, contracts, bid }));
   return x;
-}
-
-// The phone's own voice, free and offline (v13.48.3): the best English voice it has, British and male first (the closest
-// to the bot's Adam Stone), high-quality downloads ahead of the compact ones, joke voices never. pref: a voice's name.
-const NAMED = [/google uk english male/i, /\barthur\b/i, /\bdaniel\b/i, /\boliver\b/i, /\bjamie\b/i, /\bmalcolm\b/i, /\bgeorge\b/i, /\bharry\b/i, /\bryan\b/i, /\bthomas\b/i];
-const NOVELTY = /\b(bad news|good news|bells|bubbles|cellos|organ|jester|superstar|wobble|boing|bahh|whisper|zarvox|trinoids|albert|fred|junior|ralph|kathy|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley|hysterical|deranged|pipe organ)\b/i;
-const FEMALE = /\b(female|samantha|serena|kate|stephanie|martha|karen|moira|tessa|fiona|victoria|allison|ava|susan|zoe|catherine|siri female|google uk english female|libby|sonia|maisie|hazel)\b/i;
-const usable = (v) => !!v && /^en/i.test(v.lang || '') && !NOVELTY.test(v.name || '');
-export function voiceScore(v) {
-  if (!usable(v)) return -Infinity;
-  const named = NAMED.findIndex((r) => r.test(v.name));
-  return (/premium/i.test(v.name) ? 40 : /enhanced|neural|natural|online/i.test(v.name) ? 25 : 0) + (/^en[-_]gb/i.test(v.lang) ? 15 : 0)
-    + (named >= 0 ? 20 - named : 0) + (FEMALE.test(v.name) ? -12 : 0) + (v.localService === false ? 2 : 0);
-}
-export function pickVoice(voices, pref = '') {
-  const list = (voices || []).filter(usable);
-  return (pref && list.find((v) => v.name === pref)) || list.sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
-}
-export const englishVoices = (voices) => (voices || []).filter(usable).sort((a, b) => voiceScore(b) - voiceScore(a));
-
-// an answer in pieces for the server's free voice (v13.49): the first piece alone so speech starts sooner, the rest
-// packed up to max characters. Pieces stay short because the voice's memory grows with each piece's length (about
-// 70 MB a second of speech on top of ~560 MB), so a long sentence is split at a comma, then between words; never at a
-// decimal point.
-export function speechChunks(text, max = 90) {
-  const units = [];
-  for (const sent of String(text || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean)) {
-    if (sent.length <= max) { units.push(sent); continue; }
-    for (const clause of sent.split(/(?<=[,;:—])\s+/)) {
-      if (clause.length <= max) { units.push(clause); continue; }
-      let cur = '';
-      for (const w of clause.split(' ')) {
-        for (let i = 0; i < w.length; i += max) { // a single "word" longer than max (no spaces) is cut
-          const part = w.slice(i, i + max);
-          if (cur && cur.length + part.length + 1 > max) { units.push(cur); cur = part; } else cur = cur ? `${cur} ${part}` : part;
-        }
-      }
-      if (cur) units.push(cur);
-    }
-  }
-  const out = [];
-  for (const u of units) {
-    const last = out[out.length - 1];
-    if (last && out.length > 1 && last.length + u.length + 1 <= max) out[out.length - 1] = `${last} ${u}`;
-    else out.push(u);
-  }
-  return out;
-}
-
-// "Hey Shot" (v13.50): hands-free. The phone's speech recognition hears everything while it's on; only what follows the
-// wake phrase is a question. Recognisers mishear "shot" (shop, shut, shout, chat…), so near misses count, but only right
-// after a greeting, so "a shot of espresso" mid-sentence never wakes it.
-const WAKE = /(?:(?:^|[\s,.!?])(?:hey|hay|hei|hi|hiya|okay|ok|yo|oi)|^\s*(?:a|eh))[\s,.!-]*(?:shot ?caller|shotcaller|shots?|shop|shut|shout|shoot|shote|shawt|chat|shirt|shalt)(?=$|[\s,.!?'])[\s,.!?:-]*/i;
-export function parseWake(transcript) {
-  const t = String(transcript || '').replace(/\s+/g, ' ').trim();
-  const m = WAKE.exec(` ${t}`);
-  if (!m) return { woke: false, question: '' };
-  const question = ` ${t}`.slice(m.index + m[0].length).replace(/^(?:can you|could you|please|tell me)?[\s,]*/i, (x) => (/tell me/i.test(x) ? 'tell me ' : '')).trim();
-  return { woke: true, question };
 }

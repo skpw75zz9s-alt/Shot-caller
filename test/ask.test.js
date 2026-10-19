@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answer, englishVoices, factsForAI, pickVoice, route } from '../public/ask.js';
+import { answer, factsForAI, route } from '../public/ask.js';
 
 const FACTS = {
   coin: 'BTC', digits: 0, crypto: true,
@@ -39,7 +39,6 @@ test('a buy question: bottom line first, the round call and its lean, a note tha
   assert.match(a.parts.find((p) => p.key === 'call').text, /locked UP at 74%.*never switches/);
   assert.match(a.parts.find((p) => p.key === 'line').text, /UP is winning by \$120 with 6:30 left.*1\.26 times.*81% of the time/);
   assert.match(a.tail, /not financial advice/);
-  assert.match(a.speak, /^Not a buy/);
 });
 
 test('a live buy call is a yes by the bot\'s rules; a bail says bail', () => {
@@ -92,37 +91,11 @@ test('the facts sent to the AI are trimmed copies, positions without anything ex
   assert.equal(f.moves.length, 9, 'the original is untouched');
 });
 
-test('the free phone voice: the best British male voice it has, never a joke voice, a picked one honoured', () => {
-  const iphone = [{ name: 'Samantha', lang: 'en-US' }, { name: 'Bad News', lang: 'en-US' }, { name: 'Daniel', lang: 'en-GB' }, { name: 'Arthur (Enhanced)', lang: 'en-GB' }, { name: 'Thomas', lang: 'fr-FR' }, { name: 'Karen', lang: 'en-AU' }];
-  assert.equal(pickVoice(iphone).name, 'Arthur (Enhanced)', 'a high-quality British male first');
-  assert.equal(pickVoice(iphone.filter((v) => !/Arthur/.test(v.name))).name, 'Daniel');
-  assert.equal(pickVoice(iphone, 'Samantha').name, 'Samantha', 'the one picked in the sheet');
-  assert.equal(pickVoice(iphone, 'Gone').name, 'Arthur (Enhanced)', 'a picked voice that is gone falls back to the best');
-  const android = [{ name: 'Google US English', lang: 'en-US' }, { name: 'Google UK English Female', lang: 'en-GB' }, { name: 'Google UK English Male', lang: 'en-GB' }];
-  assert.equal(pickVoice(android).name, 'Google UK English Male');
-  assert.deepEqual(englishVoices(iphone).map((v) => v.name).includes('Bad News'), false);
-  assert.equal(englishVoices(iphone).some((v) => v.lang.startsWith('fr')), false);
-  assert.equal(pickVoice([]), null);
-});
-
 test('with no flip check, the flip chance comes from how rounds at this cushion ended, not a rule of thumb', () => {
   const f = { ...FACTS, flip: null, round: { ...FACTS.round, minutesLeft: 0.33 }, line: { leadSide: 'UP', lead: 0.0003, move: 0.0004, ratio: 0.57, word: 'thin', razor: false, hist: { rate: 0.85, n: 98 } }, digits: 4 };
   const a = answer('Is the lead safe?', f);
   assert.match(a.parts.find((p) => p.key === 'flip').text, /held 85% of the time, so it flips about 15%/);
   assert.match(a.bottom, /15% chance it flips by the close\. Rounds like this finished UP 85%/);
-});
-
-test('"Hey Shot": the wake phrase (and its usual mishearings) wakes it, and what follows is the question', async () => {
-  const { parseWake } = await import('../public/ask.js');
-  assert.deepEqual(parseWake('hey shot is the lead safe'), { woke: true, question: 'is the lead safe' });
-  assert.deepEqual(parseWake('Hey, Shot. Should I buy?'), { woke: true, question: 'Should I buy?' });
-  assert.deepEqual(parseWake('hey shot'), { woke: true, question: '' }, 'just the wake phrase: it waits for the question');
-  assert.equal(parseWake('okay shop why is it moving').question, 'why is it moving');
-  assert.equal(parseWake('hey shotcaller will it flip').question, 'will it flip');
-  assert.equal(parseWake('so anyway hey shut give me a deep dive').question, 'give me a deep dive');
-  assert.equal(parseWake('hey shot can you tell me the record').question, 'tell me the record');
-  assert.equal(parseWake('a shot is the lead safe').question, 'is the lead safe', '"a shot" is a common mishearing, when it opens what was said');
-  for (const no of ['I need a shot of espresso', 'that was a good shot', 'shot caller', 'hey there', 'they shot it', '']) assert.equal(parseWake(no).woke, false, no);
 });
 
 test('odds are given for the side being called, and never as a flat 0% or 100%', () => {

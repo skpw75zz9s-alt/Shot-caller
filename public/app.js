@@ -32,13 +32,13 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
-import { answer as askAnswer, englishVoices, factsForAI, parseWake, pickVoice, speechChunks } from './ask.js';
+import { answer as askAnswer, factsForAI } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '198'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '199'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2047,7 +2047,7 @@ function renderBoard(live, sig, now) {
 
 $('sbList').addEventListener('toggle', (e) => { state.sbOpen = e.target.open; }, true); // stays open across re-renders
 
-// ---------- Ask the bot (public/ask.js, server askai.js): a question by voice or keyboard, answered from the live facts ----------
+// ---------- Ask the bot (public/ask.js, server askai.js): a typed question, answered from the live facts ----------
 // Everything here is what the Deck already worked out (the last render) and what the cards fetched: nothing new is guessed.
 function askFacts(now = Date.now()) {
   const a = state.askSnap, live = a?.live && Date.parse(a.live.m.close_time) > now ? a.live : null, sig = live ? a.sig : null, snap = a?.snap;
@@ -2116,149 +2116,16 @@ function askFacts(now = Date.now()) {
   return f;
 }
 
-const ask = { log: [], busy: false, ai: null, voice: null, free: false, freeVoice: null, rec: null, listening: false, audio: null, src: null, srcs: [], sayN: 0 };
-let askSpeak = store.get('askSpeak', true);
-const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-// the sheet opened and the free voice will read: have the server load it now, not when the first answer is ready
-function askWarm() {
-  if (askSpeak && ask.free && (askVoicePref === '' || askVoicePref === 'free')) fetch(`${API}/ask/say`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{"warm":true}' }).catch(() => {});
-}
+const ask = { log: [], busy: false, ai: null };
 function askOpen(on = true) {
   setHidden($('askSheet'), !on);
   document.body.classList.toggle('asking', on);
   if (on) {
-    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; ask.free = !!d?.free; ask.freeVoice = d?.freeVoice || null; askWarm(); renderVoicePicker(); renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
-    else askWarm();
-    renderVoicePicker();
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; renderAsk(); }).catch(() => { ask.ai = false; renderAsk(); });
     renderAsk();
-  } else { askStopListening(); askHush(); }
-}
-// The server's voice (voice.js, one chosen voice for every answer) when it's on, else the phone's own. Played through Web
-// Audio, unlocked on the tap that asked (askUnlock), so phones that block sound outside a tap still play it when it arrives.
-function askUnlock() {
-  try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) { ask.audio ||= new AC(); if (ask.audio.state === 'suspended') ask.audio.resume(); } } catch { /* no Web Audio */ }
-}
-function askHush() {
-  ask.sayN++;
-  for (const x of [ask.src, ...ask.srcs]) { try { x?.stop(); } catch { /* already done */ } }
-  ask.src = null; ask.srcs = []; ask.speakEnd = 0;
-  window.speechSynthesis?.cancel();
-}
-const sayable = (t) => t.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent').replace(/\s+/g, ' ').trim();
-// The voice (v13.49): the server's free natural voice by default (Kokoro, freevoice.js: no credits), else the phone's own
-// (the best British male voice it has, ask.js pickVoice), or Adam Stone through ElevenLabs when picked (uses credits)
-let askVoicePref = store.get('askVoice', ''); // '' = auto (the server's free voice, else the phone's best), 'free', 'bot' = ElevenLabs, else a phone voice's name
-const phoneVoices = () => { try { return window.speechSynthesis?.getVoices() || []; } catch { return []; } };
-function askSayLocal(text) {
-  if (!window.speechSynthesis) return null;
-  try {
-    // a sentence or two at a time: some phones cut a long utterance off partway, and short ones sound more natural
-    const v = pickVoice(phoneVoices(), askVoicePref === 'bot' || askVoicePref === 'free' ? '' : askVoicePref);
-    let named = null;
-    for (const part of speechChunks(text, 160)) {
-      const u = new SpeechSynthesisUtterance(part);
-      if (v) { try { u.voice = v; u.lang = v.lang; named = v.name; } catch { /* that voice can't be set here: the default reads it */ } }
-      u.rate = 1; u.pitch = 1;
-      window.speechSynthesis.speak(u);
-    }
-    return named || 'the default voice';
-  } catch { return null; } // no voice on this phone
-}
-// a basic voice read it: say where the phone's free natural (neural) voices are, once a session
-function voiceTip(name) {
-  if (ask.tipShown || /premium|enhanced|neural|natural|online|google/i.test(name || '')) return '';
-  ask.tipShown = true;
-  const ua = navigator.userAgent || '';
-  return /iPhone|iPad|iPod|Macintosh/.test(ua) ? '. For a natural free voice: Settings → Accessibility → Read & Speak → Voices → English → download one marked Premium (e.g. Arthur, UK), then pick it under Voice.'
-    : /Android/.test(ua) ? '. For a natural free voice: Settings → Text-to-speech → Google → install voice data → English (UK), then pick it under Voice.'
-    : '. Your device may have free natural voices to download in its speech settings.';
-}
-// which voice spoke the last answer, and why when it wasn't the one picked: shown under the input, never a silent switch
-function askVoiceNote(text, ok) { ask.voiceNote = { text, ok }; renderAsk(); }
-async function askSay(text) {
-  if (!askSpeak || !text) return;
-  askHush();
-  const n = ask.sayN, t = sayable(text);
-  let why = null;
-  if (askVoicePref === 'bot') {
-    why = !ask.voice ? (ask.voiceWhy || 'the bot\'s voice isn\'t set up on the server') : !ask.audio ? 'this browser can\'t play the bot\'s voice' : null;
-    if (!why) {
-      try {
-        if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
-        const r = await fetch(`${API}/ask/voice`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
-        if (r.ok) {
-          const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
-          if (n !== ask.sayN || !askSpeak) return; // a newer answer, mute or close came first
-          const src = ask.audio.createBufferSource();
-          src.buffer = buf; src.connect(ask.audio.destination); src.start();
-          ask.src = src; ask.speakEnd = ask.audio.currentTime + buf.duration;
-          askVoiceNote('🔊 Adam Stone (ElevenLabs, uses credits)', true);
-          return;
-        }
-        const d = await r.json().catch(() => ({}));
-        why = `${d.error || `the voice service answered ${r.status}`}${d.detail ? ` (${d.detail})` : ''}`;
-        // a refusal (plan, key, voice) won't fix itself this session: stop asking, so nothing is wasted on it
-        if (r.status !== 429) { ask.voice = false; ask.voiceWhy = why; }
-      } catch { why = 'the bot\'s voice didn\'t load or play on this phone'; }
-      if (n !== ask.sayN) return;
-    }
+    if (!ask.log.length) $('askInput').focus({ preventScroll: true });
   }
-  let rest = t, whose = 'Adam';
-  if (askVoicePref === 'free' || (askVoicePref === '' && ask.free)) {
-    whose = freeName();
-    const out = await askSayFree(text, n);
-    if (out === 'done' || n !== ask.sayN) return;
-    why = out.why; rest = out.rest ? sayable(out.rest) : t;
-  }
-  const used = askSayLocal(rest);
-  askVoiceNote(!used ? 'This browser has no voice to read with.' : why ? `Phone voice (${used}), not ${whose}: ${why}` : `🔊 ${used} · your phone's voice, free${voiceTip(used)}`, !why && !!used);
 }
-// the server's free voice: the answer a piece at a time, each fetched while the one before plays, queued back to back
-const freeName = () => { const v = ask.freeVoice || 'bm_george'; return v.slice(3, 4).toUpperCase() + v.slice(4); };
-async function askSayFree(text, n) {
-  const parts = speechChunks(text);
-  if (!ask.audio || !parts.length) return { why: 'this browser can\'t play the server\'s voice', rest: text };
-  if (ask.audio.state === 'suspended') await ask.audio.resume().catch(() => {});
-  let at = 0;
-  for (let i = 0; i < parts.length; i++) {
-    let why = null;
-    try {
-      const r = await fetch(`${API}/ask/say`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: parts[i] }) });
-      if (r.ok) {
-        const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
-        if (n !== ask.sayN || !askSpeak) return 'done'; // a newer answer, mute or close came first
-        const src = ask.audio.createBufferSource();
-        src.buffer = buf; src.connect(ask.audio.destination);
-        at = Math.max(at, ask.audio.currentTime + 0.05); src.start(at); at += buf.duration; ask.speakEnd = at;
-        ask.srcs.push(src);
-        if (i === 0) askVoiceNote(`🔊 ${freeName()} · natural voice, free`, true);
-        continue;
-      }
-      const d = await r.json().catch(() => ({}));
-      if (r.status === 501) ask.free = false;
-      why = d.error || `the free voice answered ${r.status}`;
-    } catch { why = 'the free voice didn\'t load on this phone'; }
-    if (n !== ask.sayN) return 'done';
-    // what's left is read by the phone, after what George already said
-    const rest = parts.slice(i).join(' ');
-    if (i && at > ask.audio.currentTime) await new Promise((res) => setTimeout(res, (at - ask.audio.currentTime) * 1000));
-    return { why, rest };
-  }
-  return 'done';
-}
-// the voice picker: the best phone voice (auto), every English voice the phone has, and Adam when the server has him
-function renderVoicePicker() {
-  const sel = $('askVoiceSel');
-  if (!sel) return;
-  const vs = englishVoices(phoneVoices()), best = vs[0];
-  const opts = [['', ask.free ? `Auto: ${freeName()}, natural (free)` : `Auto${best ? `: ${best.name}` : ''} (free)`], ...(ask.free ? [['free', `${freeName()} · natural voice (free)`]] : []),
-    ...vs.map((v) => [v.name, `${v.name} · phone (${v.lang})`]), ...(ask.voice ? [['bot', 'Adam Stone · ElevenLabs (credits)']] : [])];
-  const html = opts.map(([v, l]) => `<option value="${esc(v)}"${v === askVoicePref ? ' selected' : ''}>${esc(l)}</option>`).join('');
-  setHTML(sel, html);
-  sel.value = opts.some(([v]) => v === askVoicePref) ? askVoicePref : '';
-}
-window.speechSynthesis?.addEventListener?.('voiceschanged', () => renderVoicePicker());
-$('askVoiceSel')?.addEventListener('change', (e) => { askVoicePref = e.target.value; store.set('askVoice', askVoicePref); askUnlock(); askSay('This is the voice your answers will be read in.'); });
 async function askQuestion(q) {
   q = String(q || '').trim();
   if (!q || ask.busy) return;
@@ -2267,49 +2134,25 @@ async function askQuestion(q) {
   ask.log.unshift(item); if (ask.log.length > 20) ask.log.length = 20;
   $('askInput').value = '';
   renderAsk();
-  if (item.aiState === 'off') { askSay(built.speak); return; }
+  if (item.aiState === 'off') return;
   ask.busy = true;
   try {
     const history = ask.log.slice(1, 4).reverse().filter((x) => x.ai).map((x) => ({ q: x.q, a: x.ai }));
     const r = await fetch(`${API}/ask`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q, facts: factsForAI(facts), history }) });
     paywalled(r);
     const d = await r.json().catch(() => ({}));
-    if (r.status === 501) { ask.ai = false; item.aiState = 'off'; askSay(built.speak); }
-    else if (r.ok && d.answer) { item.ai = d.answer; item.aiState = 'done'; askSay(d.answer); }
-    else { item.aiState = 'error'; item.aiErr = d.error || `The AI couldn't answer (${r.status}).`; askSay(built.speak); }
+    if (r.status === 501) { ask.ai = false; item.aiState = 'off'; }
+    else if (r.ok && d.answer) { item.ai = d.answer; item.aiState = 'done'; }
+    else { item.aiState = 'error'; item.aiErr = d.error || `The AI couldn't answer (${r.status}).`; }
   } catch {
-    item.aiState = 'error'; item.aiErr = 'Couldn\'t reach the server. Here\'s the built-in answer.'; askSay(built.speak);
+    item.aiState = 'error'; item.aiErr = 'Couldn\'t reach the server. Here\'s the built-in answer.';
   } finally { ask.busy = false; renderAsk(); }
 }
-function askListen() {
-  if (!SpeechRec) { $('askInput').focus(); toast('Voice input isn\'t built into this browser: tap the mic on your keyboard to dictate.'); return; }
-  if (ask.listening) { askStopListening(); return; }
-  askHush();
-  const rec = new SpeechRec();
-  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-  let finalText = '';
-  rec.onresult = (e) => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) finalText += t; else interim += t; }
-    $('askInput').value = (finalText + interim).trim();
-  };
-  rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Microphone blocked: allow it for this site in your browser settings, or type the question.'); else if (e.error !== 'no-speech' && e.error !== 'aborted') toast('Didn\'t catch that. Try again or type it.'); };
-  rec.onend = () => { ask.listening = false; ask.rec = null; renderAsk(); const t = finalText.trim() || $('askInput').value.trim(); if (t) askQuestion(t); };
-  try { rec.start(); ask.rec = rec; ask.listening = true; renderAsk(); } catch { ask.listening = false; }
-}
-function askStopListening() { try { ask.rec?.stop(); } catch { /* already stopped */ } }
 function renderAsk() {
   if ($('askSheet').hidden) return;
-  const mic = $('askMic');
-  mic.classList.toggle('on', ask.listening);
-  mic.setAttribute('aria-pressed', String(ask.listening));
-  mic.setAttribute('aria-label', ask.listening ? 'Stop listening' : 'Ask by voice');
-  setText($('askHint'), ask.listening ? 'Listening… ask about the round' : ask.voiceNote?.text ?? `Ask about ${MKT.key}'s live round: tap the mic or type`);
-  setClass($('askHint'), `ask-hint${ask.voiceNote && !ask.voiceNote.ok ? ' warn' : ''}`);
+  setText($('askHint'), `Ask about ${MKT.key}'s live round`);
   setText($('askMode'), ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '');
-  $('askSpeak').setAttribute('aria-pressed', String(askSpeak));
-  setText($('askSpeak'), askSpeak ? '🔊 Read aloud' : '🔇 Muted');
-  $('askChips').classList.toggle('used', ask.log.length > 0); // after the first question only the voice test stays
+  setHidden($('askChips'), ask.log.length > 0);
   setHTML($('askLog'), ask.log.map((x) => {
     const b = x.built, ago = Math.round((Date.now() - x.at) / 60000);
     const ai = x.aiState === 'done' ? `<div class="ask-ai"><span class="ask-tag">AI deep dive</span>${x.ai.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`
@@ -2321,86 +2164,11 @@ function renderAsk() {
       + (x.aiState === 'done' ? `<details class="ask-nums"><summary>The numbers behind it</summary>${nums}</details>` : `<div class="ask-nums">${nums}</div>`) + '</article>';
   }).join(''));
 }
-$('askBtn').addEventListener('click', () => { askUnlock(); askOpen($('askSheet').hidden); });
+$('askBtn').addEventListener('click', () => askOpen($('askSheet').hidden));
 $('askClose').addEventListener('click', () => askOpen(false));
-$('askMic').addEventListener('click', () => { askUnlock(); askListen(); });
-$('askForm').addEventListener('submit', (e) => { e.preventDefault(); askUnlock(); askStopListening(); askQuestion($('askInput').value); });
-$('askChips').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-q], button[data-say]'); if (!b) return;
-  askUnlock();
-  if (b.dataset.say) { if (!askSpeak) { askSpeak = true; store.set('askSpeak', true); } askSay(b.dataset.say); } else askQuestion(b.dataset.q);
-});
-$('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) askHush(); renderAsk(); });
+$('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion($('askInput').value); });
+$('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
-
-// ---------- "Hey Shot" (v13.50): hands-free, anywhere in the app ----------
-// While it's on, the phone's speech recognition listens (only while the app is open and in front, and never while the
-// bot is talking, so it doesn't hear itself). "Hey Shot, is the lead safe?" asks; a bare "Hey Shot" chimes and takes
-// the next thing said as the question. Recognisers stop on their own after a pause, so a loop keeps it going.
-const wake = { on: store.get('wakeOn', false), rec: null, running: false, armedUntil: 0, fails: 0 };
-const speakingNow = () => !!window.speechSynthesis?.speaking || !!(ask.audio && (ask.speakEnd || 0) > ask.audio.currentTime);
-const wakeWanted = () => wake.on && !!SpeechRec && !document.hidden && !ask.listening && !speakingNow();
-function wakeStart() {
-  if (wake.running || !wakeWanted()) return;
-  const rec = new SpeechRec();
-  rec.lang = navigator.language || 'en-US'; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 1;
-  rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) { wake.fails = 0; wakeHeard(e.results[i][0].transcript); } };
-  rec.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wakeSet(false); toast('Hey Shot needs the microphone: allow it for this site, then turn it on again in Ask.'); }
-    else if (e.error !== 'no-speech' && e.error !== 'aborted') wake.fails++;
-  };
-  rec.onend = () => { if (wake.rec === rec) { wake.rec = null; wake.running = false; renderWake(); } };
-  try { rec.start(); wake.rec = rec; wake.running = true; } catch { wake.fails++; }
-  renderWake();
-}
-function wakeStop() { const r = wake.rec; wake.rec = null; wake.running = false; try { r?.abort(); } catch { /* already stopped */ } renderWake(); }
-setInterval(() => {
-  if (wakeWanted()) { if (!wake.running && wake.fails < 6) wakeStart(); }
-  else if (wake.running) wakeStop();
-  if (wake.on && wake.fails >= 6) { wakeSet(false); toast('Hey Shot stopped: speech recognition kept failing on this browser. Try again later, or tap the mic.'); }
-}, 700);
-function wakeChime() {
-  try {
-    const a = ask.audio, o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
-    o.frequency.setValueAtTime(660, t); o.frequency.setValueAtTime(990, t + 0.09);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.24);
-  } catch { /* no sound: the sheet still shows it heard */ }
-}
-function wakeAsk(q) { if ($('askSheet').hidden) askOpen(true); askQuestion(q); }
-function wakeHeard(text) {
-  const now = Date.now(), w = parseWake(text);
-  if (w.woke && w.question.length > 1) { wake.armedUntil = 0; wakeAsk(w.question); return; }
-  if (w.woke) { // just the wake phrase: chime, and the next thing said is the question
-    wake.armedUntil = now + 8000;
-    if ($('askSheet').hidden) askOpen(true);
-    wakeChime(); askVoiceNote('👂 Yes? Ask your question…', true);
-    return;
-  }
-  if (now < wake.armedUntil && text.trim().length > 1) { wake.armedUntil = 0; wakeAsk(text.trim()); }
-}
-function wakeSet(on) {
-  wake.on = !!on && !!SpeechRec; wake.fails = 0; wake.armedUntil = 0;
-  store.set('wakeOn', wake.on);
-  if (!wake.on) wakeStop();
-  renderWake();
-}
-function renderWake() {
-  const b = $('askWake'), btn = $('askBtn');
-  btn?.classList.toggle('wake-on', wake.on); btn?.classList.toggle('wake-live', wake.running);
-  if (!b) return;
-  b.setAttribute('aria-pressed', String(wake.on));
-  setText(b, !SpeechRec ? '👂 Hey Shot: not on this browser' : wake.on ? (wake.running ? '👂 Hey Shot: listening' : '👂 Hey Shot: on') : '👂 Hey Shot: off');
-  b.disabled = !SpeechRec;
-}
-$('askWake')?.addEventListener('click', () => {
-  askUnlock();
-  const on = !wake.on;
-  wakeSet(on);
-  if (on) toast('Hey Shot is on: say "Hey Shot" and a question anywhere in the app. It listens only while the app is open (through your browser\'s speech service) and never while it\'s talking.');
-});
-document.addEventListener('visibilitychange', () => { if (document.hidden) wakeStop(); });
-renderWake();
 
 // ---------- Simple mode ----------
 function applyMode() {

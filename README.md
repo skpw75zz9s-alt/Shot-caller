@@ -271,6 +271,14 @@ Security:
 
 ## Version notes (newest first)
 
+### Ask, typed (v13.51)
+
+**All voice features are removed for now.** Ask is typed only: tap the chat button up top, type a question or tap a suggestion, and read the answer (the built-in deep dive, plus the AI one if `ANTHROPIC_API_KEY` is set).
+
+- Gone: the mic, Hey Shot, reading answers aloud, the voice picker, the server-run voice (George / Kokoro: `freevoice.js`, `ttsworker.js`, `kokoro.js`), Adam Stone via ElevenLabs (`voice.js`), and their routes (`/api/ask/say`, `/api/ask/voice`). The `onnxruntime-node` and `phonemizer` dependencies and `.npmrc` are removed too, so the server installs only `@anthropic-ai/sdk` again.
+- Nothing about voice runs, downloads or listens. Railway variables that are no longer read: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`, `FREE_VOICE`, `KOKORO_*`.
+- The voice notes below (v13.47–v13.50.2) are history. That code is in git (up to commit e8da382) if voice comes back.
+
 ### The free voice (v13.50.2)
 
 The voice now costs nothing anywhere by default: **answers are read by the phone's own voice**, with no server memory, no downloads and no credits. George, the server-run voice, is **off unless `FREE_VOICE=on`** is set in Railway, because it holds about 0.56 GB of memory while loaded and about 1.1 GB at its peak while reading.

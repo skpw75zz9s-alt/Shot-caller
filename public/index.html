@@ -92,7 +92,7 @@
   <div id="fx" class="fx" hidden aria-live="polite"></div>
   <header>
     <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span>Shot<em>Caller</em> <select id="mktPick" class="tag mkt-pick" aria-label="Kalshi market"><option>BTC · 15m</option></select></h1>
-    <div class="hdr-r"><button type="button" id="askBtn" class="ask-btn" aria-label="Ask the bot" title="Ask the bot about the market, by voice or text"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg><span>Ask</span></button><button type="button" id="modeBtn" class="mode-btn" aria-pressed="false" title="Simple shows just the call; Pro shows everything">Simple</button><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
+    <div class="hdr-r"><button type="button" id="askBtn" class="ask-btn" aria-label="Ask the bot" title="Ask the bot about the market"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A2.5 2.5 0 0 1 4 13.5z"/></svg><span>Ask</span></button><button type="button" id="modeBtn" class="mode-btn" aria-pressed="false" title="Simple shows just the call; Pro shows everything">Simple</button><button type="button" id="splitBtn" class="split-btn" hidden aria-label="Split screen" title="Split screen"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M12 3v18M3 12h18"/></svg></button><span id="status" class="dot" title="connection"></span></div>
     <div id="splitMenu" class="split-menu" hidden></div>
   </header>
   <div class="ticker" id="ticker">
@@ -606,12 +606,12 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.50.2 · The free voice</p>
+      <p class="fine" id="version">Shot Caller v13.51 · Ask, typed</p>
     </section>
   </main>
 
   <section id="askSheet" class="ask-sheet" hidden role="dialog" aria-modal="false" aria-labelledby="askTitle">
-    <div class="ask-head"><h2 id="askTitle">Ask the bot</h2><span id="askMode" class="ask-mode"></span><button type="button" id="askSpeak" class="ask-speak" aria-pressed="true">🔊 Read aloud</button><button type="button" id="askClose" class="ask-x" aria-label="Close">✕</button></div>
+    <div class="ask-head"><h2 id="askTitle">Ask the bot</h2><span id="askMode" class="ask-mode"></span><button type="button" id="askClose" class="ask-x" aria-label="Close">✕</button></div>
     <div id="askChips" class="ask-chips">
       <button type="button" data-q="Should I buy right now?">Should I buy?</button>
       <button type="button" data-q="Is the lead safe?">Is the lead safe?</button>
@@ -619,13 +619,9 @@
       <button type="button" data-q="Will it flip?">Will it flip?</button>
       <button type="button" data-q="Any patterns on the chart?">Chart patterns?</button>
       <button type="button" data-q="Give me a deep dive on this round">Deep dive</button>
-      <button type="button" data-say="Shot Caller here. This is the voice your answers will be read in." class="ask-test">🔊 Test the voice</button>
-      <button type="button" id="askWake" class="ask-wake" aria-pressed="false">👂 Hey Shot: off</button>
-      <label class="ask-vsel">Voice <select id="askVoiceSel" aria-label="The voice answers are read in"><option value="">Auto (free)</option></select></label>
     </div>
     <div id="askLog" class="ask-log" aria-live="polite"></div>
     <form id="askForm" class="ask-form" autocomplete="off">
-      <button type="button" id="askMic" class="ask-mic" aria-pressed="false" aria-label="Ask by voice"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button>
       <input id="askInput" type="text" enterkeyhint="send" maxlength="500" placeholder="Ask about the round…" aria-label="Your question">
       <button type="submit" class="ask-go">Ask</button>
     </form>
@@ -647,7 +643,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '198';
+    window.SC_BUILD = '199';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

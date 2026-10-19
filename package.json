@@ -15,8 +15,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "0.135.0",
-    "onnxruntime-node": "1.20.1",
-    "phonemizer": "1.2.1"
+    "@anthropic-ai/sdk": "0.135.0"
   }
 }
