@@ -17,7 +17,7 @@ import { createMarketWatch } from './marketwatch.js';
 import { createFutures } from './futures.js';
 import { createMicroFeed } from './microfeed.js';
 import { createFlowsFeed } from './flowsfeed.js';
-import { liqSummary, positioning } from './public/insiders.js';
+import { createInsiderFeed } from './insiderfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
@@ -92,6 +92,8 @@ export const volTuneFeed = createVolTuneFeed({ playbook });
 export const flipFeed = createFlipFeed({ playbook, scanFeed });
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
 // money flows: spot-ETF flows, stablecoin supply and whale transfers, on probation until proven (flowsfeed.js)
+// insider traders: the SEC's Form 4 filings for the companies tied to the markets, read only while the Insiders tab is open (insiderfeed.js)
+export const insiderFeed = createInsiderFeed({ file: join(DATA_DIR, 'insiders.json') });
 export const flowsFeed = createFlowsFeed({ asset: ASSETS.find((a) => a.key === 'BTC'), file: join(DATA_DIR, 'flows.json'), prices: { candleRows: (...a) => prices.candleRows(...a) }, playbook }); // prices is made further down
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'), tuned: () => tuneUp.get(HOME.series),
@@ -269,7 +271,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([tuneUp.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([tuneUp.load(), flowsFeed.load(), insiderFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -301,7 +303,7 @@ const PAYWALL_HDR = { 'x-paywall': '1' };
 // a market the server may start a bot for: one Kalshi lists (discovery.js), never any name a request makes up (v13.43.2)
 const listedSeries = (s) => typeof s === 'string' && /^[A-Z0-9]+$/.test(s) && discovery.list().some((m) => m.series === s);
 // the answers that belong to one market's own bot and readers (asked with ?m=SERIES)
-const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|flows|insiders|learn|index)$/;
+const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|flows|learn|index)$/;
 function send(res, status, body, type = 'application/json', headers = {}) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -493,10 +495,8 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/tune') return send(res, 200, mTune.api());
     if (path === '/api/flip') return send(res, 200, mFlip.api()); // the flip check (flipfeed.js)
     if (path === '/api/voltune') return send(res, 200, mVol.api());
-    if (path === '/api/insiders') { // the Insiders tab: liquidations, futures positioning and the money flows (public/insiders.js)
-      const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, fl = ms ? ms.flowsFeed : flowsFeed, now = Date.now();
-      return send(res, 200, { crypto: !!fl, liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, flows: fl ? fl.api(now) : null, at: now });
-    }
+    // the Insiders tab: insider trades at the companies tied to this market, then the rest (one reader for every market)
+    if (path === '/api/insiders') return send(res, 200, { ...insiderFeed.api(marketOf(mq || HOME.series, discovery.list())), at: Date.now() });
     if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)
     if (path === '/api/learn') return send(res, 200, { learned: { ...mb.learned(), fees: feeBook.rates(), volTune: mVol.live() }, status: { ...mb.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } }, market: mb.market() });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset

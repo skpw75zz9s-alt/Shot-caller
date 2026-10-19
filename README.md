@@ -73,7 +73,7 @@ Nine tabs along the bottom (Simple mode hides Radar, Insiders and Learn):
   - The Deck's "Bot record" tile shows it too.
   - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
 - **Map.** The map to success: your stats, the road from first call to steady results with a tip per step, and the coach.
-- **Insiders.** Where the big money is moving: big Kalshi orders, exchange whales, liquidations, futures positioning, on-chain transfers and fund flows (see v13.54).
+- **Insiders.** Insider traders: executives, directors and 10% owners buying and selling their own company's stock, from their SEC Form 4 filings, for the companies tied to the market (see v13.55).
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 
@@ -276,17 +276,25 @@ Security:
 
 ## Version notes (newest first)
 
-### Insiders (v13.54)
+### Insider traders (v13.55)
 
-A new **Insiders** tab (Pro) shows where the big money is moving, in one place. Each card says how the bot uses it; none of it is a call by itself.
+The **Insiders** tab (Pro) is now about insider traders: company executives, directors and 10% owners trading their own company's stock. By law they report each trade to the SEC on a **Form 4**, usually within two business days, and the SEC publishes the filings free on EDGAR.
 
-- **Big money on Kalshi:** this round's UP vs DOWN dollars and its biggest orders, from the Kalshi trades the phone already polls. Context only, since the bot already prices the round from Kalshi's quotes. Every market gets this card.
-- **Whale trades on exchanges:** the last hour's whale trades across the coin's exchanges (your whale size from Alerts), bought vs sold. They feed the Round scan and whale alerts.
-- **Forced closes · liquidations:** the last 30 minutes of longs and shorts force-closed, biggest first. Longs liquidated is forced selling; shorts liquidated is a squeeze up. An input to the Round scan.
-- **Futures positioning:** funding (who's paying whom, and how crowded), open interest over 5 minutes and the perp premium, in plain words (Hyperliquid).
-- **On-chain whales:** Whale Alert's $500k+ transfers onto, off and between exchanges in the last hour (with `WHALE_ALERT_API_KEY`).
-- **Fund flows:** the last 10 days of spot-ETF net flows (Farside: BTC, ETH, SOL) and the stablecoin supply's 7-day change (DefiLlama).
-- Built from `public/insiders.js` (pure summaries) and `/api/insiders` (liquidations, positioning and the money flows for the market). It refreshes while the tab is on screen: the phone's own data every 2 seconds, the server's every 15. Non-crypto markets show the Kalshi card only.
+- **Which companies:** the ones tied to your market come first; the other groups fold underneath.
+
+  | Market | Companies |
+  |---|---|
+  | Crypto (BTC, ETH, SOL, XRP, DOGE) | Strategy (MSTR), Coinbase, Robinhood, Marathon, Riot, CleanSpark |
+  | S&P 500, Nasdaq-100, Dow | Apple, Microsoft, Nvidia, Amazon, Alphabet, Meta, Tesla, Broadcom, JPMorgan |
+  | Gold, silver | Newmont, Agnico Eagle, Wheaton, Franco-Nevada, Pan American Silver |
+  | Oil | Exxon, Chevron, ConocoPhillips, Occidental, EOG |
+
+- **What it shows for each group (last 90 days):** open-market buys vs sales in dollars, in plain words; how much of the selling was under a pre-set **10b5-1 plan**; **cluster buys** (two or more insiders of one company buying within 30 days); the newest trades (date, company, insider and title, shares, price, dollars, plan); and buys and sales per company.
+- **Only trades by choice:** open-market buys (code P) and sales (code S). Grants, option exercises, tax withholding and gifts are left out.
+- **Context only, not in the calls:** a Form 4 arrives up to two business days after the trade, and insider buying tends to play out over weeks or months, not a 15-minute round. Buys are the clearer signal; insiders sell for many reasons.
+- **Costs nothing while nobody looks:** the server (`insiderfeed.js`, one reader for every market) reads EDGAR only when someone opens the tab and the data is over 30 minutes old. It reads each company's filing list and only the Form 4s it hasn't read, at most 4 requests a second (the SEC allows 10), and keeps 180 days of trades in `insiders.json` in `DATA_DIR`. The first read after a deploy takes a minute or two.
+- **Set `SEC_USER_AGENT` in Railway** to a name and a contact email (for example `Shot Caller you@example.com`). The SEC asks every program reading EDGAR to name one and may refuse those that don't; the tab says so if it does. `INSIDERS=off` turns the reader off.
+- Built from `public/insiders.js` (the Form 4 parser and the summaries, pure) and `/api/insiders`. The v13.54 cards (big Kalshi orders, exchange whales, liquidations, futures positioning, on-chain transfers, fund flows) are gone from this tab; the money flows stay on the Signal board (v13.53), and liquidations, whales and positioning still feed the Round scan and alerts.
 
 ### Money flows (v13.53)
 
