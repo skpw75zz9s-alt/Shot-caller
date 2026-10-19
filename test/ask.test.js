@@ -111,3 +111,16 @@ test('with no flip check, the flip chance comes from how rounds at this cushion 
   assert.match(a.parts.find((p) => p.key === 'flip').text, /held 85% of the time, so it flips about 15%/);
   assert.match(a.bottom, /15% chance it flips by the close\. Rounds like this finished UP 85%/);
 });
+
+test('"Hey Shot": the wake phrase (and its usual mishearings) wakes it, and what follows is the question', async () => {
+  const { parseWake } = await import('../public/ask.js');
+  assert.deepEqual(parseWake('hey shot is the lead safe'), { woke: true, question: 'is the lead safe' });
+  assert.deepEqual(parseWake('Hey, Shot. Should I buy?'), { woke: true, question: 'Should I buy?' });
+  assert.deepEqual(parseWake('hey shot'), { woke: true, question: '' }, 'just the wake phrase: it waits for the question');
+  assert.equal(parseWake('okay shop why is it moving').question, 'why is it moving');
+  assert.equal(parseWake('hey shotcaller will it flip').question, 'will it flip');
+  assert.equal(parseWake('so anyway hey shut give me a deep dive').question, 'give me a deep dive');
+  assert.equal(parseWake('hey shot can you tell me the record').question, 'tell me the record');
+  assert.equal(parseWake('a shot is the lead safe').question, 'is the lead safe', '"a shot" is a common mishearing, when it opens what was said');
+  for (const no of ['I need a shot of espresso', 'that was a good shot', 'shot caller', 'hey there', 'they shot it', '']) assert.equal(parseWake(no).woke, false, no);
+});

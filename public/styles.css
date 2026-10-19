@@ -1131,3 +1131,13 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .ask-vsel { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: 600 11px var(--mono); }
 .ask-vsel select { width: auto; max-width: 190px; margin: 0; height: 32px; padding: 0 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line-2); color: var(--text); font: 500 12px var(--sans); text-overflow: ellipsis; }
 .ask-chips.used .ask-vsel { display: inline-flex; }
+/* Hey Shot (v13.50): the switch in the sheet, and a dot on the header mic while it's on (pulsing while it listens) */
+.ask-chips .ask-wake { border-color: #2ee6a655; background: #2ee6a60f; }
+.ask-chips .ask-wake[aria-pressed="true"] { color: var(--yes); border-color: var(--yes); background: #2ee6a61f; }
+.ask-chips .ask-wake:disabled { opacity: .5; }
+.ask-chips.used .ask-wake { display: inline-block; }
+.ask-btn { position: relative; }
+.ask-btn.wake-on::after { content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--yes); border: 2px solid var(--bg); }
+.ask-btn.wake-live::after { animation: wakeDot 1.6s infinite; }
+@keyframes wakeDot { 0% { box-shadow: 0 0 0 0 #2ee6a699; } 70% { box-shadow: 0 0 0 7px #2ee6a600; } 100% { box-shadow: 0 0 0 0 #2ee6a600; } }
+@media (prefers-reduced-motion: reduce) { .ask-btn.wake-live::after { animation: none; } }

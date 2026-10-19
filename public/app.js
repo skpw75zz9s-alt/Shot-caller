@@ -32,13 +32,13 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
-import { answer as askAnswer, englishVoices, factsForAI, pickVoice, speechChunks } from './ask.js';
+import { answer as askAnswer, englishVoices, factsForAI, parseWake, pickVoice, speechChunks } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '195'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '196'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2141,7 +2141,7 @@ function askUnlock() {
 function askHush() {
   ask.sayN++;
   for (const x of [ask.src, ...ask.srcs]) { try { x?.stop(); } catch { /* already done */ } }
-  ask.src = null; ask.srcs = [];
+  ask.src = null; ask.srcs = []; ask.speakEnd = 0;
   window.speechSynthesis?.cancel();
 }
 const sayable = (t) => t.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent').replace(/\s+/g, ' ').trim();
@@ -2178,7 +2178,7 @@ async function askSay(text) {
           if (n !== ask.sayN || !askSpeak) return; // a newer answer, mute or close came first
           const src = ask.audio.createBufferSource();
           src.buffer = buf; src.connect(ask.audio.destination); src.start();
-          ask.src = src;
+          ask.src = src; ask.speakEnd = ask.audio.currentTime + buf.duration;
           askVoiceNote('🔊 Adam Stone (ElevenLabs, uses credits)', true);
           return;
         }
@@ -2216,7 +2216,7 @@ async function askSayFree(text, n) {
         if (n !== ask.sayN || !askSpeak) return 'done'; // a newer answer, mute or close came first
         const src = ask.audio.createBufferSource();
         src.buffer = buf; src.connect(ask.audio.destination);
-        at = Math.max(at, ask.audio.currentTime + 0.05); src.start(at); at += buf.duration;
+        at = Math.max(at, ask.audio.currentTime + 0.05); src.start(at); at += buf.duration; ask.speakEnd = at;
         ask.srcs.push(src);
         if (i === 0) askVoiceNote(`🔊 ${freeName()} · natural voice, free`, true);
         continue;
@@ -2319,6 +2319,75 @@ $('askChips').addEventListener('click', (e) => {
 });
 $('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) askHush(); renderAsk(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
+
+// ---------- "Hey Shot" (v13.50): hands-free, anywhere in the app ----------
+// While it's on, the phone's speech recognition listens (only while the app is open and in front, and never while the
+// bot is talking, so it doesn't hear itself). "Hey Shot, is the lead safe?" asks; a bare "Hey Shot" chimes and takes
+// the next thing said as the question. Recognisers stop on their own after a pause, so a loop keeps it going.
+const wake = { on: store.get('wakeOn', false), rec: null, running: false, armedUntil: 0, fails: 0 };
+const speakingNow = () => !!window.speechSynthesis?.speaking || !!(ask.audio && (ask.speakEnd || 0) > ask.audio.currentTime);
+const wakeWanted = () => wake.on && !!SpeechRec && !document.hidden && !ask.listening && !speakingNow();
+function wakeStart() {
+  if (wake.running || !wakeWanted()) return;
+  const rec = new SpeechRec();
+  rec.lang = navigator.language || 'en-US'; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 1;
+  rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) { wake.fails = 0; wakeHeard(e.results[i][0].transcript); } };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wakeSet(false); toast('Hey Shot needs the microphone: allow it for this site, then turn it on again in Ask.'); }
+    else if (e.error !== 'no-speech' && e.error !== 'aborted') wake.fails++;
+  };
+  rec.onend = () => { if (wake.rec === rec) { wake.rec = null; wake.running = false; renderWake(); } };
+  try { rec.start(); wake.rec = rec; wake.running = true; } catch { wake.fails++; }
+  renderWake();
+}
+function wakeStop() { const r = wake.rec; wake.rec = null; wake.running = false; try { r?.abort(); } catch { /* already stopped */ } renderWake(); }
+setInterval(() => {
+  if (wakeWanted()) { if (!wake.running && wake.fails < 6) wakeStart(); }
+  else if (wake.running) wakeStop();
+  if (wake.on && wake.fails >= 6) { wakeSet(false); toast('Hey Shot stopped: speech recognition kept failing on this browser. Try again later, or tap the mic.'); }
+}, 700);
+function wakeChime() {
+  try {
+    const a = ask.audio, o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
+    o.frequency.setValueAtTime(660, t); o.frequency.setValueAtTime(990, t + 0.09);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.24);
+  } catch { /* no sound: the sheet still shows it heard */ }
+}
+function wakeAsk(q) { if ($('askSheet').hidden) askOpen(true); askQuestion(q); }
+function wakeHeard(text) {
+  const now = Date.now(), w = parseWake(text);
+  if (w.woke && w.question.length > 1) { wake.armedUntil = 0; wakeAsk(w.question); return; }
+  if (w.woke) { // just the wake phrase: chime, and the next thing said is the question
+    wake.armedUntil = now + 8000;
+    if ($('askSheet').hidden) askOpen(true);
+    wakeChime(); askVoiceNote('👂 Yes? Ask your question…', true);
+    return;
+  }
+  if (now < wake.armedUntil && text.trim().length > 1) { wake.armedUntil = 0; wakeAsk(text.trim()); }
+}
+function wakeSet(on) {
+  wake.on = !!on && !!SpeechRec; wake.fails = 0; wake.armedUntil = 0;
+  store.set('wakeOn', wake.on);
+  if (!wake.on) wakeStop();
+  renderWake();
+}
+function renderWake() {
+  const b = $('askWake'), btn = $('askBtn');
+  btn?.classList.toggle('wake-on', wake.on); btn?.classList.toggle('wake-live', wake.running);
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(wake.on));
+  setText(b, !SpeechRec ? '👂 Hey Shot: not on this browser' : wake.on ? (wake.running ? '👂 Hey Shot: listening' : '👂 Hey Shot: on') : '👂 Hey Shot: off');
+  b.disabled = !SpeechRec;
+}
+$('askWake')?.addEventListener('click', () => {
+  askUnlock();
+  const on = !wake.on;
+  wakeSet(on);
+  if (on) toast('Hey Shot is on: say "Hey Shot" and a question anywhere in the app. It listens only while the app is open (through your browser\'s speech service) and never while it\'s talking.');
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) wakeStop(); });
+renderWake();
 
 // ---------- Simple mode ----------
 function applyMode() {

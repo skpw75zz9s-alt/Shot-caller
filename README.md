@@ -271,6 +271,15 @@ Security:
 
 ## Version notes (newest first)
 
+### Hey Shot (v13.50)
+
+Hands-free asking. Turn on **👂 Hey Shot** in the Ask sheet, then anywhere in the app say **"Hey Shot"** and your question: "Hey Shot, is the lead safe?", "Hey Shot, should I buy?". The sheet opens and the answer is read aloud. A bare "Hey Shot" plays a chime and takes the next thing you say (within 8 seconds) as the question.
+
+- Listens only while the app is open and on screen, and pauses while the bot is talking, so it never hears itself. A green dot on the header mic shows it's on; it pulses while listening. Off by default; the switch is remembered.
+- The browser's own speech recognition does the listening (`parseWake` in `public/ask.js` finds the wake phrase). It accepts common mishearings ("hey shop", "okay shot", "hey shotcaller", "a shot…" at the start) but not "shot" in ordinary talk ("a shot of espresso").
+- **Privacy:** while it's on, what you say near the phone goes to your browser's speech service (Google's for Chrome, Apple's for Safari) to be turned into text, as with the 🎤 button. The app only acts on what follows "Hey Shot".
+- Works best in Chrome (Android or desktop). Safari on iPhone supports it, but may ask for the mic more often and stop listening on its own. Android Chrome may beep when listening restarts after the bot speaks.
+
 ### George, a natural free voice (v13.49)
 
 Ask now reads its answers in **George**, a warm British male voice that sounds like a person, not a robot, at **no per-character cost**. It's Kokoro (an open text-to-speech model, Apache-2.0) running on this server: no API, no credits, no account.

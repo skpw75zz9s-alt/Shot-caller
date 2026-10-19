@@ -272,3 +272,15 @@ export function speechChunks(text, max = 220) {
   }
   return out;
 }
+
+// "Hey Shot" (v13.50): hands-free. The phone's speech recognition hears everything while it's on; only what follows the
+// wake phrase is a question. Recognisers mishear "shot" (shop, shut, shout, chat…), so near misses count, but only right
+// after a greeting, so "a shot of espresso" mid-sentence never wakes it.
+const WAKE = /(?:(?:^|[\s,.!?])(?:hey|hay|hei|hi|hiya|okay|ok|yo|oi)|^\s*(?:a|eh))[\s,.!-]*(?:shot ?caller|shotcaller|shots?|shop|shut|shout|shoot|shote|shawt|chat|shirt|shalt)(?=$|[\s,.!?'])[\s,.!?:-]*/i;
+export function parseWake(transcript) {
+  const t = String(transcript || '').replace(/\s+/g, ' ').trim();
+  const m = WAKE.exec(` ${t}`);
+  if (!m) return { woke: false, question: '' };
+  const question = ` ${t}`.slice(m.index + m[0].length).replace(/^(?:can you|could you|please|tell me)?[\s,]*/i, (x) => (/tell me/i.test(x) ? 'tell me ' : '')).trim();
+  return { woke: true, question };
+}
