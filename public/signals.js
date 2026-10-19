@@ -33,7 +33,7 @@ function zVerdict({ have, need, z, zNeed, unit = 'unseen rounds', measured = '' 
   return { verdict: 'close', why: `Close${measured ? `: ${measured}` : ''}. z ${z.toFixed(1)} of the ${zNeed} needed: luck alone does this about 1 time in ${luck(z)}; it goes in once that's 1 in ${luck(zNeed)}.` };
 }
 
-// sources: { ticker, crypto, scan, micro, tune, playbook, cross, flip, volTune, lab } (each the /api/<name> body, or missing)
+// sources: { ticker, crypto, scan, micro, tune, playbook, cross, flip, volTune, lab, flows } (each the /api/<name> body, or missing)
 export function signalBoard(s = {}) {
   const rows = [], t = s.ticker;
   const add = (r) => rows.push({ lean: null, pts: null, progress: null, ...r });
@@ -123,6 +123,23 @@ export function signalBoard(s = {}) {
     add({ key: 'lessons', name: 'Lessons from losses', status: on.length ? 'in' : 'probation', note: on.length ? on.map((x) => x.label).join(', ') : `none proven yet (most data: ${best} calls)`,
       ...(on.length ? {} : best < 30 ? { verdict: 'gathering', why: `Gathering data: the most-seen situation has ${best} graded calls; a lesson needs 30.` }
         : { verdict: Math.abs(bestZ?.z ?? 0) >= 2 ? 'close' : 'noedge', why: bestZ ? `The strongest one ("${bestZ.label}") has z ${bestZ.z.toFixed(1)} on ${bestZ.n} calls; a lesson needs 2.8 and to hold in both halves of its record.` : 'No situation stands out in the losses yet.' }) });
+  }
+  if (s.crypto !== false && s.flows && !s.flows.off) { // money flows (flowsfeed.js, public/flows.js): judged on unseen days (whales: hours)
+    const pts = ptsOf(s.flows.inCalls, t), m = (x) => `$${Math.abs(x) >= 1e9 ? `${(Math.abs(x) / 1e9).toFixed(1)}B` : Math.abs(x) >= 1e6 ? `${Math.round(Math.abs(x) / 1e6)}M` : `${Math.round(Math.abs(x) / 1e3)}k`}`;
+    const SRC = [
+      ['etf', 'Spot-ETF flows · Farside', (r) => `${r.date}: ${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(0)}M ${r.value >= 0 ? 'in' : 'out'}`],
+      ['stables', 'Stablecoin supply · DefiLlama', (r) => `7-day change ${r.value >= 0 ? '+' : '−'}${Math.abs(r.value).toFixed(2)}%`],
+      ['whale', 'Whale transfers · Whale Alert', (r) => (r.n ? `last hour: ${m(r.value)} net ${r.value >= 0 ? 'onto' : 'off'} exchanges (${r.n} transfers)` : 'no $500k+ transfers to or from exchanges in the last hour')],
+    ];
+    for (const [k, name, readText] of SRC) {
+      const f = s.flows[k];
+      if (!f?.on) { if (k === 'whale') add({ key: `flows_${k}`, name, status: 'probation', verdict: 'gathering', why: 'Off: set WHALE_ALERT_API_KEY in Railway to turn it on.', note: 'off' }); continue; }
+      const tst = f.test, on = !!tst?.proven, unit = k === 'whale' ? 'unseen hours' : 'unseen days', need = tst?.need ?? (k === 'whale' ? 100 : 60);
+      const note = [f.read ? readText(f.read) : null, f.err ? `⚠ ${f.err}` : null, tst?.test?.n ? `right ${pct(tst.test.hit)} of ${tst.test.n} ${unit}${tst.dir < 0 ? ' (faded)' : ''}` : null].filter(Boolean).join(' · ') || 'reading…';
+      add({ key: `flows_${k}`, name, status: on ? 'in' : 'probation', note, lean: side(f.read?.lean ?? 0), pts: on ? pts : null, progress: on ? null : prog(tst?.test?.n, need),
+        ...(on ? {} : f.err && !tst ? { verdict: 'gathering', why: `Not reading yet: ${f.err}.` }
+          : zVerdict({ have: tst?.test?.n ?? 0, need, z: tst?.test?.z, zNeed: tst?.zNeed ?? 2.5, unit, measured: tst?.test?.n ? `right ${pct(tst.test.hit)} of ${tst.test.n} ${unit}` : '' })) });
+    }
   }
   if (s.crypto === false) add({ key: 'drivers', name: 'Why it\'s moving · drivers', status: 'context', note: 'explains the move, never a call' });
 

@@ -16,6 +16,7 @@ import { createFeeBook } from './feebook.js';
 import { createMarketWatch } from './marketwatch.js';
 import { createFutures } from './futures.js';
 import { createMicroFeed } from './microfeed.js';
+import { createFlowsFeed } from './flowsfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
@@ -89,6 +90,8 @@ export const volTuneFeed = createVolTuneFeed({ playbook });
 // The flip check: how often the side that's ahead loses, from the chart's history and the buyers and sellers (flipfeed.js)
 export const flipFeed = createFlipFeed({ playbook, scanFeed });
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
+// money flows: spot-ETF flows, stablecoin supply and whale transfers, on probation until proven (flowsfeed.js)
+export const flowsFeed = createFlowsFeed({ asset: ASSETS.find((a) => a.key === 'BTC'), file: join(DATA_DIR, 'flows.json'), prices: { candleRows: (...a) => prices.candleRows(...a) }, playbook }); // prices is made further down
 export const bot = createBot({
   kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'), tuned: () => tuneUp.get(HOME.series),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
@@ -98,6 +101,7 @@ export const bot = createBot({
     try { microFeed.observe(o); } catch (e) { console.error('micro model step failed', e.message); }
     try { tuneFeed.observe(o); } catch (e) { console.error('indicator tuning step failed', e.message); }
     try { flipFeed.observe(o); } catch (e) { console.error('flip check step failed', e.message); }
+    try { flowsFeed.observe(o); } catch (e) { console.error('money flows step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
     try { crossFeed?.observe('BTC', o); } catch (e) { console.error('related markets step failed', e.message); }
@@ -105,8 +109,8 @@ export const bot = createBot({
   },
   keepAlive: () => (autotrade?.running() ?? 0) > 0,
   liveSpot: () => scanFeed.spot(),
-  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts(), crossFeed?.shifts('BTC'), flipFeed.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
-  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live(), cross: !!crossFeed?.shifts('BTC'), flip: !!flipFeed.shifts() }),
+  shifts: () => mergeShifts(scanFeed.shifts(), microFeed?.shifts(), tuneFeed.shifts(), playbook.shifts(), crossFeed?.shifts('BTC'), flipFeed.shifts(), flowsFeed.shifts()), // proven nudges: the Round scan, the micro model, tuned indicators, the reversal checklist
+  shiftInfo: () => ({ scan: !!scanFeed.shifts(), micro: !!microFeed?.shifts(), tune: (tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), reversal: Object.entries(playbook.api().report?.reversal?.bands || {}).filter(([k, s]) => k !== 'insufficient' && s.n >= 100 && s.z15 >= 2.5).map(([k]) => k), guide: !!playbook.api().report?.guide?.proven, predictor: !!playbook.api().report?.predictor?.proven, volTune: volTuneFeed.live(), cross: !!crossFeed?.shifts('BTC'), flip: !!flipFeed.shifts(), flows: !!flowsFeed.shifts() }),
   watch: () => marketWatch.status(),
   flipCheck: () => flipFeed.check(),
   flipGate: () => tuneFeed.api().report?.flipStudy ?? null, // the flip study's rule, applied once proven (public/flipstudy.js)
@@ -127,7 +131,7 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -264,7 +268,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([tuneUp.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([tuneUp.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -296,7 +300,7 @@ const PAYWALL_HDR = { 'x-paywall': '1' };
 // a market the server may start a bot for: one Kalshi lists (discovery.js), never any name a request makes up (v13.43.2)
 const listedSeries = (s) => typeof s === 'string' && /^[A-Z0-9]+$/.test(s) && discovery.list().some((m) => m.series === s);
 // the answers that belong to one market's own bot and readers (asked with ?m=SERIES)
-const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|learn|index)$/;
+const MARKET_OWN = /^\/api\/(record|pick|lessons|scan|watch|micro|playbook|tune|flip|voltune|flows|learn|index)$/;
 function send(res, status, body, type = 'application/json', headers = {}) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -488,6 +492,7 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/tune') return send(res, 200, mTune.api());
     if (path === '/api/flip') return send(res, 200, mFlip.api()); // the flip check (flipfeed.js)
     if (path === '/api/voltune') return send(res, 200, mVol.api());
+    if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)
     if (path === '/api/learn') return send(res, 200, { learned: { ...mb.learned(), fees: feeBook.rates(), volTune: mVol.live() }, status: { ...mb.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } }, market: mb.market() });
     // BTC index estimate (several exchanges, see index.js): the phone shifts its live Coinbase price by the offset
     if (path === '/api/index') { const ix = mb.index(); return send(res, 200, { ...ix, offset: ix.index && ix.coinbase ? ix.index - ix.coinbase : 0 }); }

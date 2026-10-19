@@ -15,6 +15,7 @@ import { createFutures } from './futures.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createMarketWatch } from './marketwatch.js';
 import { createMicroFeed } from './microfeed.js';
+import { createFlowsFeed } from './flowsfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
 import { createVolTuneFeed } from './voltunefeed.js';
@@ -47,8 +48,9 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     const marketWatch = createMarketWatch({ kalshi, asset: { key: a.key, digits: a.digits }, scanFeed, futures, playbook });
     const tuneFeed = createTuneFeed({ playbook, settle: a.settle }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
     const microFeed = createMicroFeed({ file: join(dir, 'micro.json'), scanFeed, futures, marketWatch, playbook });
-    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, discordAlerts, ready: null };
-    st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load()]).then(() => {
+    const flowsFeed = crypto ? createFlowsFeed({ asset: a, file: join(dir, 'flows.json'), prices, playbook, env, log }) : null; // money flows (flowsfeed.js)
+    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, flowsFeed, discordAlerts, ready: null };
+    st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load(), flowsFeed?.load()]).then(() => {
       if (crypto && on('SCAN_FEEDS')) scanFeed.start();
       if (futures && on('FUTURES')) futures.start();
       if (on('PLAYBOOK')) playbook.start();
@@ -67,13 +69,13 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
         vapidFrom: () => home.bot.vapidKeys(), log, env, tuned: () => tuned(series), // the tune-up's proven settings (tuneup.js)
         onObserve: (o) => {
           for (const [name, f] of [['round scan', () => st.scanFeed.observe(o)], ['market watch', () => st.marketWatch.observe(o)], ['micro model', () => st.microFeed.observe(o)],
-            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
+            ['indicator tuning', () => st.tuneFeed.observe(o)], ['flip check', () => st.flipFeed?.observe(o)], ['volatility tuning', () => st.volTuneFeed.observe()], ['money flows', () => st.flowsFeed?.observe(o)], ['reversal watch', () => st.playbook.observe(o)], ['related markets', () => crossFeed?.observe(mk.asset, o)]]) {
             try { f(); } catch (e) { log.error?.(`${series} ${name} step failed`, e.message); }
           }
         },
         liveSpot: () => st.scanFeed.spot(),
-        shifts: () => mergeShifts(st.scanFeed.shifts(), st.microFeed?.shifts(), st.tuneFeed.shifts(), st.playbook.shifts(), crossFeed?.shifts(mk.asset), st.flipFeed?.shifts()), // every proven nudge, related markets included
-        shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts() }),
+        shifts: () => mergeShifts(st.scanFeed.shifts(), st.microFeed?.shifts(), st.tuneFeed.shifts(), st.playbook.shifts(), crossFeed?.shifts(mk.asset), st.flipFeed?.shifts(), st.flowsFeed?.shifts()), // every proven nudge, related markets included
+        shiftInfo: () => ({ scan: !!st.scanFeed.shifts(), micro: !!st.microFeed?.shifts(), tune: (st.tuneFeed.api().report?.families || []).filter((f) => f.proven).map((f) => f.setting), volTune: st.volTuneFeed.live(), cross: !!crossFeed?.shifts(mk.asset), flip: !!st.flipFeed?.shifts(), flows: !!st.flowsFeed?.shifts() }),
         watch: () => st.marketWatch.status(),
         flipCheck: () => st.flipFeed?.check() ?? null,
         flipGate: () => (mk.freq === '15m' ? st.tuneFeed.api().report?.flipStudy ?? null : null), // learned from 15-minute rounds: only for them

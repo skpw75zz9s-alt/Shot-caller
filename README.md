@@ -275,6 +275,22 @@ Security:
 
 ## Version notes (newest first)
 
+### Money flows (v13.53)
+
+Three outside sources join the signal board for crypto markets, each **on probation** until it proves itself on data it never trained on (`flowsfeed.js` fetches them, `public/flows.js` parses and tests them):
+
+| Factor | Source | Reading | Tested against |
+|---|---|---|---|
+| Spot-ETF flows | Farside (BTC, ETH, SOL) | the day's net flow into the spot ETFs, US$ m | the next day's move (it's published after the US close) |
+| Stablecoin supply | DefiLlama (free API) | 7-day change in total stablecoin supply: fresh dollars arriving or leaving | the next day's move |
+| Whale transfers | Whale Alert (`WHALE_ALERT_API_KEY`) | last hour's $500k+ transfers onto exchanges (to sell) minus off them | the next 15 minutes' move, from the bot's 1-minute candles |
+
+- **Judged honestly:** a daily reading holds for a whole day of rounds, so it's graded on days, not rounds (96 rounds that share one reading are one sample). The direction (with the reading, or faded) is picked on the older 70% of days and scored on the newest 30%. A factor is proven when it's right more often than chance there with z ≥ 2.5 on 60+ unseen days (whales: 100+ unseen hours, one sample an hour so overlapping readings aren't counted twice).
+- **If one proves itself,** its edge is scaled to the minutes left and turned into odds through the bot's own volatility model, so a daily edge moves a 15-minute round by a fraction of a point (capped at 2; all flows together at 3).
+- **Every source says whether it's working:** the board row shows the reading, its record on unseen days, and the source's error if it couldn't read (blocked, page layout changed, key refused). `/api/flows` has the details.
+- Fetching: Farside every 3 hours, DefiLlama every 6 (shared by every market), Coinbase daily candles every 6 (for grading), Whale Alert once a minute while a key is set. Only the whale log is saved (`flows.json` per asset); the rest is re-read.
+- To turn on whale transfers, set `WHALE_ALERT_API_KEY` in Railway. Without it the row says it's off and Whale Alert is never called.
+
 ### Tune-up (v13.52)
 
 An accuracy check you run whenever you want. It does nothing between runs, so it costs no memory.

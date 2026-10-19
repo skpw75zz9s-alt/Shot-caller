@@ -38,7 +38,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '200'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '201'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2015,11 +2015,12 @@ function roundCallFor(live, snap, now) {
 
 // ---------- Signal board (public/signals.js): every factor, in calls / probation / context, with or against the card ----------
 let boardSide = null; // the side on the card (set by render: the call, the round call or the bot's lean)
-async function refreshBoardExtras() { // the two sources nothing else on the Deck fetches
+async function refreshBoardExtras() { // the sources nothing else on the Deck fetches
   if (document.hidden || !shownViews.has('live')) return;
-  const [vt, lab] = await Promise.all([getJSON(api('voltune')).catch(() => null), getJSON(api('lessons')).catch(() => null)]);
+  const [vt, lab, fl] = await Promise.all([getJSON(api('voltune')).catch(() => null), getJSON(api('lessons')).catch(() => null), CRYPTO ? getJSON(api('flows')).catch(() => null) : null]);
   if (vt) state.volTuneApi = vt;
   if (lab) state.lab = lab;
+  if (fl) state.flowsApi = fl;
 }
 setInterval(refreshBoardExtras, 60000);
 setTimeout(refreshBoardExtras, 4000);
@@ -2027,7 +2028,7 @@ function renderBoard(live, sig, now) {
   if (!$('boardCard')) return;
   const t = live?.m?.ticker ?? null, fresh = (at, ms) => now - (at || 0) < ms;
   const b = signalBoard({ ticker: t, side: boardSide, crypto: CRYPTO, scan: fresh(state.scanFetchAt, 60000) ? state.scanSrv : null, micro: state.micro, tune: state.tune, playbook: state.playbook,
-    cross: state.cross, flip: fresh(state.flipChkAt, 30000) ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab });
+    cross: state.cross, flip: fresh(state.flipChkAt, 30000) ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab, flows: state.flowsApi });
   const c = b.counts, nm = (x) => (x === 'YES' ? 'UP' : 'DOWN');
   setText($('sbSum'), `${c.in} in calls · ${c.probation} on probation`);
   setHTML($('sbMeter'), b.side && c.with + c.against ? `${c.with ? `<i class="w" style="flex:${c.with}"></i>` : ''}${c.against ? `<i class="a" style="flex:${c.against}"></i>` : ''}` : '<i class="n" style="flex:1"></i>');
@@ -2098,7 +2099,7 @@ function askFacts(now = Date.now()) {
   }
   try {
     const b = signalBoard({ ticker: m.ticker, side: boardSide, crypto: CRYPTO, scan: now - (state.scanFetchAt || 0) < 60000 ? state.scanSrv : null, micro: state.micro, tune: state.tune, playbook: state.playbook,
-      cross: state.cross, flip: now - (state.flipChkAt || 0) < 30000 ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab });
+      cross: state.cross, flip: now - (state.flipChkAt || 0) < 30000 ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab, flows: state.flowsApi });
     f.board = { side: b.side, inCalls: b.counts.in, probation: b.counts.probation, with: b.counts.with, against: b.counts.against,
       rows: b.rows.filter((r) => r.status === 'in' && r.vs).map((r) => ({ name: r.name, lean: r.lean, vs: r.vs })),
       close: b.rows.filter((r) => r.verdict === 'close').map((r) => r.name) };
