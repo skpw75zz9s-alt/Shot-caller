@@ -73,7 +73,7 @@ Nine tabs along the bottom (Simple mode hides Radar, X-ray and Learn):
   - The Deck's "Bot record" tile shows it too.
   - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
 - **Map.** The map to success: your stats, the road from first call to steady results with a tip per step, and the coach.
-- **X-ray.** The live market seen through, layer by layer: the odds, how wild it is, Kalshi's money, exchange order flow, whales, leverage, what's moving it and money flows, each leaning UP or DOWN (see v13.56).
+- **X-ray.** A scanner sweeps the live round like an x-ray film and reveals the stats that help but nobody looks at (see v13.57).
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 
@@ -276,26 +276,31 @@ Security:
 
 ## Version notes (newest first)
 
-### Market X-ray (v13.56)
+### X-ray scanner (v13.57)
 
-The Insiders tab is replaced by the **X-ray** tab (Pro): the live market seen through, layer by layer, on one screen.
+The **X-ray** tab (Pro) is now an x-ray animation of the live round, with the stats that help but nobody looks at. (It replaces v13.56's layer list, which replaced v13.55's insider trades.)
 
-- **The summary:** how many layers lean UP, DOWN or neither, and the strongest push. It's a picture, not a call: layers that agree aren't proof, and only the ones marked **in the calls** move the bot's odds. The call stays on the Deck.
-- **The layers.** Each has a bar from DOWN to UP and a one-line read; tap it for the detail and how the bot uses it.
+- **The film:** the round's price drawn like an x-ray. The price path is the glowing spine, each minute a rib, the dashed line the target, and the haze the typical move left before the close. Glowing dots mark target crossings (amber), the high, the low and the live price (pulsing). A scanner beam sweeps across it on a loop.
+- **The hidden stats** develop out of a blur as the beam passes when the tab opens or a new round starts, then keep their numbers fresh every 2 seconds:
 
-  | Layer | What it reads | Markets | In the calls? |
-  |---|---|---|---|
-  | The odds | the bot's odds and Kalshi's, the gap between them, and how many typical moves the price is from the target for the time left | all | yes: the call is made from them |
-  | Pulse | volatility now against normal (calm, normal, wild) and the typical move in the minutes left; no direction | all | yes: it sets how far the price can travel |
-  | Kalshi money | this round's UP vs DOWN dollars and the biggest orders (the lean grows to full by $2k of orders) | all | context |
-  | Order flow | buyers vs sellers across the exchanges over 1, 5 and 10 minutes, and the Round scan's verdict | crypto | only when the Round scan is proven |
-  | Whales | whale trades on the exchanges in the last 15 minutes | crypto | context (feeds the Round scan and alerts) |
-  | Leverage | forced closes (liquidations) in the last 30 minutes, funding and open interest | crypto | context until proven |
-  | Money flows | spot-ETF flows, the stablecoin supply and on-chain whale transfers (v13.53) | crypto | only a proven factor |
-  | What's moving it | the dollar and rates, the rest of its market, and its own buyers and sellers (v13.34) | stock indexes, gold, oil | context |
+  | Stat | What it tells you |
+  |---|---|
+  | Cross chance | how often the price touches the target before the close from where it is (twice the chance of finishing past it, for a price with no drift). A touch isn't a loss |
+  | Clock value | the points a minute with the price standing still adds to the side that's ahead |
+  | Odds per move | how many points the odds swing for each $X the price moves now |
+  | Break-even | the win rate the side the bot favours needs at its price plus the fee, and how far the bot's odds are above or below it |
+  | Round-trip toll | what buying and selling straight back costs: the spread plus both fees, in cents and % of the stake |
+  | Target crossings | how many times the price crossed the target this round, and the round's range |
+  | Volatility vs normal | volatility now against normal, and the typical move in the time left |
+  | Settlement locked in | crypto: Kalshi settles on the last 60 seconds' average, so each second counts 1/60; in the final minute, how much is already locked |
+  | Trade pace | crypto: exchange trades in the last minute against the last 10 minutes' average |
+  | Average Kalshi order | this round's average and biggest Kalshi order: many small traders or a few big ones |
+  | Cost to hold leverage | crypto: futures funding per year, and whether one side is crowded |
+  | Forced closes | crypto: futures liquidations in the last 30 minutes, longs vs shorts |
 
-- Built from `public/xray.js` (pure readers and layers) and `/api/xray` (liquidations, futures positioning and money flows for the market). It re-reads the phone's own data every 2 seconds while the tab is on screen and the server's every 15; nothing extra runs on the server.
-- The insider-trades reader (v13.55) is removed with its SEC requests; `SEC_USER_AGENT` is no longer used.
+- Context only: none of it is a call or moves the bot's odds. A stat shows up once there's data for it.
+- Built from `public/xray.js` (pure: the stats and the film's SVG) and `/api/xray` (liquidations and funding for the market). Nothing extra runs on the server. With reduced motion turned on, the film and stats show without animation.
+- The insider-trades reader (v13.55) is gone with its SEC requests; `SEC_USER_AGENT` isn't used.
 
 ### Money flows (v13.53)
 

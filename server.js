@@ -493,9 +493,9 @@ export const server = http.createServer(async (req, res) => {
     if (path === '/api/tune') return send(res, 200, mTune.api());
     if (path === '/api/flip') return send(res, 200, mFlip.api()); // the flip check (flipfeed.js)
     if (path === '/api/voltune') return send(res, 200, mVol.api());
-    if (path === '/api/xray') { // the X-ray tab's server layers: liquidations, futures positioning and the money flows (public/xray.js)
-      const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, fl = ms ? ms.flowsFeed : flowsFeed, now = Date.now();
-      return send(res, 200, { crypto: !!fl, liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, flows: fl ? fl.api(now) : null, at: now });
+    if (path === '/api/xray') { // the X-ray tab's server stats: forced closes and the cost of leverage (public/xray.js)
+      const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
+      return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, at: now });
     }
     if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)
     if (path === '/api/learn') return send(res, 200, { learned: { ...mb.learned(), fees: feeBook.rates(), volTune: mVol.live() }, status: { ...mb.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } }, market: mb.market() });

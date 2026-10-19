@@ -1,79 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { XRAY, distance, flowWindows, kalshiBig, liqSummary, positioning, pulse, whaleSummary, xrayLayers, xraySummary } from '../public/xray.js';
+import { crossings, distance, hiddenStats, kalshiBig, liqSummary, niceStep, positioning, xraySvg } from '../public/xray.js';
+import { kalshiFee, normCdf } from '../public/model.js';
 
-const now = 1e10;
-const live = { pYes: 0.7, pBot: 0.66, yesBid: 0.6, yesAsk: 0.64, spot: 100100, strike: 100000, sigmaMin: 0.0005, sigmaLong: 0.0004, minutesLeft: 4 };
+const now = 1e12, live = { pYes: 0.7, yesBid: 0.6, yesAsk: 0.64, spot: 100100, strike: 100000, sigmaMin: 0.0005, sigmaLong: 0.0004, minutesLeft: 4 };
+const by = (xs) => Object.fromEntries(xs.map((x) => [x.key, x]));
 
-test('Kalshi money: UP vs DOWN dollars and the biggest orders', () => {
-  const k = kalshiBig([{ t: 1, side: 'YES', count: 100, price: 0.6, usd: 60 }, { t: 2, side: 'NO', count: 500, price: 0.4, usd: 200 }, { t: 3, side: 'YES', usd: 0 }]);
-  assert.equal(k.up.usd, 60); assert.equal(k.down.usd, 200); assert.equal(k.top[0].usd, 200); assert.equal(kalshiBig(null).upShare, null);
+test('readers: Kalshi orders, liquidations, funding per year, distance, round steps and target crossings', () => {
+  const k = kalshiBig([{ side: 'YES', usd: 60 }, { side: 'NO', usd: 200 }, { side: 'YES', usd: 0 }]);
+  assert.deepEqual([k.n, k.total, k.biggest], [2, 260, 200]);
+  assert.deepEqual(liqSummary([{ t: now - 1, liq: 'long', usd: 3 }, { t: now - 2, liq: 'short', usd: 1 }, { t: now - 4e6, liq: 'long', usd: 9 }], now), { n: 2, long: 3, short: 1, minutes: 30 });
+  assert.ok(Math.abs(positioning({ funding: 0.00001 }).fundingYear - 0.0876) < 1e-9); assert.equal(positioning(null), null);
+  const d = distance(live); assert.equal(d.gap, 100); assert.ok(Math.abs(d.move - 100.1) < 1e-9); assert.equal(distance({ ...live, minutesLeft: 0 }), null);
+  assert.deepEqual([niceStep(10.01), niceStep(2.7), niceStep(0.06), niceStep(80)], [10, 2, 0.05, 100]);
+  assert.equal(crossings([99, 101, 102, 100, 98, 101], 100), 3, 'a close exactly on the target is no crossing by itself');
 });
 
-test('order flow: buyers vs sellers over 1, 5 and 10 minutes, by dollars', () => {
-  const tr = [{ t: now - 30000, price: 100, size: 3, side: 'buy' }, { t: now - 4 * 60000, price: 100, size: 1, side: 'sell' }, { t: now - 9 * 60000, price: 100, size: 6, side: 'sell' }, { t: now - 20 * 60000, price: 100, size: 99, side: 'buy' }];
-  const [w1, w5, w10] = flowWindows(tr, now);
-  assert.deepEqual([w1.buy, w1.sell, w1.lean], [300, 0, 1]);
-  assert.deepEqual([w5.buy, w5.sell, w5.lean], [300, 100, 0.5]);
-  assert.deepEqual([w10.buy, w10.sell, w10.n], [300, 700, 3]);
+test('the hidden stats: cross chance, clock value, odds per move, break-even, the toll, crossings, volatility, lock-in', () => {
+  const s = by(hiddenStats({ now, kind: 'crypto', settle: 'avg60', live, closes: [99900, 100050, 99950, 100080] }));
+  const z = Math.log(1.001) / (0.0005 * 2);
+  assert.equal(s.cross.value, `${Math.round(2 * normCdf(-z) * 100)}%`); assert.match(s.cross.note, /has to finish below it/);
+  const gain = (normCdf(z * Math.sqrt(4 / 3)) - normCdf(z)) * 100;
+  assert.equal(s.theta.value, `+${gain.toFixed(1)} pts/min`);
+  assert.match(s.delta.value, / pts per \$10\.00$/);
+  const be = 0.64 + kalshiFee(0.64);
+  assert.equal(s.breakeven.value, `${(be * 100).toFixed(1)}% wins`); assert.equal(s.breakeven.tone, 'pos'); assert.match(s.breakeven.note, /UP at 64¢.*The bot gives it 70\.0%/);
+  assert.match(s.toll.note, /Buying UP and selling it straight back costs/);
+  assert.equal(s.crossings.value, '3×');
+  assert.equal(s.regime.value, '1.25×');
+  assert.equal(s.lockin.value, '1/60 per sec');
+  assert.equal(by(hiddenStats({ now, kind: 'crypto', settle: 'avg60', live: { ...live, minutesLeft: 0.25 } })).lockin.value, '75%');
 });
 
-test('whales, liquidations and positioning in a window', () => {
-  const w = whaleSummary([{ t: now - 10, side: 'buy', usd: 5e5 }, { t: now - 20, side: 'sell', usd: 2e5 }, { t: now - 3600000, side: 'buy', usd: 9e9 }], now);
-  assert.equal(w.n, 2); assert.equal(w.net, 3e5);
-  const L = liqSummary([{ t: now - 1000, ex: 'OKX', liq: 'long', usd: 3e6 }, { t: now - 2000, ex: 'Binance', liq: 'short', usd: 1e6 }, { t: now - 7200000, liq: 'long', usd: 1e9 }], now);
-  assert.equal(L.long, 3e6); assert.equal(L.short, 1e6); assert.equal(L.biggest[0].ex, 'OKX');
-  assert.match(positioning({ funding: 0.00008, oiChange5: 0.004, priceChange5: -0.002 }).words.join(' '), /longs paying shorts.*crowded.*selling the drop/);
-  assert.equal(positioning(null), null);
+test('the bot favouring DOWN: break-even and the toll are for DOWN, priced off the YES bid', () => {
+  const s = by(hiddenStats({ now, kind: 'index', settle: 'spot', live: { ...live, pYes: 0.2, yesBid: 0.25, yesAsk: 0.28 } }));
+  assert.match(s.breakeven.note, /DOWN at 75¢/); assert.ok(!s.lockin, 'spot-settled markets have no 60-second average');
 });
 
-test('distance to the target in typical moves, and the pulse against normal', () => {
-  const d = distance(live);
-  assert.ok(Math.abs(d.move - 100100 * 0.0005 * 2) < 1e-6); assert.equal(d.gap, 100);
-  assert.ok(Math.abs(d.z - Math.log(100100 / 100000) / 0.001) < 1e-9);
-  assert.equal(distance({ ...live, minutesLeft: 0 }), null);
-  assert.equal(pulse(0.0005, 0.0004).label, 'normal'); assert.equal(pulse(0.0008, 0.0004).label, 'wild'); assert.equal(pulse(0.0002, 0.0004).label, 'calm'); assert.equal(pulse(0, 1), null);
+test('crypto extras: trade pace, the Kalshi crowd, the cost of leverage and forced closes; nothing without data', () => {
+  const trades = [...Array.from({ length: 30 }, (_, i) => ({ t: now - 120000 - i * 10000 })), ...Array.from({ length: 12 }, (_, i) => ({ t: now - i * 4000 }))];
+  const s = by(hiddenStats({ now, kind: 'crypto', live: null, trades, kalshiTrades: [{ side: 'YES', usd: 30 }, { side: 'NO', usd: 10 }],
+    srv: { futures: { fundingYear: 0.42 }, liqs: { n: 3, long: 2e6, short: 5e5, minutes: 30 } } }));
+  assert.equal(s.pace.value, `${(12 / 4.2).toFixed(1)}× · 12/min`);
+  assert.equal(s.crowd.value, '$20 · 2 orders');
+  assert.equal(s.funding.value, 'longs pay 42.0%/yr'); assert.equal(s.funding.tone, 'neg');
+  assert.equal(s.liqs.value, '$2.5M · 30 min');
+  assert.deepEqual(hiddenStats({ now, kind: 'crypto', live: null }), []);
 });
 
-test('crypto layers: the odds, pulse, Kalshi money, flow, whales, leverage and money flows, each with a lean and its use', () => {
-  const L = xrayLayers({ now, kind: 'crypto', live,
-    kalshiTrades: [{ side: 'YES', usd: 3000, count: 5000, price: 0.6 }, { side: 'NO', usd: 1000, count: 2500, price: 0.4 }],
-    trades: [{ t: now - 60000, price: 100, size: 30, side: 'sell' }, { t: now - 61000, price: 100, size: 10, side: 'buy' }],
-    whales: [{ t: now - 1000, side: 'buy', usd: 4e5, ex: 'Coinbase' }],
-    scan: { verdict: 'Buyers in control', score: 40, inCalls: true },
-    srv: { liqs: { n: 2, long: 0, short: 2e6, minutes: 30, biggest: [] }, futures: { words: ['funding near zero: neither side crowded'] },
-      flows: { etf: { on: true, read: { date: '2026-10-18', value: 250, lean: 1 }, test: { proven: false } }, stables: { on: true, read: null }, whale: { on: false } } } });
-  const by = Object.fromEntries(L.map((l) => [l.key, l]));
-  assert.deepEqual(L.map((l) => l.key), ['odds', 'pulse', 'crowd', 'flow', 'whales', 'leverage', 'money']);
-  assert.ok(Math.abs(by.odds.lean - 0.4) < 1e-9); assert.match(by.odds.read, /Bot 70% UP · Kalshi 62%/); assert.equal(by.odds.inCalls, true);
-  assert.match(by.odds.facts.join(' '), /\$100\.00 above the target: 1\.00 typical moves for the 4 minutes left/); assert.match(by.odds.facts.join(' '), /8 points more bullish/);
-  assert.equal(by.pulse.lean, null); assert.match(by.pulse.read, /Normal · 1.25× normal/);
-  assert.ok(Math.abs(by.crowd.lean - 0.5) < 1e-9, 'UP $3k of $4k: a full-size crowd');
-  assert.ok(by.flow.lean < 0); assert.equal(by.flow.inCalls, true); assert.match(by.flow.facts.join(' '), /Round scan: Buyers in control \(\+40\)/);
-  assert.equal(by.whales.lean, 1);
-  assert.ok(by.leverage.lean > 0, 'shorts force-closed: a squeeze up');
-  assert.ok(Math.abs(by.money.lean - 1 / 3) < 1e-9); assert.equal(by.money.inCalls, false); assert.match(by.money.facts.join(' '), /on probation/); assert.match(by.money.facts.join(' '), /needs WHALE_ALERT_API_KEY/);
-  const s = xraySummary(L);
-  assert.equal(s.up, 5); assert.equal(s.down, 1); assert.equal(s.tone, 'mixed'); assert.equal(s.headline, 'Mixed: 5 UP, 1 DOWN'); assert.equal(s.strongest.key, 'flow', 'sellers 75% of 5 minutes: a full lean, and first of the ties');
-});
-
-test('a small crowd leans little; no round and no data say so', () => {
-  const L = xrayLayers({ now, kind: 'crypto', live: null, kalshiTrades: [{ side: 'YES', usd: 100, count: 200, price: 0.5 }], trades: [], whales: [], srv: null });
-  const by = Object.fromEntries(L.map((l) => [l.key, l]));
-  assert.ok(Math.abs(by.crowd.lean - 0.05) < 1e-9);
-  assert.equal(by.odds.off, true); assert.equal(by.flow.lean, null); assert.equal(by.leverage.off, true);
-  assert.ok(!L.some((l) => l.key === 'money'));
-  assert.equal(xraySummary([{ key: 'a', lean: null }]).headline, 'Nothing to read yet');
-  assert.equal(xraySummary([{ key: 'odds', name: 'The odds', lean: 0.9 }, { key: 'b', name: 'B', lean: 0 }]).headline, 'Only the odds lean UP so far');
-  assert.equal(xraySummary([{ key: 'w', name: 'Whales', lean: -0.5 }, { key: 'f', name: 'Order flow', lean: -0.3 }]).headline, '2 layers lean DOWN, none UP');
-});
-
-test('stock indexes, gold and oil get what\'s moving them instead of the crypto layers', () => {
-  const drivers = { supported: true, move: 6, w: 60, parts: [{ group: 'macro', usd: 4 }, { group: 'sector', usd: 3 }, { group: 'own', usd: -1 }] };
-  const L = xrayLayers({ now, kind: 'index', live: { ...live, spot: 6000, strike: 5990, sigmaMin: 0.0003 }, kalshiTrades: [], drivers, fmt: (v) => `$${v.toFixed(2)}` });
-  assert.deepEqual(L.map((l) => l.key), ['odds', 'pulse', 'crowd', 'drivers']);
-  const d = L.at(-1);
-  assert.match(d.read, /Up \$6.00 in 60 min/); assert.deepEqual(d.facts, ['The dollar, rates and stocks: +$4.00', 'The rest of its market: +$3.00', 'Its own buyers and sellers: −$1.00']);
-  assert.equal(d.lean, 1, '$6 against a typical $3.60 move: capped at full UP');
-  assert.equal(xraySummary([{ key: 'a', lean: XRAY.flat - 0.01 }]).tone, 'flat');
+test('the film: ribs per minute, the target, the spine, crossing bones, the cone to the close and the live dot', () => {
+  const open = now - 5 * 60000, close = now + 10 * 60000;
+  const bars = [{ t: open + 60000, c: 99950 }, { t: open + 120000, c: 100050 }, { t: open + 180000, c: 99980 }, { t: open - 60000, c: 1 }];
+  const { svg, ok } = xraySvg({ bars, spot: 100020, strike: 100000, open, close, now, sigmaMin: 0.0005 });
+  assert.equal(ok, true);
+  assert.equal((svg.match(/class="rib"/g) || []).length, 16);
+  assert.equal((svg.match(/class="bone cross"/g) || []).length, 3);
+  assert.match(svg, /class="target"/); assert.match(svg, /class="spine"/); assert.match(svg, /class="tissue"/); assert.match(svg, /class="bone now"/);
+  assert.doesNotMatch(svg, /NaN/);
+  assert.equal(xraySvg({ open, close: open, strike: 1 }).ok, false);
 });

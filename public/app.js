@@ -38,8 +38,8 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-import { XRAY, xrayLayers, xraySummary } from './xray.js';
-window.SC_BOOT = '204'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { hiddenStats, xraySvg } from './xray.js';
+window.SC_BOOT = '205'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -658,7 +658,6 @@ function renderScan(live, snap, now) {
   const srv = state.scanSrv, open = Date.parse(live.m.open_time), tk = live.m.ticker;
   let sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin, sigmaMin: snap.sigmaMin }), fromServer = false;
   if (!sc.ready && srv?.live?.ticker === tk && srv.live.sc?.ready) { sc = srv.live.sc; fromServer = true; }
-  state.scanNow = sc.ready ? { verdict: sc.verdict, score: sc.score, ticker: tk, at: now } : null; // the X-ray tab
   setText($('scanWhen'), `${int(sc.trades)} trades · ${fromServer ? 'server feeds' : clock(now)}`);
   if (!sc.ready) {
     setText($('scanLabel'), 'Reading the round…'); setText($('scanScore'), 'waiting for the exchange feeds');
@@ -2174,10 +2173,10 @@ $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion
 $('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
-// ---------- X-ray (public/xray.js, /api/xray): the live market seen through, layer by layer ----------
-// The phone's own data (the round's odds, Kalshi's orders, the exchange trades and whales, the drivers) plus the server's
-// (liquidations, futures positioning, money flows). Re-read every 2 seconds while the tab is on screen.
-const xr = { srv: null, at: 0 };
+// ---------- X-ray (public/xray.js, /api/xray): a scanner sweeps the round and shows the stats under the surface ----------
+// The film is the round's price path drawn like an x-ray; the stat cards develop as the beam passes, then keep their
+// values fresh every 2 seconds without replaying (they replay on a new round). Liquidations and funding come from the server.
+const xr = { srv: null, at: 0, shape: '' };
 async function refreshXray(force = false) {
   if (document.hidden || (!force && !shownViews.has('xray'))) return;
   try { xr.srv = await getJSON(api('xray')); xr.at = Date.now(); } catch { /* next time */ }
@@ -2185,24 +2184,29 @@ async function refreshXray(force = false) {
 }
 setInterval(() => refreshXray(), 15000);
 setInterval(() => { if (!document.hidden && shownViews.has('xray')) renderXray(); }, 2000);
-const leanWord = (l) => (l == null ? '—' : l >= XRAY.flat ? `UP ${Math.round(l * 100)}` : l <= -XRAY.flat ? `DOWN ${Math.round(-l * 100)}` : 'even');
-const leanBar = (l) => `<span class="xr-bar">${l == null ? '' : `<i class="${l >= 0 ? 'up' : 'dn'}" style="${l >= 0 ? 'left:50%' : `left:${50 + l * 50}%`};width:${Math.abs(l) * 50}%"></i>`}</span>`;
 function renderXray() {
-  if (!$('xrBody')) return;
+  if (!$('xrStats')) return;
   const now = Date.now(), snap = state.snapNow, lv = snap?.live && snap.live.ev?.minutesLeft > 0 ? snap.live : null;
-  const live = lv ? { pYes: lv.ev.pYes, pBot: lv.pBot, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, spot: snap.mSpot ?? snap.spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
-  const scan = state.scanNow && state.scanNow.ticker === lv?.m.ticker && now - state.scanNow.at < 15000 ? { ...state.scanNow, inCalls: !!state.scanSrv?.inCalls } : null;
-  const layers = xrayLayers({ now, kind: MKT.kind, live, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], trades: tape.recent, whales: flow.whales, scan, srv: xr.srv, drivers: state.drv, fmt: (v) => usd(v, Math.max(0, MKT.digits ?? 2)) });
-  const sum = xraySummary(layers), open = new Set([...$('xrBody').querySelectorAll('details[open]')].map((d) => d.dataset.k)); // keep the layers you opened
+  const open = lv ? Date.parse(lv.m.open_time) : 0, close = lv ? Date.parse(lv.m.close_time) : 0, spot = snap?.mSpot ?? snap?.spot;
+  const bars = lv ? (snap.bars || []).filter((b) => b.t >= open && b.t < now).map((b) => ({ t: Math.min(b.t + 60000, now), c: b.c })) : [];
+  const live = lv ? { pYes: lv.ev.pYes, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
   setText($('xrWhen'), lv ? `${roundName(lv.m.ticker)} · closes in ${mmss(lv.ev.minutesLeft)}` : 'no open round');
-  const head = `<div class="card xr-sum ${sum.tone}"><div class="xr-verdict">${esc(sum.headline)}</div>`
-    + `<div class="xr-tally"><b class="pos">${sum.up} UP</b><b class="neg">${sum.down} DOWN</b><b class="muted">${sum.flat} even</b></div>`
-    + (sum.strongest ? `<p class="fine-left">Strongest push: <b>${esc(sum.strongest.name)}</b>, ${sum.strongest.lean > 0 ? 'UP' : 'DOWN'}.</p>` : '')
-    + '<p class="fine-left muted">A picture, not a call: layers that agree aren\'t proof, and only the ones marked “in the calls” move the bot\'s odds. The call is on the Deck.</p></div>';
-  const rows = layers.map((l) => `<details class="xr-layer${l.off ? ' off' : ''}" data-k="${l.key}"${open.has(l.key) ? ' open' : ''}><summary>`
-    + `<span class="xr-name"><b>${esc(l.name)}</b><small>${esc(l.read)}</small></span>${leanBar(l.lean)}<em class="${l.lean >= XRAY.flat ? 'pos' : l.lean <= -XRAY.flat ? 'neg' : 'muted'}">${leanWord(l.lean)}</em></summary>`
-    + `<div class="xr-more">${l.facts.length ? `<ul>${l.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}${l.use ? `<p class="xr-use">${l.inCalls ? '<span class="xr-in">in the calls</span> ' : '<span class="xr-ctx">context</span> '}${esc(l.use)}</p>` : ''}</div></details>`).join('');
-  setHTML($('xrBody'), head + `<div class="card xr-layers"><div class="deep-head"><span>Layers</span><small class="muted">DOWN ← → UP · tap for detail</small></div>${rows}</div>`);
+  const film = lv ? xraySvg({ bars, spot, strike: lv.strike, open, close, now, sigmaMin: live.sigmaMin }) : { svg: '', ok: false };
+  setHTML($('xrSvg'), film.svg);
+  $('xrFilm').classList.toggle('empty', !film.ok);
+  const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt: (v) => usd(v, Math.max(0, MKT.digits ?? 2)) });
+  // a new round or a new set of stats: build the cards and let them develop; otherwise just update the numbers
+  const shape = `${lv?.m.ticker || ''}|${stats.map((x) => x.key).join(',')}`;
+  if (shape !== xr.shape) {
+    xr.shape = shape;
+    setHTML($('xrStats'), stats.length ? stats.map((x, i) => `<div class="xr-stat" data-k="${x.key}" style="--d:${(0.35 + i * 0.16).toFixed(2)}s"><small>Hidden stat ${String(i + 1).padStart(2, '0')}</small><b>${esc(x.label)}</b><em data-v></em><p data-n></p></div>`).join('')
+      : `<div class="card"><p class="muted">${lv ? 'Developing the film… the stats appear once the round has prices and quotes.' : 'No open round right now: the scanner starts with the next one.'}</p></div>`);
+  }
+  for (const x of stats) {
+    const el = $('xrStats').querySelector(`[data-k="${x.key}"]`); if (!el) continue;
+    setText(el.querySelector('[data-v]'), x.value); setClass(el.querySelector('[data-v]'), x.tone);
+    setText(el.querySelector('[data-n]'), x.note);
+  }
 }
 
 // ---------- Simple mode ----------

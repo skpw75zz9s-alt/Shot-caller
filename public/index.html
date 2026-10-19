@@ -506,8 +506,15 @@
 
     <!-- Map to success (v13.24): live stats, the road of milestones with a tip each, and a coach reading your trades -->
     <section id="view-xray" class="view">
-      <div class="card xr-head"><div class="deep-head"><span>Market X-ray</span><small id="xrWhen" class="muted"></small></div><p class="fine-left">The live market seen through, layer by layer: the odds, how wild it is, Kalshi's money, the exchange order flow, whales, leverage and what's moving it. Each layer shows which way it leans and whether the bot's calls use it.</p></div>
-      <div id="xrBody"></div>
+      <div class="card xr-head">
+        <div class="deep-head"><span>Market X-ray</span><small id="xrWhen" class="muted"></small></div>
+        <div id="xrFilm" class="xr-film empty" aria-hidden="true">
+          <svg id="xrSvg" viewBox="0 0 320 170" preserveAspectRatio="none"></svg>
+          <div class="xr-beam"></div>
+        </div>
+        <p class="fine-left muted">The round under the scanner: the price path is the spine, each minute a rib, the dashed line the target, the haze the typical move to the close; glowing dots mark crossings, the high, the low and now. Below, the stats that help but nobody looks at. Context only, none of it is a call.</p>
+      </div>
+      <div id="xrStats" class="xr-stats"></div>
     </section>
     <section id="view-success" class="view">
       <div class="card map-hero">
@@ -615,7 +622,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.56 · Market X-ray</p>
+      <p class="fine" id="version">Shot Caller v13.57 · X-ray scanner</p>
     </section>
   </main>
 
@@ -653,7 +660,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '204';
+    window.SC_BUILD = '205';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
