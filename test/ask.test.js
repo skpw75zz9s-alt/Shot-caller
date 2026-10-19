@@ -71,6 +71,12 @@ test('asking about another coin says which market is open', () => {
   assert.equal(answer('what about BTC?', FACTS).note, null);
 });
 
+test('a lead or flip question is answered first: how safe, the flip chance, how rounds like it ended', () => {
+  assert.match(answer('Is the lead safe?', FACTS).bottom, /^Fairly safe, not locked: UP leads by \$120, 1\.26 times the move still likely, a moderate cushion, with a 22% chance it flips by the close\. Rounds like this finished UP 81%/);
+  assert.match(answer('will it flip', { ...FACTS, line: { ...FACTS.line, ratio: 0.25, word: 'thin' }, flip: { ...FACTS.flip, used: false } }).bottom, /^Not safe: .*26% chance it flips/);
+  assert.match(answer('is the lead safe, should I buy', FACTS).bottom, /^Not a buy/, 'a buy question still gets the buy answer first');
+});
+
 test('missing facts never throw: no round, an empty object, a broken part', () => {
   assert.match(answer('should I buy', { coin: 'SOL' }).bottom, /no open SOL round/);
   assert.doesNotThrow(() => answer('deep dive', {}));

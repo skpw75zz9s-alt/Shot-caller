@@ -5,7 +5,10 @@
 
 export const VOICE = { id: 'DEFpwxCUkrj3WAbTDRTZ', model: 'eleven_multilingual_v2', maxChars: 1500, format: 'mp3_44100_128' };
 
-export function createVoice({ apiKey = process.env.ELEVENLABS_API_KEY, voiceId = process.env.ELEVENLABS_VOICE_ID || VOICE.id, model = process.env.ELEVENLABS_MODEL || VOICE.model,
+// a key pasted into Railway with a space, line break or quotes around it still works
+export const cleanKey = (k) => (typeof k === 'string' ? k.trim().replace(/^(['"])(.*)\1$/, '$2').trim() : k);
+
+export function createVoice({ apiKey = cleanKey(process.env.ELEVENLABS_API_KEY), voiceId = process.env.ELEVENLABS_VOICE_ID || VOICE.id, model = process.env.ELEVENLABS_MODEL || VOICE.model,
   base = process.env.ELEVENLABS_API || 'https://api.elevenlabs.io', fetchImpl = fetch, perMin = 6, perHour = 60, now = () => Date.now() } = {}) {
   const hits = new Map(); // owner -> [times]
   const on = () => !!apiKey && /^[A-Za-z0-9]{8,64}$/.test(voiceId);

@@ -187,6 +187,13 @@ function bottomLine(f, asked) {
   if (!r) return `There's no open ${f.coin} round right now, so there's nothing live to read.`;
   const buyQ = asked.includes('buy') || asked.includes('mine');
   if (c?.bail) return `Bail: the bot's ${nm(c.bail.side)} call went bad, its odds are down to ${pc(c.bail.p)}.`;
+  // "is the lead safe?" / "will it flip?": answered first, the call after it in the parts
+  const l = f.line, x = f.flip;
+  if (!buyQ && l && (asked.includes('line') || asked.includes('flip'))) {
+    const lose = x?.lead && nm(x.lead) === l.leadSide ? (x.used ? x.p : x.base) : null;
+    const verdict = l.razor || l.ratio < 0.5 ? 'Not safe' : l.ratio < 1 ? 'Not very safe' : l.ratio < 2 ? 'Fairly safe, not locked' : 'Safe by the numbers';
+    return `${verdict}: ${l.leadSide} leads by ${money(l.lead, f.digits)}, ${l.ratio.toFixed(2)} times the move still likely, a ${l.word} cushion${lose != null ? `, with a ${pc(lose)} chance it flips by the close` : ''}${l.hist ? `. Rounds like this finished ${l.leadSide} ${pc(l.hist.rate)} of the time` : ''}.`;
+  }
   if (f.block && (c?.side || rc?.buy)) return `Buys are paused right now (${f.block.split(':')[0].toLowerCase()}), so no buy, even though the bot leans ${nm(c?.side ?? rc.side)}.`;
   if (c?.side) return `${buyQ ? 'Yes, by the bot\'s rules: ' : ''}it's calling ${nm(c.side)}, a buy at up to ${cents(c.limit ?? c.price)}${c.conf != null ? ` with confidence ${c.conf}` : ''}.`;
   if (rc?.side) {

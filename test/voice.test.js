@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VOICE, createVoice } from '../voice.js';
+import { VOICE, cleanKey, createVoice } from '../voice.js';
 
 function fakeFetch(status = 200) {
   const calls = [];
@@ -50,4 +50,11 @@ test('errors come back clearly, and each person has a limit', async () => {
   assert.equal((await v.speak({ owner: 'a', text: '1' })).status, 200);
   assert.equal((await v.speak({ owner: 'a', text: '2' })).status, 429);
   assert.equal((await v.speak({ owner: 'b', text: '1' })).status, 200);
+});
+
+test('a key pasted with spaces, a line break or quotes still works', () => {
+  assert.equal(cleanKey('  sk_abc123\n'), 'sk_abc123');
+  assert.equal(cleanKey('"sk_abc123"'), 'sk_abc123');
+  assert.equal(cleanKey("'sk_abc123' "), 'sk_abc123');
+  assert.equal(cleanKey(undefined), undefined);
 });

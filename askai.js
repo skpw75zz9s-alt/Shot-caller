@@ -4,6 +4,8 @@
 // model the key can use (the Models API, newest first), so no model name is baked in here.
 // Members and admins only (the paywall), and a few questions a minute each, since every answer costs API tokens.
 
+import { cleanKey } from './voice.js';
+
 const SYSTEM = `You are "Ask", the voice assistant inside Shot Caller, a signal app for Kalshi's 15-minute markets. Each round asks one yes/no question: will the asset be above (UP, the YES side) or below (DOWN, the NO side) a target price when the round closes. Contracts pay $1 for the right side; the price in cents is roughly the market's odds.
 
 You get a JSON snapshot of everything the app knows about the live round: the call on screen, the bot's odds and Kalshi's, the locked round call (once locked at 10:00 left it never switches sides), the lead and how big it is against the move still possible, the flip check, recent moves and why, buyers and sellers across exchanges, chart patterns, the signal board (factors "in calls" are proven; "probation" ones have not shown an edge on unseen data), market stability, the track record, and the user's own positions.
@@ -16,7 +18,7 @@ How to answer:
 - These are signals, not financial advice. For buy/sell questions, say what the bot's rules say and why; leave the decision to the user.
 - Keep it under about 170 words, in short plain sentences that sound natural read aloud: no tables, no headings, no markdown symbols. Say UP and DOWN rather than YES and NO.`;
 
-export function createAskAI({ apiKey = process.env.ANTHROPIC_API_KEY, model = process.env.ASK_MODEL, client = null, perMin = 4, perHour = 40, now = () => Date.now() } = {}) {
+export function createAskAI({ apiKey = cleanKey(process.env.ANTHROPIC_API_KEY), model = process.env.ASK_MODEL, client = null, perMin = 4, perHour = 40, now = () => Date.now() } = {}) {
   let sdk = client, chosen = model || null, chosenAt = 0;
   const hits = new Map(); // owner -> [times]
   const on = () => !!(client || apiKey);
