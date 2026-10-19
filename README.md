@@ -271,6 +271,15 @@ Security:
 
 ## Version notes (newest first)
 
+### George, steadier (v13.50.1)
+
+On Railway, George stopped partway through an answer ("the voice stopped") and the phone's voice took over. Measured here: the voice's memory grows with the length of each piece it reads, and the 220-character pieces peaked at **1.8 GB**, more than many Railway plans allow a service.
+
+- Pieces are now at most about 90 characters, split at a comma or between words when a sentence is long, never at a decimal point (`speechChunks`, shared by the phone and the server). The worker also splits anything it's sent, and the server accepts at most 200 characters a request. The model runs without a memory arena and at the lighter "basic" optimisation level, which is also faster here. **Peak is now about 1.1 GB, idle-loaded about 560 MB.**
+- If the worker dies anyway, the reason is shown: "ran out of memory (it was killed)" for a system kill, otherwise the exit code and its last error line, which also goes to the server log. Two crashes in ten minutes pause the free voice for half an hour, so it can't keep pushing the server over its limit; the phone's voice reads meanwhile.
+- If your Railway plan caps memory below about 1.5 GB (the voice plus the app), raise the service's memory limit, or set `FREE_VOICE=off`.
+- Ask's odds are now given for the side being called ("DOWN 99%+", not "UP 0%"), and never as a flat 0% or 100%.
+
 ### Hey Shot (v13.50)
 
 Hands-free asking. Turn on **👂 Hey Shot** in the Ask sheet, then anywhere in the app say **"Hey Shot"** and your question: "Hey Shot, is the lead safe?", "Hey Shot, should I buy?". The sheet opens and the answer is read aloud. A bare "Hey Shot" plays a chime and takes the next thing you say (within 8 seconds) as the question.
@@ -284,7 +293,7 @@ Hands-free asking. Turn on **👂 Hey Shot** in the Ask sheet, then anywhere in 
 
 Ask now reads its answers in **George**, a warm British male voice that sounds like a person, not a robot, at **no per-character cost**. It's Kokoro (an open text-to-speech model, Apache-2.0) running on this server: no API, no credits, no account.
 
-- **How it runs** (`kokoro.js`, `ttsworker.js`, `freevoice.js`): at startup the server downloads the model once (177 MB, plus 28 MB of voices) from the kokoro-onnx release on GitHub into `DATA_DIR/kokoro`. Nothing is loaded until someone opens Ask. The model then runs in its own process, using about 0.65–0.85 GB of memory, and stops after 10 quiet minutes so that memory is given back. Opening the Ask sheet warms it up, so the first answer starts in about 4 seconds; later ones start sooner.
+- **How it runs** (`kokoro.js`, `ttsworker.js`, `freevoice.js`): at startup the server downloads the model once (177 MB, plus 28 MB of voices) from the kokoro-onnx release on GitHub into `DATA_DIR/kokoro`. Nothing is loaded until someone opens Ask. The model then runs in its own process, using about 0.56 GB of memory loaded and 1.1 GB at its peak while reading, and stops after 10 quiet minutes so that memory is given back. Opening the Ask sheet warms it up, so the first answer starts in about 4 seconds; later ones start sooner.
 - The phone sends the answer a sentence or two at a time (`/api/ask/say`) and plays the pieces back to back as they arrive, so it starts talking before the whole answer is read. On this machine the model reads about 2–3× faster than real time.
 - If the free voice is still downloading, off, or fails, the phone reads the answer in its own voice and says why. The Voice picker still offers the phone's voices and Adam Stone (ElevenLabs, uses credits).
 - Settings: `FREE_VOICE=off` turns it off. `KOKORO_VOICE` swaps the voice: `bm_lewis`, `bm_daniel`, `bm_fable` (British), or `am_michael`, `am_adam`, `am_puck`, `am_onyx` (American). `KOKORO_THREADS` (default 4) and `KOKORO_SPEED` (default 1) tune it.

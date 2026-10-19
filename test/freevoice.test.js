@@ -8,14 +8,14 @@ import { KOKORO } from '../kokoro.js';
 import { createFreeVoice } from '../freevoice.js';
 
 // a stand-in worker: answers warm-up and each request (or fails/hangs on cue) without loading any model
-function fakeFork({ fail = null, die = false } = {}) {
+function fakeFork({ fail = null, die = false, signal = null } = {}) {
   const made = [];
   const f = () => {
     const c = new EventEmitter();
     c.sent = []; c.killed = false;
     c.send = (m) => { c.sent.push(m); setImmediate(() => {
       if (m.type === 'warm') return c.emit('message', { type: 'warm' });
-      if (die) { c.emit('exit', 1); return; }
+      if (die) { c.emit('exit', signal ? null : 1, signal); return; }
       c.emit('message', fail ? { id: m.id, error: fail } : { id: m.id, wav: Buffer.from(`wav:${m.voice}:${m.text}`) });
     }); };
     c.kill = () => { c.killed = true; setImmediate(() => c.emit('exit', null)); };
@@ -91,5 +91,21 @@ test('an empty text is refused, and each person has a limit', async () => {
   assert.equal((await v.speak({ owner: 'a', text: '2' })).status, 200);
   assert.equal((await v.speak({ owner: 'a', text: '3' })).status, 429);
   assert.equal((await v.speak({ owner: 'b', text: '1' })).status, 200);
+  v.stop();
+});
+
+test('killed for memory: says so plainly, and two crashes pause the free voice instead of retrying into the limit', async () => {
+  let t = 1e12;
+  const fork = fakeFork({ die: true, signal: 'SIGKILL' }), v = createFreeVoice({ dir: sized(readyDir()), forkImpl: fork, now: () => t });
+  const a = await v.speak({ owner: 'a', text: 'hi' });
+  assert.equal(a.status, 503); assert.match(a.body.error, /ran out of memory/);
+  assert.match(v.status().freeError, /ran out of memory/);
+  assert.equal(v.status().free, true, 'one crash: still on');
+  await v.speak({ owner: 'a', text: 'hi' });
+  assert.equal(v.status().free, false, 'two in ten minutes: paused');
+  const p = await v.speak({ owner: 'a', text: 'hi' });
+  assert.equal(p.status, 503); assert.equal(p.body.paused, true); assert.equal(fork.made.length, 2, 'no third worker while paused');
+  t += 1800001;
+  assert.equal(v.status().free, true, 'back after half an hour');
   v.stop();
 });

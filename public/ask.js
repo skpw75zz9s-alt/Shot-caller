@@ -43,6 +43,8 @@ export function route(q) {
 
 const nm = (side) => (side === 'YES' ? 'UP' : side === 'NO' ? 'DOWN' : '—');
 const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+// odds at the edges said honestly: never a flat 0% or 100%
+const pe = (x) => (x == null ? '—' : x >= 0.995 ? '99%+' : x <= 0.005 ? 'under 1%' : pc(x));
 const cents = (x) => (x == null ? '—' : `${Math.round(x * 100)}¢`);
 const mmss = (min) => { const s = Math.max(0, Math.round(min * 60)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 function money(v, digits = 0) {
@@ -64,7 +66,10 @@ const PARTS = {
     if (rc?.side) out.push(`This round's call is locked ${nm(rc.side)} at ${pc(rc.p)}${rc.buy ? `, worth buying at up to ${cents(rc.price)}` : ', a lean, not a buy at this price'}${rc.fallback ? ` (${rc.why})` : ''}. It never switches sides for the rest of the round.`);
     else if (r.minutesLeft > 10) out.push(`The round call locks at 10:00 left, in ${mmss(r.minutesLeft - 10)}.`);
     if (f.lockedOut) out.push(`The bot's own lean has moved to the other side, but the round call is locked, so it stays.`);
-    if (f.odds?.botUp != null) out.push(`The bot's math gives UP ${pc(f.odds.botUp)}${f.odds.kalshiUp != null ? `; Kalshi's prices say ${pc(f.odds.kalshiUp)}` : ''}.`);
+    if (f.odds?.botUp != null) { // the odds for the side being called (else the side the math favours), not always UP
+      const side = c?.side ?? rc?.side ?? (f.odds.botUp >= 0.5 ? 'YES' : 'NO'), of = (p) => (p == null ? null : side === 'YES' ? p : 1 - p);
+      out.push(`The bot's math gives ${nm(side)} ${pe(of(f.odds.botUp))}${f.odds.kalshiUp != null ? `; Kalshi's prices say ${pe(of(f.odds.kalshiUp))}` : ''}.`);
+    }
     if (f.card?.reason && !c?.side && !rc?.side) out.push(f.card.reason);
     return out.length ? out.join(' ') : null;
   },
@@ -82,8 +87,8 @@ const PARTS = {
     if (!x && !l) return null;
     if (x) {
       const why = (x.parts || []).slice(0, 3).map((p) => `${p.name.toLowerCase()} ${p.push > 0 ? 'raising' : 'lowering'} it`).join(', ');
-      return x.used ? `Flip check: ${nm(x.lead)} leads, with a ${pc(x.p)} chance it loses by the close (the price math alone says ${pc(x.base)})${why ? `; ${why}` : ''}.`
-        : `Flip check: ${nm(x.lead)} leads, and the price math gives it a ${pc(x.base)} chance to lose. The extra flip reads are still being tested, so they don't change that.`;
+      return x.used ? `Flip check: ${nm(x.lead)} leads, with a ${pe(x.p)} chance it loses by the close (the price math alone says ${pe(x.base)})${why ? `; ${why}` : ''}.`
+        : `Flip check: ${nm(x.lead)} leads, and the price math gives it a ${pe(x.base)} chance to lose. The extra flip reads are still being tested, so they don't change that.`;
     }
     // history at this cushion beats the rule of thumb (a thin cushion with seconds left still holds most of the time)
     if (l.hist) return `No live flip check yet. At this cushion and time left, the side ahead held ${pc(l.hist.rate)} of the time, so it flips about ${pc(1 - l.hist.rate)}: the other side needs ${money(l.lead, f.digits)} in ${mmss(f.round.minutesLeft)}.`;
@@ -259,16 +264,31 @@ export function pickVoice(voices, pref = '') {
 }
 export const englishVoices = (voices) => (voices || []).filter(usable).sort((a, b) => voiceScore(b) - voiceScore(a));
 
-// an answer in pieces for the server's free voice (v13.49): the first sentence alone so speech starts sooner, then
-// sentences packed up to max characters (the server reads each piece in a second or two); never split at a decimal
-export function speechChunks(text, max = 220) {
-  const s = String(text || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean), out = [];
-  for (const x of s) {
-    for (let i = 0; i < x.length; i += max) {
-      const piece = x.slice(i, i + max), last = out[out.length - 1];
-      if (last && out.length > 1 && last.length + piece.length + 1 <= max) out[out.length - 1] = `${last} ${piece}`;
-      else out.push(piece);
+// an answer in pieces for the server's free voice (v13.49): the first piece alone so speech starts sooner, the rest
+// packed up to max characters. Pieces stay short because the voice's memory grows with each piece's length (about
+// 70 MB a second of speech on top of ~560 MB), so a long sentence is split at a comma, then between words; never at a
+// decimal point.
+export function speechChunks(text, max = 90) {
+  const units = [];
+  for (const sent of String(text || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean)) {
+    if (sent.length <= max) { units.push(sent); continue; }
+    for (const clause of sent.split(/(?<=[,;:—])\s+/)) {
+      if (clause.length <= max) { units.push(clause); continue; }
+      let cur = '';
+      for (const w of clause.split(' ')) {
+        for (let i = 0; i < w.length; i += max) { // a single "word" longer than max (no spaces) is cut
+          const part = w.slice(i, i + max);
+          if (cur && cur.length + part.length + 1 > max) { units.push(cur); cur = part; } else cur = cur ? `${cur} ${part}` : part;
+        }
+      }
+      if (cur) units.push(cur);
     }
+  }
+  const out = [];
+  for (const u of units) {
+    const last = out[out.length - 1];
+    if (last && out.length > 1 && last.length + u.length + 1 <= max) out[out.length - 1] = `${last} ${u}`;
+    else out.push(u);
   }
   return out;
 }

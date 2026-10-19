@@ -3,6 +3,8 @@
 // clean-up, phonemes to tokens, the voices file, WAV); ttsworker.js runs the model in its own process and freevoice.js
 // starts and stops that process. Model files: the kokoro-onnx project's release on GitHub (MIT).
 
+import { speechChunks } from './public/ask.js';
+
 export const KOKORO = {
   voice: 'bm_george', // a warm British male voice; KOKORO_VOICE swaps it (bm_lewis, bm_daniel, bm_fable, am_michael…)
   rate: 24000,
@@ -40,19 +42,8 @@ export function fixPhonemes(ph) {
 }
 export const tokenize = (ph) => [...ph].map((c) => VOCAB[c]).filter((x) => x != null).slice(0, KOKORO.maxTokens);
 
-// pieces short enough to read quickly (the first one shortest, so speech starts sooner), split at sentence ends
-export function chunks(text, max = 220) {
-  const s = normalize(text).split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean); // sentence ends, never decimals
-  const out = [];
-  for (const x of s) {
-    for (let i = 0; i < x.length; i += max) {
-      const piece = x.slice(i, i + max), last = out[out.length - 1];
-      if (last && out.length > 1 && last.length + piece.length + 1 <= max) out[out.length - 1] = `${last} ${piece}`;
-      else out.push(piece);
-    }
-  }
-  return out;
-}
+// pieces short enough to read quickly and to keep the worker's memory down (public/ask.js: the phone splits the same way)
+export const chunks = (text, max = 90) => speechChunks(normalize(text), max);
 
 // the voices file: a numpy .npz (an uncompressed zip of .npy arrays, written with ZIP64 headers) -> name -> Float32Array
 export function readVoices(buf) {

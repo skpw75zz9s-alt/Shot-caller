@@ -124,3 +124,10 @@ test('"Hey Shot": the wake phrase (and its usual mishearings) wakes it, and what
   assert.equal(parseWake('a shot is the lead safe').question, 'is the lead safe', '"a shot" is a common mishearing, when it opens what was said');
   for (const no of ['I need a shot of espresso', 'that was a good shot', 'shot caller', 'hey there', 'they shot it', '']) assert.equal(parseWake(no).woke, false, no);
 });
+
+test('odds are given for the side being called, and never as a flat 0% or 100%', () => {
+  const f = { ...FACTS, odds: { botUp: 0.002, kalshiUp: 0.01 }, roundCall: { ...FACTS.roundCall, side: 'NO', p: 0.94 }, flip: { lead: 'NO', base: 0.001, used: false, parts: [] } };
+  const a = answer('should I buy', f);
+  assert.match(a.parts.find((p) => p.key === 'call').text, /The bot's math gives DOWN 99%\+; Kalshi's prices say 99%\./);
+  assert.match(a.parts.find((p) => p.key === 'flip').text, /under 1% chance to lose/);
+});

@@ -13,8 +13,9 @@ import { KOKORO, voiceOk } from './kokoro.js';
 const WORKER = fileURLToPath(new URL('./ttsworker.js', import.meta.url));
 
 export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off', voice = voiceOk(process.env.KOKORO_VOICE) ? process.env.KOKORO_VOICE : KOKORO.voice,
-  idleMs = 600000, timeoutMs = 60000, fetchImpl = fetch, forkImpl = fork, perMin = 40, perHour = 600, maxChars = 400, now = () => Date.now() } = {}) {
+  idleMs = 600000, timeoutMs = 60000, fetchImpl = fetch, forkImpl = fork, perMin = 60, perHour = 900, maxChars = 200, now = () => Date.now() } = {}) {
   let files = null, filesErr = null, child = null, warm = null, warmFail = null, idle = null, seq = 0, busy = 0;
+  let lastExit = null, crashes = [], pausedUntil = 0; // why the worker last died, and a pause after repeated crashes
   const pending = new Map(), hits = new Map();
 
   // the model and the voices, downloaded once (a .part file renamed when complete, so a cut-off download never counts)
@@ -37,7 +38,14 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
     })().catch((e) => { files = null; filesErr = String(e?.message || e); throw e; }));
   }
 
-  function failAll() { for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error('the voice stopped')); } pending.clear(); }
+  function failAll(why = 'the voice stopped') { for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error(why)); } pending.clear(); }
+  // a worker that dies on its own: killed by the system (SIGKILL: almost always out of memory) or crashed. Two in ten
+  // minutes pause the free voice for half an hour, so it can't keep pushing the server over its memory limit.
+  function exitReason(code, signal, tail) {
+    if (signal === 'SIGKILL') return 'the server ran out of memory for the voice (it was killed): give the Railway service more memory, or set FREE_VOICE=off';
+    const last = (tail || '').trim().split('\n').filter((l) => l && !/^var A=/.test(l)).pop();
+    return `the voice crashed (${signal || `exit ${code}`})${last ? `: ${last.slice(0, 160)}` : ''}`;
+  }
   function stop() {
     clearTimeout(idle); idle = null;
     if (child) { child.removeAllListeners('exit'); child.kill(); }
@@ -49,7 +57,9 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
   function touch() { clearTimeout(idle); idle = setTimeout(() => (busy ? touch() : stop()), idleMs); idle.unref?.(); }
   function worker() {
     if (child) return warm;
-    child = forkImpl(WORKER, [], { env: { ...process.env, KOKORO_DIR: dir }, serialization: 'advanced', stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+    child = forkImpl(WORKER, [], { env: { ...process.env, KOKORO_DIR: dir }, serialization: 'advanced', stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    let tail = '';
+    child.stderr?.on('data', (d) => { const x = String(d); tail = (tail + x).slice(-4000); if (!/^var A=/.test(x)) process.stderr.write(`[voice] ${x.slice(0, 2000)}`); });
     warm = new Promise((resolve, reject) => {
       warmFail = reject;
       child.on('message', (m) => {
@@ -59,7 +69,15 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
         pending.delete(m.id); clearTimeout(p.timer);
         if (m.error) p.reject(new Error(m.error)); else p.resolve(Buffer.from(m.wav));
       });
-      child.on('exit', () => { const was = child; child = null; warm = null; failAll(); if (was) reject(new Error('the voice stopped')); });
+      child.on('exit', (code, signal) => {
+        const was = child, why = exitReason(code, signal, tail);
+        child = null; warm = null; lastExit = { why, at: now() };
+        console.error(`[voice] worker stopped: ${why}`);
+        crashes = [...crashes.filter((t) => now() - t < 600000), now()];
+        if (crashes.length >= 2) pausedUntil = now() + 1800000;
+        failAll(why);
+        if (was) reject(new Error(why));
+      });
     });
     warm.catch(() => {});
     child.send({ type: 'warm' });
@@ -81,6 +99,7 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
     const t = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, maxChars) : '';
     if (!t) return { status: 400, body: { error: 'nothing to say' } };
     if (limited(owner || 'anon')) return { status: 429, body: { error: 'too many spoken answers for now' } };
+    if (now() < pausedUntil) return { status: 503, body: { error: `the free voice is paused for ${Math.ceil((pausedUntil - now()) / 60000)} min after crashing twice (${lastExit?.why || 'unknown'})`, paused: true } };
     try { await ensureFiles(); } catch { return { status: 503, body: { error: `the free voice is still downloading or couldn't download (${filesErr || 'try again in a minute'})`, retry: true } }; }
     busy++;
     try {
@@ -101,13 +120,13 @@ export function createFreeVoice({ dir, enabled = process.env.FREE_VOICE !== 'off
 
   // someone opened Ask: load the model now, so their first answer doesn't wait for it (stops again when quiet)
   async function warmUp() {
-    if (!enabled) return false;
+    if (!enabled || now() < pausedUntil) return false;
     try { await ensureFiles(); touch(); worker(); return true; } catch { return false; }
   }
 
   return {
     speak, stop, voice, warmUp,
     prefetch: () => { if (enabled) ensureFiles().catch(() => {}); }, // at startup: download only, nothing loaded
-    status: () => ({ free: enabled, freeVoice: voice, freeReady: !!files && !filesErr, freeLoaded: !!child }),
+    status: () => ({ free: enabled && now() >= pausedUntil, freeVoice: voice, freeReady: !!files && !filesErr, freeLoaded: !!child, ...(lastExit ? { freeError: lastExit.why } : {}) }),
   };
 }
