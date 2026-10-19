@@ -39,7 +39,7 @@ import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
 import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
-window.SC_BOOT = '206'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '207'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1598,7 +1598,8 @@ function renderNow() {
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
   renderPositions(snap);
-  const sig = live && state.spotAt ? buySignal(live, snap, withGuard(settings, state.botRecord?.guard?.floor), now, state.calls) : null; // never call off the cached price from last visit (90% target: the server's guard floor)
+  const sig = live && state.spotAt ? buySignal(live, snap, withGuard(settings, state.botRecord?.guard?.floor), now, state.calls) : null;
+  state.sigNow = sig ? { ticker: live.m.ticker, hold: sig.hold ?? null, side: sig.side ?? null } : null; // the X-ray's flip risk // never call off the cached price from last visit (90% target: the server's guard floor)
   if (sig?.fire) store.set(LK('calls'), state.calls);
   const block = buyBlock(now); // the daily loss limit or the profit guard: calls still show as paused, no buy alerts
   trackRule(snap, live, now);
@@ -2190,7 +2191,8 @@ function renderXray() {
   const now = Date.now(), snap = state.snapNow, lv = snap?.live && snap.live.ev?.minutesLeft > 0 ? snap.live : null;
   const open = lv ? Date.parse(lv.m.open_time) : 0, close = lv ? Date.parse(lv.m.close_time) : 0, spot = snap?.mSpot ?? snap?.spot;
   const bars = lv ? (snap.bars || []).filter((b) => b.t >= open && b.t < now).map((b) => ({ t: Math.min(b.t + 60000, now), c: b.c })) : [];
-  const live = lv ? { pYes: lv.ev.pYes, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
+  const sg = lv && state.sigNow?.ticker === lv.m.ticker ? state.sigNow : null;
+  const live = lv ? { pYes: lv.ev.pYes, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, noAsk: lv.ev.quote?.noAsk ?? null, hold: sg?.hold ?? null, holdSide: sg?.side ?? null, spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
   setText($('xrWhen'), lv ? `${roundName(lv.m.ticker)} · closes in ${mmss(lv.ev.minutesLeft)}` : 'no open round');
   const fmt = (v) => usd(v, Math.max(0, MKT.digits ?? 2));
   if (lv) {
@@ -2206,7 +2208,7 @@ function renderXray() {
   setText($('xrStatus'), !lv ? '' : openN ? `⚠ ${openN} break${openN === 1 ? '' : 's'} found` : breaks.length ? `scanning · ${breaks.length} healed` : 'scanning · no breaks');
   setHTML($('xrBreaks'), !lv ? '' : `<div class="card xr-breaks"><div class="deep-head"><span>Breaks found</span><small class="muted">${breaks.length ? `${openN} open · ${breaks.length - openN} healed` : 'none this round'}</small></div>`
     + (breaks.length ? `<ul>${breaks.map((b) => `<li class="s${b.sev}${b.open ? ' open' : ''}"><i></i><div><b>${esc(b.title)}</b><small>${clock(b.at)} · ${b.open ? 'open' : `healed ${clock(b.last)}`}</small><p>${esc(b.detail)}</p><p class="xr-means">${esc(b.means)}</p></div></li>`).join('')}</ul>`
-      : '<p class="muted">The scanner checks every 2 seconds for jumps, breakouts, Kalshi lagging or far from fair, a broken book, an exchange splitting from the rest, one-sided flow, volatility shifts and liquidation bursts.</p>')
+      : '<p class="muted">The scanner checks every 2 seconds for jumps, breakouts, high flip risk, market shifts (odds swings, lead changes, the price and Kalshi pulling apart), Kalshi lagging or disagreeing with the bot, UP and DOWN prices that don\'t add up, an exchange splitting from the rest, one-sided flow, volatility shifts and liquidation bursts.</p>')
     + '<p class="fine-left muted">Places to look, not trades: breaks aren\'t graded yet, and the bot\'s calls don\'t use them.</p></div>');
   const stats = hiddenStats({ now, kind: MKT.kind, settle: MKT.settle, live, closes: bars.map((b) => b.c), trades: tape.recent, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], srv: xr.srv, fmt });
   // a new round or a new set of stats: build the cards and let them develop; otherwise just update the numbers

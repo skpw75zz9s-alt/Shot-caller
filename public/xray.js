@@ -156,7 +156,9 @@ export function xraySvg({ bars = [], spot, strike, open, close, now, sigmaMin, b
 }
 
 // ---------- breaks ----------
-// Each detector looks for one way the market can be out of line with itself, right now or earlier in the round.
+// Each detector looks for one way the market can be out of line with itself, right now or earlier in the round: a
+// jump, a breakout, Kalshi lagging or disagreeing with the bot, UP and DOWN prices that don't add up, high flip risk, a
+// market shift (odds swings, a lead change, the price and Kalshi pulling apart), an exchange split, one-sided flow…
 // A break: { key (one per kind and time, so a log can follow it), kind, at, price, sev 1-3, title, detail, means }.
 // None of them is graded yet: they're places to look, not trades.
 export const BREAKS = {
@@ -165,7 +167,10 @@ export const BREAKS = {
   lagMove: 0.08,    // the bot's odds moved 8+ points in 30 seconds…
   lagStill: 0.02,   // …while Kalshi's quote moved 2 or less
   gap: 0.15,        // Kalshi 15+ points from the bot's odds (25+ severe)
-  thin: 0.1,        // a spread of 10 cents or more
+  disagree: 0.08,   // UP + DOWN prices adding to 108¢ or more (115+ severe): the two sides disagree
+  flip: 0.4,        // flip risk 40+ (60+ severe): the hold odds, or a late toss-up (leader at 65% or less, 5 minutes or less left)
+  swing: 0.2,       // the bot's odds, or Kalshi's, moved 20+ points in a minute (35+ severe)
+  diverge: 0.05,    // the bot's odds and Kalshi's moved 5+ points in opposite directions in a minute
   split: 1.5,       // one exchange 1.5+ typical one-minute moves away from the others' median
   flowShare: 0.8,   // 80%+ of the last minute's dollars on one side…
   flowBurst: 2,     // …with 2x the usual dollars a minute
@@ -216,12 +221,46 @@ export function findBreaks(x) {
   if (q && lv.pYes != null) {
     const g = lv.pYes - mid;
     if (Math.abs(g) >= BREAKS.gap) out.push({ key: 'gap', kind: 'gap', at: now, price: null, sev: Math.abs(g) >= 0.25 ? 3 : 2,
-      title: `Kalshi ${Math.round(Math.abs(g) * 100)} points from fair`, detail: `The bot says ${Math.round(lv.pYes * 100)}% UP; Kalshi's traders ${Math.round(mid * 100)}%.`,
+      title: `Bot and Kalshi disagree by ${Math.round(Math.abs(g) * 100)} points`, detail: `The bot says ${Math.round(lv.pYes * 100)}% UP; Kalshi's traders ${Math.round(mid * 100)}%.`,
       means: 'Either Kalshi is slow or it knows something the price doesn\'t show yet. A gap this wide is a place to be careful, not a sure thing.' });
-    if (q.yesBid >= q.yesAsk) out.push({ key: 'crossed', kind: 'book', at: now, price: null, sev: 3, title: 'Kalshi\'s book is crossed', detail: `Bid ${cents(q.yesBid)} at or above ask ${cents(q.yesAsk)}.`,
-      means: 'A crossed book is a glitch or a quote in flight; it rarely lasts more than a moment.' });
-    else if (q.yesAsk - q.yesBid >= BREAKS.thin) out.push({ key: 'thin', kind: 'book', at: now, price: null, sev: 1, title: `Thin book: ${cents(q.yesAsk - q.yesBid)} spread`, detail: `Bid ${cents(q.yesBid)}, ask ${cents(q.yesAsk)}.`,
-      means: 'Few orders resting: getting in and out costs more, and one order can move the price.' });
+  }
+  // the UP and DOWN prices against each other: together they should cost about $1
+  if (q) {
+    const noAsk = lv.noAsk ?? 1 - q.yesBid, sum = q.yesAsk + noAsk, both = `UP ${cents(q.yesAsk)} + DOWN ${cents(noAsk)} = ${Math.round(sum * 100)}¢`;
+    if (sum < 0.995 || q.yesBid >= q.yesAsk) out.push({ key: 'crossed', kind: 'book', at: now, price: null, sev: 3, title: 'UP and DOWN cost less than $1 together', detail: `${both}.`,
+      means: 'A crossed book: a glitch or a quote in flight. It rarely lasts more than a moment.' });
+    else if (sum - 1 >= BREAKS.disagree) out.push({ key: 'disagree', kind: 'book', at: now, price: null, sev: sum - 1 >= 0.15 ? 2 : 1,
+      title: `UP and DOWN prices disagree by ${Math.round((sum - 1) * 100)}¢`, detail: `${both}: a fair pair adds to about 100¢.`,
+      means: 'The two sides can\'t agree on the price: few orders resting, so getting in and out costs more and one order can move it.' });
+  }
+  // high flip risk: the hold odds (the chance the call's side stays ahead to the close), else a late toss-up
+  if (lv?.pYes != null) {
+    const lead = Math.max(lv.pYes, 1 - lv.pYes), side = lv.pYes >= 0.5 ? 'UP' : 'DOWN';
+    const risk = lv.hold != null ? 1 - lv.hold : lv.minutesLeft <= 5 && lead <= 0.65 ? 1 - lead : null;
+    if (risk != null && risk >= BREAKS.flip) out.push({ key: 'flip', kind: 'flip', at: now, price: null, sev: risk >= 0.6 ? 3 : 2,
+      title: `High flip risk: ${Math.round(risk * 100)}/100`, detail: lv.hold != null ? `Hold odds ${Math.round(lv.hold * 100)}% on ${lv.holdSide === 'NO' ? 'DOWN' : lv.holdSide === 'YES' ? 'UP' : side} (300 simulated paths).` : `${side} leads at only ${Math.round(lead * 100)}% with ${Math.max(0, lv.minutesLeft).toFixed(1)} minutes left.`,
+      means: 'The side ahead can easily lose its lead before the close. A late toss-up is where rounds flip.' });
+  }
+  // market shifts over the last minute: the odds swinging, the lead changing hands, the price and Kalshi pulling apart
+  const min = (x.quoteLog || []).filter((e) => e && e.t >= now - 62000 && e.p != null);
+  if (min.length >= 2) {
+    const a = min[0], b = min.at(-1), secs = Math.round((b.t - a.t) / 1000), dp = b.p - a.p;
+    const km = (e) => (e.yesAsk != null && e.noAsk != null ? (e.yesAsk + 1 - e.noAsk) / 2 : null), dk = km(a) != null && km(b) != null ? km(b) - km(a) : null;
+    if (Math.abs(dp) >= BREAKS.swing) out.push({ key: 'swing:bot', kind: 'shift', at: now, price: null, sev: Math.abs(dp) >= 0.35 ? 3 : 2,
+      title: `Odds swing: ${Math.round(Math.abs(dp) * 100)} points ${dp > 0 ? 'toward UP' : 'toward DOWN'}`, detail: `The bot's UP odds went ${Math.round(a.p * 100)}% → ${Math.round(b.p * 100)}% in ${secs} seconds.`,
+      means: 'The market shifted fast. Calls made before the swing were made on a different market.' });
+    if (dk != null && Math.abs(dk) >= BREAKS.swing) out.push({ key: 'swing:kalshi', kind: 'shift', at: now, price: null, sev: Math.abs(dk) >= 0.35 ? 3 : 2,
+      title: `Kalshi swing: ${Math.round(Math.abs(dk) * 100)} points ${dk > 0 ? 'toward UP' : 'toward DOWN'}`, detail: `Kalshi's UP price went ${Math.round(km(a) * 100)}¢ → ${Math.round(km(b) * 100)}¢ in ${secs} seconds.`,
+      means: 'Kalshi\'s traders changed their minds fast: news, a big order, or a move they saw first.' });
+    if (dk != null && Math.abs(dp) >= BREAKS.diverge && Math.abs(dk) >= BREAKS.diverge && Math.sign(dp) !== Math.sign(dk)) out.push({ key: 'diverge', kind: 'shift', at: now, price: null, sev: 2,
+      title: 'The price and Kalshi are moving opposite ways', detail: `In ${secs} seconds the bot's odds moved ${Math.round(Math.abs(dp) * 100)} points ${dp > 0 ? 'UP' : 'DOWN'}, Kalshi's ${Math.round(Math.abs(dk) * 100)} ${dk > 0 ? 'UP' : 'DOWN'}.`,
+      means: 'One of them is wrong. Kalshi may know something the price doesn\'t show, or be about to snap back.' });
+    if (lv?.strike > 0 && a.s > 0 && b.s > 0) {
+      const cross = min.findIndex((e, i) => i > 0 && e.s > 0 && min[i - 1].s > 0 && (e.s - lv.strike) * (min[i - 1].s - lv.strike) < 0);
+      if (cross > 0) out.push({ key: `lead:${minuteKey(min[cross].t)}`, kind: 'shift', at: min[cross].t, price: lv.strike, sev: 2,
+        title: `Lead change: now ${min[cross].s > lv.strike ? 'UP' : 'DOWN'}`, detail: `The price crossed the target (${fmt(lv.strike)}) ${Math.round((now - min[cross].t) / 1000)} seconds ago.`,
+        means: 'The side ahead just changed. Rounds where the lead changes hands are the hardest to call.' });
+    }
   }
   // one exchange splitting from the rest (crypto)
   if (typ && crypto && Array.isArray(x.trades)) {

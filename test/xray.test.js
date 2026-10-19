@@ -64,7 +64,7 @@ test('the film: ribs per minute, the target, the spine, crossing bones, the cone
 import { BREAKS, findBreaks, trackBreaks } from '../public/xray.js';
 const kinds = (xs) => xs.map((b) => b.kind).sort();
 
-test('breaks: a jump, a breakout, Kalshi lagging and far from fair, a thin book', () => {
+test('breaks: a jump, a breakout, Kalshi lagging and disagreeing with the bot, UP and DOWN prices that disagree', () => {
   const t0 = now - 5 * 60000, typ = 100100 * 0.0005; // a typical minute: ~$50
   const bars = [{ t: t0, c: 100000 }, { t: t0 + 60000, c: 100020 }, { t: t0 + 120000, c: 100300 }, { t: now, c: 100100 }];
   const preBars = Array.from({ length: 8 }, (_, i) => ({ t: t0 - (i + 1) * 60000, c: 100000, h: 100150, l: 99900 }));
@@ -75,8 +75,8 @@ test('breaks: a jump, a breakout, Kalshi lagging and far from fair, a thin book'
   assert.equal(j.sev, 3, `$280 is ${(280 / typ).toFixed(1)}x a typical minute`); assert.match(j.title, /Jump up of \$280\.00 in a minute/);
   assert.match(b.find((x) => x.kind === 'breakout').title, /Broke above the last 15 minutes' high \(\$100150\.00\)/);
   assert.match(b.find((x) => x.kind === 'lag').detail, /10 points toward UP in 28 seconds; Kalshi's quote moved 1/);
-  assert.equal(b.find((x) => x.kind === 'gap').title, 'Kalshi 33 points from fair'); assert.equal(b.find((x) => x.kind === 'gap').sev, 3);
-  assert.match(b.find((x) => x.kind === 'book').title, /Thin book: 14¢ spread/);
+  assert.equal(b.find((x) => x.kind === 'gap').title, 'Bot and Kalshi disagree by 33 points'); assert.equal(b.find((x) => x.kind === 'gap').sev, 3);
+  assert.equal(b.find((x) => x.kind === 'book').title, 'UP and DOWN prices disagree by 14¢'); assert.match(b.find((x) => x.kind === 'book').detail, /^UP 44¢ \+ DOWN 70¢ = 114¢/);
 });
 
 test('breaks (crypto): a 15-second spike, an exchange split, one-sided flow, a big Kalshi order, a liquidation burst, a volatility shift', () => {
@@ -94,6 +94,22 @@ test('breaks (crypto): a 15-second spike, an exchange split, one-sided flow, a b
   assert.match(b.find((x) => x.kind === 'order').title, /75% of the round/);
   assert.deepEqual(findBreaks({ now, kind: 'crypto', live: null }), [], 'nothing to scan, nothing found');
   assert.ok(BREAKS.jump > 0);
+});
+
+test('breaks: high flip risk, odds and Kalshi swings, the price and Kalshi pulling apart, a lead change, a crossed book', () => {
+  const quoteLog = [{ t: now - 60000, p: 0.3, yesAsk: 0.62, noAsk: 0.4, s: 99990 }, { t: now - 30000, p: 0.45, yesAsk: 0.55, noAsk: 0.47, s: 100010 }, { t: now - 2000, p: 0.55, yesAsk: 0.38, noAsk: 0.64, s: 100020 }];
+  const b = findBreaks({ now, kind: 'index', live: { ...live, pYes: 0.55, yesBid: 0.5, yesAsk: 0.52, noAsk: 0.47, hold: 0.35, holdSide: 'YES' }, quoteLog });
+  const k = (key) => b.find((x) => x.key === key || x.key.startsWith(key));
+  assert.equal(k('flip').title, 'High flip risk: 65/100'); assert.equal(k('flip').sev, 3); assert.match(k('flip').detail, /Hold odds 35% on UP/);
+  assert.match(k('swing:bot').title, /Odds swing: 25 points toward UP/); assert.match(k('swing:bot').detail, /30% → 55% in 58 seconds/);
+  assert.match(k('swing:kalshi').title, /Kalshi swing: 24 points toward DOWN/);
+  assert.equal(k('diverge').title, 'The price and Kalshi are moving opposite ways');
+  assert.match(k('lead').title, /Lead change: now UP/); assert.equal(k('lead').at, now - 30000); assert.equal(k('lead').price, 100000);
+  assert.equal(k('crossed').title, 'UP and DOWN cost less than $1 together');
+  // no hold odds: a late toss-up counts; an early one doesn't
+  const late = findBreaks({ now, kind: 'index', live: { ...live, pYes: 0.42, minutesLeft: 3 } });
+  assert.match(late.find((x) => x.kind === 'flip').detail, /DOWN leads at only 58% with 3\.0 minutes left/);
+  assert.ok(!findBreaks({ now, kind: 'index', live: { ...live, pYes: 0.42, minutesLeft: 9 } }).some((x) => x.kind === 'flip'));
 });
 
 test('the break log: open while found, healed after 20 seconds, the crack stays where it opened, a new round starts over', () => {

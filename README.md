@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### More breaks (v13.59)
+
+The break finder also looks for **high flip risk**, **market shifts** (odds swings on the bot or Kalshi, a lead change, the price and Kalshi moving opposite ways) and **UP and DOWN prices that disagree** (or cost less than $1 together, a crossed book). The thin-book check became the UP/DOWN check, and "Kalshi far from fair" is now "Bot and Kalshi disagree". The full list is in the table under v13.58.
+
 ### X-ray break finder (v13.58)
 
 The X-ray now hunts for **breaks in the market**: places where it's out of line with itself. Every 2 seconds while the tab is open it checks:
@@ -286,8 +290,14 @@ The X-ray now hunts for **breaks in the market**: places where it's out of line 
 | Spike | the last 15 seconds moved 2.5+ typical 15-second moves (crypto, from the exchange trades) | 2-3 |
 | Breakout | the round's price closed beyond the 15 minutes before it, high or low | 1 |
 | Kalshi lagging | the price moved the bot's odds 8+ points in 30 seconds while Kalshi's quote moved 2 or less | 2 |
-| Kalshi far from fair | Kalshi's mid 15+ points from the bot's odds | 2 (25+: 3) |
-| Broken book | Kalshi's bid at or above its ask (crossed), or a spread of 10¢+ (thin) | 3 / 1 |
+| Bot and Kalshi disagree | Kalshi's mid 15+ points from the bot's odds | 2 (25+: 3) |
+| UP and DOWN disagree | the UP and DOWN prices add to 108¢ or more (a fair pair adds to about 100¢) | 1 (115¢+: 2) |
+| Crossed book | UP and DOWN together cost less than $1, or the bid is at or above the ask | 3 |
+| High flip risk | flip risk 40+/100 from the hold odds (the chance the call's side stays ahead to the close), or without a call a late toss-up: the leader at 65% or less with 5 minutes or less left | 2 (60+: 3) |
+| Odds swing | the bot's UP odds moved 20+ points in a minute | 2 (35+: 3) |
+| Kalshi swing | Kalshi's UP price moved 20+ points in a minute | 2 (35+: 3) |
+| Price and Kalshi pull apart | in the last minute the bot's odds and Kalshi's moved 5+ points in opposite directions | 2 |
+| Lead change | the price crossed the target in the last minute | 2 |
 | Exchange split | one exchange 1.5+ typical one-minute moves (and 0.05%+) from the others' median (crypto) | 2 |
 | One-sided flow | 80%+ of the last minute's exchange dollars on one side, at 2x the usual pace (crypto) | 2 |
 | Volatility shift | volatility at 2x normal | 1 |
