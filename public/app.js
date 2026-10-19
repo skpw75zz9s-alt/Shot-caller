@@ -32,12 +32,13 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
+import { answer as askAnswer, factsForAI } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '189'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '190'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -628,6 +629,7 @@ function dataHealth(now) {
 const STAB = { stable: ['👍', 'Stable', 'Calm, settled market: the bot\'s odds are on firm ground'], moderate: ['🤷', 'Moderate', 'Some chop: odds can wobble more than usual'], unstable: ['👎', 'Unstable', 'Jumpy market: expect big swings, size down'], unknown: ['…', 'Measuring…', 'Needs about 20 minutes of candles'] };
 function renderStability(st, now) {
   const [icon, label, why] = STAB[st.level] || STAB.unknown;
+  state.stabNow = st;
   const changed = state.stabLevel != null && state.stabLevel !== st.level;
   state.stabLevel = st.level;
   for (const id of ['stabThumb', 'pulseThumb']) { const el = $(id); setText(el, icon); setClass(el, `thumb ${st.level}${id === 'pulseThumb' ? ' big' : ''}`); if (changed) pop(el); }
@@ -1589,6 +1591,7 @@ function renderFailed(e) {
 function renderNow() {
   state.renderedAt = Date.now();
   state.clock = null;
+  state.askRc = null;
   boardSide = null;
   const snap = compute();
   const { now, bars, sigmaMin, driftMin, rows, live } = snap;
@@ -1621,6 +1624,7 @@ function renderNow() {
     roundBar(state.clock.close, now);
     const rcRaw = ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null, locking = !!rcRaw?.locking, rc = locking ? null : rcRaw;
     boardSide = rc?.side ?? null;
+    state.askRc = rc;
     if (setText(callEl, rc ? (rc.side === 'YES' ? 'UP' : 'DOWN') : locking ? '…' : 'SIT OUT')) pop(callEl);
     setClass(callEl, rc ? `call ${rc.side.toLowerCase()} round` : 'call pass');
     setText($('callLabel'), rc ? 'ROUND CALL · LEAN, NOT A BUY' : locking ? 'Locking the round call…' : 'Waiting for a live price');
@@ -1679,6 +1683,7 @@ function renderNow() {
     // v13.39 every round gets a call: from 10:00 left, no buy means the round call (the 10-minute pick), never SIT OUT
     const rcRaw = !call && !sig.bail && !waitingToCall && ev.minutesLeft <= 10 ? roundCallFor(live, snap, now) : null;
     const locking = !!rcRaw?.locking, rc = locking ? null : rcRaw; // the first seconds after 10:00 left: waiting for the server's pick
+    state.askRc = rc;
     // the big word, set once a render so its pop plays only on a real change (bail and paused included)
     const paused = !!(block && call && !sig.bail);
     boardSide = call ?? rc?.side ?? (ev.pYes != null && ev.pYes !== 0.5 ? (ev.pYes > 0.5 ? 'YES' : 'NO') : null); // else the bot's lean
@@ -1761,6 +1766,7 @@ function renderNow() {
     drawChart(bars, strike, Date.parse(m.open_time), timing, limit, live.rej);
   }
   setClass(card, cardCls.join(' ')); setClass(entry, entryCls.join(' '));
+  state.askSnap = { snap, live, sig, block, now }; // what Ask reads (askFacts)
   renderDeck(snap, live, sig, now);
 
   setText($('spot'), usd(state.spot, 0)); // the coin's own precision under $1,000
@@ -2040,6 +2046,164 @@ function renderBoard(live, sig, now) {
 }
 
 $('sbList').addEventListener('toggle', (e) => { state.sbOpen = e.target.open; }, true); // stays open across re-renders
+
+// ---------- Ask the bot (public/ask.js, server askai.js): a question by voice or keyboard, answered from the live facts ----------
+// Everything here is what the Deck already worked out (the last render) and what the cards fetched: nothing new is guessed.
+function askFacts(now = Date.now()) {
+  const a = state.askSnap, live = a?.live && Date.parse(a.live.m.close_time) > now ? a.live : null, sig = live ? a.sig : null, snap = a?.snap;
+  const txt = (id) => ($(id)?.textContent || '').trim() || null;
+  const f = { coin: MKT.key, name: MKT.name || MKT.key, series: settings.series, digits: Math.max(0, MKT.digits ?? 0), crypto: CRYPTO, at: now,
+    card: { word: txt('call'), label: txt('callLabel'), sub: txt('callSub'), reason: txt('reason') } };
+  if (!live) return f;
+  const { m, ev } = live, ml = Math.max(0, (Date.parse(m.close_time) - now) / 60000), price = modelSpot(), strike = live.strike, below = /^less/.test(m.strike_type || '');
+  const bars = snap?.bars || [], openT = Date.parse(m.open_time), firstBar = bars.find((b) => b.t >= openT);
+  f.round = { ticker: m.ticker, title: m.title || m.ticker, minutesLeft: +ml.toFixed(2), strike, below, spot: price, change: firstBar && price ? price - firstBar.o : null };
+  const q = ev.quote || {}, mid = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
+  f.odds = { botUp: ev.pYes ?? null, kalshiUp: mid, yesAsk: q.yesAsk ?? null, noAsk: q.noAsk ?? null };
+  if (sig) f.call = { side: sig.callSide ?? null, price: sig.price ?? null, limit: sig.limit ?? null, conf: sig.deep?.score ?? null, hold: sig.hold ?? null, lane: sig.lane ?? null,
+    called: sig.called ?? null, bail: sig.bail ? { side: sig.bail.side, p: sig.bail.p, bid: sig.bail.bid ?? null } : null };
+  f.lockedOut = !!sig?.lockedOut;
+  const rc = state.askRc;
+  if (rc?.side) f.roundCall = { side: rc.side, p: rc.p ?? null, buy: !!rc.buy, price: rc.price ?? rc.ask ?? null, fallback: !!rc.fallback, why: rc.why ?? null, worst: rc.worst ?? null };
+  if (a.block) f.block = a.block.kind === 'loss' ? `Daily loss limit: your trades are down ${dollars(Math.abs(a.block.dl.pnl))} today, past your limit` : `Profit guard: this level's last ${a.block.pg.n} calls lost ${dollars(Math.abs(a.block.pg.usd))} after fees`;
+  const c = price && strike ? cushionRead({ price, strike, sigmaMin: live.sigma ?? snap.sigmaMin, minutesLeft: ml }) : null;
+  if (c) {
+    const leadSide = c.up !== below ? 'UP' : 'DOWN', h = cushionHistory(state.tune?.report?.cushion, c.ratio, ml);
+    const sw = MKT.settle === 'avg60' ? settlementWatch({ prints: snap.quoteLog?.[m.ticker], close: Date.parse(m.close_time), spot: price, strike, sigmaMin: live.sigma ?? snap.sigmaMin, now }) : null;
+    f.line = { leadSide, lead: c.lead, move: c.move, ratio: c.ratio, word: c.word, razor: !!c.razor, hist: h ? { rate: h.rate, n: h.n } : null, settle: sw ? { banked: sw.banked, locked: !!sw.locked } : null };
+  }
+  const fl = state.flipChk?.live;
+  if (fl && fl.ticker === m.ticker && now - (state.flipChkAt || 0) < 20000) f.flip = { lead: fl.lead, p: fl.p, base: fl.base, used: !!fl.used, parts: (fl.parts || []).slice(0, 4).map((x) => ({ name: x.name, push: x.push })) };
+  f.moves = (state.whyLog || []).filter((x) => now - x.t < 30 * 60000).slice(0, 5).map((x) => ({ ago: +((now - x.t) / 60000).toFixed(1), dir: x.dir, headline: x.headline, reasons: x.reasons }));
+  if (!CRYPTO && state.drv?.parts) { try { f.drivers = explainDrivers(state.drv, { name: MKT.name, w: state.drv.w, digits: Math.max(2, MKT.digits ?? 2), r2: state.drv.fit?.r2All }); } catch { /* skip */ } }
+  const sc = state.scanSrv?.live?.ticker === m.ticker ? state.scanSrv.live.sc : null;
+  if (sc?.ready) {
+    const ch = scanChance(ev.pYes, featureVector(sc, m.strike_type), state.scanSrv?.models, ml);
+    f.scan = { verdict: sc.verdict, score: sc.score, leader: sc.leader?.ex ?? null, bigBuy: sc.bigBuy ?? 0, bigSell: sc.bigSell ?? 0,
+      chance: ch ? { active: !!ch.active, side: ch.p >= 0.5 ? 'UP' : 'DOWN', p: Math.max(ch.p, 1 - ch.p) } : null };
+  }
+  const tug = CRYPTO ? flowStats(flow, now).nowBuyShare : null;
+  if (tug != null) {
+    const side = tug >= 0.5 ? 'UP' : 'DOWN', ag = state.scanSrv?.agreement, b = f.line ? (side !== f.line.leadSide ? ag?.disagree : ag?.agree) : null;
+    f.pressure = { side, share: Math.max(tug, 1 - tug), note: b?.n >= 20 ? `When pressure ${side !== f.line.leadSide ? 'disagreed with' : 'agreed with'} the leading side, that side still won ${Math.round(b.won / b.n * 100)}% of ${b.n} checks` : null };
+  }
+  const w = state.watch?.status;
+  if (w && now - (state.watchAt || 0) < 30000) f.watch = { hold: w.hold ? w.hold.why : null, events: (state.watch.events || []).filter((e) => e.sev !== 'info' && now - e.t < 5 * 60000).slice(0, 3).map((e) => e.text) };
+  let P = chartState.pats;
+  if (!P) { try { P = patternsNow(bars.slice(0, -1)); } catch { P = null; } }
+  if (P) {
+    const fams = new Map((state.tune?.report?.families || []).filter((x) => /^cp_/.test(x.family)).map((x) => [x.family.slice(3), x]));
+    f.patterns = { forming: P.forming ? { name: P.forming.name, up: P.forming.up, dn: P.forming.dn } : null,
+      recent: (P.recent || []).map((e) => { const h = fams.get(e.key); return { name: e.name, dir: e.dir, ago: +((now - e.t) / 60000).toFixed(1), target: e.target ?? null, proven: !!h?.proven, hit: h?.test?.hit ?? null }; }) };
+  }
+  try {
+    const b = signalBoard({ ticker: m.ticker, side: boardSide, crypto: CRYPTO, scan: now - (state.scanFetchAt || 0) < 60000 ? state.scanSrv : null, micro: state.micro, tune: state.tune, playbook: state.playbook,
+      cross: state.cross, flip: now - (state.flipChkAt || 0) < 30000 ? state.flipChk : null, volTune: state.volTuneApi, lab: state.lab });
+    f.board = { side: b.side, inCalls: b.counts.in, probation: b.counts.probation, with: b.counts.with, against: b.counts.against,
+      rows: b.rows.filter((r) => r.status === 'in' && r.vs).map((r) => ({ name: r.name, lean: r.lean, vs: r.vs })),
+      close: b.rows.filter((r) => r.verdict === 'close').map((r) => r.name) };
+  } catch { /* the board needs its feeds; skip it */ }
+  const st = state.stabNow;
+  if (st) f.stability = { level: st.level, score: st.score ?? null, parts: (st.parts || []).map((x) => x.label) };
+  f.vol = snap?.sigmaMin ?? null;
+  const pk = state.pick?.stats, acc = (() => { try { return accuracyNow(); } catch { return []; } })(), off = acc.find((r) => r.key === 'calls')?.data;
+  f.record = { picks: pk?.graded ? { wins: pk.wins, graded: pk.graded, avgP: pk.avgP ?? null, buys: pk.buys?.graded ? { wins: pk.buys.wins, graded: pk.buys.graded, usd: pk.buys.usd } : null } : null,
+    official: off?.graded ? off : null, accuracy: acc.map((r) => ({ name: r.name, metric: r.metric, verdict: r.verdict })),
+    trades: state.trades.length ? { n: state.trades.length, total: state.trades.reduce((x, t) => x + (t.pnl || 0), 0) } : null };
+  if (!state.sessAt || now - state.sessAt > 60000) { state.sessAt = now; state.sess = sessions(now); }
+  f.sessions = (state.sess || []).map((x) => ({ name: x.name, open: !!x.open }));
+  f.positions = state.positions.map((p) => ({ ticker: p.ticker, side: p.side, price: p.price, contracts: p.contracts, bid: state.posChecks?.[p.id]?.bid ?? null }));
+  return f;
+}
+
+const ask = { log: [], busy: false, ai: null, rec: null, listening: false };
+let askSpeak = store.get('askSpeak', true);
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+function askOpen(on = true) {
+  setHidden($('askSheet'), !on);
+  document.body.classList.toggle('asking', on);
+  if (on) {
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; renderAsk(); }).catch(() => { ask.ai = false; renderAsk(); });
+    renderAsk();
+  } else { askStopListening(); window.speechSynthesis?.cancel(); }
+}
+function askSay(text) {
+  if (!askSpeak || !text || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent'));
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  } catch { /* no voice on this phone */ }
+}
+async function askQuestion(q) {
+  q = String(q || '').trim();
+  if (!q || ask.busy) return;
+  const facts = askFacts(), built = askAnswer(q, facts);
+  const item = { q, at: Date.now(), built, ai: null, aiState: ask.ai === false ? 'off' : 'thinking', aiErr: null };
+  ask.log.unshift(item); if (ask.log.length > 20) ask.log.length = 20;
+  $('askInput').value = '';
+  renderAsk();
+  if (item.aiState === 'off') { askSay(built.speak); return; }
+  ask.busy = true;
+  try {
+    const history = ask.log.slice(1, 4).reverse().filter((x) => x.ai).map((x) => ({ q: x.q, a: x.ai }));
+    const r = await fetch(`${API}/ask`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q, facts: factsForAI(facts), history }) });
+    paywalled(r);
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 501) { ask.ai = false; item.aiState = 'off'; askSay(built.speak); }
+    else if (r.ok && d.answer) { item.ai = d.answer; item.aiState = 'done'; askSay(d.answer); }
+    else { item.aiState = 'error'; item.aiErr = d.error || `The AI couldn't answer (${r.status}).`; askSay(built.speak); }
+  } catch {
+    item.aiState = 'error'; item.aiErr = 'Couldn\'t reach the server. Here\'s the built-in answer.'; askSay(built.speak);
+  } finally { ask.busy = false; renderAsk(); }
+}
+function askListen() {
+  if (!SpeechRec) { $('askInput').focus(); toast('Voice input isn\'t built into this browser: tap the mic on your keyboard to dictate.'); return; }
+  if (ask.listening) { askStopListening(); return; }
+  window.speechSynthesis?.cancel();
+  const rec = new SpeechRec();
+  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  let finalText = '';
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) finalText += t; else interim += t; }
+    $('askInput').value = (finalText + interim).trim();
+  };
+  rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Microphone blocked: allow it for this site in your browser settings, or type the question.'); else if (e.error !== 'no-speech' && e.error !== 'aborted') toast('Didn\'t catch that. Try again or type it.'); };
+  rec.onend = () => { ask.listening = false; ask.rec = null; renderAsk(); const t = finalText.trim() || $('askInput').value.trim(); if (t) askQuestion(t); };
+  try { rec.start(); ask.rec = rec; ask.listening = true; renderAsk(); } catch { ask.listening = false; }
+}
+function askStopListening() { try { ask.rec?.stop(); } catch { /* already stopped */ } }
+function renderAsk() {
+  if ($('askSheet').hidden) return;
+  const mic = $('askMic');
+  mic.classList.toggle('on', ask.listening);
+  mic.setAttribute('aria-pressed', String(ask.listening));
+  mic.setAttribute('aria-label', ask.listening ? 'Stop listening' : 'Ask by voice');
+  setText($('askHint'), ask.listening ? 'Listening… ask about the round' : `Ask about ${MKT.key}'s live round: tap the mic or type`);
+  setText($('askMode'), ask.ai ? 'AI deep dive on' : ask.ai === false ? 'Built-in answers' : '');
+  $('askSpeak').setAttribute('aria-pressed', String(askSpeak));
+  setText($('askSpeak'), askSpeak ? '🔊 Read aloud' : '🔇 Muted');
+  setHidden($('askChips'), ask.log.length > 0);
+  setHTML($('askLog'), ask.log.map((x) => {
+    const b = x.built, ago = Math.round((Date.now() - x.at) / 60000);
+    const ai = x.aiState === 'done' ? `<div class="ask-ai"><span class="ask-tag">AI deep dive</span>${x.ai.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`
+      : x.aiState === 'thinking' ? '<div class="ask-ai thinking"><span class="ask-tag">AI deep dive</span><p><i class="ask-dots"><b></b><b></b><b></b></i> Weighing everything…</p></div>'
+      : x.aiState === 'error' ? `<div class="ask-ai err"><small>${esc(x.aiErr)}</small></div>` : '';
+    const parts = b.parts.map((p) => `<li><b>${esc(p.title)}</b><span>${esc(p.text)}</span></li>`).join('');
+    const nums = `${b.note ? `<p class="ask-note">${esc(b.note)}</p>` : ''}<p class="ask-bottom">${esc(b.bottom)}</p>${parts ? `<ul class="ask-parts">${parts}</ul>` : ''}${b.tail ? `<small class="ask-tail">${esc(b.tail)}</small>` : ''}`;
+    return `<article class="ask-item"><header><b>${esc(x.q)}</b><small>${ago < 1 ? 'just now' : `${ago} min ago`}</small></header>${ai}`
+      + (x.aiState === 'done' ? `<details class="ask-nums"><summary>The numbers behind it</summary>${nums}</details>` : `<div class="ask-nums">${nums}</div>`) + '</article>';
+  }).join(''));
+}
+$('askBtn').addEventListener('click', () => askOpen($('askSheet').hidden));
+$('askClose').addEventListener('click', () => askOpen(false));
+$('askMic').addEventListener('click', askListen);
+$('askForm').addEventListener('submit', (e) => { e.preventDefault(); askStopListening(); askQuestion($('askInput').value); });
+$('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
+$('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) window.speechSynthesis?.cancel(); renderAsk(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
 // ---------- Simple mode ----------
 function applyMode() {

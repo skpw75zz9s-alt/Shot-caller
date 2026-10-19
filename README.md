@@ -271,6 +271,15 @@ Security:
 
 ## Version notes (newest first)
 
+### Ask the bot (v13.47)
+
+Tap the **mic** up top and ask out loud ("should I buy?", "is the lead safe?", "why is it dumping?", "any patterns?", "deep dive"), or type. The sheet answers from everything the app already knows about the live round, and can read the answer aloud (🔊, on by default; tap to mute).
+
+- **Built-in answers, no setup** (`public/ask.js`): the question is matched to what it's about (the call, the lead, flip risk, why it moved, buyers and sellers, chart patterns, the signal board, market mood, the record, your position, sessions), and each part is written from the live numbers: the bottom line first, then the parts. Nothing new is guessed: it reads the Deck's last render, the round call, the cushion, the flip check, the scan, the pattern reader, the board and the record. Ask about another coin and it tells you to switch markets.
+- **AI deep dive, optional** (`askai.js`): set `ANTHROPIC_API_KEY` in Railway and the server sends Claude the same facts with the question. It weighs them and answers in a few spoken-style sentences: bottom line first, only the snapshot's numbers, honest about uncertainty, unproven factors as context only, never financial advice. The built-in answer shows instantly and folds under "The numbers behind it" when the AI's arrives. `ASK_MODEL` picks the model; without it the server uses the newest Opus model the key can use (from the Models API). Members and admins only; 4 questions a minute and 40 an hour each, since every answer costs API tokens. Without a key, `/api/ask` returns 501 and the phone uses the built-in answer.
+- **Voice**: the browser's own speech recognition (Chrome, Edge, Safari 14.5+). Where it isn't available, the mic focuses the text box: use the keyboard's dictation mic. The audio never reaches the server, only the transcribed text.
+- Adds the server's first npm dependency, `@anthropic-ai/sdk`, loaded only when the first AI question comes in.
+
 ### Why it's on probation (v13.46)
 
 Every factor on the signal board's probation list now says why it isn't used, in plain words. The rows are grouped:
@@ -1611,7 +1620,7 @@ Everything is enforced on the server: without access, it serves only the paywall
 
 ## Run it
 
-Needs Node 18+ and nothing else (no dependencies).
+Needs Node 18+. One npm dependency, `@anthropic-ai/sdk`, used only by Ask's optional AI deep dive (`npm install`).
 
 ```bash
 npm start            # http://localhost:8080

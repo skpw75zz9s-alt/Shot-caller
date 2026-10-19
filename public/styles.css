@@ -1071,3 +1071,57 @@ details.chart-more summary::-webkit-details-marker { display: none; } details.ch
 .sb-right em.v-noedge { color: var(--dim); border-color: var(--line-2); }
 .sb-right em.v-reversed { color: #fb7185; border-color: #fb718555; }
 .sb-fold-note { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+
+/* ---------- Ask the bot (v13.47): the mic up top, the sheet over the screen ---------- */
+.ask-btn { flex: none; width: auto; margin: 0; height: 28px; padding: 0 9px 0 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 8px; background: #22d3ee14; border: 1px solid #22d3ee66; color: var(--accent); font: 700 10px var(--mono); letter-spacing: .4px; text-transform: uppercase; }
+.ask-btn svg, .ask-mic svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body.asking .ask-btn { background: var(--accent); color: var(--bg); }
+.hdr-r:has(.ask-btn) { gap: 8px; }
+.ask-sheet { position: fixed; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 30; max-width: 560px; margin: 0 auto; max-height: min(78dvh, 720px); display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--panel-2); border: 1px solid #22d3ee44; border-radius: 14px; box-shadow: 0 18px 50px #000c, 0 0 24px #22d3ee14; animation: askUp .22s cubic-bezier(.2, 1, .4, 1); }
+.ask-sheet[hidden] { display: none; }
+@keyframes askUp { from { transform: translateY(14px); opacity: 0; } }
+.ask-head { display: flex; align-items: center; gap: 8px; }
+.ask-head h2 { margin: 0; font-size: 15px; flex: none; }
+.ask-mode { flex: 1; min-width: 0; color: var(--dim); font: 500 10px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-speak, .ask-x { flex: none; width: auto; margin: 0; height: 28px; padding: 0 8px; border-radius: 8px; background: none; border: 1px solid var(--line-2); color: var(--muted); font: 600 11px var(--mono); text-transform: none; letter-spacing: 0; }
+.ask-speak[aria-pressed="true"] { color: var(--accent); border-color: #22d3ee55; }
+.ask-x { padding: 0 10px; }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-chips button { width: auto; margin: 0; padding: 7px 10px; border-radius: 999px; background: #22d3ee0d; border: 1px solid #22d3ee33; color: var(--text); font: 500 12px var(--sans); text-transform: none; letter-spacing: 0; }
+.ask-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; }
+.ask-log:empty { display: none; }
+.ask-item { padding: 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line-2); }
+.ask-item > header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.ask-item > header b { font-size: 13px; }
+.ask-item > header small { color: var(--dim); font: 500 10px var(--mono); flex: none; }
+.ask-tag { display: inline-block; margin-bottom: 4px; color: var(--violet); font: 700 9.5px var(--mono); letter-spacing: .6px; text-transform: uppercase; }
+.ask-ai { padding: 8px 10px; margin-bottom: 8px; border-left: 2px solid var(--violet); background: #a78bfa0d; border-radius: 0 8px 8px 0; }
+.ask-ai p { margin: 0 0 6px; font-size: 13px; line-height: 1.45; }
+.ask-ai p:last-child { margin: 0; }
+.ask-ai.err { border-left-color: var(--amber); background: #fbbf240d; }
+.ask-ai.err small { color: var(--muted); }
+.ask-dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 4px; }
+.ask-dots b { width: 5px; height: 5px; border-radius: 50%; background: var(--violet); animation: askDot 1s infinite ease-in-out; }
+.ask-dots b:nth-child(2) { animation-delay: .15s; } .ask-dots b:nth-child(3) { animation-delay: .3s; }
+@keyframes askDot { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+.ask-bottom { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.ask-note { margin: 0 0 6px; color: var(--amber); font-size: 12px; }
+.ask-parts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.ask-parts li { display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; line-height: 1.4; }
+.ask-parts b { color: var(--accent); font: 700 10px var(--mono); letter-spacing: .5px; text-transform: uppercase; }
+.ask-parts span { color: var(--text); }
+.ask-tail { display: block; margin-top: 6px; color: var(--dim); font-size: 11px; }
+details.ask-nums summary { cursor: pointer; color: var(--muted); font: 600 11px var(--mono); padding: 2px 0 6px; }
+.ask-form { display: flex; gap: 6px; align-items: center; }
+.ask-form input { flex: 1; min-width: 0; margin: 0; height: 42px; padding: 0 12px; border-radius: 10px; font-size: 16px; } /* 16px: iOS doesn't zoom in on focus */
+.ask-mic { flex: none; width: 42px; height: 42px; margin: 0; padding: 0; display: grid; place-items: center; border-radius: 50%; background: #22d3ee1a; border: 1px solid #22d3ee66; color: var(--accent); }
+.ask-mic svg { width: 19px; height: 19px; }
+.ask-mic.on { background: var(--no); border-color: var(--no); color: #fff; animation: askPulse 1.2s infinite; }
+@keyframes askPulse { 0% { box-shadow: 0 0 0 0 #ff4d6d88; } 70% { box-shadow: 0 0 0 12px #ff4d6d00; } 100% { box-shadow: 0 0 0 0 #ff4d6d00; } }
+.ask-go { flex: none; width: auto; margin: 0; height: 42px; padding: 0 14px; border-radius: 10px; }
+.ask-hint { color: var(--dim); font: 500 10.5px var(--mono); text-align: center; }
+@media (prefers-reduced-motion: reduce) { .ask-sheet, .ask-mic.on, .ask-dots b { animation: none; } }
+body.split .ask-sheet { bottom: calc(50px + env(safe-area-inset-bottom)); }
+@media (max-width: 440px) { .ask-btn { padding: 0 7px; } .ask-btn span { display: none; } } /* phones: the mic alone, so the market pill keeps its room */
+header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width: 0; flex: 0 1 auto; } /* the header never overlaps: the market pill shrinks first */
+@media (max-width: 400px) { .hdr-r:has(.ask-btn) { gap: 6px; } header h1 em { letter-spacing: .5px; } }

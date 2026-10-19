@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'shot-srv-'));
 process.env.PAYWALL = 'off'; // paywall has its own tests
+delete process.env.ANTHROPIC_API_KEY; // Ask's AI is off here (askai.test.js tests it with a stand-in client)
 
 // Mock upstream standing in for both Kalshi and Coinbase.
 const upstream = http.createServer((req, res) => {
@@ -166,6 +167,12 @@ test('Discord role routes: status says off without config, linking needs a membe
   assert.equal((await fetch(`${app}/api/discord/link`, { method: 'POST', body: '{}' })).status, 400);
   const cb = await fetch(`${app}/api/discord/callback?code=x&state=y`, { redirect: 'manual' });
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /^\/\?discord=error&msg=/);
+});
+
+test('Ask without an API key: the status says off and a question gets 501, so the phone answers on its own', async () => {
+  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null });
+  const r = await fetch(`${app}/api/ask`, { method: 'POST', body: JSON.stringify({ q: 'should I buy?', facts: { coin: 'BTC' } }) });
+  assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
 });
 
 test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', async () => {
