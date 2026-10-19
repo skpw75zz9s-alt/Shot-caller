@@ -1125,3 +1125,23 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .tu-m { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); }
 .tu-m b { font-size: 12.5px; }
 .tu-m small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+/* the Insiders tab (v13.54) */
+.ins-card .deep-head small { font: 500 10.5px var(--mono); }
+.ins-split { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin: 6px 0 8px; font: 700 12px var(--mono); }
+.ins-bar { height: 8px; border-radius: 4px; background: var(--no); overflow: hidden; }
+.ins-bar i { display: block; height: 100%; background: var(--yes); border-right: 2px solid var(--panel); }
+.ins-bar.rev { background: var(--no); }
+.ins-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.ins-list li { display: grid; grid-template-columns: 62px 72px 1fr auto; gap: 6px; align-items: baseline; padding: 4px 6px; border-radius: 6px; background: var(--panel-2); font: 500 11.5px var(--mono); }
+.ins-list li time { color: var(--dim); font-size: 10.5px; }
+.ins-list li span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-list li em { font-style: normal; font-weight: 700; }
+.ins-list li.up b { color: var(--yes); } .ins-list li.dn b { color: var(--no); }
+.ins-facts { margin: 4px 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.ins-tab { width: 100%; border-collapse: collapse; font: 500 12px var(--mono); margin: 4px 0; }
+.ins-tab th { text-align: left; color: var(--dim); font-weight: 600; padding: 2px 4px; }
+.ins-tab td { padding: 3px 4px; border-top: 1px solid var(--line); }
+.ins-stable { font-size: 12.5px; margin: 8px 0 0; }
+.ins-use { margin: 8px 0 0; color: var(--dim); font-size: 11.5px; line-height: 1.4; }
+/* nine tabs in Pro on a phone: tighter labels so "Insiders" and "Settings" fit */
+@media (max-width: 440px) { body:not(.simple) nav { gap: 2px; padding-left: 4px; padding-right: 4px; } body:not(.simple) nav button { font-size: 8.5px; letter-spacing: 0; text-transform: none; } }

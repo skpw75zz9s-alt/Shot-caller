@@ -58,7 +58,7 @@ export function createFlowsFeed({ asset, file, prices, playbook = null, fetchImp
       const j = await get(`https://api.whale-alert.io/v1/transactions?api_key=${encodeURIComponent(key)}&min_value=${FLOWS.whaleMin}&start=${since}&currency=${asset.key.toLowerCase()}&limit=100`);
       if (j?.result !== 'success') throw new Error(j?.message || 'Whale Alert refused the request (check WHALE_ALERT_API_KEY and its plan)');
       const seen = new Set(s.whale.txs.map((t) => t.hash + t.to?.address));
-      for (const t of j.transactions || []) if (!seen.has(t.hash + t.to?.address)) s.whale.txs.push({ hash: t.hash, symbol: t.symbol, timestamp: t.timestamp, amount_usd: t.amount_usd, from: { owner_type: t.from?.owner_type }, to: { owner_type: t.to?.owner_type, address: t.to?.address } });
+      for (const t of j.transactions || []) if (!seen.has(t.hash + t.to?.address)) s.whale.txs.push({ hash: t.hash, symbol: t.symbol, timestamp: t.timestamp, amount_usd: t.amount_usd, amount: t.amount, from: { owner_type: t.from?.owner_type, owner: t.from?.owner }, to: { owner_type: t.to?.owner_type, owner: t.to?.owner, address: t.to?.address } });
       s.whale.txs = s.whale.txs.filter((t) => t.timestamp * 1000 > now - 2 * HOUR);
       s.whale.err = null;
       // one sample an hour (a reading overlaps the next 60 minutes' readings, so more often would count the same flow twice)
@@ -118,9 +118,10 @@ export function createFlowsFeed({ asset, file, prices, playbook = null, fetchImp
   function api(now = clock()) {
     const r = reads(now), slim = (t) => (t ? { n: t.n, dir: t.dir, test: t.test, train: t.train, proven: t.proven, need: t.need, zNeed: t.zNeed, unit: t.unit } : null);
     return {
-      etf: { on: !!slug, read: r.etf, test: slim(tests.etf), days: s.etf.rows.length, err: s.etf.err },
-      stables: { on: true, read: r.stables, test: slim(tests.stables), err: shared.err },
-      whale: { on: !!key, read: r.whale, test: slim(tests.whale), samples: s.whale.log.length, err: key ? s.whale.err : 'set WHALE_ALERT_API_KEY to turn it on' },
+      etf: { on: !!slug, read: r.etf, test: slim(tests.etf), days: s.etf.rows.length, recent: s.etf.rows.slice(-10).reverse(), err: s.etf.err },
+      stables: { on: true, read: r.stables, test: slim(tests.stables), recent: shared.stables ? stablesChange(shared.stables).slice(-8).reverse() : [], err: shared.err },
+      whale: { on: !!key, read: r.whale, test: slim(tests.whale), samples: s.whale.log.length, err: key ? s.whale.err : 'set WHALE_ALERT_API_KEY to turn it on',
+        recent: s.whale.txs.filter((t) => String(t.symbol).toLowerCase() === asset.key.toLowerCase()).slice(-15).reverse().map((t) => ({ t: t.timestamp * 1000, usd: t.amount_usd, amount: t.amount, from: t.from?.owner || t.from?.owner_type || 'unknown', to: t.to?.owner || t.to?.owner_type || 'unknown', fromType: t.from?.owner_type, toType: t.to?.owner_type })) },
       prices: { days: Object.keys(s.closes.map).length, err: s.closes.err },
       inCalls: shifts(now),
     };

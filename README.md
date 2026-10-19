@@ -11,7 +11,7 @@ A mobile signal bot for **Kalshi's 15-minute markets**: Bitcoin by default (seri
 
 Along the top: the market picker, **Ask** (the chat button: type a question about the live round and get a deep dive from the live numbers, see v13.47), **Simple / Pro** (Simple shows just the call; Pro shows every card and tab) and split screen.
 
-Eight tabs along the bottom (Simple mode hides Radar and Learn):
+Nine tabs along the bottom (Simple mode hides Radar, Insiders and Learn):
 
 - **Deck.** The command deck:
   - **Status tiles:** live feed, a server-synced clock, the active contract, and the bot's verified record.
@@ -73,6 +73,7 @@ Eight tabs along the bottom (Simple mode hides Radar and Learn):
   - The Deck's "Bot record" tile shows it too.
   - Losses are never hidden or reset. The record is kept in `record.json` in `DATA_DIR`, so add the Railway volume or it restarts with each deploy.
 - **Map.** The map to success: your stats, the road from first call to steady results with a tip per step, and the coach.
+- **Insiders.** Where the big money is moving: big Kalshi orders, exchange whales, liquidations, futures positioning, on-chain transfers and fund flows (see v13.54).
 - **Learn.** How calls, hold odds, the indicators and the tug of war work, in plain words.
 - **Settings.** As before.
 
@@ -274,6 +275,18 @@ Security:
 - **Settlements** close linked positions from Kalshi's settlement records. The market result is used only as a fallback 15 minutes after close.
 
 ## Version notes (newest first)
+
+### Insiders (v13.54)
+
+A new **Insiders** tab (Pro) shows where the big money is moving, in one place. Each card says how the bot uses it; none of it is a call by itself.
+
+- **Big money on Kalshi:** this round's UP vs DOWN dollars and its biggest orders, from the Kalshi trades the phone already polls. Context only, since the bot already prices the round from Kalshi's quotes. Every market gets this card.
+- **Whale trades on exchanges:** the last hour's whale trades across the coin's exchanges (your whale size from Alerts), bought vs sold. They feed the Round scan and whale alerts.
+- **Forced closes · liquidations:** the last 30 minutes of longs and shorts force-closed, biggest first. Longs liquidated is forced selling; shorts liquidated is a squeeze up. An input to the Round scan.
+- **Futures positioning:** funding (who's paying whom, and how crowded), open interest over 5 minutes and the perp premium, in plain words (Hyperliquid).
+- **On-chain whales:** Whale Alert's $500k+ transfers onto, off and between exchanges in the last hour (with `WHALE_ALERT_API_KEY`).
+- **Fund flows:** the last 10 days of spot-ETF net flows (Farside: BTC, ETH, SOL) and the stablecoin supply's 7-day change (DefiLlama).
+- Built from `public/insiders.js` (pure summaries) and `/api/insiders` (liquidations, positioning and the money flows for the market). It refreshes while the tab is on screen: the phone's own data every 2 seconds, the server's every 15. Non-crypto markets show the Kalshi card only.
 
 ### Money flows (v13.53)
 

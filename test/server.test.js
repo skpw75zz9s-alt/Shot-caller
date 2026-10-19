@@ -175,6 +175,11 @@ test('Ask without an API key: the status says off and a question gets 501, so th
   assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
 });
 
+test('the Insiders tab\'s server parts: liquidations, futures and flows for crypto', async () => {
+  const r = await (await fetch(`${app}/api/insiders`)).json();
+  assert.equal(r.crypto, true); assert.ok(r.liqs && Array.isArray(r.liqs.biggest)); assert.ok('futures' in r); assert.ok(r.flows?.etf);
+});
+
 test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', async () => {
   const r = await fetch(`${app}/api/kalshi/markets/KXREFUSED-1`);
   assert.equal(r.status, 502); assert.equal(r.headers.get('x-paywall'), null);

@@ -67,6 +67,7 @@
   <link rel="modulepreload" href="flipmodel.js">
   <link rel="modulepreload" href="losslab.js">
   <link rel="modulepreload" href="pick.js">
+  <link rel="modulepreload" href="insiders.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -504,6 +505,10 @@
     </section>
 
     <!-- Map to success (v13.24): live stats, the road of milestones with a tip each, and a coach reading your trades -->
+    <section id="view-insiders" class="view">
+      <div class="card ins-head"><div class="deep-head"><span>Insiders</span><small id="insWhen" class="muted"></small></div><p class="fine-left">Where the big money is moving: big orders on Kalshi, whales on the exchanges, forced closes and positioning in futures, large on-chain transfers and fund flows. None of it is a call by itself; each card says how the bot uses it.</p></div>
+      <div id="insBody"></div>
+    </section>
     <section id="view-success" class="view">
       <div class="card map-hero">
         <div class="deep-head"><span>Map to success</span><b id="mapLive" class="map-live">● live</b></div>
@@ -610,7 +615,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.53 · Money flows</p>
+      <p class="fine" id="version">Shot Caller v13.54 · Insiders</p>
     </section>
   </main>
 
@@ -640,6 +645,7 @@
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
+    <button data-view="insiders" data-pro><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Insiders</button>
     <button data-view="learn" data-pro><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
@@ -647,7 +653,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '201';
+    window.SC_BUILD = '202';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

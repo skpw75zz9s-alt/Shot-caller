@@ -32,13 +32,14 @@ import { PICK, pickFallback, pickNow } from './pick.js';
 import { cushionHistory, cushionRead, sessions, settlementWatch, span } from './settle.js';
 import { VERDICTS, signalBoard } from './signals.js';
 import { patternsNow } from './chartpatterns.js';
+import { kalshiBig, transferDir, whaleSummary } from './insiders.js';
 import { answer as askAnswer, factsForAI } from './ask.js';
 import { balanceDollars, foldFills, importKey, parseFill, parsePosition, parseSettlement, reconcilePositions, signHeaders } from './kalshi.js';
 import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '201'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '202'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -522,7 +523,7 @@ const noteClass = (k) => ({ call: 'call', win: 'good', whaleBuy: 'good', feedUp:
 
 // ---------- live orders from all markets (public/feeds.js) ----------
 // Every exchange's trades feed the tug of war, whales and the tape; the round's per-exchange split resets each round.
-const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0 }; // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
+const tape = { list: [], round: null, ex: [], kalshi: [], kalshiSeen: new Set(), kalshiTicker: null, rate: [], big: [], bigV: 0, whales: [] }; // whales: the last 2 hours' (the Insiders tab) // big: market-moving orders, 6h, for the chart's bubbles (bigV bumps on each)
 const impact = createImpact(); // which trades moved the price (public/chart.js)
 tape.recent = []; // every exchange trade in the last ~10 minutes, for "why it moved" (public/why.js)
 const alignPrices = createAligner(0.005, MKT.sym || undefined); // the global markets' USDT / futures price levels, aligned to USD spot (public/feeds.js)
@@ -540,6 +541,7 @@ function handleTrades(trades) {
     tape.list.unshift(x); tape.rate.push(Date.now());
     const moved = impact(x, { sigmaMin: state.sigmaNow || undefined }); // only orders that move the price bubble on the chart
     if (moved) { tape.big.push(moved); tape.bigV++; }
+    if (w) { tape.whales.push({ t: x.t, ex: x.ex, side: w.side, usd: w.usd, price: w.price, size: w.size }); if (tape.whales.length > 500 || tape.whales[0].t < Date.now() - 2 * 3600000) tape.whales = tape.whales.filter((y) => y.t >= Date.now() - 2 * 3600000).slice(-400); }
     if (w) alerts.event(w.side === 'buy' ? 'whaleBuy' : 'whaleSell', `Whale ${w.side}: ${cash(w.usd)}`, `${w.size >= 100 ? int(w.size) : w.size.toFixed(2)} ${MKT.key} at ${usd(w.price, 0)} on ${w.ex}`, `whale:${w.ex}:${w.t}`);
   }
   if (tape.list.length > 200) tape.list.length = 200;
@@ -2171,6 +2173,70 @@ $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion
 $('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
+// ---------- Insiders (public/insiders.js, /api/insiders): where the big money is moving ----------
+// Kalshi's big orders and the exchange whales come from what this phone already streams; liquidations, futures
+// positioning, on-chain transfers and fund flows from the server. Refreshed while the tab is on screen.
+const ins = { srv: null, at: 0 };
+const big$ = (v) => { const a = Math.abs(v); return a >= 1e9 ? `$${(a / 1e9).toFixed(2)}B` : a >= 1e6 ? `$${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `$${Math.round(a / 1e3)}k` : `$${Math.round(a)}`; };
+const insCard = (title, sub, body, use) => `<div class="card ins-card"><div class="deep-head"><span>${title}</span><small class="muted">${sub || ''}</small></div>${body}<p class="ins-use">${use}</p></div>`;
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; };
+async function refreshInsiders(force = false) {
+  if (document.hidden || (!force && !shownViews.has('insiders'))) return;
+  try { ins.srv = await getJSON(api('insiders')); ins.at = Date.now(); } catch { /* next time */ }
+  renderInsiders();
+}
+setInterval(() => refreshInsiders(), 15000);
+setInterval(() => { if (!document.hidden && shownViews.has('insiders')) renderInsiders(); }, 2000);
+function renderInsiders() {
+  if (!$('insBody')) return;
+  const now = Date.now(), live = state.markets.find((m) => Date.parse(m.close_time) > now), s = ins.srv, out = [];
+  setText($('insWhen'), ins.at ? `updated ${clock(ins.at)}` : 'loading…');
+  // Kalshi: this round's biggest orders
+  const k = kalshiBig(tape.kalshiTicker === live?.ticker ? tape.kalshi : []);
+  out.push(insCard('Big money on Kalshi', live ? `this round · ${esc(live.yes_sub_title || live.ticker)}` : 'no open round',
+    k.total ? `<div class="ins-split"><b class="pos">UP ${big$(k.up.usd)}</b><span class="ins-bar"><i style="width:${Math.round((k.upShare ?? 0.5) * 100)}%"></i></span><b class="neg">${big$(k.down.usd)} DOWN</b></div>`
+      + `<ul class="ins-list">${k.top.map((x) => `<li class="${x.side === 'YES' ? 'up' : 'dn'}"><time>${hms(x.t)}</time><b>${x.side === 'YES' ? 'UP' : 'DOWN'}</b><span>${int(x.count)} @ ${Math.round(x.price * 100)}¢</span><em>${big$(x.usd)}</em></li>`).join('')}</ul>`
+      : '<p class="muted">No Kalshi orders seen on this round yet.</p>',
+    'Context only: the bot already prices the round from Kalshi\'s quotes. A rush of big orders on one side shows conviction, not a guarantee.'));
+  if (!CRYPTO) {
+    out.push(insCard('Whales, liquidations, on-chain and fund flows', '', `<p class="muted">These are for crypto markets. ${esc(MKT.name || MKT.key)} gets the Kalshi orders above.</p>`, ''));
+    setHTML($('insBody'), out.join('')); return;
+  }
+  // exchange whales: the last hour
+  const w = whaleSummary(tape.whales, now);
+  out.push(insCard('Whale trades on exchanges', `last hour · ${alerts.prefs().whaleMin ? `${big$(alerts.prefs().whaleMin)}+` : 'big'} trades`,
+    w.n ? `<div class="ins-split"><b class="pos">bought ${big$(w.buy)}</b><span class="ins-bar"><i style="width:${Math.round(w.buy / (w.buy + w.sell || 1) * 100)}%"></i></span><b class="neg">sold ${big$(w.sell)}</b></div>`
+      + `<ul class="ins-list">${w.list.map((x) => `<li class="${x.side === 'buy' ? 'up' : 'dn'}"><time>${hms(x.t)}</time><b>${x.side === 'buy' ? 'BUY' : 'SELL'}</b><span>${esc(x.ex.replace('.US', ''))} @ ${usd(x.price, 0)}</span><em>🐋 ${big$(x.usd)}</em></li>`).join('')}</ul>`
+      : '<p class="muted">No whale trades in the last hour (or the exchange feeds are off in Settings).</p>',
+    'Feeds the Round scan and whale alerts. The scan moves the calls only once it proves itself (Signal board).'));
+  // liquidations + positioning (server)
+  const L = s?.liqs, F = s?.futures;
+  out.push(insCard('Forced closes · liquidations', L ? `last ${L.minutes} min` : '',
+    !s ? '<p class="muted">Loading…</p>' : !L ? '<p class="muted">Not available for this market.</p>' : L.n
+      ? `<div class="ins-split"><b class="neg">longs ${big$(L.long)}</b><span class="ins-bar rev"><i style="width:${Math.round(L.short / (L.long + L.short || 1) * 100)}%"></i></span><b class="pos">shorts ${big$(L.short)}</b></div>`
+        + `<ul class="ins-list">${L.biggest.map((x) => `<li class="${x.liq === 'short' ? 'up' : 'dn'}"><time>${ago(x.t)}</time><b>${x.liq === 'long' ? 'LONG' : 'SHORT'}</b><span>${esc(x.ex)} @ ${usd(x.price, 0)}</span><em>${big$(x.usd)}</em></li>`).join('')}</ul>`
+      : '<p class="muted">No liquidations in the last 30 minutes.</p>',
+    'Longs liquidated means forced selling (pushes down); shorts liquidated means forced buying (a squeeze up). An input to the Round scan.'));
+  out.push(insCard('Futures positioning', F ? 'Hyperliquid perpetual' : '',
+    !s ? '<p class="muted">Loading…</p>' : !F ? '<p class="muted">No futures data for this coin right now.</p>'
+      : `<ul class="ins-facts">${F.words.map((x) => `<li>${esc(x)}</li>`).join('') || '<li>Quiet: nothing unusual.</li>'}</ul><small class="muted">${F.funding != null ? `funding ${(F.funding * 100).toFixed(4)}%/h (${(F.fundingYear * 100).toFixed(1)}%/yr)` : ''}${F.premium != null ? ` · premium ${(F.premium * 100).toFixed(3)}%` : ''}</small>`,
+    'Crowded positioning tends to unwind against the crowd. An input to the micro model and the scan; they move the calls only once proven.'));
+  // on-chain transfers (Whale Alert)
+  const fw = s?.flows?.whale;
+  out.push(insCard('On-chain whales · Whale Alert', fw?.on ? 'last hour · $500k+' : '',
+    !s ? '<p class="muted">Loading…</p>' : !fw?.on ? `<p class="muted">Off: set <code>WHALE_ALERT_API_KEY</code> in Railway to see large transfers onto and off exchanges.</p>`
+      : (fw.err ? `<p class="neg">⚠ ${esc(fw.err)}</p>` : '') + (fw.recent?.length ? `<ul class="ins-list">${fw.recent.map((x) => { const d = transferDir({ from: { owner_type: x.fromType }, to: { owner_type: x.toType } }); return `<li class="${d === 'onto' ? 'dn' : d === 'off' ? 'up' : ''}"><time>${ago(x.t)}</time><b>${d === 'onto' ? 'TO EXCH' : d === 'off' ? 'FROM EXCH' : d === 'between' ? 'EXCH↔EXCH' : 'WALLETS'}</b><span>${esc(x.from)} → ${esc(x.to)}</span><em>${big$(x.usd)}</em></li>`; }).join('')}</ul>` : '<p class="muted">No large transfers in the last hour.</p>'),
+    'Coins sent onto exchanges are often about to be sold; coins taken off, held. On probation on the Signal board until proven on unseen hours.'));
+  // fund flows (Farside, DefiLlama)
+  const fe = s?.flows?.etf, fs = s?.flows?.stables;
+  out.push(insCard('Fund flows', 'spot ETFs · stablecoins',
+    !s ? '<p class="muted">Loading…</p>' : (fe?.on ? (fe.err ? `<p class="neg">⚠ ETF flows: ${esc(fe.err)}</p>` : '') + (fe.recent?.length ? `<table class="ins-tab"><tr><th>Day</th><th>ETF net flow</th></tr>${fe.recent.map((x) => `<tr><td>${esc(x.date)}</td><td class="${x.total > 0 ? 'pos' : x.total < 0 ? 'neg' : ''}">${x.total >= 0 ? '+' : '−'}$${Math.abs(x.total).toFixed(1)}M</td></tr>`).join('')}</table>` : '') : `<p class="muted">No spot-ETF table for ${esc(MKT.key)} on Farside.</p>`)
+      + (fs?.err ? `<p class="neg">⚠ Stablecoins: ${esc(fs.err)}</p>` : fs?.recent?.length ? `<p class="ins-stable">Stablecoin supply, 7-day change: ${fs.recent.slice(0, 5).map((x) => `<b class="${x.value >= 0 ? 'pos' : 'neg'}">${x.value >= 0 ? '+' : '−'}${Math.abs(x.value).toFixed(2)}%</b>`).join(' ')} <small class="muted">(newest first)</small></p>` : '')
+      + (!fe?.recent?.length && !fe?.err && !fs?.recent?.length && !fs?.err ? '<p class="muted">Reading the ETF and stablecoin data (the first read after a deploy takes a minute)…</p>' : ''),
+    'Money into ETFs and new stablecoins are buying power arriving. Daily numbers, on probation (judged on unseen days); a daily edge barely moves a 15-minute round.'));
+  setHTML($('insBody'), out.join(''));
+}
+
 // ---------- Simple mode ----------
 function applyMode() {
   document.body.classList.toggle('simple', simpleMode);
@@ -2813,6 +2879,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'history') refreshLab(true);
     if (v === 'history') refreshBotRecord();
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
+    if (v === 'insiders') { renderInsiders(); refreshInsiders(true); }
   }
   shownViews.clear(); for (const v of views) shownViews.add(v);
   adminPolling(views.includes('settings'));

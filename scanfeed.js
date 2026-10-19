@@ -178,7 +178,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     return { live: last && now - last.at < 60000 ? last : null, inCalls: shifts(now), models: data.models, record: scanStats(data.samples), rounds, agreement: pressureAgreement(data.samples),
       feeds: Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v.lastAt > now - 60000 ? 'live' : v.state || 'off'])) };
   }
-  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data };
+  return { load, start, stop, observe, add, api, spot, shifts, proven, venues, feedTimes, flowSince, spotAt, imbalance, lastScan: () => last, data: () => data, liqs: () => liqs }; // liqs: the last 30 minutes' liquidations (the Insiders tab)
 }
 const round3 = (v) => Math.round(v * 1000) / 1000;
 // The scan without what the phone doesn't need
