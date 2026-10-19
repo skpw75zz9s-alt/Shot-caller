@@ -38,7 +38,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '199'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '200'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2585,7 +2585,7 @@ async function loadAccess() {
     setHidden($('signOut'), !!st.open && !st.access);
     setHidden($('adminCard'), st.role !== 'admin');
     setHidden($('adminLogin'), st.role === 'admin');
-    if (st.role === 'admin') loadAdmin();
+    if (st.role === 'admin') { loadAdmin(); loadTuneUp(); }
     loadDiscord();
   } catch { /* offline */ }
 }
@@ -2647,6 +2647,35 @@ async function loadAdmin() {
     }).join('') || '<li class="muted">No members yet.</li>');
   } catch (e) { setText($('admErr'), e.message); }
 }
+
+// ---------- the tune-up (tuneup.js, public/tuneup.js): an on-demand accuracy check, admins only ----------
+function tuneUpHtml(st) {
+  const last = st?.last;
+  if (!last) return '<p class="muted">Not run yet.</p>';
+  const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`), f3 = (x) => (x == null ? '—' : x.toFixed(3));
+  return last.markets.map((m) => {
+    if (m.error) return `<div class="tu-m"><b>${esc(m.name || m.series)}</b><small class="neg">failed: ${esc(m.error)}</small></div>`;
+    const b = m.blend, c = m.calibration, r = m.record, L = m.learners?.after;
+    const lines = [
+      r?.graded ? `${r.graded} graded round calls${r.vs ? ` · Brier ${f3(r.brierPick)} (bot ${f3(r.brierBot)}, Kalshi ${f3(r.brierKalshi)}; lower is better)` : ''}` : 'no graded round calls yet',
+      `Blend: ${b.apply ? `<b class="pos">now ${pc(b.chosen)} bot</b> (was ${pc(b.current)})` : `stays ${pc(b.current)} bot`}, ${esc(b.why)}`,
+      `Calibration: ${c.apply ? `<b class="pos">odds ×${c.temp}</b> (unseen rounds: said ${pc(c.said)}, won ${pc(c.won)})` : 'unchanged'}, ${esc(c.why)}`,
+      L ? `Learners${m.learners.shared ? ' (shared with another market)' : ' rerun'}: ${L.indicators?.length ? `proven indicators ${esc(L.indicators.join(', '))}` : `no indicator proven yet (of ${L.indicatorsTested ?? 0})`} · volatility ${typeof L.volatility === 'string' ? 'default' : L.volatility ? 'tuned' : '—'}${L.flipCheck ? ` · flip check ${L.flipCheck.chart || L.flipCheck.flow ? 'proven' : 'learning'}` : ''}${L.history ? ` · ${int(L.history)} candles` : ''}` : null,
+    ].filter(Boolean);
+    return `<div class="tu-m"><b>${esc(m.name || m.series)}</b>${lines.map((x) => `<small>${x}</small>`).join('')}</div>`;
+  }).join('');
+}
+async function loadTuneUp() {
+  try { const st = await getJSON('admin/tuneup'); setText($('tuWhen'), st.last ? `last run ${clock(st.last.at)} · ${day(st.last.at)}` : ''); setHTML($('tuReport'), tuneUpHtml(st)); } catch { /* next time */ }
+}
+$('tuRun')?.addEventListener('click', async () => {
+  const b = $('tuRun'); b.disabled = true; setText(b, 'Tuning…');
+  try { const r = await postJSON('admin/tuneup', {}); setText($('tuWhen'), `last run ${clock(r.at)} · ${day(r.at)} · ${(r.ms / 1000).toFixed(1)} s`); setHTML($('tuReport'), tuneUpHtml({ last: r }));
+    const n = r.markets.filter((m) => m.blend?.apply || m.calibration?.apply).length;
+    toast(n ? `Tune-up done: ${n} market${n === 1 ? '' : 's'} improved on unseen rounds.` : 'Tune-up done: nothing beat the current settings on unseen rounds, so nothing changed.'); }
+  catch (e) { setText($('admErr'), `Tune-up: ${e.message}`); }
+  finally { b.disabled = false; setText(b, 'Run tune-up'); }
+});
 
 async function adminAction(action, body) {
   setText($('admErr'), '');

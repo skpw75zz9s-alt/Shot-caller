@@ -32,7 +32,7 @@ const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.s
 // shifts: () => { ticker: points } proven learned nudges to the odds (the Round scan, scanfeed.js)
 // liveSpot: () => the latest BTC price from the server's own exchange trade feeds (scanfeed.js), or null. The bot ticks
 // every second; the exchanges' REST tickers are only polled every 5 seconds, and in between the live trades move the price.
-export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, flipGate = () => null, lessonCtx = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, market: mk = null, prices = null, vapidFrom = null }) {
+export function createBot({ kalshi, coinbase, dataFile, env = process.env, log = console, canNotify = () => true, learn = false, indexSources = null, onObserve = null, keepAlive = () => false, liveSpot = () => null, shifts = () => null, watch = () => null, shiftInfo = () => ({}), volTune = () => null, flipCheck = () => null, flipGate = () => null, lessonCtx = () => null, onCall = () => {}, onSettle = () => {}, onTick = () => {}, onRound = () => {}, onPick = () => {}, tuned = () => null, market: mk = null, prices = null, vapidFrom = null }) {
   // the market this bot calls (v13.30: one bot per Kalshi market, public/markets.js); Bitcoin's 15-minute one by default
   const MK = mk ?? HOME, ASSET = ASSETS.find((a) => a.key === MK.asset) ?? HOME_ASSET, SPOT_SETTLE = ASSET.settle === 'spot';
   const DEV = { ...DEVICE_DEFAULTS, series: MK.series };
@@ -468,8 +468,9 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     if (snap.live) {
       const lv = snap.live, t = lv.m.ticker, ml = lv.ev.minutesLeft;
       if (ml <= PICK.at && ml > 1 && !pickRecord.some((e) => e.ticker === t)) {
-        const off = officialMem[t]?.side ?? null, mix = pickMix(pickRecord).mix;
-        let e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off, mix }); // the official call's side, with its own odds and worst case; the bot's odds and Kalshi's in the mix the record favours
+        // the tune-up's proven blend and calibration when it has them (tuneup.js), else the blend the record favours
+        const tu = tuned() || {}, off = officialMem[t]?.side ?? null, mix = tu.mix ?? pickMix(pickRecord).mix, temp = tu.temp ?? 1;
+        let e = pickNow({ row: lv, snap, settings: OFFICIAL, side: off, mix, temp }); // the official call's side, with its own odds and worst case; the bot's odds and Kalshi's in the mix the record favours
         // v13.43.3 every round gets its call: if the bot's own odds aren't ready a minute after the lock, Kalshi's favourite (or
         // the side price is on), marked fallback, never a buy
         const fallbackDue = ml <= PICK.at - 1;
@@ -477,12 +478,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
         let ctx = e && !e.fallback ? lessonContext(lv, e.side, snap, now) : null, orig = null, applied = [];
         if (e && !off && !e.fallback) {
           applied = lessonsFor(pickLab(), ctx);
-          const e2 = applied.length ? pickNow({ row: lv, snap, settings: OFFICIAL, side: e.side === 'YES' ? 'NO' : 'YES', mix }) : null;
+          const e2 = applied.length ? pickNow({ row: lv, snap, settings: OFFICIAL, side: e.side === 'YES' ? 'NO' : 'YES', mix, temp }) : null;
           if (e2 && e2.ask != null) { orig = { side: e.side, ctx, p: Math.round(e.p * 1000) / 1000 }; e = e2; ctx = lessonContext(lv, e.side, snap, now); } else applied = [];
         }
         if (e && (e.ask != null || fallbackDue)) { // no Kalshi price yet: a minute's grace, then it locks anyway
           const prev = pickRecord.filter((x) => x.result === 'yes' || x.result === 'no').at(-1) ?? null;
-          pickRecord.push({ ticker: t, side: e.side, price: e.ask ?? null, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: e.pb != null ? Math.round(e.pb * 1000) / 1000 : null, mix: e.mix, ...(e.fallback ? { fallback: e.fallback } : {}), gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
+          pickRecord.push({ ticker: t, side: e.side, price: e.ask ?? null, p: Math.round(e.p * 1000) / 1000, worst: e.worst != null ? Math.round(e.worst * 1000) / 1000 : null, kalshi: e.kalshi != null ? Math.round(e.kalshi * 1000) / 1000 : null, pb: e.pb != null ? Math.round(e.pb * 1000) / 1000 : null, mix: e.mix, ...(e.temp && e.temp !== 1 ? { temp: e.temp } : {}), ...(e.fallback ? { fallback: e.fallback } : {}), gap: e.gap != null ? Math.round(e.gap * 1000) / 1000 : null, buy: !!e.buy, why: e.why, official: !!off, strike: e.strike, at: now, closeTime: lv.m.close_time, n: 1, result: null, lane: 'pick',
             ctx, sigma: lv.sigma ?? snap.sigmaMin, strikeType: lv.m.strike_type || 'greater', ...(ml < PICK.at - PICK.window ? { late: true } : {}), ...(orig ? { orig, lessons: applied.map((x) => x.label) } : {}) });
           seal(pickRecord, pickRecord.at(-1));
           if (pickRecord.length > 5000) pickRecord.splice(0, pickRecord.length - 5000);
@@ -694,5 +695,5 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
   return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, vapidKeys: () => (vapid ? { publicKey: vapid.publicKey, privateKey: vapid.privateKey } : null), market: () => ({ series: MK.series, asset: ASSET.key, freq: MK.freq, delayed: market.delayed }), devices,
-    learned: () => publicLearned(learned), learnStatus, record: officialRecord, pick: pickNowApi, lessons: lessonsApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
+    learned: () => publicLearned(learned), learnStatus, picks: () => pickRecord, record: officialRecord, pick: pickNowApi, lessons: lessonsApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
 }

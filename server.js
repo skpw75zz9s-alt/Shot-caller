@@ -9,6 +9,7 @@ import { Readable } from 'node:stream';
 import { createBot } from './bot.js';
 import { createAccess } from './access.js';
 import { createAskAI } from './askai.js';
+import { createTuneUp } from './tuneup.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -54,6 +55,8 @@ export const access = createAccess({
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on once ANTHROPIC_API_KEY is set
+// the tune-up (tuneup.js): an on-demand accuracy check; the round calls use the blend and calibration it has proven
+export const tuneUp = createTuneUp({ file: join(DATA_DIR, 'tuneup.json') });
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -87,7 +90,7 @@ export const volTuneFeed = createVolTuneFeed({ playbook });
 export const flipFeed = createFlipFeed({ playbook, scanFeed });
 export const microFeed = createMicroFeed({ file: join(DATA_DIR, 'micro.json'), scanFeed, futures, marketWatch, playbook });
 export const bot = createBot({
-  kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'),
+  kalshi: KALSHI, coinbase: COINBASE, dataFile: join(DATA_DIR, 'shot-caller.json'), tuned: () => tuneUp.get(HOME.series),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token),
   onObserve: (o) => {
     try { scanFeed.observe(o); } catch (e) { console.error('round scan step failed', e.message); }
@@ -124,7 +127,7 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed,
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -261,7 +264,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([tuneUp.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -332,6 +335,13 @@ async function accessApi(req, res, action, token) {
 // /api/admin/* — admin only
 async function adminApi(req, res, action, token) {
   if (!access.isAdminToken(token)) return send(res, 403, { error: 'admin only' });
+  // the tune-up: GET its last report and the settings in use; POST runs it now on every running market (a few seconds)
+  if (action === 'tuneup') {
+    if (req.method === 'GET') return send(res, 200, tuneUp.status());
+    if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+    const markets = stacks.bots().map(([series, b]) => ({ series, name: marketOf(series, discovery.list()).name, bot: b, stack: stacks.stack(series) }));
+    return send(res, 200, { ...(await tuneUp.run(markets)), settings: tuneUp.status().settings });
+  }
   if (action === 'members' && req.method === 'GET') { const out = access.listMembers(), dv = discordRoles.adminView(); out.body.members = out.body.members.map((m) => (dv[m.code] ? { ...m, discord: dv[m.code] } : m)); out.body.discord = discordRoles.config().on; return reply(req, res, out); }
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);

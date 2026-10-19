@@ -27,6 +27,9 @@ export const PICK = { at: 10, window: 1, vols: [0.8, 1, 1.25], mix: 0.5, mixes: 
 const clampP = (p) => Math.min(0.995, Math.max(0.005, p));
 const logit = (p) => Math.log(clampP(p) / (1 - clampP(p)));
 // the bot's odds and Kalshi's combined in log-odds space (mix = the bot's share); Kalshi missing: the bot's alone
+// odds pulled toward 50% (t > 1) or pushed away from it (t < 1) on the log-odds scale: the tune-up's calibration
+// (public/tuneup.js); t = 1 leaves them alone
+export const calibrate = (p, t = 1) => (p == null || t === 1 ? p : 1 / (1 + Math.exp(-logit(p) / t)));
 export const mixOdds = (pBot, pKalshi, mix) => (pKalshi == null || mix >= 1 ? pBot : 1 / (1 + Math.exp(-(mix * logit(pBot) + (1 - mix) * logit(pKalshi)))));
 
 // The mix the pick uses: half and half until 30 graded picks have both odds stored, then the one whose combined odds had
@@ -40,7 +43,7 @@ export function pickMix(picks) {
   return { mix: best.w, n: xs.length, learned: true, scores };
 }
 
-export function pickNow({ row, snap, settings = {}, side: forced = null, mix = PICK.mix }) {
+export function pickNow({ row, snap, settings = {}, side: forced = null, mix = PICK.mix, temp = 1 }) { // temp: the tune-up's calibration (1: none)
   const s = { ...DEFAULTS, ...settings }, ev = row?.ev;
   if (!ev || ev.pYes == null || !(snap?.sigmaMin > 0)) return null;
   const q = ev.quote, midYes = q.yesBid != null && q.yesAsk != null ? (q.yesBid + q.yesAsk) / 2 : null;
@@ -48,10 +51,10 @@ export function pickNow({ row, snap, settings = {}, side: forced = null, mix = P
   const pYes = mixOdds(ev.pYes, kYes, mix);
   const lean = pYes >= 0.5 ? 'YES' : 'NO', side = forced === 'YES' || forced === 'NO' ? forced : lean;
   const of = (y) => (y == null ? null : side === 'YES' ? y : 1 - y);
-  const pb = of(ev.pYes), p = of(pYes), kalshi = of(midYes);
+  const pb = of(ev.pYes), p = calibrate(of(pYes), temp), kalshi = of(midYes);
   const ws = PICK.vols.map((k) => sideOdds(row, snap, s, side, k)).filter((v) => v != null);
   const worstBot = ws.length ? Math.min(pb, ...ws) : null;
-  const worst = worstBot == null ? null : Math.min(p, used ? mixOdds(worstBot, of(kYes), mix) : worstBot);
+  const worst = worstBot == null ? null : Math.min(p, calibrate(used ? mixOdds(worstBot, of(kYes), mix) : worstBot, temp));
   const ask = side === 'YES' ? q.yesAsk : q.noAsk, bid = side === 'YES' ? q.yesBid : q.noBid;
   const n10 = ask > 0 ? Math.max(1, Math.floor(10 / ask + 1e-9)) : 0; // the $10 order the record is scored on
   const gap = ask != null && worst != null && n10 ? worst - ask - feeEach(ask, n10) : null;
@@ -62,7 +65,7 @@ export function pickNow({ row, snap, settings = {}, side: forced = null, mix = P
     : ask == null ? 'no Kalshi price to buy at'
     : !inBand ? `a pick, not a buy: Kalshi asks ${c(ask)}, outside ${Math.round((s.minAsk || 0) * 100)}-${Math.round((s.maxAsk || 1) * 100)}¢`
     : `a pick, not a buy: at ${c(ask)} the worst-case edge is ${gap == null ? '—' : c(gap)}, under the ${c(s.minEdge)} it takes to pay`);
-  return { side, p, pb, kalshi, mix: used ? mix : 1, worst, worstBot, ask, bid, gap, buy, why, official: side !== lean, strike: row.strike, spot: snap.mSpot ?? snap.spot, minutesLeft: ev.minutesLeft };
+  return { side, p, pb, kalshi, mix: used ? mix : 1, temp, worst, worstBot, ask, bid, gap, buy, why, official: side !== lean, strike: row.strike, spot: snap.mSpot ?? snap.spot, minutesLeft: ev.minutesLeft };
 }
 
 // The guaranteed pick (v13.43.3): every round gets a side after the first 5 minutes, even when the bot's own odds can't

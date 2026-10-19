@@ -145,3 +145,11 @@ test('the guaranteed pick: when the bot\'s odds can\'t be worked out, Kalshi\'s 
   assert.equal(pickScore(graded).vs, 0);
   assert.equal(pickMix(graded).learned ?? false, false);
 });
+
+test('the tune-up\'s calibration: temp above 1 pulls the odds and the worst case toward 50%, never changes the side', () => {
+  const base = pickNow({ ...setup({ yb: 70, ya: 72, lead: 120 }), settings: prof });
+  const cool = pickNow({ ...setup({ yb: 70, ya: 72, lead: 120 }), settings: prof, temp: 2 });
+  assert.equal(cool.side, base.side); assert.equal(cool.temp, 2); assert.equal(base.temp, 1);
+  assert.ok(cool.p < base.p && cool.p > 0.5, `${cool.p} vs ${base.p}`);
+  assert.ok(cool.worst <= base.worst); assert.equal(cool.pb, base.pb, 'the bot\'s own odds are kept as they were (the tune-up tests on them)');
+});

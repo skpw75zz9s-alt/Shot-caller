@@ -275,6 +275,18 @@ Security:
 
 ## Version notes (newest first)
 
+### Tune-up (v13.52)
+
+An accuracy check you run whenever you want. It does nothing between runs, so it costs no memory.
+
+- **Run it:** Settings → Admin → **Run tune-up** (admins), `POST /api/admin/tuneup`, or `npm run tuneup` on the server's data (for example from a Railway shell). `npm run tuneup -- --dry-run` shows the report without saving.
+- **What it does, for every running market:**
+  1. Reruns every learner now instead of waiting for its hourly timer: the indicator test, the cushion table and flip study, the volatility tuner and the flip check, each on the latest candles. Markets on the same asset share them, so they're refreshed once.
+  2. Tests the round call's **blend** (how much is the bot's odds vs Kalshi's) and its **calibration** (whether a call that says 80% wins about 80%: a temperature that pulls over-confident odds toward 50%) on graded rounds they never saw. Each setting is tuned on the older 70% of rounds and checked on the newest 30%.
+  3. Keeps a setting only if it beats what the bot does now on those unseen rounds by a clear margin (z ≥ 2 on the per-round difference, 80+ graded rounds). Otherwise the bot keeps its own settings, and a setting that stops proving itself on a later run is dropped.
+- Calibration never changes the side, only the odds, which decide which round calls are worth buying. The tests always start from the raw odds each round call stored, so the tune-up never learns from its own output.
+- The report shows, per market: graded rounds and Brier scores (round call, bot alone, Kalshi), the blend and calibration verdicts with the reason, and what the learners say after the rerun. It's saved with the settings in `DATA_DIR/tuneup.json`; a running server picks up a terminal run within a minute.
+
 ### Ask the bot (v13.47)
 
 Tap the **chat button** up top and type a question ("should I buy?", "is the lead safe?", "why is it dumping?", "any patterns?", "deep dive"), or tap a suggestion. The sheet answers from everything the app already knows about the live round.

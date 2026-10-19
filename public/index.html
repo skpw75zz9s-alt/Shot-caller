@@ -543,6 +543,10 @@
         <ul id="admPending" class="adm-list"></ul>
         <h4>Members</h4>
         <ul id="admMembers" class="adm-list"></ul>
+        <h4>Tune-up <small id="tuWhen" class="muted"></small></h4>
+        <p class="fine-left">Reruns every learner on the latest candles now, then tests the round call's blend (bot vs Kalshi) and calibration on graded rounds they never saw. A change is kept only if it clearly beats what the bot does now; otherwise nothing changes. Takes a few seconds; run it whenever you like.</p>
+        <button id="tuRun">Run tune-up</button>
+        <div id="tuReport" class="tu-report"></div>
       </div>
       <div data-pro class="card push-card kalshi-card">
         <h3>Kalshi account</h3>
@@ -606,7 +610,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.51 · Ask the bot</p>
+      <p class="fine" id="version">Shot Caller v13.52 · Tune-up</p>
     </section>
   </main>
 
@@ -643,7 +647,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '199';
+    window.SC_BUILD = '200';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
