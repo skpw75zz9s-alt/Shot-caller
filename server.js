@@ -13,6 +13,7 @@ import { createTuneUp } from './tuneup.js';
 import { createCouncil } from './council.js';
 import { createBreakLab } from './breaklab.js';
 import { createStrength } from './strength.js';
+import { createAskTools, createMarketBook } from './asktools.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -68,6 +69,8 @@ export const council = createCouncil({ file: join(DATA_DIR, 'council.json') });
 export const breakLab = createBreakLab({ file: join(DATA_DIR, 'breaks.json') });
 // the strength meter (strength.js, public/strength.js): the bot's odds graded every second, round by round
 export const strength = createStrength({ file: join(DATA_DIR, 'strength.json') });
+// every market bot's latest snapshot, for Ask's lookups (asktools.js)
+export const marketBook = createMarketBook();
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -112,6 +115,7 @@ export const bot = createBot({
     try { flowsFeed.observe(o); } catch (e) { console.error('money flows step failed', e.message); }
     try { council.observe(HOME.series, o.snap, HOME.settle); } catch (e) { console.error('council step failed', e.message); }
     try { strength.observe(HOME.series, o.snap); } catch (e) { console.error('strength meter step failed', e.message); }
+    marketBook.observe(HOME.series, o);
     try { const now = Date.now(); breakLab.observe(HOME.series, o.snap, { kind: HOME.kind, tape: scanFeed.tape(now - 600000), liqs: liqSummary(scanFeed.liqs(), now) }); } catch (e) { console.error('break lab step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
@@ -143,8 +147,10 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
+// Ask's lookups: any market, live, from the server's own readers (asktools.js)
+askAI.setTools(createAskTools({ book: marketBook, discovery, stacks, marketOf, listed: () => true, isHome, home: { bot, scanFeed, futures }, council, breakLab, strength, crossFeed }));
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
@@ -466,7 +472,7 @@ export const server = http.createServer(async (req, res) => {
       if (req.method === 'GET') return send(res, 200, askAI.status());
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
       const b = await readBody(req);
-      const out = await askAI.ask({ owner: ownerOf(token) ?? clientIp(req), question: b?.q, facts: b?.facts, history: b?.history });
+      const out = await askAI.ask({ owner: ownerOf(token) ?? clientIp(req), question: b?.q, facts: b?.facts, history: b?.history, series: url.searchParams.get('m') || HOME.series });
       return send(res, out.status, out.body);
     }
     // the phone reports real fees from your Kalshi fills (numbers only: count, price, fee, taker)

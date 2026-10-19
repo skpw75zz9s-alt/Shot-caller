@@ -276,6 +276,27 @@ Security:
 
 ## Version notes (newest first)
 
+### Ask: the market chatbot (v13.63)
+
+**Ask the bot** now answers any question about **any market, at any time**, not just the round on screen. With `ANTHROPIC_API_KEY` set, the AI looks things up live on the server before it answers, with read-only tools over the app's own readers (`asktools.js`):
+
+| Lookup | What it returns |
+|---|---|
+| `list_markets` | every market: name, kind, whether its bot runs, the open round and the bot's odds |
+| `market_now` | one market's live round: price, target, time left, the bot's odds (price math, after Kalshi's blend, final), Kalshi's bid and ask, the lead in typical moves, volatility vs normal, the buy signal, the locked round call, the council's debate, open breaks |
+| `market_history` | its last 5-120 one-minute closes: the path, change, high and low |
+| `market_record` | the official record and the round calls' record |
+| `market_strength` | the strength meter (v13.62) |
+| `market_learning` | which learners are proven and shape the calls, and each feature's council record |
+| `market_xray` | each kind of break's proof, forced closes and the cost of leverage |
+| `market_drivers` | what's moving a stock index, gold or oil |
+
+- So "Which market has the safest lead?", "Compare Bitcoin and Ethereum", "How accurate has the bot been on every market?" or "What's gold doing?" get answers from real, current numbers. A market whose bot isn't running is started, and the AI says to ask again in a minute.
+- The AI answers only from what it looked up and what the phone shows; it says when the data can't answer something. Same rules as before: bottom line first, honest about uncertainty, never financial advice, plain text.
+- Under the hood: a tool loop (up to 6 turns), each turn streamed; every lookup's input is checked before it runs, all results go back in one message, a turn cut off or refused never runs its tools, and an unparseable stream is re-issued once. Prompt caching keeps repeated questions cheap. On the newest models (Claude Opus 5 and later, Fable 5.1, Sonnet 5.5) the server-side refusal fallback is on: a declined answer is retried on a fallback model; if the API ever rejects that, Ask drops it and asks without.
+- Without a key, the phone's built-in answers still cover the market on screen.
+- Cost: each lookup adds tokens, so a multi-market question costs more than a simple one. The rate limits (4 a minute, 40 an hour per member) still apply.
+
 ### The strength meter (v13.62)
 
 **Is the bot actually getting stronger?** The Record tab has a **Strength meter**. Every second, the server keeps the live round's odds at each stage, plus Kalshi's own price, and when the round settles it scores every one of those seconds against the result with the Brier score (the squared miss: 0 is perfect, 0.25 is a coin flip):

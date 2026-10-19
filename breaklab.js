@@ -86,5 +86,10 @@ export function createBreakLab({ file, clock = () => Date.now(), log = console }
     return saving;
   }
   const keep = setInterval(() => { save(); }, 60000); keep.unref?.();
-  return { load, observe, settle, save, api, stop: () => clearInterval(keep) };
+  // the breaks open right now on a market's live round (for Ask), each with its proof so far
+  function open(series) {
+    const l = live[series]?.log, v = api(series).kinds;
+    return (l?.items || []).filter((b) => b.open).map((b) => ({ title: b.title, detail: b.detail, sev: b.sev, proof: b.proof, proofText: v[b.proof]?.text ?? null }));
+  }
+  return { load, observe, settle, save, api, open, stop: () => clearInterval(keep) };
 }

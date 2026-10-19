@@ -638,7 +638,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.62 · Strength meter</p>
+      <p class="fine" id="version">Shot Caller v13.63 · Market chatbot</p>
     </section>
   </main>
 
@@ -651,10 +651,13 @@
       <button type="button" data-q="Will it flip?">Will it flip?</button>
       <button type="button" data-q="Any patterns on the chart?">Chart patterns?</button>
       <button type="button" data-q="Give me a deep dive on this round">Deep dive</button>
+      <button type="button" data-q="Which market has the safest lead right now?">Safest lead?</button>
+      <button type="button" data-q="How accurate has the bot been on every market?">Bot's accuracy</button>
+      <button type="button" data-q="Compare Bitcoin and Ethereum right now">BTC vs ETH</button>
     </div>
     <div id="askLog" class="ask-log" aria-live="polite"></div>
     <form id="askForm" class="ask-form" autocomplete="off">
-      <input id="askInput" type="text" enterkeyhint="send" maxlength="500" placeholder="Ask about the round…" aria-label="Your question">
+      <input id="askInput" type="text" enterkeyhint="send" maxlength="500" placeholder="Ask about any market…" aria-label="Your question">
       <button type="submit" class="ask-go">Ask</button>
     </form>
     <small id="askHint" class="ask-hint"></small>
@@ -676,7 +679,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '210';
+    window.SC_BUILD = '211';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

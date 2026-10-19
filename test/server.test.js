@@ -170,7 +170,7 @@ test('Discord role routes: status says off without config, linking needs a membe
 });
 
 test('Ask without an API key: the status says off and a question gets 501, so the phone answers on its own', async () => {
-  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null });
+  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null, markets: true });
   const r = await fetch(`${app}/api/ask`, { method: 'POST', body: JSON.stringify({ q: 'should I buy?', facts: { coin: 'BTC' } }) });
   assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
 });

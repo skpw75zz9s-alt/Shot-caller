@@ -42,7 +42,7 @@ import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
-window.SC_BOOT = '210'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '211'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2152,7 +2152,7 @@ async function askQuestion(q) {
   ask.busy = true;
   try {
     const history = ask.log.slice(1, 4).reverse().filter((x) => x.ai).map((x) => ({ q: x.q, a: x.ai }));
-    const r = await fetch(`${API}/ask`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q, facts: factsForAI(facts), history }) });
+    const r = await fetch(`${API}/ask?m=${encodeURIComponent(settings.series || '')}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q, facts: factsForAI(facts), history }) });
     paywalled(r);
     const d = await r.json().catch(() => ({}));
     if (r.status === 501) { ask.ai = false; item.aiState = 'off'; }
@@ -2164,8 +2164,8 @@ async function askQuestion(q) {
 }
 function renderAsk() {
   if ($('askSheet').hidden) return;
-  setText($('askHint'), `Ask about ${MKT.key}'s live round`);
-  setText($('askMode'), ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '');
+  setText($('askHint'), ask.ai ? `Ask about any market: ${MKT.key} is open here, the AI looks up the rest live` : ask.ai === false ? `Built-in answers about ${MKT.key}'s live round (the AI, for any market, needs ANTHROPIC_API_KEY)` : `Ask about ${MKT.key}'s live round`);
+  setText($('askMode'), ask.ai ? 'Market chatbot' : ask.ai === false ? 'Built-in answers' : '');
   setHidden($('askChips'), ask.log.length > 0);
   setHTML($('askLog'), ask.log.map((x) => {
     const b = x.built, ago = Math.round((Date.now() - x.at) / 60000);
