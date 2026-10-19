@@ -8,6 +8,7 @@
 #   bash video/make.sh ad2        the v13.39 ad: 1080p60 with motion blur (video/shot-caller-v13.39-ad-1080p60.mp4) and a
 #                                 720p60 copy under Discord's 10 MB limit (video/shot-caller-v13.39-ad-discord.mp4)
 #   bash video/make.sh ad3        the v13.45 update video, the same way (video/shot-caller-v13.45-update-*.mp4)
+#   bash video/make.sh ad4        the v13.59 update video, the same way (video/shot-caller-v13.59-update-*.mp4)
 set -euo pipefail
 cd "$(dirname "$0")"
 if [ "${1:-}" = ad ]; then
@@ -30,6 +31,12 @@ if [ "${1:-}" = ad3 ]; then
   (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
   for i in 0 1 2 3; do AD=ad3 node adrender2.mjs worker $i 4 & done; wait
   AD=ad3 python3 admusic2.py && bash ad3post.sh; exit 0
+fi
+if [ "${1:-}" = ad4 ]; then
+  node adcap4.mjs
+  (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
+  for i in 0 1 2 3; do AD=ad4 node adrender2.mjs worker $i 4 & done; wait
+  AD=ad4 python3 admusic2.py && bash ad4post.sh; exit 0
 fi
 if [ "${1:-}" = shots ]; then rm -f shots/boxes.json; node capture.mjs app; node capture.mjs buy; node capture.mjs loss; node capture.mjs site; fi
 if [ "${1:-}" = voice ]; then mkdir -p vo; python3 tts_elevenlabs.py; fi

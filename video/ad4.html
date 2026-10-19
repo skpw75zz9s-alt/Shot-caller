@@ -1,0 +1,465 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* The v13.59 update video (the v13.45 video's look): 1920x1080. Every frame is drawn by render(t), so the recording is exact and can be supersampled
+     in time (adrender2.mjs renders 2 frames per output frame for real motion blur). */
+  * { box-sizing: border-box; margin: 0; transition: none !important; animation: none !important; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #03050b; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #eef2f8; }
+  #bgc, #fx { position: absolute; inset: 0; }
+  #stage { position: absolute; inset: 0; perspective: 1800px; }
+  #cam { position: absolute; inset: 0; transform-origin: 50% 50%; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .eyebrow { font: 700 20px 'DejaVu Sans Mono', monospace; letter-spacing: 6px; color: #22d3ee; text-transform: uppercase; }
+  .h { font-weight: 800; font-size: 84px; line-height: 1.02; letter-spacing: -2.5px; }
+  .h em { font-style: normal; background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 30px; line-height: 1.42; color: #b9c3d6; max-width: 900px; }
+  .left { position: absolute; left: 130px; top: 170px; width: 1000px; display: flex; flex-direction: column; gap: 22px; }
+  /* phones: a 3D device with a glass sheen */
+  .phone { position: absolute; width: 430px; height: 930px; border-radius: 58px; background: #000; transform-style: preserve-3d;
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; overflow: hidden; }
+  .phone .scr { position: absolute; left: 0; top: 0; width: 430px; transform-origin: 50% 0; }
+  .phone .gloss { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, #ffffff1c 45%, transparent 60%); mix-blend-mode: screen; pointer-events: none; }
+  .phone .notch { position: absolute; left: 50%; top: 14px; width: 130px; height: 36px; margin-left: -65px; border-radius: 20px; background: #000; }
+  .refl { position: absolute; width: 430px; height: 260px; border-radius: 58px; background: linear-gradient(180deg, #22d3ee18, transparent 70%); filter: blur(10px); }
+  .chip { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font: 800 26px 'DejaVu Sans Mono', monospace; background: #2a0d16; color: #ff6b85; border: 2px solid #ff4d6d77; box-shadow: 0 0 30px #ff4d6d33; }
+  .chip.ok { background: #062419; color: #4dfbb8; border-color: #2ee6a688; box-shadow: 0 0 30px #2ee6a633; }
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; }
+  /* intro */
+  #logo { position: absolute; left: 50%; top: 250px; width: 210px; height: 210px; margin-left: -105px; border-radius: 48px; box-shadow: 0 0 0 2px #22d3ee66, 0 30px 120px #22d3ee66; }
+  #brand { position: absolute; width: 100%; top: 510px; text-align: center; font-weight: 800; font-size: 104px; letter-spacing: 16px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #sweep { position: absolute; top: 500px; height: 140px; width: 260px; background: linear-gradient(90deg, transparent, #ffffff55, transparent); mix-blend-mode: overlay; transform: skewX(-20deg); }
+  #tag { position: absolute; width: 100%; top: 650px; text-align: center; font-size: 36px; color: #b9c3d6; }
+  #ver { position: absolute; left: 50%; top: 730px; transform: translateX(-50%); font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #22d3ee; border: 2px solid #22d3ee77; border-radius: 999px; padding: 8px 26px; }
+  /* s1 */
+  #sitout { position: absolute; left: 130px; top: 300px; font-weight: 800; font-size: 200px; letter-spacing: 6px; color: #5d6880; white-space: nowrap; }
+  #sitout span { display: inline-block; }
+  #strike { position: absolute; left: 120px; top: 405px; height: 16px; background: #ff4d6d; box-shadow: 0 0 30px #ff4d6d; border-radius: 8px; }
+  #ring { position: absolute; width: 230px; height: 230px; }
+  #ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 46px 'DejaVu Sans Mono', monospace; color: #eef2f8; }
+  #ring small { position: absolute; left: 0; width: 100%; top: 150px; text-align: center; font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #2ee6a6; }
+  /* s4 notes */
+  .note { position: absolute; width: 330px; height: 420px; border-radius: 10px; background: #f5f3ec; color: #1d2433; padding: 26px 26px 0 58px; overflow: hidden;
+    background-image: linear-gradient(90deg, transparent 44px, #e2707088 44px, #e2707088 46px, transparent 46px), repeating-linear-gradient(180deg, transparent 0 33px, #8fb4e055 33px 35px); box-shadow: 0 30px 70px #000b; }
+  .note h3 { font: italic 700 46px 'DejaVu Serif', serif; margin-bottom: 8px; }
+  .note p { font: italic 21px/35px 'DejaVu Serif', serif; color: #2b3550; }
+  .stamp { position: absolute; right: 18px; bottom: 30px; padding: 8px 16px; border: 5px solid #11a873; border-radius: 10px; color: #11a873; font: 800 34px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; transform: rotate(-12deg); background: #ffffffaa; }
+  /* s6 lock screen */
+  #lock { position: absolute; left: 1180px; top: 75px; width: 430px; height: 930px; border-radius: 58px; overflow: hidden; background: radial-gradient(120% 70% at 30% 0%, #1b3a6b, #070b16 70%);
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; }
+  #lock .time { position: absolute; width: 100%; top: 110px; text-align: center; font-weight: 300; font-size: 104px; letter-spacing: -2px; }
+  #lock .date { position: absolute; width: 100%; top: 90px; text-align: center; font-size: 22px; color: #c9d4ea; }
+  .ban { position: absolute; left: 16px; width: 398px; padding: 16px 18px; border-radius: 26px; background: #1c2537e6; backdrop-filter: blur(8px); display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; }
+  .ban img { width: 44px; height: 44px; border-radius: 11px; }
+  .ban b { font-size: 18px; display: block; } .ban span { font-size: 16px; color: #c3cde0; line-height: 1.3; display: block; } .ban i { font-style: normal; float: right; font-size: 14px; color: #8e9ab2; font-weight: 400; }
+  /* outro */
+  #o-logo { position: absolute; left: 50%; top: 190px; width: 170px; height: 170px; margin-left: -85px; border-radius: 40px; box-shadow: 0 30px 110px #22d3ee66; }
+  #o-h { position: absolute; width: 100%; top: 410px; text-align: center; font-size: 110px; }
+  #o-sub { position: absolute; width: 100%; top: 540px; text-align: center; max-width: none; }
+  #o-cta { position: absolute; left: 50%; top: 630px; transform: translateX(-50%); padding: 22px 50px; border-radius: 22px; background: linear-gradient(90deg, #22d3ee, #5ef2c8); color: #04121a; font: 800 34px 'DejaVu Sans', sans-serif; letter-spacing: 1px; box-shadow: 0 0 60px #22d3ee77; white-space: nowrap; }
+  #o-fine { position: absolute; left: 260px; right: 260px; bottom: 70px; text-align: center; font-size: 20px; line-height: 1.5; color: #7f8aa0; }
+  #flash { position: absolute; inset: 0; background: #e9fbff; opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%); pointer-events: none; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); box-shadow: 0 0 20px #22d3ee; }
+  #note { position: absolute; right: 30px; bottom: 18px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 2px; }
+  /* kinetic type: each word slides up from behind a mask; gradient words carry their own gradient */
+  .h .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding: 0.02em 0.04em 0.2em; margin: -0.02em -0.04em -0.2em; }
+  .h .w > span { display: inline-block; will-change: transform; }
+  .h em { background: none; color: inherit; }
+  .h em .w > span { background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #leak { position: absolute; left: -30%; top: -30%; width: 160%; height: 160%; pointer-events: none; mix-blend-mode: screen; opacity: 0;
+    background: radial-gradient(28% 34% at 50% 50%, #ffb86b66, #f472b62a 40%, #22d3ee1c 60%, transparent 75%); }
+  .coins { position: absolute; left: 130px; top: 560px; width: 820px; display: flex; flex-wrap: wrap; gap: 16px; }
+  .coin { padding: 14px 22px; border-radius: 16px; background: #0b1426e6; border: 2px solid #22d3ee44; font: 800 28px 'DejaVu Sans Mono', monospace; color: #eef2f8; box-shadow: 0 0 30px #22d3ee22; }
+  .coin b { color: #22d3ee; margin-right: 12px; }
+  .pill { display: inline-block; padding: 10px 18px; border-radius: 12px; font: 800 22px 'DejaVu Sans Mono', monospace; background: #2a0d2244; color: #f9a8d4; border: 2px solid #f472b688; box-shadow: 0 0 24px #f472b633; }
+  .pills { position: absolute; left: 130px; top: 840px; width: 1000px; display: flex; flex-wrap: wrap; gap: 12px; }
+  #ring3 { position: absolute; width: 230px; height: 230px; }
+  #ring3 b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 44px 'DejaVu Sans Mono', monospace; color: #eef2f8; }
+  #ring3 small { position: absolute; left: 0; width: 100%; top: 150px; text-align: center; font: 700 15px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #2ee6a6; }
+  /* v13.59 scenes */
+  .bk { display: inline-block; padding: 10px 18px; border-radius: 12px; font: 800 22px 'DejaVu Sans Mono', monospace; background: #2a0d1666; color: #ff8fa3; border: 2px solid #ff4d6d88; box-shadow: 0 0 24px #ff4d6d33; }
+  .bk.y { background: #2a1a0644; color: #ffc27a; border-color: #ff9f4388; box-shadow: 0 0 24px #ff9f4333; }
+  .bks { position: absolute; left: 130px; top: 470px; width: 1000px; display: flex; flex-wrap: wrap; gap: 12px; }
+  #alarm { position: absolute; left: 130px; top: 850px; font: 800 30px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #ff4d6d; text-shadow: 0 0 24px #ff4d6d; opacity: 0; }
+</style></head>
+<body>
+<canvas id="bgc" width="1920" height="1080"></canvas>
+<div id="stage"><div id="cam">
+
+<section class="scene" id="s0">
+  <img id="logo" src="../public/icon-512.png">
+  <div id="brand">SHOT<em>CALLER</em></div><div id="sweep"></div>
+  <div id="tag">What's new: an X-ray for every round.</div>
+  <div id="ver">v13.46 → v13.59</div>
+</section>
+
+<section class="scene" id="s1">
+  <div class="left" style="top:90px;width:1000px">
+    <div class="eyebrow a">New · Market X-ray</div>
+    <div class="h a">The round,<br><em>under the scanner.</em></div>
+  </div>
+  <div class="sub" id="s1s" style="position:absolute;left:130px;top:915px;max-width:1000px;font-size:24px">The price path is the spine, each minute a rib, the target a dashed line. A scanner sweeps it, live.</div>
+  <div class="phone" id="p1" style="left:1240px;top:75px"><img class="scr" src="ad4/xray-film.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s2">
+  <div class="left" style="top:90px;width:1000px">
+    <div class="eyebrow a">New · break finder</div>
+    <div class="h a">It hunts for<br><em>breaks.</em></div>
+    <div class="sub a" style="font-size:26px">Every 2 seconds: anywhere the market is out of line with itself.</div>
+  </div>
+  <div class="bks" id="s2b">
+    <div class="bk k">High flip risk</div><div class="bk k">Odds swings</div><div class="bk k">Lead changes</div><div class="bk k">UP/DOWN disagree</div>
+    <div class="bk k">Bot vs Kalshi gap</div><div class="bk k">Kalshi lagging</div><div class="bk y k">Jumps &amp; spikes</div><div class="bk y k">Breakouts</div>
+    <div class="bk y k">Exchange splits</div><div class="bk y k">One-sided flow</div><div class="bk y k">Liquidation bursts</div>
+  </div>
+  <div id="alarm">⚠ 5 BREAKS FOUND</div>
+  <div class="phone" id="p2" style="left:1240px;top:75px"><img class="scr" src="ad4/xray-breaks.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s3">
+  <div class="left" style="top:90px;width:1000px">
+    <div class="eyebrow a">New · hidden stats</div>
+    <div class="h a" style="font-size:76px">The stats that help.<br><em>Nobody looks at.</em></div>
+  </div>
+  <div class="phone" id="p3" style="left:1240px;top:75px"><img class="scr" src="ad4/xray-stats.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s4">
+  <div class="left" style="top:110px;width:960px">
+    <div class="eyebrow a">New · Ask the bot</div>
+    <div class="h a">Ask it<br><em>anything.</em></div>
+    <div class="sub a">Type a question about the live round. Get a deep dive from the live numbers.</div>
+  </div>
+  <div class="phone" id="p4" style="left:1240px;top:75px"><img class="scr" src="ad4/ask.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s5">
+  <div class="left" style="top:110px;width:960px">
+    <div class="eyebrow a">New · money flows</div>
+    <div class="h a">Follow<br><em>the money.</em></div>
+    <div class="sub a">On probation until they're right on days they never saw. Each one says why.</div>
+  </div>
+  <div class="phone" id="p5" style="left:1240px;top:75px"><img class="scr" src="ad4/flows.png"><div class="notch"></div><div class="gloss"></div></div>
+</section>
+
+<section class="scene" id="s6">
+  <div class="left" style="top:110px;width:1500px">
+    <div class="eyebrow a">New · the tune-up</div>
+    <div class="h a">Tune it up.<br><em>Whenever you want.</em></div>
+  </div>
+</section>
+
+<section class="scene" id="s7">
+  <img id="o-logo" src="../public/icon-512.png">
+  <div id="o-h" class="h">Shot<em>Caller</em> v13.59</div>
+  <div id="o-sub" class="sub">Live now. Reopen the app to update.</div>
+  <div id="o-cta">Open Shot Caller</div>
+  <div id="o-fine">Signals, not guarantees: every call can lose. Breaks and hidden stats are context, not calls; money flows touch the calls only once proven. Not financial advice. Trade only what you can afford to lose. Screens show sample market data.</div>
+</section>
+
+</div></div>
+<canvas id="fx" width="1920" height="1080"></canvas>
+<div id="leak"></div><div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SAMPLE MARKET DATA</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
+const easeIO = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const pop = (x) => { x = clamp(x); const c = 1.7; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const SCENES = [['s0', 0, 3.8], ['s1', 3.8, 11.0], ['s2', 11.0, 18.0], ['s3', 18.0, 24.5], ['s4', 24.5, 30.5], ['s5', 30.5, 36.5], ['s6', 36.5, 42.5], ['s7', 42.5, 48.5]];
+window.DURATION = 48.5;
+window.CUTS = SCENES.map((s) => s[1]);
+const TR = 0.45; // transition length
+
+// deterministic randomness
+function rng(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32; }
+const R = rng(11), PARTS = Array.from({ length: 260 }, () => ({ x: R() * 1920, y: R() * 1080, z: 0.2 + R() * 0.8, s: R() * Math.PI * 2, hue: R() < 0.7 ? 188 : 160 }));
+const bg = $('bgc').getContext('2d'), fx = $('fx').getContext('2d');
+
+function drawBg(t) {
+  const g = bg;
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#03050b'; g.fillRect(0, 0, 1920, 1080);
+  g.globalCompositeOperation = 'lighter';
+  // aurora blobs
+  for (const [cx, cy, r, c, sp] of [[1400, 120, 900, '#0e3a6e', 0.11], [400, 900, 800, '#06304a', 0.08], [1000, 500, 700, '#0b2d3d', 0.06]]) {
+    const x = cx + Math.sin(t * sp * 6) * 140, y = cy + Math.cos(t * sp * 5) * 90, gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, c); gr.addColorStop(1, 'transparent'); g.fillStyle = gr; g.fillRect(0, 0, 1920, 1080);
+  }
+  // perspective floor grid
+  g.globalCompositeOperation = 'source-over';
+  const hz = 700, vx = 960 + Math.sin(t * 0.3) * 40;
+  g.strokeStyle = 'rgba(34,211,238,0.10)'; g.lineWidth = 1.2;
+  for (let i = -24; i <= 24; i++) { g.beginPath(); g.moveTo(vx + i * 22, hz); g.lineTo(vx + i * 260, 1080); g.stroke(); }
+  for (let k = 0; k < 14; k++) { const f = ((k + (t * 0.6) % 1) / 14), y = hz + Math.pow(f, 2.2) * 380; g.globalAlpha = f; g.beginPath(); g.moveTo(0, y); g.lineTo(1920, y); g.stroke(); }
+  g.globalAlpha = 1;
+  const fade = g.createLinearGradient(0, hz - 40, 0, hz + 140); fade.addColorStop(0, '#03050b'); fade.addColorStop(1, 'rgba(3,5,11,0)'); g.fillStyle = fade; g.fillRect(0, hz - 40, 1920, 180);
+  // particles (depth: size, speed, brightness)
+  g.globalCompositeOperation = 'lighter';
+  for (const p of PARTS) {
+    const x = (p.x + t * 30 * p.z) % 1960 - 20, y = (p.y - t * 18 * p.z + 1080 * 4) % 1100 - 10, a = 0.15 + 0.5 * p.z * (0.6 + 0.4 * Math.sin(t * 2 + p.s));
+    g.fillStyle = `hsla(${p.hue},90%,65%,${a})`; g.beginPath(); g.arc(x, y, 0.6 + p.z * 2.2, 0, 7); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+}
+
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+
+const MONO = 'DejaVu Sans Mono';
+function panel(g, x, y, w, h) { g.fillStyle = 'rgba(8,14,28,0.72)'; g.strokeStyle = 'rgba(34,211,238,0.25)'; g.lineWidth = 2; roundRect(g, x, y, w, h, 22); g.fill(); g.stroke(); }
+// s1: the x-ray film: the round's price drawn as a spine over minute ribs, the haze to the close, a scanner beam
+// sweeping it, and a crack where it finds a break
+// the round's shape: it slips under the target, then a jump carries it back over (the break the scanner finds)
+const FILM = [0.46, 0.40, 0.33, 0.27, 0.30, 0.25, 0.56, 0.62, 0.58, 0.66, 0.71];
+function xrayViz(g, local) {
+  const X0 = 130, X1 = 1060, Y0 = 390, Y1 = 890, W = X1 - X0, H = Y1 - Y0;
+  g.save(); roundRect(g, X0, Y0, W, H, 24); g.clip();
+  const bgr = g.createRadialGradient(X0 + W / 2, Y0 + H * 0.4, 0, X0 + W / 2, Y0 + H * 0.4, W * 0.7);
+  bgr.addColorStop(0, '#0c2236'); bgr.addColorStop(0.6, '#061220'); bgr.addColorStop(1, '#03080f'); g.fillStyle = bgr; g.fillRect(X0, Y0, W, H);
+  for (let y = Y0; y < Y1; y += 3) { g.fillStyle = 'rgba(255,255,255,0.018)'; g.fillRect(X0, y, W, 1); }
+  const xOf = (m) => X0 + (m / 15) * W, yOf = (v) => Y1 - 60 - v * (H - 120);
+  g.strokeStyle = 'rgba(127,214,255,0.09)'; g.lineWidth = 2; for (let m = 0; m <= 15; m++) { g.beginPath(); g.moveTo(xOf(m), Y0); g.lineTo(xOf(m), Y1); g.stroke(); }
+  g.setLineDash([10, 10]); g.strokeStyle = 'rgba(232,246,255,0.55)'; g.lineWidth = 2; g.beginPath(); g.moveTo(X0, yOf(0.35)); g.lineTo(X1, yOf(0.35)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = 'rgba(232,246,255,0.6)'; g.font = `700 16px ${MONO}`; g.fillText('TARGET', X0 + 16, yOf(0.35) + 28);
+  const shown = clamp((local - 0.4) / 2.6) * 10, n = Math.floor(shown), fr = shown - n, path = [];
+  for (let i = 0; i <= n; i++) path.push([xOf(i), yOf(FILM[i])]);
+  if (n < 10) path.push([xOf(n + fr), yOf(FILM[n] + (FILM[n + 1] - FILM[n]) * fr)]);
+  const last = path.at(-1);
+  // the haze: the typical move left to the close
+  if (local > 1.0) { g.globalAlpha = clamp((local - 1.0) / 0.8) * 0.9; g.fillStyle = 'rgba(127,214,255,0.08)'; g.beginPath(); g.moveTo(last[0], last[1]); g.lineTo(X1, last[1] - 140); g.lineTo(X1, last[1] + 140); g.closePath(); g.fill(); g.globalAlpha = 1; }
+  g.lineJoin = 'round'; g.strokeStyle = 'rgba(111,227,255,0.35)'; g.lineWidth = 16; g.filter = 'blur(6px)'; g.beginPath(); path.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.filter = 'none';
+  g.strokeStyle = '#e6fbff'; g.lineWidth = 4; g.beginPath(); path.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke();
+  // the bones: where it crossed the target, then the live dot
+  for (let i = 1; i < path.length; i++) { const a = path[i - 1], b = path[i], ty = yOf(0.35); if ((a[1] - ty) * (b[1] - ty) < 0) { const k = (ty - a[1]) / (b[1] - a[1]); g.fillStyle = '#fbbf24'; g.shadowColor = '#fbbf24'; g.shadowBlur = 16; g.beginPath(); g.arc(a[0] + k * (b[0] - a[0]), ty, 7, 0, 7); g.fill(); g.shadowBlur = 0; } }
+  g.fillStyle = '#fff'; g.shadowColor = '#6fe3ff'; g.shadowBlur = 20; g.beginPath(); g.arc(last[0], last[1], 9 + 3 * Math.sin(local * 5), 0, 7); g.fill(); g.shadowBlur = 0;
+  // a break: the jump at minute 5-6 cracks open
+  const br = local > 3.4, red = br ? 0.55 + 0.45 * Math.abs(Math.cos(local * 4)) : 0;
+  if (br && n >= 6) {
+    const cx = xOf(5.5), cy = yOf((FILM[5] + FILM[6]) / 2), h = 34 * ease((local - 3.4) / 0.3);
+    g.strokeStyle = `rgba(255,77,109,${red})`; g.lineWidth = 5; g.shadowColor = '#ff4d6d'; g.shadowBlur = 22;
+    g.beginPath(); g.moveTo(cx - 6, cy - h); g.lineTo(cx + 6, cy - h / 3); g.lineTo(cx - 6, cy + h / 3); g.lineTo(cx + 6, cy + h); g.stroke(); g.shadowBlur = 0;
+  }
+  // the scanner beam (red once it has found something)
+  const bx = X0 - 260 + (((local * 0.42) % 1) * (W + 520));
+  const bm = g.createLinearGradient(bx, 0, bx + 260, 0), c = br ? '255,143,163' : '184,243,255';
+  bm.addColorStop(0, `rgba(${c},0)`); bm.addColorStop(0.85, `rgba(${c},0.18)`); bm.addColorStop(1, `rgba(255,255,255,0.75)`);
+  g.globalCompositeOperation = 'screen'; g.fillStyle = bm; g.fillRect(bx, Y0, 260, H); g.globalCompositeOperation = 'source-over';
+  g.restore();
+  g.strokeStyle = br ? `rgba(255,77,109,${0.4 + 0.4 * red})` : 'rgba(29,58,85,1)'; g.lineWidth = 3; roundRect(g, X0, Y0, W, H, 24); g.stroke();
+  g.font = `800 20px ${MONO}`; g.textAlign = 'right';
+  g.fillStyle = br ? `rgba(255,77,109,${red})` : 'rgba(127,214,255,0.7)'; g.fillText(br ? '⚠ 1 BREAK FOUND' : 'SCANNING · NO BREAKS', X1 - 22, Y0 + 36); g.textAlign = 'left';
+}
+// s2: a crack running across the glass under the list of breaks
+const CRACK = (() => { const r = rng(5), main = [[130, 770]]; for (let i = 1; i <= 14; i++) main.push([130 + i * 66, 770 + (r() - 0.5) * 60 - i * 2]); const br = []; for (const i of [3, 6, 9, 12]) { const [x, y] = main[i], s = r() < 0.5 ? -1 : 1; br.push([[x, y], [x + 40, y + s * 34], [x + 70, y + s * 52 + (r() - 0.5) * 20]]); } return { main, br }; })();
+function crackViz(g, local) {
+  const k = clamp((local - 2.4) / 0.7); if (k <= 0) return;
+  const pulse = 0.6 + 0.4 * Math.abs(Math.cos(local * 4));
+  g.strokeStyle = `rgba(255,77,109,${pulse})`; g.shadowColor = '#ff4d6d'; g.shadowBlur = 18; g.lineWidth = 4; g.lineJoin = 'miter';
+  const m = CRACK.main, upto = k * (m.length - 1), nn = Math.floor(upto);
+  g.beginPath(); g.moveTo(...m[0]); for (let i = 1; i <= nn; i++) g.lineTo(...m[i]);
+  if (nn < m.length - 1) { const f = upto - nn; g.lineTo(m[nn][0] + (m[nn + 1][0] - m[nn][0]) * f, m[nn][1] + (m[nn + 1][1] - m[nn][1]) * f); } g.stroke();
+  g.lineWidth = 2.5; CRACK.br.forEach((b, i) => { if (upto < 3 + i * 3) return; g.beginPath(); g.moveTo(...b[0]); g.lineTo(...b[1]); g.lineTo(...b[2]); g.stroke(); });
+  g.shadowBlur = 0;
+}
+// s3: hidden-stat cards developing out of a blur as a scanner passes, their numbers counting up
+function statsViz(g, local) {
+  const cards = [['01', 'Cross chance', (k) => `${Math.round(11 * k)}%`, 'touches the target on the way'], ['02', 'Clock value', (k) => `+${(1.0 * k).toFixed(1)} pts/min`, 'what waiting is worth to the leader'],
+    ['03', 'Break-even', (k) => `${(64 * k).toFixed(1)}% wins`, 'the win rate its price needs'], ['04', 'Round-trip toll', (k) => `${Math.round(16 * k)}¢ · ${Math.round(26 * k)}%`, 'spread + both fees, gone']];
+  const X0 = 130, Y0 = 420, w = 445, h = 205, gap = 30;
+  cards.forEach(([n, name, val, note], i) => {
+    const x = X0 + (i % 2) * (w + gap), y = Y0 + Math.floor(i / 2) * (h + gap), d = 0.7 + i * 0.45, k = ease((local - d) / 0.9);
+    if (local < d) return;
+    g.save(); g.globalAlpha = clamp((local - d) / 0.4); g.filter = `blur(${(1 - k) * 10}px) brightness(${1 + (1 - k) * 1.4})`;
+    const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#0a1a2a'); gr.addColorStop(1, '#07111c'); g.fillStyle = gr; g.strokeStyle = '#1d3a55'; g.lineWidth = 2; roundRect(g, x, y, w, h, 20); g.fill(); g.stroke();
+    g.fillStyle = '#6fb8d6'; g.font = `700 17px ${MONO}`; g.fillText(`HIDDEN STAT ${n}`, x + 26, y + 40);
+    g.fillStyle = '#b9c3d6'; g.font = '700 26px DejaVu Sans'; g.fillText(name, x + 26, y + 78);
+    g.fillStyle = i === 2 ? '#2ee6a6' : i === 3 ? '#ff6b85' : '#e6fbff'; g.shadowColor = '#6fe3ff66'; g.shadowBlur = 16; g.font = `800 44px ${MONO}`; g.fillText(val(ease((local - d - 0.2) / 1.0)), x + 26, y + 136); g.shadowBlur = 0;
+    g.fillStyle = '#7f8aa0'; g.font = '21px DejaVu Sans'; g.fillText(note, x + 26, y + 176);
+    g.restore();
+    // the scanner passing over the card as it develops
+    const u = clamp((local - d) / 0.9); if (u > 0 && u < 1) { g.save(); roundRect(g, x, y, w, h, 20); g.clip(); const sx = x - 120 + u * (w + 240), sg = g.createLinearGradient(sx - 120, 0, sx, 0); sg.addColorStop(0, 'rgba(184,243,255,0)'); sg.addColorStop(1, 'rgba(184,243,255,0.35)'); g.fillStyle = sg; g.fillRect(sx - 120, y, 120, h); g.restore(); }
+  });
+}
+// s4: a question typed in, then the deep dive arriving line by line
+function askViz(g, local) {
+  const X0 = 130, Y0 = 560, q = 'give me a deep dive', typed = q.slice(0, Math.floor(clamp((local - 0.8) / 1.0) * q.length));
+  if (local < 0.6) return;
+  g.globalAlpha = clamp((local - 0.6) / 0.3);
+  g.fillStyle = 'rgba(14,21,36,0.92)'; g.strokeStyle = 'rgba(34,211,238,0.35)'; g.lineWidth = 2; roundRect(g, X0 + 380, Y0, 560, 74, 20); g.fill(); g.stroke();
+  g.fillStyle = '#eef2f8'; g.font = '30px DejaVu Sans'; g.fillText(typed + (local < 2 && Math.floor(local * 3) % 2 ? '|' : ''), X0 + 410, Y0 + 48);
+  g.globalAlpha = 1;
+  const lines = ['UP is ahead by about $250: several times the move', 'left, so the bot gives it 97%. Kalshi prices it at 62¢:', 'a wide gap. Treat it with care, not as free money.'];
+  const a0 = 2.1; if (local < a0) { if (local > 1.9) { g.fillStyle = '#7f8aa0'; g.font = `700 22px ${MONO}`; g.fillText('thinking' + '.'.repeat(1 + Math.floor(local * 4) % 3), X0, Y0 + 140); } return; }
+  const k = clamp((local - a0) / 0.4);
+  g.globalAlpha = k; g.fillStyle = 'rgba(8,14,28,0.88)'; g.strokeStyle = '#22d3ee'; g.lineWidth = 3; roundRect(g, X0, Y0 + 104, 900, 230, 22); g.fill(); g.stroke();
+  g.fillStyle = '#22d3ee'; g.fillRect(X0, Y0 + 104, 6, 230);
+  g.fillStyle = '#22d3ee'; g.font = `700 18px ${MONO}`; g.fillText('AI DEEP DIVE', X0 + 30, Y0 + 142);
+  g.fillStyle = '#eef2f8'; g.font = '27px DejaVu Sans';
+  const words = lines.join(' ').split(' '), nW = Math.floor(clamp((local - a0 - 0.2) / 2.2) * words.length); let used = 0;
+  lines.forEach((ln, i) => { const ws = ln.split(' '), take = Math.max(0, Math.min(ws.length, nW - used)); used += ws.length; g.fillText(ws.slice(0, take).join(' '), X0 + 30, Y0 + 192 + i * 44); });
+  g.globalAlpha = 1;
+}
+// s5: the three money flows, each filling its bar of unseen days (or hours) toward proven
+function flowsViz(g, local) {
+  const rows = [['Spot-ETF flows', '+$412M in yesterday', 42, 60, 'days', 'GATHERING DATA', '#fbbf24'], ['Stablecoin supply', '+0.84% in 7 days', 120, 120, 'days', 'NO EDGE YET', '#8b95a7'], ['Whale transfers', '$24M off exchanges, last hour', 38, 100, 'hours', 'GATHERING DATA', '#fbbf24']];
+  const X0 = 130, Y0 = 600, w = 900;
+  rows.forEach(([name, read, have, need, unit, tag, col], i) => {
+    const y = Y0 + i * 110, d = 0.8 + i * 0.35, k = ease((local - d) / 0.5); if (local < d) return;
+    g.globalAlpha = k;
+    g.fillStyle = '#eef2f8'; g.font = '800 30px DejaVu Sans'; g.fillText(name, X0, y);
+    g.fillStyle = '#9aa6bd'; g.font = '22px DejaVu Sans'; g.fillText(read, X0 + 330, y);
+    g.font = `800 17px ${MONO}`; g.textAlign = 'right'; g.fillStyle = col; g.fillText(tag, X0 + w, y); g.textAlign = 'left';
+    const f = clamp((local - d - 0.3) / 1.4) * Math.min(1, have / need);
+    g.fillStyle = '#16203a'; roundRect(g, X0, y + 18, w, 14, 7); g.fill();
+    g.fillStyle = col; g.shadowColor = col; g.shadowBlur = 12; roundRect(g, X0, y + 18, Math.max(14, w * f), 14, 7); g.fill(); g.shadowBlur = 0;
+    g.fillStyle = '#7f8aa0'; g.font = `700 17px ${MONO}`; g.fillText(`${Math.round(have * clamp((local - d - 0.3) / 1.4))} of ${need} unseen ${unit}`, X0, y + 58);
+    g.globalAlpha = 1;
+  });
+}
+// s6: the tune-up: graded rounds split 70/30, each setting tried on the older ones and judged on the newer ones
+function tuneViz(g, local) {
+  const X0 = 130, X1 = 1790, Y0 = 470, n = 100, cw = (X1 - X0) / n;
+  panel(g, X0 - 30, Y0 - 40, X1 - X0 + 60, 520);
+  const shown = Math.floor(clamp((local - 0.4) / 1.4) * n), R7 = rng(3);
+  for (let i = 0; i < n; i++) { const won = R7() < 0.58; if (i >= shown) continue; g.fillStyle = i < 70 ? (won ? '#22d3ee' : '#155e75') : (won ? '#2ee6a6' : '#14532d'); roundRect(g, X0 + i * cw + 2, Y0 + 20, cw - 4, 70, 4); g.fill(); }
+  if (shown >= 70) { const sx = X0 + 70 * cw; g.strokeStyle = '#eef2f8'; g.lineWidth = 3; g.setLineDash([8, 8]); g.beginPath(); g.moveTo(sx, Y0); g.lineTo(sx, Y0 + 110); g.stroke(); g.setLineDash([]);
+    g.font = `800 20px ${MONO}`; g.fillStyle = '#22d3ee'; g.fillText('TRAIN · OLDER 70%', X0, Y0 + 124); g.fillStyle = '#2ee6a6'; g.fillText('TEST · NEWEST 30%, NEVER SEEN', sx + 14, Y0 + 124); }
+  const rowsT = [['Learners rerun', 'indicator test · volatility tuner · flip check', '✓ refreshed', '#22d3ee', 1.9],
+    ['Blend  bot ↔ Kalshi', 'best on the older rounds: 0.6  ·  unseen: z 1.1, needs 2', '✕ keeps 0.5', '#8b95a7', 2.6],
+    ['Calibration', 'over-confident: T 1.2  ·  unseen: z 2.6', '✓ applied', '#2ee6a6', 3.3]];
+  rowsT.forEach(([a, b, c, col, d], i) => {
+    const k = ease((local - d) / 0.5); if (k <= 0) return; const y = Y0 + 190 + i * 88;
+    g.globalAlpha = k; g.fillStyle = '#eef2f8'; g.font = '800 30px DejaVu Sans'; g.fillText(a, X0, y);
+    g.fillStyle = '#9aa6bd'; g.font = '24px DejaVu Sans'; g.fillText(b, X0 + 380, y);
+    g.save(); g.translate(X1 - 120, y - 10); const p = pop((local - d) / 0.45); g.scale(p, p); g.fillStyle = col; g.font = `800 28px ${MONO}`; g.textAlign = 'center'; g.shadowColor = col; g.shadowBlur = 16; g.fillText(c, 0, 10); g.restore();
+    g.globalAlpha = 1;
+  });
+}
+const els = (id, sel) => [...$(id).querySelectorAll(sel)];
+function enter(list, local, start, step = 0.12, dy = 34) { list.forEach((el, i) => { const k = ease((local - start - i * step) / 0.6); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`; el.style.filter = `blur(${(1 - k) * 8}px)`; }); }
+// a phone flying in on a 3D arc, then drifting
+function phone3d(el, local, dur, { ry = -16, rx = 5, from = 520, zoom = 0 } = {}) {
+  const k = ease(local / 0.9), drift = local / dur;
+  el.style.transform = `translateX(${(1 - k) * from}px) translateZ(${(1 - k) * -400 + zoom * drift}px) rotateY(${ry * (1 - 0.35 * drift) - (1 - k) * 30}deg) rotateX(${rx}deg) rotateZ(${(1 - k) * 4}deg)`;
+  el.style.opacity = clamp(local / 0.4);
+  const gl = el.querySelector('.gloss'); if (gl) gl.style.transform = `translateX(${-500 + ((local * 260) % 1400)}px)`;
+}
+
+window.render = (t) => {
+  drawBg(t);
+  fx.clearRect(0, 0, 1920, 1080);
+  $('bar').style.width = `${(t / window.DURATION) * 100}%`;
+  // the camera: a slow push in each scene, a short shake after each cut
+  let since = Infinity, cutIdx = 0; for (let i = 1; i < SCENES.length; i++) if (t >= SCENES[i][1]) { since = t - SCENES[i][1]; cutIdx = i; }
+  const shake = since < 0.35 ? (1 - since / 0.35) * 7 : 0, sc = SCENES[cutIdx], push = (t - sc[1]) / (sc[2] - sc[1]);
+  $('cam').style.transform = `scale(${1 + 0.035 * push}) translate(${Math.sin(t * 61) * shake}px, ${Math.cos(t * 47) * shake}px)`;
+  // the flash on each cut
+  $('flash').style.opacity = since < 0.3 ? (1 - since / 0.3) * 0.28 : 0;
+  for (const [id, a, b] of SCENES) {
+    const el = $(id), local = t - a, dur = b - a, on = t >= a - 0.001 && t < b + TR;
+    el.style.display = on ? 'block' : 'none';
+    if (!on) continue;
+    // whip: the outgoing scene slides left and blurs as the next comes in
+    const out = clamp((t - b) / TR), inn = id === 's0' ? 1 : ease(local / TR);
+    el.style.opacity = Math.min(inn, 1 - out);
+    el.style.transform = `translateX(${(1 - inn) * 160 - out * 260}px)`;
+    el.style.filter = out > 0 || inn < 1 ? `blur(${Math.max(out, 1 - inn) * 14}px)` : 'none';
+    el.style.zIndex = out > 0 ? 1 : 2;
+    if (out > 0) continue;
+    kinetic(el, local);
+    if (id === 's0') {
+      const k = pop(local / 0.9); $('logo').style.transform = `scale(${0.3 + 0.7 * k}) rotate(${(1 - k) * -20}deg)`; $('logo').style.opacity = clamp(local / 0.3);
+      enter([$('brand'), $('tag'), $('ver')], local, 0.7, 0.22, 26);
+      $('brand').style.letterSpacing = `${16 + (1 - ease((local - 0.7) / 1.4)) * 40}px`;
+      $('sweep').style.left = `${-300 + clamp((local - 1.4) / 1.0) * 2400}px`;
+      fx.globalCompositeOperation = 'lighter';
+      for (const d of DOTS) { const u = ease((local - d.d) / 0.75); if (u >= 1 || local < d.d) continue; const r = d.r * (1 - u), x = 960 + Math.cos(d.a + u * 1.6) * r, y = 355 + Math.sin(d.a + u * 1.6) * r * 0.7; fx.fillStyle = `hsla(${d.h},95%,70%,${0.9 * (1 - u * 0.6)})`; fx.beginPath(); fx.arc(x, y, d.s, 0, 7); fx.fill(); }
+      fx.globalCompositeOperation = 'source-over';
+      const gl = local > 0.75 && local < 1.15, jx = gl ? Math.sin(local * 173) * 14 : 0;
+      $('brand').style.textShadow = gl ? `${-jx}px 0 rgba(255,45,85,0.8), ${jx}px 0 rgba(34,211,238,0.8)` : '0 0 40px rgba(34,211,238,0.35)';
+      if (gl) $('brand').style.transform = `${$('brand').style.transform} translateX(${jx * 0.6}px)`;
+      // a shockwave ring behind the logo
+      for (const d of [0.1, 0.35]) { const x = clamp((local - d) / 1.3); fx.strokeStyle = `rgba(34,211,238,${(1 - x) * 0.7})`; fx.lineWidth = 4 * (1 - x) + 1; fx.beginPath(); fx.arc(960, 355, 20 + x * 700, 0, 7); fx.stroke(); }
+    }
+    if (id === 's1') {
+      enter(els(id, '.a'), local, 0.1);
+      xrayViz(fx, local);
+      const ss = $('s1s'), sk = ease((local - 1.2) / 0.6); ss.style.opacity = sk; ss.style.transform = `translateY(${(1 - sk) * 30}px)`;
+      phone3d($('p1'), local, dur);
+    }
+    if (id === 's2') {
+      enter(els(id, '.a'), local, 0.1);
+      els(id, '.k').forEach((c, i) => { const k = pop((local - 0.9 - i * 0.17) / 0.4); c.style.opacity = clamp((local - 0.9 - i * 0.17) / 0.2); c.style.transform = `scale(${0.6 + 0.4 * k})`; });
+      $('alarm').style.opacity = clamp((local - 3.0) / 0.3) * (0.55 + 0.45 * Math.abs(Math.cos(local * 4)));
+      crackViz(fx, local);
+      phone3d($('p2'), local, dur);
+    }
+    if (id === 's3') {
+      enter(els(id, '.a'), local, 0.1);
+      statsViz(fx, local);
+      phone3d($('p3'), local, dur);
+    }
+    if (id === 's4') {
+      enter(els(id, '.a'), local, 0.1);
+      askViz(fx, local);
+      phone3d($('p4'), local, dur);
+    }
+    if (id === 's5') {
+      enter(els(id, '.a'), local, 0.1);
+      flowsViz(fx, local);
+      phone3d($('p5'), local, dur);
+    }
+    if (id === 's6') {
+      enter(els(id, '.a'), local, 0.1);
+      tuneViz(fx, local);
+    }
+    if (id === 's7') {
+      const k = pop(local / 0.8); $('o-logo').style.transform = `scale(${0.4 + 0.6 * k})`; $('o-logo').style.opacity = clamp(local / 0.3);
+      enter([$('o-h'), $('o-sub'), $('o-fine')], local, 0.4, 0.2, 24);
+      const c = pop((local - 1.1) / 0.5); $('o-cta').style.opacity = clamp((local - 1.1) / 0.2); $('o-cta').style.transform = `translateX(-50%) scale(${0.8 + 0.2 * c + 0.025 * Math.sin(local * 5) * clamp(local - 1.8)})`;
+      fx.globalCompositeOperation = 'lighter';
+      for (const d of DOTS) { const u = ease((local - 0.15 - d.d * 0.4) / 1.6); if (u <= 0 || u >= 1) continue; const r = 60 + u * d.r * 0.9, x = 960 + Math.cos(d.a) * r, y = 275 + Math.sin(d.a) * r * 0.62; fx.fillStyle = `hsla(${d.h},95%,70%,${(1 - u) * 0.85})`; fx.beginPath(); fx.arc(x, y, d.s * (1.4 - u), 0, 7); fx.fill(); }
+      fx.globalCompositeOperation = 'source-over';
+      for (const d of [0.05, 0.3]) { const x = clamp((local - d) / 1.4); fx.strokeStyle = `rgba(46,230,166,${(1 - x) * 0.5})`; fx.lineWidth = 3; fx.beginPath(); fx.arc(960, 275, 30 + x * 800, 0, 7); fx.stroke(); }
+    }
+  }
+  $('note').style.opacity = t > 3.8 && t < 42.5 ? 1 : 0;
+  // the beat (124 bpm from the first cut, like the soundtrack): the vignette breathes, the accents glow
+  const beat = t >= 3.8 ? ((t - 3.8) * 124 / 60) % 1 : 1, pulse = Math.exp(-beat * 7) * (t < 42.5 ? 1 : 0.4);
+  $('vig').style.opacity = String(1 - 0.18 * pulse);
+  document.querySelectorAll('.eyebrow').forEach((e) => { e.style.textShadow = `0 0 ${4 + 16 * pulse}px rgba(34,211,238,${0.4 + 0.5 * pulse})`; });
+  bg.globalCompositeOperation = 'lighter'; bg.fillStyle = `rgba(34,211,238,${0.03 * pulse})`; bg.fillRect(0, 0, 1920, 1080); bg.globalCompositeOperation = 'source-over';
+  // each cut: a light leak sweeping across and light streaks racing through
+  const lk = since < 1.1 ? since / 1.1 : null;
+  $('leak').style.opacity = lk == null ? 0 : String(Math.sin(lk * Math.PI) * 0.9);
+  if (lk != null) $('leak').style.transform = `translateX(${-45 + lk * 90}%) rotate(${(cutIdx % 2 ? 1 : -1) * 12}deg)`;
+  if (since < 0.45) {
+    const a = 1 - since / 0.45; fx.globalCompositeOperation = 'lighter';
+    for (const st of STREAKS) { const x = ((st.v * since + st.y * 3) % 2600) - 400; const gr = fx.createLinearGradient(x, 0, x + st.l, 0); gr.addColorStop(0, `rgba(${st.c},0)`); gr.addColorStop(0.8, `rgba(${st.c},${st.a * a})`); gr.addColorStop(1, `rgba(255,255,255,${st.a * a})`); fx.fillStyle = gr; fx.fillRect(x, st.y, st.l, st.w); }
+    fx.globalCompositeOperation = 'source-over';
+  }
+};
+function splitWords(el) {
+  for (const n of [...el.childNodes]) {
+    if (n.nodeType === 3) {
+      const frag = document.createDocumentFragment();
+      n.nodeValue.split(/(\s+)/).forEach((w) => { if (!w) return; if (/^\s+$/.test(w)) { frag.append(' '); return; } const o = document.createElement('span'), i = document.createElement('span'); o.className = 'w'; i.textContent = w; o.append(i); frag.append(o); });
+      n.replaceWith(frag);
+    } else if (n.nodeType === 1 && n.tagName !== 'BR') splitWords(n);
+  }
+}
+document.querySelectorAll('.h').forEach(splitWords);
+const R5 = rng(77), STREAKS = Array.from({ length: 34 }, () => ({ y: R5() * 1080, l: 200 + R5() * 900, v: 2600 + R5() * 3400, w: 1 + R5() * 3, a: 0.3 + R5() * 0.7, c: R5() < 0.5 ? '125,255,208' : R5() < 0.7 ? '244,114,182' : '34,211,238' }));
+const DOTS = Array.from({ length: 170 }, () => ({ a: R5() * Math.PI * 2, r: 500 + R5() * 900, d: R5() * 0.35, s: 1 + R5() * 2.5, h: R5() < 0.8 ? 188 : 330 }));
+// the headline: words slide up in turn, with a red / cyan split that settles as the scene lands
+function kinetic(el, local) {
+  el.querySelectorAll('.h').forEach((h) => {
+    h.querySelectorAll('.w > span').forEach((w, i) => { const k = ease((local - 0.12 - i * 0.07) / 0.55); w.style.transform = `translateY(${(1 - k) * 115}%) rotate(${(1 - k) * 4}deg)`; });
+    const amt = Math.max(0, 1 - local / 0.7) * 9; h.style.textShadow = amt > 0.2 ? `${-amt}px 0 rgba(255,45,85,0.55), ${amt}px 0 rgba(34,211,238,0.55)` : 'none';
+  });
+}
+Promise.all([...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = r; i.onerror = r; })))).then(() => document.fonts.ready).then(() => { window.render(0); window.ready = true; });
+</script>
+</body></html>
