@@ -38,7 +38,8 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '203'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { XRAY, xrayLayers, xraySummary } from './xray.js';
+window.SC_BOOT = '204'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -435,6 +436,7 @@ const compute = () => {
   // Market watch (server): its holds pause new calls here too, and its event count feeds the call filter
   const w = state.watch && Date.now() - state.watchAt < 15000 ? state.watch.status : null;
   snap.watchHold = w?.hold ?? null; snap.watchEvents60 = w?.events60 ?? 0; snap.lateOff = !!state.botRecord?.late?.profitGuard?.paused; snap.earlyLive = !!state.botRecord?.early?.live; snap.flipOff = !!state.botRecord?.flip?.profitGuard?.paused; snap.flipCheck = flipCheckNow(); snap.flipGate = state.tune?.report?.flipStudy ?? null; snap.lockedSide = lockedSideFor(snap.live, snap.now); // the late lane's own guard and the early lane's proof (the server's records)
+  state.snapNow = snap; // the X-ray tab reads the latest
   state.sigmaNow = snap.sigmaMin; // the chart's bubbles scale "moved the price" to it
   state.strikeNow = snap.live ? { ticker: snap.live.m.ticker, strike: snap.live.strike } : null; // "why it moved" notes target crosses
   return snap;
@@ -656,6 +658,7 @@ function renderScan(live, snap, now) {
   const srv = state.scanSrv, open = Date.parse(live.m.open_time), tk = live.m.ticker;
   let sc = scanRound(tape.ex, { openTime: open, now, whaleMin: alerts.prefs().whaleMin, sigmaMin: snap.sigmaMin }), fromServer = false;
   if (!sc.ready && srv?.live?.ticker === tk && srv.live.sc?.ready) { sc = srv.live.sc; fromServer = true; }
+  state.scanNow = sc.ready ? { verdict: sc.verdict, score: sc.score, ticker: tk, at: now } : null; // the X-ray tab
   setText($('scanWhen'), `${int(sc.trades)} trades · ${fromServer ? 'server feeds' : clock(now)}`);
   if (!sc.ready) {
     setText($('scanLabel'), 'Reading the round…'); setText($('scanScore'), 'waiting for the exchange feeds');
@@ -2171,47 +2174,35 @@ $('askForm').addEventListener('submit', (e) => { e.preventDefault(); askQuestion
 $('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
-// ---------- Insiders (public/insiders.js, insiderfeed.js, /api/insiders): insider traders ----------
-// Executives, directors and 10% owners trading their own company's stock, from their SEC Form 4 filings: the companies
-// tied to this market first, then the rest. The server reads EDGAR only while someone has this tab open.
-const ins = { srv: null, at: 0 };
-const big$ = (v) => { const a = Math.abs(v); return a >= 1e9 ? `$${(a / 1e9).toFixed(2)}B` : a >= 1e6 ? `$${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `$${Math.round(a / 1e3)}k` : `$${Math.round(a)}`; };
-const insDate = (d) => { const t = Date.parse(`${d}T12:00:00Z`); return Number.isFinite(t) ? new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : esc(d || ''); };
-async function refreshInsiders(force = false) {
-  if (document.hidden || (!force && !shownViews.has('insiders'))) return;
-  try { ins.srv = await getJSON(api('insiders')); ins.at = Date.now(); } catch { /* next time */ }
-  renderInsiders();
+// ---------- X-ray (public/xray.js, /api/xray): the live market seen through, layer by layer ----------
+// The phone's own data (the round's odds, Kalshi's orders, the exchange trades and whales, the drivers) plus the server's
+// (liquidations, futures positioning, money flows). Re-read every 2 seconds while the tab is on screen.
+const xr = { srv: null, at: 0 };
+async function refreshXray(force = false) {
+  if (document.hidden || (!force && !shownViews.has('xray'))) return;
+  try { xr.srv = await getJSON(api('xray')); xr.at = Date.now(); } catch { /* next time */ }
+  renderXray();
 }
-// a pass on the server takes a minute or two after a deploy: check back sooner while it runs
-setInterval(() => { if (ins.srv?.running || Date.now() - ins.at > 120000) refreshInsiders(); }, 20000);
-function insTrade(t) {
-  const buy = t.code === 'P';
-  return `<li class="${buy ? 'up' : 'dn'}"><time>${insDate(t.date)}</time><b>${buy ? 'BUY' : 'SELL'}</b>`
-    + `<span><strong>${esc(t.ticker || '')}</strong> ${esc(t.owner || 'Insider')}<small>${esc(t.role || '')}${t.others ? ` +${t.others}` : ''}${t.plan ? ' · 10b5-1 plan' : ''}</small></span>`
-    + `<em>${t.usd ? big$(t.usd) : '—'}<small>${t.shares ? `${int(t.shares)}${t.price ? ` @ ${usd(t.price, 2)}` : ''}` : ''}</small></em></li>`;
-}
-function insGroup(g, open) {
-  const s = g.summary, b = s.buys, x = s.sales, tot = b.usd + x.usd;
-  const body = `<ul class="ins-facts">${g.words.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`
-    + (tot ? `<div class="ins-split"><b class="pos">bought ${big$(b.usd)}</b><span class="ins-bar"><i style="width:${Math.round(b.usd / tot * 100)}%"></i></span><b class="neg">sold ${big$(x.usd)}</b></div>` : '')
-    + (s.recent.length ? `<ul class="ins-list ins-trades">${s.recent.map(insTrade).join('')}</ul>` : '')
-    + `<table class="ins-tab"><tr><th>Company</th><th>Bought</th><th>Sold</th></tr>${s.companies.map((c) => `<tr><td>${esc(c.ticker)}${c.issuer ? ` <small class="muted">${esc(c.issuer)}</small>` : ''}</td><td class="${c.buys ? 'pos' : ''}">${c.buys ? `${big$(c.buyUsd)} <small>(${c.buys})</small>` : '—'}</td><td class="${c.sales ? 'neg' : ''}">${c.sales ? `${big$(c.saleUsd)} <small>(${c.sales})</small>` : '—'}</td></tr>`).join('')}</table>`
-    + (g.errors.length ? `<p class="fine-left muted">Couldn't read: ${g.errors.map((e) => `${esc(e.ticker)} (${esc(e.err)})`).join(', ')}</p>` : '');
-  const head = `<div class="deep-head"><span>${esc(g.name)}${g.mine ? ' <small class="ins-mine">this market</small>' : ''}</span><small class="muted">last ${s.days} days</small></div><p class="fine-left muted">${esc(g.why)}: ${g.tickers.join(', ')}</p>`;
-  return g.mine ? `<div class="card ins-card">${head}${body}</div>` : `<details class="card ins-card" data-k="${g.key}"${open.has(g.key) ? ' open' : ''}><summary>${head}</summary>${body}</details>`;
-}
-function renderInsiders() {
-  if (!$('insBody')) return;
-  const s = ins.srv, open = new Set([...$('insBody').querySelectorAll('details[open]')].map((d) => d.dataset.k)); // keep the groups you opened
-  setText($('insWhen'), s?.updated ? `filings read ${clock(s.updated)}` : ins.at ? '' : 'loading…');
-  if (!s) return setHTML($('insBody'), '<div class="card"><p class="muted">Loading…</p></div>');
-  if (!s.on) return setHTML($('insBody'), `<div class="card"><p class="muted">Insider trades are off on this server (${esc(s.why || '')}).</p></div>`);
-  const status = [];
-  if (s.running) status.push(`<p class="muted">Reading the SEC's filings${s.progress ? ` (${s.progress.done} of ${s.progress.total} companies)` : ''}… the first read after a deploy takes a minute or two.</p>`);
-  if (s.err) status.push(`<p class="neg">⚠ ${esc(s.err)}</p>`);
-  if (!s.ua) status.push('<p class="fine-left muted">Tip for the owner: set <code>SEC_USER_AGENT</code> in Railway to a name and contact email; the SEC asks every program reading EDGAR to name one.</p>');
-  setHTML($('insBody'), (status.length ? `<div class="card ins-card">${status.join('')}</div>` : '') + s.groups.map((g) => insGroup(g, open)).join('')
-    + '<div class="card ins-card"><p class="ins-use">Context only: not used in the calls. A Form 4 arrives up to two business days after the trade, and insider buying tends to play out over weeks or months, not a 15-minute round. Open-market buys are the clearer signal; insiders sell for many reasons, and a sale under a pre-set 10b5-1 plan says least. Grants, option exercises, tax withholding and gifts are left out.</p></div>');
+setInterval(() => refreshXray(), 15000);
+setInterval(() => { if (!document.hidden && shownViews.has('xray')) renderXray(); }, 2000);
+const leanWord = (l) => (l == null ? '—' : l >= XRAY.flat ? `UP ${Math.round(l * 100)}` : l <= -XRAY.flat ? `DOWN ${Math.round(-l * 100)}` : 'even');
+const leanBar = (l) => `<span class="xr-bar">${l == null ? '' : `<i class="${l >= 0 ? 'up' : 'dn'}" style="${l >= 0 ? 'left:50%' : `left:${50 + l * 50}%`};width:${Math.abs(l) * 50}%"></i>`}</span>`;
+function renderXray() {
+  if (!$('xrBody')) return;
+  const now = Date.now(), snap = state.snapNow, lv = snap?.live && snap.live.ev?.minutesLeft > 0 ? snap.live : null;
+  const live = lv ? { pYes: lv.ev.pYes, pBot: lv.pBot, yesBid: lv.ev.quote?.yesBid ?? null, yesAsk: lv.ev.quote?.yesAsk ?? null, spot: snap.mSpot ?? snap.spot, strike: lv.strike, sigmaMin: lv.sigma ?? snap.sigmaMin, sigmaLong: snap.sigmaLong, minutesLeft: lv.ev.minutesLeft } : null;
+  const scan = state.scanNow && state.scanNow.ticker === lv?.m.ticker && now - state.scanNow.at < 15000 ? { ...state.scanNow, inCalls: !!state.scanSrv?.inCalls } : null;
+  const layers = xrayLayers({ now, kind: MKT.kind, live, kalshiTrades: tape.kalshiTicker === lv?.m.ticker ? tape.kalshi : [], trades: tape.recent, whales: flow.whales, scan, srv: xr.srv, drivers: state.drv, fmt: (v) => usd(v, Math.max(0, MKT.digits ?? 2)) });
+  const sum = xraySummary(layers), open = new Set([...$('xrBody').querySelectorAll('details[open]')].map((d) => d.dataset.k)); // keep the layers you opened
+  setText($('xrWhen'), lv ? `${roundName(lv.m.ticker)} · closes in ${mmss(lv.ev.minutesLeft)}` : 'no open round');
+  const head = `<div class="card xr-sum ${sum.tone}"><div class="xr-verdict">${esc(sum.headline)}</div>`
+    + `<div class="xr-tally"><b class="pos">${sum.up} UP</b><b class="neg">${sum.down} DOWN</b><b class="muted">${sum.flat} even</b></div>`
+    + (sum.strongest ? `<p class="fine-left">Strongest push: <b>${esc(sum.strongest.name)}</b>, ${sum.strongest.lean > 0 ? 'UP' : 'DOWN'}.</p>` : '')
+    + '<p class="fine-left muted">A picture, not a call: layers that agree aren\'t proof, and only the ones marked “in the calls” move the bot\'s odds. The call is on the Deck.</p></div>';
+  const rows = layers.map((l) => `<details class="xr-layer${l.off ? ' off' : ''}" data-k="${l.key}"${open.has(l.key) ? ' open' : ''}><summary>`
+    + `<span class="xr-name"><b>${esc(l.name)}</b><small>${esc(l.read)}</small></span>${leanBar(l.lean)}<em class="${l.lean >= XRAY.flat ? 'pos' : l.lean <= -XRAY.flat ? 'neg' : 'muted'}">${leanWord(l.lean)}</em></summary>`
+    + `<div class="xr-more">${l.facts.length ? `<ul>${l.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}${l.use ? `<p class="xr-use">${l.inCalls ? '<span class="xr-in">in the calls</span> ' : '<span class="xr-ctx">context</span> '}${esc(l.use)}</p>` : ''}</div></details>`).join('');
+  setHTML($('xrBody'), head + `<div class="card xr-layers"><div class="deep-head"><span>Layers</span><small class="muted">DOWN ← → UP · tap for detail</small></div>${rows}</div>`);
 }
 
 // ---------- Simple mode ----------
@@ -2856,7 +2847,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'history') refreshLab(true);
     if (v === 'history') refreshBotRecord();
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
-    if (v === 'insiders') { renderInsiders(); refreshInsiders(true); }
+    if (v === 'xray') { renderXray(); refreshXray(true); }
   }
   shownViews.clear(); for (const v of views) shownViews.add(v);
   adminPolling(views.includes('settings'));

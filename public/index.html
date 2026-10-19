@@ -67,7 +67,7 @@
   <link rel="modulepreload" href="flipmodel.js">
   <link rel="modulepreload" href="losslab.js">
   <link rel="modulepreload" href="pick.js">
-  <link rel="modulepreload" href="insiders.js">
+  <link rel="modulepreload" href="xray.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -505,9 +505,9 @@
     </section>
 
     <!-- Map to success (v13.24): live stats, the road of milestones with a tip each, and a coach reading your trades -->
-    <section id="view-insiders" class="view">
-      <div class="card ins-head"><div class="deep-head"><span>Insiders</span><small id="insWhen" class="muted"></small></div><p class="fine-left">Insider traders: executives, directors and 10% owners buying and selling their own company's stock, from the Form 4s they must file with the SEC. The companies tied to this market come first. Context only; it doesn't move the calls.</p></div>
-      <div id="insBody"></div>
+    <section id="view-xray" class="view">
+      <div class="card xr-head"><div class="deep-head"><span>Market X-ray</span><small id="xrWhen" class="muted"></small></div><p class="fine-left">The live market seen through, layer by layer: the odds, how wild it is, Kalshi's money, the exchange order flow, whales, leverage and what's moving it. Each layer shows which way it leans and whether the bot's calls use it.</p></div>
+      <div id="xrBody"></div>
     </section>
     <section id="view-success" class="view">
       <div class="card map-hero">
@@ -615,7 +615,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.55 · Insider traders</p>
+      <p class="fine" id="version">Shot Caller v13.56 · Market X-ray</p>
     </section>
   </main>
 
@@ -645,7 +645,7 @@
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
-    <button data-view="insiders" data-pro><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Insiders</button>
+    <button data-view="xray" data-pro><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M12 7v10M9 9.5h6M8.5 12h7M9 14.5h6"/></svg>X-ray</button>
     <button data-view="learn" data-pro><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 7h7"/></svg>Learn</button>
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
   </nav>
@@ -653,7 +653,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '203';
+    window.SC_BUILD = '204';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

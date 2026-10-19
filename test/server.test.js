@@ -20,7 +20,6 @@ await new Promise((r) => upstream.listen(0, r));
 const base = `http://127.0.0.1:${upstream.address().port}`;
 process.env.KALSHI_API = base;
 process.env.COINBASE_API = base;
-process.env.SEC_API = base; process.env.SEC_DATA_API = base; // EDGAR (insiderfeed.js): the mock's 404s, never the real SEC
 const { server, bot } = await import('../server.js');
 await new Promise((r) => server.listen(0, r));
 const app = `http://127.0.0.1:${server.address().port}`;
@@ -176,11 +175,9 @@ test('Ask without an API key: the status says off and a question gets 501, so th
   assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
 });
 
-test('the Insiders tab: insider trades, the market\'s companies first (crypto for Bitcoin, the biggest US companies for the S&P)', async () => {
-  const r = await (await fetch(`${app}/api/insiders`)).json();
-  assert.equal(r.on, true); assert.equal(r.groups[0].key, 'crypto'); assert.equal(r.groups[0].mine, true); assert.ok(r.groups[0].summary && Array.isArray(r.groups[0].words));
-  const spx = await (await fetch(`${app}/api/insiders?m=KXINX`)).json();
-  assert.equal(spx.groups[0].key, 'megacaps');
+test('the X-ray tab\'s server layers: liquidations, futures and money flows for crypto', async () => {
+  const r = await (await fetch(`${app}/api/xray`)).json();
+  assert.equal(r.crypto, true); assert.ok(r.liqs && Array.isArray(r.liqs.biggest)); assert.ok('futures' in r); assert.ok(r.flows?.etf);
 });
 
 test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', async () => {

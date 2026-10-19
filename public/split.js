@@ -3,7 +3,7 @@
 // Each pane has its own picker and scrolls on its own; tapping a pane focuses it, and the bottom bar then changes what
 // the focused pane shows. Picking a screen another pane already shows swaps the two. On a narrow screen the panes'
 // contents shrink to fit (CSS zoom), so every card still lays out as it does full screen. The layout is remembered.
-export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['radar', 'Radar'], ['alerts', 'Alerts'], ['history', 'Record'], ['success', 'Map'], ['insiders', 'Insiders'], ['learn', 'Learn'], ['settings', 'Settings']];
+export const SPLIT_VIEWS = [['live', 'Deck'], ['chart', 'Chart'], ['radar', 'Radar'], ['alerts', 'Alerts'], ['history', 'Record'], ['success', 'Map'], ['xray', 'X-ray'], ['learn', 'Learn'], ['settings', 'Settings']];
 const DEFAULT_PANES = ['live', 'chart', 'alerts', 'history'];
 // A computer: a desktop system (Windows, Mac, Linux, ChromeOS), whatever its screen size, touchscreen or trackpad.
 // Phones and tablets say so in their user agent; iPads in desktop mode say "Macintosh" but have touch points.

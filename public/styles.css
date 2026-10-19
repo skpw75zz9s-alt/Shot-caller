@@ -1125,32 +1125,30 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 .tu-m { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); }
 .tu-m b { font-size: 12.5px; }
 .tu-m small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-/* the Insiders tab (v13.55: insider traders) */
-.ins-card .deep-head small { font: 500 10.5px var(--mono); }
-.ins-split { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin: 6px 0 8px; font: 700 12px var(--mono); }
-.ins-bar { height: 8px; border-radius: 4px; background: var(--no); overflow: hidden; }
-.ins-bar i { display: block; height: 100%; background: var(--yes); border-right: 2px solid var(--panel); }
-.ins-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.ins-list li { display: grid; grid-template-columns: 62px 72px 1fr auto; gap: 6px; align-items: baseline; padding: 4px 6px; border-radius: 6px; background: var(--panel-2); font: 500 11.5px var(--mono); }
-.ins-list li time { color: var(--dim); font-size: 10.5px; }
-.ins-list li span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ins-list li em { font-style: normal; font-weight: 700; }
-.ins-list li.up b { color: var(--yes); } .ins-list li.dn b { color: var(--no); }
-.ins-facts { margin: 4px 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
-.ins-tab { width: 100%; border-collapse: collapse; font: 500 12px var(--mono); margin: 4px 0; }
-.ins-tab th { text-align: left; color: var(--dim); font-weight: 600; padding: 2px 4px; }
-.ins-tab td { padding: 3px 4px; border-top: 1px solid var(--line); }
-.ins-trades li { grid-template-columns: 50px 38px 1fr auto; }
-.ins-trades li span, .ins-trades li em { display: flex; flex-direction: column; min-width: 0; }
-.ins-trades li span strong { color: var(--text); }
-.ins-trades li em { text-align: right; }
-.ins-trades li small, .ins-tab small { color: var(--dim); font-weight: 500; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ins-trades { margin: 8px 0; }
-.ins-mine { font: 600 9.5px var(--mono); color: var(--yes); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; vertical-align: 1px; }
-details.ins-card > summary { list-style: none; cursor: pointer; }
-details.ins-card > summary::-webkit-details-marker { display: none; }
-details.ins-card > summary .deep-head span::before { content: '▸ '; color: var(--dim); }
-details.ins-card[open] > summary .deep-head span::before { content: '▾ '; }
-.ins-use { margin: 8px 0 0; color: var(--dim); font-size: 11.5px; line-height: 1.4; }
-/* nine tabs in Pro on a phone: tighter labels so "Insiders" and "Settings" fit */
+/* the X-ray tab (v13.56) */
+.xr-sum { border-left: 3px solid var(--line); }
+.xr-sum.up { border-left-color: var(--yes); } .xr-sum.down { border-left-color: var(--no); } .xr-sum.mixed { border-left-color: var(--amber); }
+.xr-verdict { font: 700 17px var(--sans); margin-bottom: 6px; }
+.xr-tally { display: flex; gap: 14px; font: 700 12px var(--mono); margin-bottom: 4px; }
+.xr-layer { border-top: 1px solid var(--line); }
+.xr-layer:first-of-type { border-top: 0; }
+.xr-layer > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr 76px 64px; gap: 8px; align-items: center; padding: 9px 0; }
+.xr-layer > summary::-webkit-details-marker { display: none; }
+.xr-layer.off { opacity: .55; }
+.xr-name { display: flex; flex-direction: column; min-width: 0; }
+.xr-name b { font-size: 13px; }
+.xr-name b::before { content: '▸ '; color: var(--dim); font-size: 10px; }
+.xr-layer[open] .xr-name b::before { content: '▾ '; }
+.xr-name small { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.xr-bar { position: relative; height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.xr-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--dim); }
+.xr-bar i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.xr-bar i.up { background: var(--yes); } .xr-bar i.dn { background: var(--no); }
+.xr-layer > summary em { font: 700 11px var(--mono); font-style: normal; text-align: right; }
+.xr-more { padding: 0 0 10px 14px; }
+.xr-more ul { margin: 0 0 6px; padding-left: 16px; font-size: 12.5px; line-height: 1.45; }
+.xr-use { margin: 0; color: var(--dim); font-size: 11.5px; line-height: 1.4; }
+.xr-in, .xr-ctx { font: 600 9.5px var(--mono); text-transform: uppercase; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
+.xr-in { color: var(--yes); } .xr-ctx { color: var(--dim); }
+/* nine tabs in Pro on a phone: tighter labels so every label fits */
 @media (max-width: 440px) { body:not(.simple) nav { gap: 2px; padding-left: 4px; padding-right: 4px; } body:not(.simple) nav button { font-size: 8.5px; letter-spacing: 0; text-transform: none; } }
