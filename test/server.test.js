@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'shot-srv-'));
 process.env.PAYWALL = 'off'; // paywall has its own tests
-delete process.env.ANTHROPIC_API_KEY; // Ask's AI is off here (askai.test.js tests it with a stand-in client)
+delete process.env.ANTHROPIC_API_KEY; delete process.env.ELEVENLABS_API_KEY; // Ask's AI is off here (askai.test.js tests it with a stand-in client)
 
 // Mock upstream standing in for both Kalshi and Coinbase.
 const upstream = http.createServer((req, res) => {
@@ -170,9 +170,11 @@ test('Discord role routes: status says off without config, linking needs a membe
 });
 
 test('Ask without an API key: the status says off and a question gets 501, so the phone answers on its own', async () => {
-  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null });
+  assert.deepEqual(await (await fetch(`${app}/api/ask`)).json(), { ai: false, model: null, voice: false });
   const r = await fetch(`${app}/api/ask`, { method: 'POST', body: JSON.stringify({ q: 'should I buy?', facts: { coin: 'BTC' } }) });
   assert.equal(r.status, 501); assert.equal((await r.json()).ai, false);
+  const v = await fetch(`${app}/api/ask/voice`, { method: 'POST', body: JSON.stringify({ text: 'UP is the call.' }) });
+  assert.equal(v.status, 501, 'no voice key: the phone speaks with its own voice'); assert.equal((await v.json()).voice, false);
 });
 
 test('an upstream 401 reaches the phone as a 502, never as the paywall\'s 401', async () => {

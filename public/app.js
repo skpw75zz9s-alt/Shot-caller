@@ -38,7 +38,7 @@ import { allowAlert } from './notify.js';
 import { healthCheck, healthDue, newProblems } from './health.js';
 import { callStats, dailyRecord, logCall, settleCalls, unsettledCalls } from './record.js';
 import { slotLabel } from './learner.js';
-window.SC_BOOT = '190'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '191'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2116,25 +2116,53 @@ function askFacts(now = Date.now()) {
   return f;
 }
 
-const ask = { log: [], busy: false, ai: null, rec: null, listening: false };
+const ask = { log: [], busy: false, ai: null, voice: null, rec: null, listening: false, audio: null, src: null, sayN: 0 };
 let askSpeak = store.get('askSpeak', true);
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 function askOpen(on = true) {
   setHidden($('askSheet'), !on);
   document.body.classList.toggle('asking', on);
   if (on) {
-    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; renderAsk(); }).catch(() => { ask.ai = false; renderAsk(); });
+    if (ask.ai == null) getJSON('ask').then((d) => { ask.ai = !!d?.ai; ask.voice = !!d?.voice; renderAsk(); }).catch(() => { ask.ai = false; ask.voice = false; renderAsk(); });
     renderAsk();
-  } else { askStopListening(); window.speechSynthesis?.cancel(); }
+  } else { askStopListening(); askHush(); }
 }
-function askSay(text) {
-  if (!askSpeak || !text || !window.speechSynthesis) return;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent'));
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
-  } catch { /* no voice on this phone */ }
+// The server's voice (voice.js, one chosen voice for every answer) when it's on, else the phone's own. Played through Web
+// Audio, unlocked on the tap that asked (askUnlock), so phones that block sound outside a tap still play it when it arrives.
+function askUnlock() {
+  try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) { ask.audio ||= new AC(); if (ask.audio.state === 'suspended') ask.audio.resume(); } } catch { /* no Web Audio */ }
+}
+function askHush() {
+  ask.sayN++;
+  try { ask.src?.stop(); } catch { /* already done */ }
+  ask.src = null;
+  window.speechSynthesis?.cancel();
+}
+const sayable = (t) => t.replace(/¢/g, ' cents').replace(/(\d)%/g, '$1 percent').replace(/\s+/g, ' ').trim();
+function askSayLocal(text) {
+  if (!window.speechSynthesis) return;
+  try { const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; window.speechSynthesis.speak(u); } catch { /* no voice on this phone */ }
+}
+async function askSay(text) {
+  if (!askSpeak || !text) return;
+  askHush();
+  const n = ask.sayN, t = sayable(text);
+  if (ask.voice && ask.audio) {
+    try {
+      const r = await fetch(`${API}/ask/voice`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) });
+      if (r.status === 501) ask.voice = false;
+      if (r.ok) {
+        const buf = await ask.audio.decodeAudioData(await r.arrayBuffer());
+        if (n !== ask.sayN || !askSpeak) return; // a newer answer, mute or close came first
+        const src = ask.audio.createBufferSource();
+        src.buffer = buf; src.connect(ask.audio.destination); src.start();
+        ask.src = src;
+        return;
+      }
+    } catch { /* the phone's own voice below */ }
+    if (n !== ask.sayN) return;
+  }
+  askSayLocal(t);
 }
 async function askQuestion(q) {
   q = String(q || '').trim();
@@ -2161,7 +2189,7 @@ async function askQuestion(q) {
 function askListen() {
   if (!SpeechRec) { $('askInput').focus(); toast('Voice input isn\'t built into this browser: tap the mic on your keyboard to dictate.'); return; }
   if (ask.listening) { askStopListening(); return; }
-  window.speechSynthesis?.cancel();
+  askHush();
   const rec = new SpeechRec();
   rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
   let finalText = '';
@@ -2182,7 +2210,7 @@ function renderAsk() {
   mic.setAttribute('aria-pressed', String(ask.listening));
   mic.setAttribute('aria-label', ask.listening ? 'Stop listening' : 'Ask by voice');
   setText($('askHint'), ask.listening ? 'Listening… ask about the round' : `Ask about ${MKT.key}'s live round: tap the mic or type`);
-  setText($('askMode'), ask.ai ? 'AI deep dive on' : ask.ai === false ? 'Built-in answers' : '');
+  setText($('askMode'), [ask.ai ? 'AI deep dive' : ask.ai === false ? 'Built-in answers' : '', ask.voice ? 'bot voice' : ''].filter(Boolean).join(' · '));
   $('askSpeak').setAttribute('aria-pressed', String(askSpeak));
   setText($('askSpeak'), askSpeak ? '🔊 Read aloud' : '🔇 Muted');
   setHidden($('askChips'), ask.log.length > 0);
@@ -2197,12 +2225,12 @@ function renderAsk() {
       + (x.aiState === 'done' ? `<details class="ask-nums"><summary>The numbers behind it</summary>${nums}</details>` : `<div class="ask-nums">${nums}</div>`) + '</article>';
   }).join(''));
 }
-$('askBtn').addEventListener('click', () => askOpen($('askSheet').hidden));
+$('askBtn').addEventListener('click', () => { askUnlock(); askOpen($('askSheet').hidden); });
 $('askClose').addEventListener('click', () => askOpen(false));
-$('askMic').addEventListener('click', askListen);
-$('askForm').addEventListener('submit', (e) => { e.preventDefault(); askStopListening(); askQuestion($('askInput').value); });
-$('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) askQuestion(b.dataset.q); });
-$('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) window.speechSynthesis?.cancel(); renderAsk(); });
+$('askMic').addEventListener('click', () => { askUnlock(); askListen(); });
+$('askForm').addEventListener('submit', (e) => { e.preventDefault(); askUnlock(); askStopListening(); askQuestion($('askInput').value); });
+$('askChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-q]'); if (b) { askUnlock(); askQuestion(b.dataset.q); } });
+$('askSpeak').addEventListener('click', () => { askSpeak = !askSpeak; store.set('askSpeak', askSpeak); if (!askSpeak) askHush(); renderAsk(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('askSheet').hidden) askOpen(false); });
 
 // ---------- Simple mode ----------

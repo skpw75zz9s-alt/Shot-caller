@@ -5,9 +5,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Readable } from 'node:stream';
 import { createBot } from './bot.js';
 import { createAccess } from './access.js';
 import { createAskAI } from './askai.js';
+import { createVoice } from './voice.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -53,6 +55,7 @@ export const access = createAccess({
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 export const askAI = createAskAI(); // Ask the bot's AI deep dive (askai.js): on once ANTHROPIC_API_KEY is set
+export const askVoice = createVoice(); // its answers read aloud in one voice (voice.js): on once ELEVENLABS_API_KEY is set
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -436,11 +439,21 @@ export const server = http.createServer(async (req, res) => {
     if (ka) return await kalshiAuth(req, res, ka[1], url);
     // Ask the bot (askai.js): the phone's question and the facts it shows, answered by the AI; 501 when it's off
     if (path === '/api/ask') {
-      if (req.method === 'GET') return send(res, 200, askAI.status());
+      if (req.method === 'GET') return send(res, 200, { ...askAI.status(), ...askVoice.status() });
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
       const b = await readBody(req);
       const out = await askAI.ask({ owner: ownerOf(token) ?? clientIp(req), question: b?.q, facts: b?.facts, history: b?.history });
       return send(res, out.status, out.body);
+    }
+    if (path === '/api/ask/voice') { // the answer's text in, its MP3 out (voice.js); 501 when the server voice is off
+      if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+      const b = await readBody(req);
+      const out = await askVoice.speak({ owner: ownerOf(token) ?? clientIp(req), text: b?.text });
+      if (!out.audio) return send(res, out.status, out.body);
+      res.writeHead(200, { 'content-type': out.type, 'cache-control': 'no-store' });
+      const audio = Buffer.isBuffer(out.audio) ? Readable.from([out.audio]) : Readable.fromWeb(out.audio);
+      audio.on('error', () => res.destroy());
+      return void audio.pipe(res);
     }
     // the phone reports real fees from your Kalshi fills (numbers only: count, price, fee, taker)
     if (path === '/api/fees' && req.method === 'POST') { const b = await readBody(req); return send(res, 200, { added: feeBook.add(b?.samples) }); }
