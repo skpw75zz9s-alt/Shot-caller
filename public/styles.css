@@ -1203,3 +1203,23 @@ header h1 { min-width: 0; } header .hdr-r { flex: none; } .mkt-pick { min-width:
 @keyframes blip-pulse { 50% { transform: scale(1.6); opacity: .5; } }
 body.split .blip { display: none; }
 @media (prefers-reduced-motion: reduce) { .blip.buy i { animation: none; } }
+
+/* the strength meter (v13.62) */
+.str-words { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.str-chart { position: relative; height: 170px; margin: 6px 0 4px; touch-action: pan-y; }
+.str-chart svg { width: 100%; height: 100%; overflow: visible; }
+.str-grid { stroke: var(--line); stroke-width: 1; }
+.str-zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.str-ax { fill: var(--dim); font: 500 9px var(--mono); }
+.str-lab { fill: var(--muted); font: 600 9px var(--mono); }
+.str-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.str-dot { stroke: var(--panel); stroke-width: 2; }
+.str-cross { stroke: var(--muted); stroke-width: 1; }
+.str-empty { fill: var(--dim); font: 500 11px var(--sans); }
+.str-tip { position: absolute; top: 0; width: 150px; padding: 6px 8px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); font: 500 10.5px var(--mono); color: var(--text); pointer-events: none; line-height: 1.5; }
+.str-tip span { display: block; color: var(--muted); } .str-tip i, .str-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.str-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 10.5px var(--mono); color: var(--muted); margin-bottom: 8px; }
+.str-legend i.dash { width: 12px; height: 0; border-radius: 0; border-top: 1px dashed var(--muted); vertical-align: middle; }
+.str-tab { width: 100%; border-collapse: collapse; font: 500 11.5px var(--mono); margin: 4px 0; }
+.str-tab th { text-align: left; color: var(--dim); font-weight: 600; padding: 2px 4px; } .str-tab td { padding: 3px 4px; border-top: 1px solid var(--line); }
+.str-more summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }

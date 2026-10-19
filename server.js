@@ -12,6 +12,7 @@ import { createAskAI } from './askai.js';
 import { createTuneUp } from './tuneup.js';
 import { createCouncil } from './council.js';
 import { createBreakLab } from './breaklab.js';
+import { createStrength } from './strength.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -65,6 +66,8 @@ export const tuneUp = createTuneUp({ file: join(DATA_DIR, 'tuneup.json') });
 export const council = createCouncil({ file: join(DATA_DIR, 'council.json') });
 // the break lab (breaklab.js, public/breakproof.js): every X-ray break, graded against what happened next
 export const breakLab = createBreakLab({ file: join(DATA_DIR, 'breaks.json') });
+// the strength meter (strength.js, public/strength.js): the bot's odds graded every second, round by round
+export const strength = createStrength({ file: join(DATA_DIR, 'strength.json') });
 export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-roles.json'), base: appUrl(), isActive: (code) => access.isActive(code) });
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
@@ -108,6 +111,7 @@ export const bot = createBot({
     try { flipFeed.observe(o); } catch (e) { console.error('flip check step failed', e.message); }
     try { flowsFeed.observe(o); } catch (e) { console.error('money flows step failed', e.message); }
     try { council.observe(HOME.series, o.snap, HOME.settle); } catch (e) { console.error('council step failed', e.message); }
+    try { strength.observe(HOME.series, o.snap); } catch (e) { console.error('strength meter step failed', e.message); }
     try { const now = Date.now(); breakLab.observe(HOME.series, o.snap, { kind: HOME.kind, tape: scanFeed.tape(now - 600000), liqs: liqSummary(scanFeed.liqs(), now) }); } catch (e) { console.error('break lab step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
@@ -127,7 +131,7 @@ export const bot = createBot({
   onCall: (e, o) => discord.call(e, o),
   onSettle: (e, stats) => discord.result(e, stats),
   onTick: (o) => discordAlerts.tick(o),
-  onRound: (r) => { discordAlerts.settled(r); council.settle(HOME.series, r.ticker, r.result); breakLab.settle(HOME.series, r.ticker, r.result); },
+  onRound: (r) => { discordAlerts.settled(r); council.settle(HOME.series, r.ticker, r.result); breakLab.settle(HOME.series, r.ticker, r.result); strength.settle(HOME.series, r.ticker, r.result); },
   onPick: (e, o) => discord.pick(e, o),
 });
 setInterval(() => access.prune(), 3600000).unref();
@@ -139,7 +143,7 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
@@ -276,7 +280,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([tuneUp.load(), council.load(), breakLab.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -504,6 +508,7 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
     if (path === '/api/council') return send(res, 200, council.api(mq || HOME.series)); // the debate behind the calls (council.js)
     if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)
     if (path === '/api/learn') return send(res, 200, { learned: { ...mb.learned(), fees: feeBook.rates(), volTune: mVol.live() }, status: { ...mb.learnStatus(), fees: { ...feeBook.rates(), samples: feeBook.count() } }, market: mb.market() });

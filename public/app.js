@@ -41,7 +41,8 @@ import { slotLabel } from './learner.js';
 import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
-window.SC_BOOT = '209'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { STRENGTH } from './strength.js';
+window.SC_BOOT = '210'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2265,6 +2266,58 @@ function renderDebate(lv, now) {
     + `<p class="fine-left muted">The rules: the facts beat opinions (a big lead or a mostly-settled average can't be argued with); a feature clearly wrong lately is vetoed, a shaky one discounted; features reading the same data count once, and if they contradict each other they're all vetoed; the rest are netted, capped at 10 points. The council can only shrink a nudge, never grow it.${recs ? ` Graded arguments: ${recs}.` : ''}</p></div>`);
 }
 
+// ---------- The strength meter (public/strength.js, strength.js, /api/strength) ----------
+// The bot's odds scored every second against each round's result, day by day, next to Kalshi's price and a coin flip.
+const STR_COLORS = { final: '#0aa0bd', kalshi: '#8a63f2', math: '#bf8406' }, STR_NAMES = { final: 'Bot', kalshi: 'Kalshi', math: 'Price math' };
+const strPct = (v) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%`);
+async function refreshStrength(force = false) {
+  if (document.hidden || (!force && !shownViews.has('history'))) return;
+  try { state.strength = await getJSON(api('strength')); state.strengthAt = Date.now(); } catch { /* next time */ }
+  renderStrength();
+}
+setInterval(() => refreshStrength(), 60000);
+function renderStrength() {
+  const d = state.strength; if (!$('strCard') || !d) return;
+  setText($('strWhen'), `${int(d.rounds)} round${d.rounds === 1 ? '' : 's'} graded`);
+  setHTML($('strWords'), d.words.map((w) => `<li>${esc(w)}</li>`).join(''));
+  const days = d.daily.slice(-30), W = 320, H = 160, L = 34, R = 56, T = 10, B = 22;
+  if (!days.length) { setHTML($('strSvg'), `<text x="${W / 2}" y="${H / 2}" class="str-empty" text-anchor="middle">The first rounds are being graded</text>`); setHTML($('strStages'), ''); setHTML($('strTable'), ''); return; }
+  const vals = days.flatMap((x) => ['final', 'kalshi', 'math'].map((k) => x[k])).filter((v) => v != null);
+  let lo = Math.min(0, ...vals), hi = Math.max(0.05, ...vals); const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  const X = (i) => L + (days.length === 1 ? (W - L - R) / 2 : (i / (days.length - 1)) * (W - L - R)), Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B), f = (n) => n.toFixed(1);
+  const ticks = [lo + pad, 0, hi - pad].filter((v, i, a) => a.findIndex((u) => Math.abs(u - v) < (hi - lo) * 0.08) === i);
+  let svg = ticks.map((v) => `<line class="str-grid" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="str-ax" x="${L - 4}" y="${f(Y(v) + 3)}" text-anchor="end">${strPct(v)}</text>`).join('');
+  svg += `<line class="str-zero" x1="${L}" x2="${W - R}" y1="${f(Y(0))}" y2="${f(Y(0))}"/>`;
+  const labels = [];
+  for (const k of ['math', 'kalshi', 'final']) {
+    const pts = days.map((x, i) => (x[k] == null ? null : [X(i), Y(x[k])])).filter(Boolean); if (!pts.length) continue;
+    if (pts.length > 1) svg += `<path class="str-line" stroke="${STR_COLORS[k]}" d="M${pts.map((p) => `${f(p[0])},${f(p[1])}`).join('L')}"/>`;
+    svg += (pts.length > 10 ? [pts.at(-1)] : pts).map((p) => `<circle class="str-dot" fill="${STR_COLORS[k]}" cx="${f(p[0])}" cy="${f(p[1])}" r="4"/>`).join(''); // many days: only the latest dot, so the line stays whole
+    labels.push({ k, y: pts.at(-1)[1], x: pts.at(-1)[0] });
+  }
+  labels.sort((a, b) => a.y - b.y); for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 11) labels[i].y = labels[i - 1].y + 11; // direct labels that don't collide
+  svg += labels.map((l) => `<text class="str-lab" x="${f(l.x + 6)}" y="${f(l.y + 3)}">${STR_NAMES[l.k]}</text>`).join('');
+  svg += `<text class="str-ax" x="${L}" y="${H - 6}">${days[0].day.slice(5)}</text>${days.length > 1 ? `<text class="str-ax" x="${W - R}" y="${H - 6}" text-anchor="end">${days.at(-1).day.slice(5)}</text>` : ''}<line id="strCross" class="str-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>`;
+  setHTML($('strSvg'), svg);
+  state.strDays = { days, X };
+  setHTML($('strStages'), `<table class="str-tab"><tr><th>When in the round</th><th>Bot</th><th>Kalshi</th><th></th></tr>${d.stages.filter((s) => s.rounds).map((s) => `<tr><td>${esc(s.name)}</td><td>${strPct(s.final)}</td><td>${strPct(s.kalshi)}</td><td class="muted">${s.vsKalshi && s.rounds >= STRENGTH.minRounds ? (s.vsKalshi.z <= -STRENGTH.z ? 'bot ahead' : s.vsKalshi.z >= STRENGTH.z ? 'Kalshi ahead' : 'level') : 'measuring'}</td></tr>`).join('')}</table>`);
+  setHTML($('strTable'), `<table class="str-tab"><tr><th>Day</th><th>Rounds</th><th>Bot</th><th>Kalshi</th><th>Math</th></tr>${[...days].reverse().map((x) => `<tr><td>${x.day}</td><td>${x.rounds}</td><td>${strPct(x.final)}</td><td>${strPct(x.kalshi)}</td><td>${strPct(x.math)}</td></tr>`).join('')}</table>`);
+}
+// the hover layer: a crosshair and the day's numbers at the nearest day
+(() => {
+  const box = $('strChart'), tip = $('strTip'); if (!box || !tip) return;
+  const hide = () => { tip.hidden = true; $('strCross')?.setAttribute('visibility', 'hidden'); };
+  box.addEventListener('pointermove', (e) => {
+    const s = state.strDays; if (!s?.days.length) return hide();
+    const r = box.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * 320;
+    let i = 0; for (let j = 1; j < s.days.length; j++) if (Math.abs(s.X(j) - x) < Math.abs(s.X(i) - x)) i = j;
+    const d = s.days[i], c = $('strCross'); c?.setAttribute('x1', s.X(i)); c?.setAttribute('x2', s.X(i)); c?.setAttribute('visibility', 'visible');
+    tip.innerHTML = `<b>${d.day}</b> · ${d.rounds} round${d.rounds === 1 ? '' : 's'}<br>${['final', 'kalshi', 'math'].map((k) => `<span><i style="background:${STR_COLORS[k]}"></i>${STR_NAMES[k]} ${strPct(d[k])}</span>`).join('')}`;
+    tip.hidden = false; tip.style.left = `${Math.min(r.width - 150, Math.max(0, (s.X(i) / 320) * r.width - 70))}px`;
+  });
+  box.addEventListener('pointerleave', hide);
+})();
+
 // ---------- Simple mode ----------
 function applyMode() {
   document.body.classList.toggle('simple', simpleMode);
@@ -2906,6 +2959,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'learn') renderLessons();
     if (v === 'history') refreshLab(true);
     if (v === 'history') refreshBotRecord();
+    if (v === 'history') refreshStrength(true);
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
     if (v === 'xray') { renderXray(); refreshXray(true); }
   }

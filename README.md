@@ -276,6 +276,23 @@ Security:
 
 ## Version notes (newest first)
 
+### The strength meter (v13.62)
+
+**Is the bot actually getting stronger?** The Record tab has a **Strength meter**. Every second, the server keeps the live round's odds at each stage, plus Kalshi's own price, and when the round settles it scores every one of those seconds against the result with the Brier score (the squared miss: 0 is perfect, 0.25 is a coin flip):
+
+| Line | What it is |
+|---|---|
+| Bot | the odds its calls actually use (after Kalshi's blend and the council's nudges) |
+| Kalshi's price | the mid of Kalshi's bid and ask: the bar to beat |
+| Bot's price math alone | distance to the target, volatility and time left, before anything else |
+| Coin flip | the dashed zero line |
+
+- The chart shows each day's **skill** (how much less it misses than a coin flip; above zero beats it) for the last 30 days, with a hover crosshair and a day-by-day table.
+- In plain words, each only as strong as its evidence: stronger than a coin flip or not; ahead of, level with or behind Kalshi's price; **getting stronger, weaker or no clear change** (the last 7 days against the 7 before); and whether mixing in Kalshi's price and the council's nudges clearly helped or hurt.
+- By time left in the round (minutes 15-10, 10-5, 5-1, the last minute): the bot against Kalshi.
+- **Judged round by round, never second by second**: a round's seconds all grade the same way when it settles, so counting seconds would make a lucky streak look like proof. Every "clearly" means z ≥ 2 on per-round differences; nothing is said before 30 settled rounds; once the last 7 days have 30+ rounds, they're what it's judged on.
+- `strength.js` (server) and `public/strength.js` (scoring); `/api/strength?m=SERIES`; the last 3,000 rounds per market in `strength.json` in `DATA_DIR`.
+
 ### Proven breaks and the blip (v13.61)
 
 **Every break in the X-ray is now proven or labelled.** A break is a measurement (a $280 minute is arithmetic); what it *means* was a claim, and claims are now graded. The server (`breaklab.js`) runs the break finder on every market every second, records each new break with the facts at that moment, and grades its claim when its horizon passes or its round settles. Where it makes sense it also samples an ordinary moment every minute and grades the same outcome there, so a break is compared with "no break", not with a guess. Each break in the list shows its badge:

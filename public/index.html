@@ -70,6 +70,7 @@
   <link rel="modulepreload" href="xray.js">
   <link rel="modulepreload" href="council.js">
   <link rel="modulepreload" href="blip.js">
+  <link rel="modulepreload" href="strength.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -440,6 +441,15 @@
     </section>
 
     <section id="view-history" class="view">
+      <div data-pro class="card str-card" id="strCard">
+        <div class="deep-head"><span>Strength meter</span><small id="strWhen" class="muted"></small></div>
+        <p class="push-status">Is the bot getting stronger? Every second of every round, its odds are scored against the result, next to Kalshi's own price and a coin flip. Above zero beats a coin flip; higher is stronger. Judged round by round, so a lucky streak can't fake it.</p>
+        <ul class="str-words" id="strWords"></ul>
+        <div class="str-chart" id="strChart"><svg id="strSvg" viewBox="0 0 320 160" preserveAspectRatio="none" role="img" aria-label="Daily strength: the bot, Kalshi and the bot's price math, against a coin flip"></svg><div id="strTip" class="str-tip" hidden></div></div>
+        <div class="str-legend"><span><i style="background:#0aa0bd"></i>Bot (what its calls use)</span><span><i style="background:#8a63f2"></i>Kalshi's price</span><span><i style="background:#bf8406"></i>Bot's price math alone</span><span><i class="dash"></i>Coin flip</span></div>
+        <div id="strStages"></div>
+        <details class="str-more"><summary>Day by day (table)</summary><div id="strTable"></div></details>
+      </div>
       <div data-pro class="card acc-card" id="accCard">
         <div class="deep-head"><span>Accuracy: every predictor's record</span></div>
         <p class="push-status">Each one is graded on calls it made before the outcome was known, next to the baseline it has to beat. Green beats its baseline, red is behind it, grey needs more data.</p>
@@ -628,7 +638,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.61 · Proven breaks</p>
+      <p class="fine" id="version">Shot Caller v13.62 · Strength meter</p>
     </section>
   </main>
 
@@ -666,7 +676,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '209';
+    window.SC_BUILD = '210';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
