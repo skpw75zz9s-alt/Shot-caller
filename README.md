@@ -276,9 +276,13 @@ Security:
 
 ## Version notes (newest first)
 
+### The Ask AI is off (v13.64.1)
+
+The AI behind Ask is **off by default**, so it never spends credits, even if `ANTHROPIC_API_KEY` is still set in Railway. Every question gets the free market answers below. To turn the AI back on later, set `ASK_AI=on` in Railway (with a key).
+
 ### Ask for free (v13.64)
 
-Ask answers questions about **any market without an AI, and without spending any credits.** Whenever the server has no `ANTHROPIC_API_KEY` (or `ASK_AI=off` is set, which keeps the AI off even with a key), questions go to `freeask.js`: it reads which markets the question names (Bitcoin, ETH, Solana, XRP, Doge, the S&P, Nasdaq, the Dow, gold, silver, oil, "the coins", "every market"; none named means the market open on the phone) and what kind of question it is, runs the same live lookups the AI uses (v13.63), and writes the answer from the numbers:
+Ask answers questions about **any market without an AI, and without spending any credits.** Whenever the AI is off (the default since v13.64.1; with `ASK_AI=on` and a key it answers instead), questions go to `freeask.js`: it reads which markets the question names (Bitcoin, ETH, Solana, XRP, Doge, the S&P, Nasdaq, the Dow, gold, silver, oil, "the coins", "every market"; none named means the market open on the phone) and what kind of question it is, runs the same live lookups the AI uses (v13.63), and writes the answer from the numbers:
 
 | Ask something like | It answers with |
 |---|---|

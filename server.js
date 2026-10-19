@@ -61,8 +61,9 @@ export const access = createAccess({
 });
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
-// Ask the bot (askai.js): the AI market chatbot once ANTHROPIC_API_KEY is set; ASK_AI=off keeps it off (no credits) even with a key
-export const askAI = createAskAI(process.env.ASK_AI === 'off' ? { apiKey: '' } : {});
+// Ask the bot (askai.js): the AI market chatbot is OFF (no credits spent), even with ANTHROPIC_API_KEY set; ASK_AI=on (with a
+// key) turns it back on. While it's off, every question gets the free market answers (freeask.js)
+export const askAI = createAskAI(process.env.ASK_AI === 'on' ? {} : { apiKey: '' });
 let freeAsk = null; // Ask, free (freeask.js): the same lookups, answered without an AI, whenever the AI is off
 const freeHits = new Map(); // owner -> [times]: free answers cost nothing, but a runaway script still shouldn't hammer the server
 // the tune-up (tuneup.js): an on-demand accuracy check; the round calls use the blend and calibration it has proven
