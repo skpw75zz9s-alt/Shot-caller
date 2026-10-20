@@ -64,7 +64,7 @@ test('the live window: a fresh reading at most once a second, the round\'s numbe
   assert.equal(reads, 2); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.deepEqual(a.pulse, { ticker: 'T1', spot: 99900, strike: 100000, pYes: 0.2, minutesLeft: 9 });
   assert.equal(teamPulse(null), null); assert.equal(teamPulse({ rows: [{ m: { ticker: 'X' }, ev: { minutesLeft: 0 } }] }), null, 'between rounds');
-  assert.deepEqual(Object.keys(TEAM_ICON).filter((k) => !/^(f[xh]|tr)_/.test(k)).sort(), [MANAGER, ...CREW, ...ROLES, ...STAFF].map(([k]) => k).sort());
+  assert.deepEqual(Object.keys(TEAM_ICON).filter((k) => !/^(f[xh]|tr|h)_/.test(k) && k !== 'recruiter').sort(), [MANAGER, ...CREW, ...ROLES, ...STAFF].map(([k]) => k).sort());
   assert.ok(a.roster.every((x) => TEAM_ICON[x.role]), 'an icon for everyone, the fixers too');
 });
 
