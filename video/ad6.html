@@ -1,0 +1,338 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* The whole-bot ad (v13.78): Shot Caller, start to finish. 1920x1080, every frame drawn by render(t) (adrender2.mjs:
+     120 frames a second, blended in pairs for motion blur). Every screen is the real app against sample market data
+     (adcap6.mjs); no results are shown that the app didn't produce. */
+  * { box-sizing: border-box; margin: 0; transition: none !important; animation: none !important; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #02040a; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #eef2f8; }
+  #bgc { position: absolute; inset: 0; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .chap { position: absolute; left: 120px; top: 120px; display: flex; align-items: center; gap: 18px; font: 700 19px 'DejaVu Sans Mono', monospace; letter-spacing: 6px; color: #22d3ee; text-transform: uppercase; }
+  .chap b { color: #eef2f8; font-weight: 800; } .chap i { display: block; height: 2px; width: 0; background: linear-gradient(90deg, #22d3ee, transparent); }
+  .h { font-weight: 800; font-size: 76px; line-height: 1.04; letter-spacing: -2.4px; }
+  .h .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding: 0.02em 0.05em 0.2em; margin: -0.02em -0.05em -0.2em; }
+  .h .w > span { display: inline-block; }
+  .h em { font-style: normal; } .h em .w > span { background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 28px; line-height: 1.45; color: #aeb9cd; max-width: 720px; }
+  .left { position: absolute; left: 120px; top: 200px; width: 760px; display: flex; flex-direction: column; gap: 24px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font: 800 23px 'DejaVu Sans Mono', monospace; background: #062419; color: #4dfbb8; border: 2px solid #2ee6a688; box-shadow: 0 0 30px #2ee6a622; }
+  .chip.cy { background: #04202a; color: #67e8f9; border-color: #22d3ee88; } .chip.am { background: #2a1d04; color: #fcd34d; border-color: #fbbf2488; } .chip.vi { background: #1a1030; color: #c4b5fd; border-color: #a78bfa88; }
+  /* devices: a wrapper carries the phone and its callouts (the phone clips its screen; the callouts don't) */
+  .dev { position: absolute; width: 430px; height: 930px; }
+  .phone { position: absolute; inset: 0; border-radius: 58px; background: #000; overflow: hidden; box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 70px 140px #000e, 0 0 160px #22d3ee26; }
+  .phone img { position: absolute; left: 0; top: 0; width: 430px; }
+  .phone .notch { position: absolute; left: 50%; top: 14px; width: 128px; height: 34px; margin-left: -64px; border-radius: 20px; background: #000; z-index: 4; }
+  .phone .gloss, .mon .gloss { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 32%, #ffffff12 46%, transparent 60%); z-index: 3; }
+  .refl { position: absolute; left: 0; top: 950px; width: 430px; height: 160px; border-radius: 58px; background: linear-gradient(180deg, #22d3ee14, transparent 70%); filter: blur(12px); }
+  .co { position: absolute; z-index: 6; pointer-events: none; }
+  .co .dot { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 0 4px #22d3ee44, 0 0 24px #22d3ee; }
+  .co .ring { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; border: 2px solid #22d3ee; }
+  .co svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .co .lbl { position: absolute; white-space: nowrap; padding: 12px 18px; border-radius: 14px; background: #0b1426f2; border: 1.5px solid #22d3ee77; font: 700 22px 'DejaVu Sans', sans-serif; color: #eef2f8; box-shadow: 0 20px 50px #000b; }
+  .co .lbl small { display: block; font: 600 16px 'DejaVu Sans Mono', monospace; color: #67e8f9; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 3px; }
+  .mon { position: absolute; border-radius: 22px; overflow: hidden; background: #000; box-shadow: 0 0 0 3px #1c2740, 0 0 0 6px #2f3d5e, 0 60px 140px #000e, 0 0 160px #22d3ee22; }
+  .mon img { position: absolute; left: 0; top: 38px; transform-origin: 0 0; }
+  .mon .bar3 { position: absolute; left: 0; right: 0; top: 0; height: 38px; background: #0b1120; border-bottom: 1px solid #1c2740; z-index: 2; }
+  .mon .bar3 i { position: absolute; top: 13px; width: 12px; height: 12px; border-radius: 50%; } .mon .bar3 i:nth-child(1) { left: 16px; background: #ff5f57; } .mon .bar3 i:nth-child(2) { left: 36px; background: #febc2e; } .mon .bar3 i:nth-child(3) { left: 56px; background: #28c840; }
+  .mon .bar3 span { position: absolute; left: 90px; top: 9px; font: 15px 'DejaVu Sans Mono', monospace; color: #6b7a90; }
+  .card { position: absolute; border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 2px #22d3ee44, 0 40px 100px #000c; background: #0a0f1a; }
+  .card img { display: block; width: 100%; }
+  /* cold open */
+  #q1, #q2 { position: absolute; width: 100%; text-align: center; font-weight: 700; font-size: 54px; color: #aeb9cd; letter-spacing: -1px; }
+  #q1 { top: 300px; } #q2 { top: 380px; }
+  #q3 { position: absolute; width: 100%; top: 500px; text-align: center; font-weight: 900; font-size: 150px; letter-spacing: -5px; }
+  #q3 .up { color: #2ee6a6; text-shadow: 0 0 60px #2ee6a666; } #q3 .dn { color: #ff4d6d; text-shadow: 0 0 60px #ff4d6d66; } #q3 .or { color: #5d6880; font-size: 90px; letter-spacing: 0; }
+  #clockr { position: absolute; left: 50%; top: 120px; width: 150px; height: 150px; margin-left: -75px; }
+  #clockr b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 32px 'DejaVu Sans Mono', monospace; }
+  /* logo */
+  #logo, #o-logo { position: absolute; left: 50%; border-radius: 48px; box-shadow: 0 0 0 2px #22d3ee66, 0 30px 120px #22d3ee66; }
+  #logo { top: 210px; width: 220px; height: 220px; margin-left: -110px; }
+  #brand { position: absolute; width: 100%; top: 480px; text-align: center; font-weight: 800; font-size: 112px; letter-spacing: 18px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #tag { position: absolute; width: 100%; top: 640px; text-align: center; font-size: 38px; color: #b9c3d6; }
+  #sweep { position: absolute; top: 470px; height: 160px; width: 280px; background: linear-gradient(90deg, transparent, #ffffff55, transparent); mix-blend-mode: overlay; transform: skewX(-20deg); }
+  /* markets */
+  #grid { position: absolute; left: 980px; top: 180px; width: 820px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .mk { height: 150px; border-radius: 22px; background: linear-gradient(160deg, #0f1a2e, #0a1120); border: 1.5px solid #22d3ee33; padding: 20px 22px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 20px 50px #0008; }
+  .mk b { font-size: 46px; line-height: 1; } .mk span { font: 800 26px 'DejaVu Sans', sans-serif; } .mk small { font: 600 16px 'DejaVu Sans Mono', monospace; color: #67e8f9; letter-spacing: 2px; }
+  /* lock screen */
+  #lock { position: absolute; width: 430px; height: 930px; border-radius: 58px; overflow: hidden; background: radial-gradient(120% 70% at 30% 0%, #1b3a6b, #070b16 70%); box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 70px 140px #000e; }
+  #lock .time { position: absolute; width: 100%; top: 110px; text-align: center; font-weight: 300; font-size: 104px; letter-spacing: -2px; }
+  #lock .date { position: absolute; width: 100%; top: 88px; text-align: center; font-size: 22px; color: #c9d4ea; }
+  .ban { position: absolute; left: 16px; width: 398px; padding: 16px 18px; border-radius: 26px; background: #1c2537ee; display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; box-shadow: 0 12px 30px #0008; }
+  .ban img { width: 44px; height: 44px; border-radius: 11px; } .ban b { font-size: 18px; display: block; } .ban span { font-size: 16px; color: #c3cde0; line-height: 1.3; display: block; } .ban i { font-style: normal; float: right; font-size: 14px; color: #8e9ab2; font-weight: 400; }
+  /* end card */
+  #o-logo { top: 150px; width: 170px; height: 170px; margin-left: -85px; }
+  #o-h { position: absolute; width: 100%; top: 360px; text-align: center; font-size: 110px; }
+  #o-sub { position: absolute; width: 100%; top: 500px; text-align: center; max-width: none; font-size: 34px; }
+  #o-feat { position: absolute; width: 100%; top: 575px; text-align: center; font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 3px; color: #67e8f9; }
+  #o-cta { position: absolute; left: 50%; top: 660px; transform: translateX(-50%); padding: 24px 58px; border-radius: 22px; background: linear-gradient(90deg, #22d3ee, #5ef2c8); color: #04121a; font: 800 36px 'DejaVu Sans Mono', monospace; letter-spacing: 2px; box-shadow: 0 20px 80px #22d3ee66; white-space: nowrap; }
+  #o-fine { position: absolute; left: 220px; right: 220px; bottom: 56px; text-align: center; font-size: 19px; line-height: 1.55; color: #7f8aa0; }
+  #flash { position: absolute; inset: 0; background: #e9fbff; opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #leak { position: absolute; left: -30%; top: -30%; width: 160%; height: 160%; pointer-events: none; mix-blend-mode: screen; opacity: 0; background: radial-gradient(26% 32% at 50% 50%, #ffb86b55, #f472b622 40%, #22d3ee18 60%, transparent 75%); }
+  #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000b 100%); pointer-events: none; }
+  #bars { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
+  #bars::before, #bars::after { content: ''; position: absolute; left: 0; right: 0; height: var(--lb, 0px); background: #000; } #bars::before { top: 0; } #bars::after { bottom: 0; }
+  #note { position: absolute; right: 34px; bottom: 22px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 3px; }
+</style></head>
+<body>
+<canvas id="bgc" width="1920" height="1080"></canvas>
+
+<!-- s0 cold open -->
+<div class="scene" id="s0">
+  <div id="clockr"><svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="66" fill="none" stroke="#1a2336" stroke-width="8"/><circle id="clockArc" cx="75" cy="75" r="66" fill="none" stroke="#22d3ee" stroke-width="8" stroke-linecap="round" transform="rotate(-90 75 75)" stroke-dasharray="414.7" stroke-dashoffset="0"/></svg><b id="clockT">15:00</b></div>
+  <div id="q1">Every 15 minutes,</div>
+  <div id="q2">Kalshi asks one question:</div>
+  <div id="q3"><span class="up">UP</span> <span class="or">or</span> <span class="dn">DOWN?</span></div>
+</div>
+
+<!-- s1 logo -->
+<div class="scene" id="s1">
+  <img id="logo" src="../public/icon-512.png" alt="">
+  <div id="brand">SHOT <em>CALLER</em></div><div id="sweep"></div>
+  <div id="tag">Calls you can check. A team you can watch.</div>
+</div>
+
+<!-- s2 the call -->
+<div class="scene" id="s2">
+  <div class="chap"><b>01</b><i></i>The call</div>
+  <div class="left" style="top:230px">
+    <div class="h">The odds, every second. A call <em>only</em> when it pays.</div>
+    <div class="sub">Price math on the live price, against Kalshi's own odds and its fee. When the edge is real, it calls it.</div>
+  </div>
+  <div class="dev" id="d2" style="left:1000px;top:75px"><div class="phone"><img src="ad6/deck.png"><div class="notch"></div><div class="gloss"></div></div>
+    <div class="co" id="c2a" data-x="200" data-y="120" data-lx="300" data-ly="-40"><small>live</small>The price vs the target</div>
+    <div class="co" id="c2b" data-x="80" data-y="430" data-lx="360" data-ly="10"><small>the call</small>Only when the edge beats the fee</div>
+    <div class="co" id="c2c" data-x="160" data-y="720" data-lx="340" data-ly="20"><small>10:00 left</small>The round call, locked</div>
+  </div>
+</div>
+
+<!-- s3 see it coming -->
+<div class="scene" id="s3">
+  <div class="chap"><b>02</b><i></i>See it coming</div>
+  <div class="left" style="top:250px;width:640px">
+    <div class="h">Where it's <em>headed,</em> before it gets there.</div>
+    <div class="sub">A forecast cone on the chart. A radar with 90% ranges. Patterns, levels and the flow of buyers and sellers.</div>
+  </div>
+  <div class="dev" id="d3a" style="left:900px;top:75px"><div class="phone"><img src="ad6/chart.png"><div class="notch"></div><div class="gloss"></div></div></div>
+  <div class="dev" id="d3b" style="left:1390px;top:75px"><div class="phone"><img src="ad6/radar.png"><div class="notch"></div><div class="gloss"></div></div></div>
+</div>
+
+<!-- s4 the X-ray -->
+<div class="scene" id="s4">
+  <div class="chap"><b>03</b><i></i>The X-ray</div>
+  <div class="left" style="top:240px">
+    <div class="h">It finds the <em>breaks.</em> Then it proves them.</div>
+    <div class="sub">When Kalshi and the math disagree, when a price swings or a level breaks, the X-ray flags it, and tests every kind of break before trusting it.</div>
+  </div>
+  <div class="dev" id="d4" style="left:1000px;top:75px"><div class="phone"><img src="ad6/xray.png"><div class="notch"></div><div class="gloss"></div></div>
+    <div class="co" id="c4a" data-x="330" data-y="215" data-lx="170" data-ly="-30"><small>live</small>4 breaks found</div>
+    <div class="co" id="c4b" data-x="70" data-y="728" data-lx="430" data-ly="40"><small>proof</small>Tested before it's trusted</div>
+  </div>
+</div>
+
+<!-- s5 every market -->
+<div class="scene" id="s5">
+  <div class="chap"><b>04</b><i></i>Every market</div>
+  <div class="left" style="top:260px;width:760px">
+    <div class="h">Every market Kalshi runs. <em>One bot</em> each.</div>
+    <div class="sub">Crypto, stock indexes and commodities: each market gets its own odds, its own calls and its own graded record.</div>
+  </div>
+  <div id="grid">
+    <div class="mk"><b>₿</b><div><span>Bitcoin</span><br><small>CRYPTO · 15 MIN</small></div></div>
+    <div class="mk"><b>Ξ</b><div><span>Ethereum</span><br><small>CRYPTO</small></div></div>
+    <div class="mk"><b>◎</b><div><span>Solana</span><br><small>CRYPTO</small></div></div>
+    <div class="mk"><b>✕</b><div><span>XRP</span><br><small>CRYPTO</small></div></div>
+    <div class="mk"><b>Ð</b><div><span>Dogecoin</span><br><small>CRYPTO</small></div></div>
+    <div class="mk"><b>📈</b><div><span>S&amp;P 500</span><br><small>INDEX</small></div></div>
+    <div class="mk"><b>💻</b><div><span>Nasdaq-100</span><br><small>INDEX</small></div></div>
+    <div class="mk"><b>🏛️</b><div><span>Dow Jones</span><br><small>INDEX</small></div></div>
+    <div class="mk"><b>🥇</b><div><span>Gold · Silver · Oil</span><br><small>COMMODITIES</small></div></div>
+  </div>
+</div>
+
+<!-- s6 proof -->
+<div class="scene" id="s6">
+  <div class="chap"><b>05</b><i></i>Proof, not promises</div>
+  <div class="left" style="top:220px">
+    <div class="h">Every call <em>graded</em> at settlement.</div>
+    <div class="sub">Win or lose, on the record. And nothing gets a say in the calls until it has beaten the bot on rounds it never saw.</div>
+    <div class="chips"><span class="chip">✓ Official record</span><span class="chip cy">🛡️ Profit guard</span><span class="chip vi">⚖️ Council vetoes</span><span class="chip am">🎓 Prove it first</span></div>
+  </div>
+  <div class="dev" id="d6" style="left:1000px;top:75px"><div class="phone"><img src="ad6/record.png"><div class="notch"></div><div class="gloss"></div></div>
+    <div class="co" id="c6a" data-x="90" data-y="790" data-lx="410" data-ly="-20"><small>graded</small>At each settlement</div>
+  </div>
+</div>
+
+<!-- s7 the team -->
+<div class="scene" id="s7">
+  <div class="chap"><b>06</b><i></i>The team</div>
+  <div class="left" style="top:230px;width:720px">
+    <div class="h"><span id="cnt">0</span> agents. <em>One</em> for every part of the bot.</div>
+    <div class="sub">They talk to each other, a Manager keeps everyone working, fixers fix what breaks, and trainers walk every learner to its proof.</div>
+  </div>
+  <div class="mon" id="m7" style="left:900px;top:120px;width:920px;height:640px"><div class="bar3"><i></i><i></i><i></i><span>team-live</span></div><img src="ad6/office.png" width="3200"><div class="gloss"></div></div>
+  <div class="card" id="k7" style="left:1010px;top:690px;width:700px"><img src="ad6/road.png"></div>
+</div>
+
+<!-- s8 ask -->
+<div class="scene" id="s8">
+  <div class="chap"><b>07</b><i></i>Ask anything</div>
+  <div class="left" style="top:280px">
+    <div class="h">Ask about any market. <em>Get the numbers.</em></div>
+    <div class="sub">Plain-English answers from the live data. Free.</div>
+  </div>
+  <div class="dev" id="d8" style="left:1240px;top:75px"><div class="phone"><img src="ad6/ask.png"><div class="notch"></div><div class="gloss"></div></div></div>
+</div>
+
+<!-- s9 act on it -->
+<div class="scene" id="s9">
+  <div class="chap"><b>08</b><i></i>Act on it</div>
+  <div class="left" style="top:230px;width:640px">
+    <div class="h">Alerts on your lock screen. <em>Auto-trade</em> on your terms.</div>
+    <div class="sub">Push alerts for every call and sell. An auto-trader with your limits, and your Kalshi key never leaves your phone.</div>
+  </div>
+  <div id="lock" style="left:900px;top:75px"><div class="date">Tuesday, October 20</div><div class="time">2:44</div>
+    <div class="ban" id="ban1" style="top:290px"><img src="../public/icon-192.png"><div><b>Shot Caller <i>now</i></b><span>BUY UP at 80¢ · Bitcoin · 9 min left</span></div></div>
+    <div class="ban" id="ban2" style="top:400px"><img src="../public/icon-192.png"><div><b>Shot Caller <i>now</i></b><span>SELL HIGH: up 14¢ · lock in the profit</span></div></div>
+  </div>
+  <div class="dev" id="d9" style="left:1390px;top:75px"><div class="phone"><img src="ad6/trader.png"><div class="notch"></div><div class="gloss"></div></div></div>
+</div>
+
+<!-- s10 end card -->
+<div class="scene" id="s10">
+  <img id="o-logo" src="../public/icon-512.png" alt="">
+  <div id="o-h" class="h">Shot <em>Caller</em></div>
+  <div id="o-sub" class="sub">Every call. Graded. Explained.</div>
+  <div id="o-feat">ODDS · CALLS · X-RAY · EVERY MARKET · THE TEAM · AUTO-TRADER</div>
+  <div id="o-cta">Open Shot Caller</div>
+  <div id="o-fine">Sample market data. Shot Caller gives signals, not financial advice: calls can and do lose, Kalshi charges fees, and past results don't promise future ones. Only learners proven on unseen rounds change a call.</div>
+</div>
+
+<div id="leak"></div><div id="flash"></div><div id="vig"></div><div id="bars"></div><div id="note">SHOT CALLER</div>
+<script>
+  const DURATION = 62, CUTS = [0, 4.2, 8, 15, 21.5, 28, 33.5, 40.5, 47, 51.5, 57];
+  window.DURATION = DURATION; window.CUTS = CUTS;
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const io = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2), out = (x) => 1 - (1 - x) ** 3, out5 = (x) => 1 - (1 - x) ** 5, back = (x) => 1 + 2.2 * (x - 1) ** 3 + 1.2 * (x - 1) ** 2;
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  // kinetic headlines
+  for (const h of document.querySelectorAll('.h')) {
+    const wrap = (node) => { for (const c of [...node.childNodes]) { if (c.nodeType === 3) { const f = document.createDocumentFragment(); for (const part of c.textContent.split(/(\s+)/)) { if (!part) continue; if (/^\s+$/.test(part)) { f.append(part); continue; } const w = document.createElement('span'); w.className = 'w'; const i = document.createElement('span'); i.textContent = part; w.append(i); f.append(w); } c.replaceWith(f); } else if (c.nodeType === 1 && !c.id) wrap(c); } };
+    wrap(h);
+  }
+  // callouts: a pulsing dot on the screen, a line out, a label
+  for (const co of document.querySelectorAll('.co')) {
+    const x = +co.dataset.x, y = +co.dataset.y, lx = +co.dataset.lx, ly = +co.dataset.ly, label = co.innerHTML;
+    co.style.left = `${x}px`; co.style.top = `${y}px`; co.innerHTML = '';
+    const ring = document.createElement('div'); ring.className = 'ring';
+    const dot = document.createElement('div'); dot.className = 'dot';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const ex = lx + (lx < 0 ? 0 : 0), mid = lx * 0.35;
+    path.setAttribute('d', `M0,0 L${mid},${ly} L${ex},${ly}`); path.setAttribute('stroke', '#22d3ee'); path.setAttribute('stroke-width', '2'); path.setAttribute('fill', 'none');
+    svg.append(path);
+    const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.innerHTML = label;
+    co.append(svg, ring, dot, lbl);
+    co._len = Math.hypot(mid, ly) + Math.abs(ex - mid); path.style.strokeDasharray = co._len;
+    co._lbl = lbl; co._path = path; co._dot = dot; co._ring = ring; co._lx = lx; co._ly = ly;
+  }
+  function callout(id, lt, a) {
+    const co = $(id), p = seg(lt, a, a + 0.6);
+    co._dot.style.transform = `scale(${back(seg(lt, a, a + 0.35))})`; co._dot.style.opacity = clamp(seg(lt, a, a + 0.15));
+    const r = ((lt - a) % 1.4) / 1.4; co._ring.style.opacity = lt > a ? 0.8 * (1 - r) : 0; co._ring.style.transform = `scale(${1 + r * 2.4})`;
+    co._path.style.strokeDashoffset = co._len * (1 - out(seg(lt, a + 0.15, a + 0.6)));
+    const q = out(seg(lt, a + 0.45, a + 0.9)); co._lbl.style.opacity = q;
+    const w = co._lbl.offsetWidth, h = co._lbl.offsetHeight;
+    co._lbl.style.left = `${co._lx < 0 ? co._lx - w : co._lx}px`; co._lbl.style.top = `${co._ly - h / 2}px`; co._lbl.style.transform = `translateX(${(1 - q) * (co._lx < 0 ? 20 : -20)}px)`;
+    return p;
+  }
+  const words = (scene) => [...$(scene).querySelectorAll('.h .w > span')];
+  function kinetic(scene, lt, at = 0.15, step = 0.065) { words(scene).forEach((w, i) => { const p = out5(seg(lt, at + i * step, at + i * step + 0.6)); w.style.transform = `translateY(${(1 - p) * 110}%)`; }); }
+  function fadeUp(el, lt, a, d = 0.7) { const p = out(seg(lt, a, a + d)); el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * 26}px)`; }
+  function chap(scene, lt) { const c = $(scene).querySelector('.chap'); if (!c) return; const p = out(seg(lt, 0, 0.6)); c.style.opacity = p; c.style.transform = `translateX(${(1 - p) * -30}px)`; c.querySelector('i').style.width = `${out(seg(lt, 0.1, 0.9)) * 90}px`; }
+  function device(el, lt, d, { from = 120, rot = -10, drift = 7, delay = 0 } = {}) {
+    const p = out(seg(lt, delay, delay + 1.0)), k = io(seg(lt, 0, d));
+    el.style.opacity = p; el.style.transform = `perspective(2000px) translateY(${(1 - p) * from}px) rotateY(${rot + drift * k}deg) rotateX(${2 - 2 * k}deg) scale(${0.96 + 0.04 * p})`;
+  }
+  // the background: a slow network of agents, its color drifting with the chapters
+  const ctx = $('bgc').getContext('2d');
+  let s = 11; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const pts = Array.from({ length: 80 }, () => ({ x: rnd() * 1920, y: rnd() * 1080, vx: (rnd() - 0.5) * 18, vy: (rnd() - 0.5) * 12, r: 1 + rnd() * 2.2, ph: rnd() * 6.28 }));
+  const HUES = [[12, 26, 46], [12, 26, 46], [6, 30, 44], [10, 22, 48], [26, 14, 40], [8, 26, 48], [6, 32, 30], [14, 20, 46], [10, 26, 44], [22, 18, 40], [12, 26, 46]];
+  function bg(t) {
+    const i = CUTS.findLastIndex((c) => t >= c), next = Math.min(HUES.length - 1, i + 1), f = clamp((t - CUTS[i]) / ((CUTS[i + 1] ?? DURATION) - CUTS[i])), m = (a, b) => Math.round(a + (b - a) * io(f));
+    const [r, g, b] = HUES[i].map((v, k) => m(v, HUES[next][k] * 0.4 + v * 0.6));
+    const grd = ctx.createRadialGradient(960, 360, 80, 960, 540, 1300); grd.addColorStop(0, `rgb(${r},${g},${b})`); grd.addColorStop(1, '#02040a');
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, 1920, 1080);
+    const P = pts.map((p) => ({ x: ((p.x + p.vx * t) % 1920 + 1920) % 1920, y: ((p.y + p.vy * t) % 1080 + 1080) % 1080, r: p.r, a: 0.3 + 0.35 * Math.sin(t * 1.2 + p.ph) }));
+    for (let a = 0; a < P.length; a++) for (let c = a + 1; c < P.length; c++) { const dx = P[a].x - P[c].x, dy = P[a].y - P[c].y, dd = Math.hypot(dx, dy); if (dd < 180) { ctx.strokeStyle = `rgba(34,211,238,${(1 - dd / 180) * 0.13})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(P[a].x, P[a].y); ctx.lineTo(P[c].x, P[c].y); ctx.stroke(); } }
+    for (const p of P) { ctx.fillStyle = `rgba(125,255,208,${p.a})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill(); }
+  }
+  const SC = [
+    ['s0', 0, 4.2, (lt) => {
+      fadeUp($('q1'), lt, 0.2, 0.6); fadeUp($('q2'), lt, 1.0, 0.6);
+      const p = back(seg(lt, 2.0, 2.6)); $('q3').style.opacity = clamp(seg(lt, 2.0, 2.2)); $('q3').style.transform = `scale(${0.8 + 0.2 * p})`;
+      const c = seg(lt, 0, 4.2), secs = Math.round(900 - c * 900 * 0.06); $('clockT').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      $('clockArc').style.strokeDashoffset = 414.7 * c * 0.06; $('clockr').style.opacity = clamp(lt / 0.5);
+    }],
+    ['s1', 4.2, 8, (lt) => {
+      const p = back(seg(lt, 0.05, 0.9)); $('logo').style.transform = `scale(${0.4 + 0.6 * p}) rotate(${(1 - p) * -14}deg)`; $('logo').style.opacity = clamp(lt / 0.35);
+      fadeUp($('brand'), lt, 0.45, 0.7); fadeUp($('tag'), lt, 1.1, 0.7); $('sweep').style.left = `${-320 + seg(lt, 0.8, 2.0) * 2500}px`;
+    }],
+    ['s2', 8, 15, (lt, d) => { chap('s2', lt); kinetic('s2', lt, 0.25); fadeUp($('s2').querySelector('.sub'), lt, 1.1); device($('d2'), lt, d, { delay: 0.1 }); callout('c2a', lt, 1.6); callout('c2b', lt, 2.6); callout('c2c', lt, 3.6); }],
+    ['s3', 15, 21.5, (lt, d) => { chap('s3', lt); kinetic('s3', lt, 0.25); fadeUp($('s3').querySelector('.sub'), lt, 1.1); device($('d3a'), lt, d, { delay: 0.1, rot: 10, drift: -8 }); device($('d3b'), lt, d, { delay: 0.35, rot: -12, drift: 8 }); }],
+    ['s4', 21.5, 28, (lt, d) => { chap('s4', lt); kinetic('s4', lt, 0.25); fadeUp($('s4').querySelector('.sub'), lt, 1.1); device($('d4'), lt, d, { delay: 0.1 }); callout('c4a', lt, 1.5); callout('c4b', lt, 2.7); }],
+    ['s5', 28, 33.5, (lt) => {
+      chap('s5', lt); kinetic('s5', lt, 0.25); fadeUp($('s5').querySelector('.sub'), lt, 1.1);
+      [...$('grid').children].forEach((m, i) => { const q = back(seg(lt, 0.5 + i * 0.12, 1.1 + i * 0.12)); m.style.opacity = clamp(seg(lt, 0.5 + i * 0.12, 0.8 + i * 0.12)); m.style.transform = `translateY(${(1 - q) * 40}px) scale(${0.9 + 0.1 * q})`; m.style.borderColor = `rgba(34,211,238,${0.2 + 0.5 * Math.max(0, 1 - Math.abs(lt - 2.6 - i * 0.18) * 2)})`; });
+    }],
+    ['s6', 33.5, 40.5, (lt, d) => {
+      chap('s6', lt); kinetic('s6', lt, 0.25); fadeUp($('s6').querySelector('.sub'), lt, 1.1); device($('d6'), lt, d, { delay: 0.1 }); callout('c6a', lt, 2.0);
+      $('s6').querySelectorAll('.chip').forEach((ch, i) => { const q = back(seg(lt, 2.2 + i * 0.28, 2.7 + i * 0.28)); ch.style.opacity = clamp(q); ch.style.transform = `scale(${0.6 + 0.4 * q})`; });
+    }],
+    ['s7', 40.5, 47, (lt, d) => {
+      chap('s7', lt); kinetic('s7', lt, 0.25); fadeUp($('s7').querySelector('.sub'), lt, 1.1);
+      $('cnt').textContent = Math.round(out(seg(lt, 0.3, 2.0)) * 90);
+      const m = $('m7'), p = out(seg(lt, 0.1, 1.0)), k = io(seg(lt, 0.5, d)); m.style.opacity = p; m.style.transform = `perspective(2000px) translateX(${(1 - p) * 120}px) rotateY(${-7 + 5 * k}deg)`;
+      m.querySelector('img').style.transform = `translate(${-120 - 380 * k}px, ${-30 - 170 * k}px) scale(${0.46 + 0.05 * k})`;
+      const q = out(seg(lt, 2.4, 3.2)); $('k7').style.opacity = q; $('k7').style.transform = `translateY(${(1 - q) * 50}px)`;
+    }],
+    ['s8', 47, 51.5, (lt, d) => { chap('s8', lt); kinetic('s8', lt, 0.25); fadeUp($('s8').querySelector('.sub'), lt, 1.0); device($('d8'), lt, d, { delay: 0.1 }); }],
+    ['s9', 51.5, 57, (lt, d) => {
+      chap('s9', lt); kinetic('s9', lt, 0.25); fadeUp($('s9').querySelector('.sub'), lt, 1.1);
+      const l = $('lock'), p = out(seg(lt, 0.1, 1.0)); l.style.opacity = p; l.style.transform = `perspective(2000px) translateY(${(1 - p) * 120}px) rotateY(${10 - 6 * io(seg(lt, 0, d))}deg)`;
+      [['ban1', 1.2], ['ban2', 2.3]].forEach(([id, a]) => { const q = back(seg(lt, a, a + 0.5)); $(id).style.opacity = clamp(seg(lt, a, a + 0.2)); $(id).style.transform = `translateY(${(1 - q) * -40}px) scale(${0.92 + 0.08 * q})`; });
+      device($('d9'), lt, d, { delay: 0.5, rot: -12, drift: 7 });
+    }],
+    ['s10', 57, 62, (lt) => {
+      const p = back(seg(lt, 0.05, 0.8)); $('o-logo').style.transform = `scale(${0.5 + 0.5 * p})`; $('o-logo').style.opacity = clamp(lt / 0.3);
+      fadeUp($('o-h'), lt, 0.3, 0.7); fadeUp($('o-sub'), lt, 0.75); fadeUp($('o-feat'), lt, 1.05);
+      const q = back(seg(lt, 1.4, 2.0)); $('o-cta').style.opacity = clamp(q); $('o-cta').style.transform = `translateX(-50%) scale(${0.7 + 0.3 * q})`;
+      fadeUp($('o-fine'), lt, 1.9, 0.8);
+    }],
+  ];
+  function render(t) {
+    bg(t);
+    for (const [id, a, b, draw] of SC) {
+      const el = $(id), on = t >= a - 0.4 && t < b + 0.4;
+      el.style.display = on ? 'block' : 'none';
+      if (!on) continue;
+      const fin = id === 's0' ? 1 : seg(t, a - 0.4, a + 0.4), fout = id === 's10' ? 1 : 1 - seg(t, b - 0.4, b + 0.4), o = Math.min(fin, fout);
+      el.style.opacity = o; el.style.transform = `scale(${1 + (1 - fin) * 0.05 - (1 - fout) * 0.035})`; el.style.filter = o < 1 ? `blur(${(1 - o) * 8}px)` : 'none';
+      draw(Math.max(0, t - a), b - a);
+    }
+    const near = Math.min(...CUTS.slice(1).map((c) => Math.abs(t - c)));
+    $('flash').style.opacity = near < 0.16 ? (1 - near / 0.16) * 0.18 : 0;
+    $('leak').style.opacity = near < 0.5 ? (1 - near / 0.5) * 0.55 : 0; $('leak').style.transform = `translateX(${(t % 7) * 60 - 200}px)`;
+    // letterbox breathes in for the cold open and the end card
+    const lb = t < 4.2 ? 70 * (1 - seg(t, 3.6, 4.4)) : t > 57 ? 70 * seg(t, 57, 57.8) * 0 : 0;
+    $('bars').style.setProperty('--lb', `${lb}px`);
+  }
+  window.render = render;
+  Promise.all([...document.images].map((im) => (im.complete ? 1 : new Promise((r) => { im.onload = im.onerror = r; })))).then(() => { render(0); window.ready = true; });
+</script>
+</body></html>

@@ -10,6 +10,7 @@
 #   bash video/make.sh ad3        the v13.45 update video, the same way (video/shot-caller-v13.45-update-*.mp4)
 #   bash video/make.sh ad4        the v13.59 update video, the same way (video/shot-caller-v13.59-update-*.mp4)
 #   bash video/make.sh ad5        the v13.77 update video, the same way (video/shot-caller-v13.77-update-*.mp4; ADMIN_CODE for its live-window shots)
+#   bash video/make.sh ad6        the whole-bot ad, the same way (video/shot-caller-ad-1080p60.mp4 and -discord.mp4)
 set -euo pipefail
 cd "$(dirname "$0")"
 if [ "${1:-}" = ad ]; then
@@ -44,6 +45,12 @@ if [ "${1:-}" = ad5 ]; then
   (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
   for i in 0 1 2 3; do AD=ad5 node adrender2.mjs worker $i 4 & done; wait
   AD=ad5 python3 admusic2.py && bash ad5post.sh; exit 0
+fi
+if [ "${1:-}" = ad6 ]; then
+  ADMIN_CODE="${ADMIN_CODE:-ad6-$RANDOM$RANDOM}" TUT_LEARN=on node adcap6.mjs
+  (cd .. && python3 -m http.server 8820 >/dev/null 2>&1) & SRV=$!; trap 'kill $SRV' EXIT; sleep 1
+  for i in 0 1 2 3; do AD=ad6 node adrender2.mjs worker $i 4 & done; wait
+  AD=ad6 python3 admusic2.py && bash ad6post.sh; exit 0
 fi
 if [ "${1:-}" = shots ]; then rm -f shots/boxes.json; node capture.mjs app; node capture.mjs buy; node capture.mjs loss; node capture.mjs site; fi
 if [ "${1:-}" = voice ]; then mkdir -p vo; python3 tts_elevenlabs.py; fi
