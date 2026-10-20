@@ -167,7 +167,22 @@ freeAsk = createFreeAsk({ tools: askTools });
 export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
-  markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }) });
+  markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus() });
+
+// The Tune-up runner (v13.69, public/improve.js): the tune-up (tuneup.js) on a schedule instead of only by hand, every
+// TUNEUP_EVERY_H hours (6), the first 30 minutes after a start; TUNEUP_AUTO=off leaves it to the admin's button. It
+// changes nothing the tune-up wouldn't: a setting is kept only while it beats the bot's own on rounds it never saw.
+const tuneMarkets = () => stacks.bots().map(([series, b]) => ({ series, name: marketOf(series, discovery.list()).name, bot: b, stack: stacks.stack(series) }));
+const TUNE_EVERY_H = process.env.TUNEUP_AUTO === 'off' ? 0 : Math.max(1, Number(process.env.TUNEUP_EVERY_H) || 6);
+function autoTuneStatus() {
+  const st = tuneUp.status(), ms = st.last?.markets || [];
+  return { on: TUNE_EVERY_H > 0, everyH: TUNE_EVERY_H, at: st.last?.at ?? null, changed: ms.filter((m) => m.uses).length, of: ms.length, running: st.running };
+}
+if (TUNE_EVERY_H > 0) {
+  const due = () => { const st = tuneUp.status(); if (!st.running && Date.now() - (st.last?.at || 0) >= TUNE_EVERY_H * 3600000) tuneUp.run(tuneMarkets()).catch((e) => console.error('automatic tune-up failed', e.message)); };
+  const first = setTimeout(() => { due(); setInterval(due, 10 * 60000).unref?.(); }, 30 * 60000);
+  first.unref?.();
+}
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
@@ -406,8 +421,7 @@ async function adminApi(req, res, action, token) {
   if (action === 'tuneup') {
     if (req.method === 'GET') return send(res, 200, tuneUp.status());
     if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
-    const markets = stacks.bots().map(([series, b]) => ({ series, name: marketOf(series, discovery.list()).name, bot: b, stack: stacks.stack(series) }));
-    return send(res, 200, { ...(await tuneUp.run(markets)), settings: tuneUp.status().settings });
+    return send(res, 200, { ...(await tuneUp.run(tuneMarkets())), settings: tuneUp.status().settings });
   }
   // the bot team, read fresh every second, for the admin's live window (v13.66, public/team-live.js)
   if (action === 'team' && req.method === 'GET') {

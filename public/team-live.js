@@ -3,7 +3,9 @@
 // robot's light, eyes and motion follow its state (ok, busy, warn, idle, off). The talking: the server sends who tells whom
 // what right now (teamTalk: along the real handoffs in the code); this plays it as conversations, a few at a time: the
 // speaker talks with its words in a bubble, a dot flies to the listener, who turns to hear it. A teammate whose situation
-// just changed speaks first, marked CHANGED in the conversation log. The server serves this page and its data to the admin only.
+// just changed speaks first, marked CHANGED in the conversation log. The Improvement crew (v13.69, improve.js) coaches the
+// rest: its reviews show in each teammate's sheet, and a teammate it flags as hurting or broken gets a red tag.
+// The server serves this page and its data to the admin only.
 import { DEPTS, TEAM_ICON } from './team.js';
 
 const $ = (id) => document.getElementById(id);
@@ -121,6 +123,7 @@ function render(t) {
     const e = $(`e-${r.role}`); if (!e) continue;
     for (const st of Object.keys(STATE_WORD)) e.classList.toggle(st, st === r.state);
     e.title = `${r.name} (${STATE_WORD[r.state]}): ${r.status}`;
+    e.classList.toggle('flagged', (r.reviews || []).some((v) => v.verdict === 'hurting' || v.verdict === 'broken')); // the crew flagged it
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
   const n = (st) => t.roster.filter((r) => r.state === st).length;
@@ -176,7 +179,9 @@ function sheet(role) {
   $('shName').innerHTML = `${TEAM_ICON[role] || ''} ${esc(r.name)}<span class="chip" style="color:${STATE_COLOR[r.state]}">${STATE_WORD[r.state]}</span>`;
   $('shSub').textContent = `${r.lead ? 'Lead · ' : ''}${dept} · ${r.job}`;
   $('shSt').textContent = r.status;
-  $('shRel').innerHTML = `<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
+  const VERDICT = { helping: ['helping', 'ok'], hurting: ['hurting', 'warn'], noise: ['noise', 'idle'], data: ['gathering data', 'idle'], broken: ['needs attention', 'warn'], ok: ['noted', 'busy'] };
+  const rv = (r.reviews || []).map((v) => `<div class="rv"><b>${TEAM_ICON[v.by] || ''} ${esc(byRole[v.by]?.name ?? v.by)}</b><span class="chip" style="color:${STATE_COLOR[VERDICT[v.verdict]?.[1] || 'idle']}">${VERDICT[v.verdict]?.[0] || v.verdict}</span><div>${esc(v.note)}</div></div>`).join('');
+  $('shRel').innerHTML = `${rv ? `<div class="rvs"><b>What the Improvement crew says</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
   $('sheet').classList.add('open');
 }
 $('rooms').addEventListener('click', (e) => { const b = e.target.closest('.emp'); if (b) sheet(b.dataset.role); });

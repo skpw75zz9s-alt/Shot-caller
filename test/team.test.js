@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEPTS, LEARNERS, ROLES, STAFF, TEAM_ICON, teamChanges, teamPulse, teamRoster, teamTalk } from '../public/team.js';
+import { CREW } from '../public/improve.js';
 import { createTeam } from '../team.js';
 
 const now = 1e12;
@@ -10,7 +11,7 @@ const by = (r) => Object.fromEntries(r.map((x) => [x.role, x]));
 test('one teammate per action, each with a state and a status from the part it owns', () => {
   const r = by(teamRoster({ now, snap: snap(), sig: null, watch: { events60: 0 }, breaks: [], proven: 2, debate: null, pick: { live: { side: 'YES', p: 0.84 } }, record: { profitGuard: { paused: false }, guard: { floor: 0.9 } },
     learners: [{ on: true }, { on: false }], strength: { words: ['Stronger than a coin flip.'] }, autotraders: 0, discord: { on: true, sent: 12 }, ask: 'free answers' }));
-  assert.deepEqual(Object.keys(r), [...ROLES, ...STAFF].map(([k]) => k), 'the nine leads first, then the staff');
+  assert.deepEqual(Object.keys(r), [...CREW, ...ROLES, ...STAFF].map(([k]) => k), 'the Improvement crew, the nine leads, then the staff');
   assert.equal(r.scout.state, 'ok'); assert.match(r.scout.status, /Calm/);
   assert.match(r.analyst.status, /^UP 96% · UP ahead by \d\.\d\d typical moves · 9\.0 min left · volatility 1\.25×/);
   assert.match(r.inspector.status, /No breaks · 2 kinds of break proven/); assert.equal(r.judge.state, 'idle');
@@ -48,7 +49,7 @@ test('the server team reads each part every 5 seconds and keeps the feed', () =>
   assert.equal(team.api('S').feed.length, 0, 'within 5 seconds: not read again');
   t += 5000; team.observe('S');
   const a = team.api('S');
-  assert.equal(a.roster.length, ROLES.length + STAFF.length); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
+  assert.equal(a.roster.length, CREW.length + ROLES.length + STAFF.length); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.ok(createTeam({ book: { get: () => null }, botOf: () => null, watchOf: () => null }).api('X').roster.length, 'answers before its first reading');
 });
 
@@ -62,7 +63,7 @@ test('the live window: a fresh reading at most once a second, the round\'s numbe
   assert.equal(reads, 2); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.deepEqual(a.pulse, { ticker: 'T1', spot: 99900, strike: 100000, pYes: 0.2, minutesLeft: 9 });
   assert.equal(teamPulse(null), null); assert.equal(teamPulse({ rows: [{ m: { ticker: 'X' }, ev: { minutesLeft: 0 } }] }), null, 'between rounds');
-  assert.deepEqual(Object.keys(TEAM_ICON).sort(), [...ROLES, ...STAFF].map(([k]) => k).sort());
+  assert.deepEqual(Object.keys(TEAM_ICON).sort(), [...CREW, ...ROLES, ...STAFF].map(([k]) => k).sort());
 });
 
 test('the whole staff: everyone in a department, one researcher per learner, each status from its own part', () => {
@@ -74,7 +75,7 @@ test('the whole staff: everyone in a department, one researcher per learner, eac
       cross: { proven: false }, flows: { live: 1, total: 2, err: null }, markets: { listed: 6, running: 3 }, flip: { inCalls: false, live: true }, proof: { proven: 2, opposite: 1, testing: 11, graded: 340 },
       records: { voices: 7, graded: 55 }, tuneUp: { at: now - 7200000, running: false }, devices: 3, persistent: false, lastTick: now - 1000, lastError: null } });
   const r = by(roster);
-  assert.equal(roster.length, 9 + STAFF.length); assert.ok(roster.length >= 45, 'as many teammates as the bot has parts');
+  assert.equal(roster.length, CREW.length + 9 + STAFF.length); assert.ok(roster.length >= 45, 'as many teammates as the bot has parts');
   for (const x of roster) { assert.ok(DEPTS.some(([d]) => d === x.dept), `${x.role} sits in a department`); assert.ok(x.status && x.state && x.key != null, `${x.role} reports`); }
   assert.equal(new Set(roster.map((x) => x.role)).size, roster.length, 'one owner per part');
   assert.match(r.quotes.status, /UP 60¢ bid \/ 62¢ ask · spread 2¢/);
@@ -95,7 +96,7 @@ test('the whole staff: everyone in a department, one researcher per learner, eac
 test('the talk: each teammate tells whoever uses its part, the live reading word for word; the quiet ones say nothing', () => {
   const roster = teamRoster({ now, snap: snap(), record: { guard: { floor: 0.9, n: 0, wins: 0 }, profitGuard: { paused: false, n: 0, usd: 0 } }, parts: { feeds: null, markets: { listed: 2, running: 1 } } }), talk = teamTalk(roster), r = by(roster);
   const roles = new Set(roster.map((x) => x.role));
-  for (const m of talk) { assert.ok(roles.has(m.from) && roles.has(m.to) && m.from !== m.to, `${m.from} → ${m.to}`); assert.equal(m.text, r[m.from].status); }
+  for (const m of talk) { assert.ok(roles.has(m.from) && roles.has(m.to) && m.from !== m.to, `${m.from} → ${m.to}`); if (!r[m.from].crew) assert.equal(m.text, r[m.from].status); }
   assert.ok(talk.some((m) => m.from === 'price' && m.to === 'analyst'), 'the price goes to the Analyst');
   assert.ok(talk.some((m) => m.from === 'analyst' && m.to === 'caller'), 'the odds go to the Caller');
   assert.ok(talk.some((m) => m.from === 'winguard' && m.to === 'risk'), 'the guards report to the Risk officer');
@@ -108,7 +109,7 @@ test('the server staff: each reader is optional, and one that throws leaves the 
   const team = createTeam({ book: { get: () => ({ snap: snap(), sig: null }) }, botOf: () => ({ status: () => ({ devices: 2, lastTick: now }), record: () => { throw new Error('x'); } }), watchOf: () => null,
     stackOf: () => { throw new Error('no stack'); }, tuneUp: { status: () => ({ running: true }) }, markets: () => ({ listed: 4, running: 2 }), persistent: true, clock: () => now });
   const a = team.api('S'), r = by(a.roster);
-  assert.equal(a.roster.length, ROLES.length + STAFF.length); assert.ok(a.talk.length > 10);
+  assert.equal(a.roster.length, CREW.length + ROLES.length + STAFF.length); assert.ok(a.talk.length > 10);
   assert.match(r.push.status, /2 phones get push alerts/); assert.equal(r.mechanic.state, 'busy'); assert.match(r.archivist.status, /survives a deploy/);
   assert.equal(r.exchanges.state, 'off', 'no stack: no feeds, said plainly');
 });

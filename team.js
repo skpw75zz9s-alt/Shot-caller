@@ -10,8 +10,9 @@ import { liqSummary, positioning } from './public/xray.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
-  stackOf = () => null, crossFeed = null, tuneUp = null, markets = () => null, persistent = null, clock = () => Date.now(), everyMs = 5000 }) {
+  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, clock = () => Date.now(), everyMs = 5000 }) {
   const per = new Map(); // series -> { at, keys, roster, feed }
+  const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
   function read(series, now) {
     const b = book.get(series), bot = botOf(series), deb = council?.api?.(series), proof = breakLab?.api?.(series);
     const record = tryIt(() => bot?.record?.() ?? null), learners = tryIt(() => bot?.learnStatus?.()?.using ?? null);
@@ -22,7 +23,9 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       debate: deb?.debate ?? null, pick: bot?.pick?.() ?? null,
       record: record && { profitGuard: record.profitGuard, guard: record.guard, graded: record.graded, wins: record.wins, usd: record.usd, early: record.early, late: record.late, certain: record.certain },
       learners: learners && learners.map((u) => ({ key: u.key, name: u.name, on: !!u.on, detail: u.detail })), strength: strength?.api?.(series), autotraders: autotraders(series), discord: discord?.status?.(), ask: askMode(),
-      parts: parts(series, now, { bot, deb, proof, kinds, count }),
+      parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
+      // what the Improvement crew grades (improve.js)
+      council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result })),
     });
   }
   // what the staff read: each one defensive, so a reader that isn't there (or throws) leaves its teammate quiet, never the team
@@ -45,6 +48,13 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       tuneUp: tu ? { at: tu.last?.at ?? null, running: !!tu.running } : null,
       devices: status?.devices ?? 0, persistent, lastTick: status?.lastTick ?? null, lastError: status?.lastError ?? null,
     };
+  }
+  function learnerSince(series, learners, now) {
+    const m = since.get(series) ?? {}, out = {};
+    // a time only once it's seen the change happen: what it found at the start has no known "since"
+    for (const l of learners || []) { if (!m[l.key]) m[l.key] = { on: !!l.on, at: null }; else if (m[l.key].on !== !!l.on) m[l.key] = { on: !!l.on, at: now }; if (m[l.key].at) out[l.key] = m[l.key].at; }
+    since.set(series, m);
+    return out;
   }
   function observe(series, now = clock(), every = everyMs) {
     const s = per.get(series) ?? { at: 0, keys: {}, roster: null, feed: [] };

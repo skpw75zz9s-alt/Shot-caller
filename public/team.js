@@ -7,6 +7,7 @@
 // handoffs in the code (the price goes to the Analyst, the guards to the Risk officer, the call to the Trader).
 // No teammate makes a decision of its own: each one reports a part that already exists.
 import { kalshiFee } from './model.js';
+import { CREW_ICON, crewRoster } from './improve.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -21,7 +22,7 @@ export const ROLES = [
 ];
 // departments, in the order the live window lays out its rooms
 export const DEPTS = [
-  ['desk', 'Market desk'], ['lab', 'Research lab'], ['xray', 'X-ray room'], ['council', 'Council chamber'], ['calls', 'Call desk'],
+  ['improve', 'Improvement crew'], ['desk', 'Market desk'], ['lab', 'Research lab'], ['xray', 'X-ray room'], ['council', 'Council chamber'], ['calls', 'Call desk'],
   ['risk', 'Risk office'], ['trade', 'Trading floor'], ['grade', 'Grading room'], ['news', 'Newsroom'], ['ops', 'Operations'],
 ];
 export const LEAD_DEPT = { scout: 'desk', analyst: 'lab', inspector: 'xray', judge: 'council', caller: 'calls', risk: 'risk', trader: 'trade', coach: 'grade', reporter: 'news' };
@@ -71,7 +72,7 @@ export const STAFF = [
   ['archivist', 'Archivist', 'saves everything', 'ops', '💾', 'clerk'],
   ['nightwatch', 'Night watch', 'keeps the bot ticking', 'ops', '🌃', 'scout'],
 ];
-export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])) };
+export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON };
 // who each lead tells (the staff each report to one: STAFF's last field)
 const LEAD_TO = { scout: ['risk', 'analyst'], analyst: ['caller'], inspector: ['risk'], judge: ['caller'], caller: ['trader', 'reporter', 'push'], risk: ['caller'], trader: ['clerk'], coach: ['mechanic'], reporter: [] };
 const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);
@@ -85,8 +86,11 @@ export function teamPulse(snap) {
   return lv ? { ticker: lv.m.ticker, spot: snap.mSpot ?? snap.spot ?? null, strike: lv.strike ?? null, pYes: lv.ev.pYes ?? null, minutesLeft: lv.ev.minutesLeft } : null;
 }
 
-// x: { now, snap, sig, watch, breaks, proven, debate, pick, record, learners, strength, autotraders, discord, ask, parts }
-// (learners: [{ key, name, on, detail }]; parts: what the staff read, see staffRoster)
+// x: { now, snap, sig, watch, breaks, proven, debate, pick, record, learners, strength, autotraders, discord, ask, parts,
+//      council, kinds, calls }
+// (learners: [{ key, name, on, detail }]; parts: what the staff read, see staffRoster; council, kinds, calls and
+// parts.autoTune / learnerSince: the records the Improvement crew grades, see improve.js). Each teammate the crew
+// coaches carries its reviews: [{ by, verdict, note }]
 export function teamRoster(x) {
   const now = x.now ?? Date.now(), snap = x.snap, lv = liveRow(snap);
   const spot = snap?.mSpot ?? snap?.spot, sig = lv ? (lv.sigma ?? snap.sigmaMin) : null;
@@ -133,7 +137,9 @@ export function teamRoster(x) {
   const ds = x.discord;
   R.reporter = { state: ds?.on ? 'ok' : 'off', status: `${ds?.on ? `Discord on · ${ds.sent} post${ds.sent === 1 ? '' : 's'} sent` : 'Discord off'} · Ask: ${x.ask || 'free answers'}`, key: `${!!ds?.on}:${x.ask}` };
   const leads = ROLES.map(([role, name, job]) => ({ role, name, job, dept: LEAD_DEPT[role], lead: true, ...R[role] }));
-  return [...leads, ...staffRoster(x, { lv, R, hold, br })];
+  const team = [...leads, ...staffRoster(x, { lv, R, hold, br })], { crew, reviews } = crewRoster(x, team);
+  for (const r of team) if (reviews[r.role]) r.reviews = reviews[r.role];
+  return [...crew, ...team];
 }
 const usd = (v) => `${v < 0 ? '−' : ''}$${Math.abs(v) >= 1e6 ? `${(Math.abs(v) / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(Math.abs(v) / 1e3).toFixed(1)}k` : Math.abs(v).toFixed(2)}`;
 const won = (r) => (r?.graded ? `${r.wins} of ${r.graded} won` : 'nothing graded yet');
@@ -225,6 +231,7 @@ export function teamTalk(roster) {
   const by = Object.fromEntries(roster.map((r) => [r.role, r])), out = [];
   for (const r of roster) {
     if (r.state === 'off' || /^Not reporting/.test(r.status || '')) continue;
+    if (r.crew) { for (const t of r.talks || []) if (by[t.to]) out.push({ from: r.role, to: t.to, text: t.text }); continue; } // the crew coaches: each review, to its teammate
     const to = r.lead ? LEAD_TO[r.role] || [] : [STAFF.find((s) => s[0] === r.role)?.[5]];
     for (const t of to) if (by[t]) out.push({ from: r.role, to: t, text: r.status });
   }

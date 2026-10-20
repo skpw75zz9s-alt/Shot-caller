@@ -276,6 +276,22 @@ Security:
 
 ## Version notes (newest first)
 
+### The Improvement crew (v13.69)
+
+Seven new teammates whose job is **the other teammates**. Each one grades a part of the team on its graded track record and tells each teammate it coaches what the record says: **helping**, **hurting**, **noise**, **still gathering data**, or **needs attention**. In the admin's live window they have their own room at the top of the office, their reviews show in each teammate's sheet, they talk to the teammates they coach, and a teammate they flag as hurting or broken gets a red **!**.
+
+| Crew member | Grades | On |
+|---|---|---|
+| ⚙️ Tune-up runner | the learners and the round call | **runs the tune-up automatically every 6 hours** |
+| 📋 Track-record reviewer | the council's seven voices | each voice's graded nudges (helping at z 2+, hurting when the council vetoes it, data under 20) |
+| 🧭 Break coach | the X-ray's kinds of break | the break lab's verdicts: trust, read backwards, ignore as noise, still testing |
+| 🏷️ Price checker | the official calls | wins against the prices paid for them (breakeven), with a z: 30 graded calls and z 2 before it says helping or hurting |
+| 📐 Accuracy coach | each layer of the odds | the strength meter's paired scores: does the Kalshi blend help, do the council's nudges help, does the bot beat Kalshi |
+| 🩺 Feed medic | the feeds and systems | anything warning on the Market desk or in Operations |
+| 🧑‍🏫 Probation mentor | the 14 learners | which are proven and which on probation, and for how long (a time only once it has seen the change happen) |
+
+**Only one of them changes anything: the Tune-up runner.** It runs the existing tune-up (`tuneup.js`) on a schedule instead of only when the admin taps it: every `TUNEUP_EVERY_H` hours (6), the first 30 minutes after a start; `TUNEUP_AUTO=off` leaves it to the button. It changes nothing the tune-up wouldn't: a setting is kept only while it beats what the bot does now on graded rounds it never saw, and dropped when it stops. The other six **coach**: they point at what's helping and what's hurting, and the proof rules already in the bot (the council's veto, the break lab, each learner's probation) are what act on that. None of them can make a part look better than its record, and with too little data they say so instead of guessing.
+
 ### Auto-trade on your phone, the key never leaves it (v13.68)
 
 The Auto-trader can now run **on this phone** instead of the server, so you can auto-trade **without giving the server your Kalshi key** (and without setting `KEY_SECRET` in Railway). Settings → Auto-trader → **On this phone**.
