@@ -213,6 +213,6 @@ test('the live bot-team window and its data: the admin only, paywall or not', as
   assert.equal(page.status, 200); assert.match(await page.text(), /<title>Bot Team Live<\/title>/);
   assert.equal((await fetch(`${app}/team-live.js`, h)).status, 200);
   const t = await (await fetch(`${app}/api/admin/team`, h)).json();
-  assert.equal(t.roster.length, 9); assert.ok(Array.isArray(t.feed)); assert.ok('pulse' in t);
+  assert.ok(t.roster.length >= 45, 'the whole staff'); assert.ok(Array.isArray(t.feed) && Array.isArray(t.talk)); assert.ok('pulse' in t);
   assert.equal(t.markets[0].series, t.series, 'the home market first, and the default');
 });

@@ -162,7 +162,9 @@ askAI.setTools(askTools);
 freeAsk = createFreeAsk({ tools: askTools });
 // the bot team (team.js, public/team.js): one teammate per action, each with its live status, and a feed of what changed
 export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
-  council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers') });
+  council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
+  stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
+  markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }) });
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;

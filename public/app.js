@@ -43,7 +43,7 @@ import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
-window.SC_BOOT = '214'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '215'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2326,7 +2326,9 @@ async function refreshTeam() {
   try { state.team = await getJSON(api('team')); } catch { return; }
   const t = state.team, ago = (x) => { const s = Math.round((Date.now() - x) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : clock(x); };
   setText($('teamWhen'), `${t.roster.filter((r) => r.state === 'busy' || r.state === 'warn').length} acting now`);
-  setHTML($('teamList'), t.roster.map((r) => `<li class="team-r ${r.state}"><i aria-hidden="true">${TEAM_ICON[r.role] || '•'}</i><div><b>${esc(r.name)}</b><small>${esc(r.job)}</small><p>${esc(r.status)}</p></div><em class="team-dot" title="${r.state}"></em></li>`).join(''));
+  const staff = t.roster.filter((r) => !r.lead), staffWarn = staff.filter((r) => r.state === 'warn');
+  setHTML($('teamList'), t.roster.filter((r) => r.lead).map((r) => `<li class="team-r ${r.state}"><i aria-hidden="true">${TEAM_ICON[r.role] || '•'}</i><div><b>${esc(r.name)}</b><small>${esc(r.job)}</small><p>${esc(r.status)}</p></div><em class="team-dot" title="${r.state}"></em></li>`).join('')
+    + (staff.length ? `<li class="team-r ${staffWarn.length ? 'warn' : 'ok'}"><i aria-hidden="true">👥</i><div><b>${staff.length} more on the staff</b><small>each owns one part</small><p>${staffWarn.length ? esc(staffWarn.slice(0, 3).map((r) => `${r.name}: ${r.status}`).join(' · ')) : `${staff.filter((r) => r.state === 'busy').length} acting, nothing to flag`}</p></div><em class="team-dot"></em></li>` : ''));
   setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
 }
 setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);

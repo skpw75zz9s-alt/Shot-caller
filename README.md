@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The whole staff, talking (v13.67)
+
+The bot team grew from 9 to **48 teammates**, one for **every real part of the bot**, in ten departments: the Market desk (price, Kalshi's book, the exchange feeds, the tape, futures, liquidations, related markets, money flows, the market finder), the Research lab (one researcher per learner: volatility, momentum, calibration, the Kalshi blend, the scan, the micro model, indicators, reversals, the forecaster, the predictor, the call filter, the flip check), the X-ray room (with the Proof clerk), the Council chamber (with the Records keeper), the Call desk (early, late and near-certain calls), the Risk office (the win-rate guard, the profit guard, the Fee checker, the Auditor), the Trading floor, the Grading room (the Settlement clerk, the Tune-up mechanic), the Newsroom (push, Ask) and Operations (the Archivist, the Night watch).
+
+- **Every status is that part's own live reading**, word for word: *9 of 12 exchange feeds live*, *Last 15 min: 75% of the money bought*, *$10 at 62¢: 16 contracts, fee $0.27, a win pays $5.81*, *On probation: needs more rounds*. A part this market doesn't have (no futures for gold, say) is shown *off*, never made up.
+- **The Auditor** is the one new check: it flags when the team's reports contradict each other (a buy showing during a Market Watch hold, on a delayed price, while the profit guard pauses calls, or against the round call).
+- **The live window (admin only) is now an office:** each department is a room of little robots, and **they talk to each other**. Each teammate tells whoever uses its part, along the real handoffs in the code (the price to the Analyst, the guards to the Risk officer, the call to the Trader). The speaker's mouth moves with its words in a bubble, a dot flies to the listener, who turns to hear it. A teammate whose situation just changed speaks first, marked **CHANGED** in the conversation log (with a filter for only those). Tap anyone to see what it owns, what it's saying, who it tells and who it hears from.
+- The phone's Deck card still shows the nine leads, plus one line for the rest of the staff (who's warning).
+
+**About accuracy:** more teammates make the bot **easier to watch**. They don't make it more accurate on their own. None of them changes a call: each one reports a part that already existed. Accuracy still comes from the learners and the council, and each of those only shapes the calls once it has proven itself on rounds it was never tuned on. The Research lab shows which ones have (*In the calls*) and which are still *On probation*.
+
 ### Watch the bot team live (v13.66, admin only)
 
 A separate window for the admin: **▶ Watch them live** on the Bot team card, or **▶ Watch the bot team live** in the Admin card, opens `/team-live`. The nine teammates are little robots on a snaking line (Scout → Analyst → Inspector → Judge → Caller → Risk officer → Trader → Coach → Reporter), read fresh **every second** from `GET /api/admin/team?m=…`:
