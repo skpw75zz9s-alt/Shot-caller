@@ -167,7 +167,14 @@ freeAsk = createFreeAsk({ tools: askTools });
 export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
-  markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus() });
+  markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus(),
+  // the flag fixers' real fixes (public/fixers.js, fixdesk.js): each returns true when it ran
+  fixes: {
+    restartFeeds: (s) => { const st = stacks.stack(s); if (!st?.scanFeed || process.env.SCAN_FEEDS === 'off' || (st.asset && st.asset.kind !== 'crypto')) return false; st.scanFeed.stop(); st.scanFeed.start(); return true; },
+    restartFutures: (s) => { const f = stacks.stack(s)?.futures; if (!f || process.env.FUTURES === 'off') return false; f.stop(); f.start(); return true; },
+    kickBot: (s) => { const b = isHome(s) ? bot : stacks.bot(s); if (!b?.start) return false; b.start(); return true; },
+    tuneUp: () => { if (!tuneUp.status().running) tuneUp.run(tuneMarkets()).catch((e) => console.error('tune-up (flag fixer) failed', e.message)); return true; },
+  } });
 
 // The Tune-up runner (v13.69, public/improve.js): the tune-up (tuneup.js) on a schedule instead of only by hand, every
 // TUNEUP_EVERY_H hours (6), the first 30 minutes after a start; TUNEUP_AUTO=off leaves it to the admin's button. It

@@ -128,6 +128,10 @@ function render(t) {
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
   const n = (st) => t.roster.filter((r) => r.state === st).length;
+  // what the flag fixers couldn't fix: it needs the admin (public/fixers.js)
+  const needs = t.roster.filter((r) => r.fixer).flatMap((r) => r.escalations || []);
+  $('needs').hidden = !needs.length;
+  if (needs.length) $('needs').innerHTML = `<b>🛠️ Needs you</b><ul>${needs.map((n) => `<li><b>${esc(n.name)}</b>${n.tries ? ` (tried ${n.tries}×)` : ''}: ${esc(n.help)}</li>`).join('')}</ul>`;
   const mgr = byRole.manager;
   if (mgr) { const b = $('mgr'); b.hidden = false; b.className = `mgr ${mgr.state}`; b.innerHTML = `<b>👔 Manager</b> ${esc(mgr.status)}`; }
   $('counts').innerHTML = `<span><b>${t.roster.length}</b> on the team</span><span class="a"><b>${n('busy')}</b> acting</span><span class="w"><b>${n('warn')}</b> warning</span><span><b>${n('idle')}</b> waiting</span><span><b>${n('off')}</b> off</span><span><b>${talk.length}</b> lines of talk</span>`;

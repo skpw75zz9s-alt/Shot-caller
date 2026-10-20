@@ -9,6 +9,7 @@
 import { kalshiFee } from './model.js';
 import { CREW_ICON, crewRoster } from './improve.js';
 import { MANAGER, managerReport } from './manager.js';
+import { FIX_ICON } from './fixers.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -73,7 +74,7 @@ export const STAFF = [
   ['archivist', 'Archivist', 'saves everything', 'ops', '💾', 'clerk'],
   ['nightwatch', 'Night watch', 'keeps the bot ticking', 'ops', '🌃', 'scout'],
 ];
-export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3] };
+export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])) };
 // who each lead tells (the staff each report to one: STAFF's last field)
 const LEAD_TO = { scout: ['risk', 'analyst'], analyst: ['caller'], inspector: ['risk'], judge: ['caller'], caller: ['trader', 'reporter', 'push'], risk: ['caller'], trader: ['clerk'], coach: ['mechanic'], reporter: [] };
 const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);
@@ -248,7 +249,7 @@ export function teamTalk(roster) {
   const by = Object.fromEntries(roster.map((r) => [r.role, r])), out = [];
   for (const r of roster) {
     if (r.state === 'off' || /^Not reporting/.test(r.status || '')) continue;
-    if (r.crew || r.manager) { for (const t of r.talks || []) if (by[t.to]) out.push({ from: r.role, to: t.to, text: t.text }); continue; } // the crew coaches: each review, to its teammate
+    if (r.crew || r.manager || r.fixer) { for (const t of r.talks || []) if (by[t.to]) out.push({ from: r.role, to: t.to, text: t.text }); continue; } // the crew coaches: each review, to its teammate
     const to = r.lead ? LEAD_TO[r.role] || [] : [STAFF.find((s) => s[0] === r.role)?.[5]];
     for (const t of to) if (by[t]) out.push({ from: r.role, to: t, text: r.status });
   }

@@ -276,6 +276,22 @@ Security:
 
 ## Version notes (newest first)
 
+### A flag fixer for every team (v13.72)
+
+Each team (department) now has its own 🛠️ **fixer**: eleven of them, one per room in the live window. Every flag on its team (*stuck* or *slacking* from the Manager, *hurting* or *broken* from the Improvement crew) gets one of three answers:
+
+- **Fixed.** If there's a real fix the server can make, the fixer makes it:
+  - **reconnect the exchange feeds** (the Exchange runner, the Tape reader, the Liquidation watcher)
+  - **reconnect the futures feed**
+  - **make sure the bot's loop is running** (a frozen Price clerk or Analyst, the Night watch, the Quote clerk, the Scout)
+  - **run the tune-up now**, to rerun the learners (a slacking or stuck researcher, the Tune-up runner; at most once an hour, and the tune-up still keeps a setting only if it proves better on unseen rounds)
+
+  It tries at most **3 times, 10 minutes apart**, and one reconnect counts for every flag it covers. A fix is logged as **fixed only when the flag actually clears**: *Fixed 1 in the last day (last: Exchange runner, reconnect the exchange feeds)*.
+- **Already handled.** The bot has a rule for it: a council voice with a bad record is already vetoed; calls that lose to their prices are what the profit guard pauses.
+- **Escalated to you.** If nothing in code can fix it, or 3 tries didn't clear the flag, it goes to a **Needs you** panel at the top of the live window with what to do. Examples: the Archivist not on a volume (*add a volume in Railway and set DATA_DIR*), the Caller making no round calls, a layer of the odds proven to hurt accuracy.
+
+The fixers tell each flagged teammate what they're doing (*On it: I'll reconnect the exchange feeds (try 1 of 3)*) and report to the Manager. The Manager's banner counts them too: *· 11 fixers: 1 fixing, 0 with something escalated to you*. Nothing a fixer does changes a call or a trade, and no fixer touches a setting directly: the only setting changes still come from the tune-up's proof rule.
+
 ### The Manager catches slacking (v13.71)
 
 The Manager now makes sure **nobody is slacking**, as well as nobody stuck. **Slacking** means not stuck, but not producing: a teammate whose work has to move every round, and that many rounds have passed with nothing new from it. Only work that *must* move counts, so a calm market or a proven setting sitting still is never called slacking:

@@ -5,12 +5,15 @@
 //   api(series)       the roster and the feed
 //   live(series)      the same, read fresh (at most once a second): the admin's live window (v13.66, public/team-live.js)
 //   (the staff, v13.67: each asset's readers from stackOf, the related markets, the tune-up, the market list, storage)
-import { liveRow, teamBase, teamChanges, teamPulse, teamTalk, withManager } from './public/team.js';
+import { DEPTS, liveRow, teamBase, teamChanges, teamPulse, teamTalk, withManager } from './public/team.js';
 import { liqSummary, positioning } from './public/xray.js';
+import { fixerRows, planFixes } from './public/fixers.js';
+import { createFixDesk } from './fixdesk.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
-  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, clock = () => Date.now(), everyMs = 5000 }) {
+  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, clock = () => Date.now(), everyMs = 5000 }) {
+  const desk = createFixDesk({ actions: fixes, clock }); // the flag fixers' fixes (fixdesk.js)
   const per = new Map(); // series -> { at, keys, roster, feed }
   const act = new Map(); // series -> { text, at, rounds, hits, round }: each teammate's last status, when it changed, rounds since, changes this hour (the Manager)
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
@@ -31,7 +34,19 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     };
   }
   const managed = (base, x, series, now) => withManager(base, { ...x, parts: { ...x.parts, ...timesheet(series, now) } });
-  const read = (series, now) => { const x = inputs(series, now); return managed(teamBase(x), x, series, now); };
+  // a team's flag fixers join last: they act on the Manager's and the crew's flags (the fixes run in observe)
+  const fixersFor = (series, roster, now, run) => {
+    const plans = planFixes(roster);
+    if (run) desk.step(series, plans);
+    const fx = fixerRows(roster, plans, desk.state(series), { now, depts: DEPTS }), m = roster.find((r) => r.manager);
+    if (m && fx.length) { // the Manager accounts for the fixers too
+      const fixing = fx.filter((r) => r.state === 'busy').length, up = fx.filter((r) => r.state === 'warn').length;
+      m.status += ` · ${fx.length} fixers: ${fixing} fixing, ${up} with something escalated to you`;
+      if (up) m.state = 'warn';
+    }
+    return [...roster, ...fx];
+  };
+  const read = (series, now) => { const x = inputs(series, now); return fixersFor(series, managed(teamBase(x), x, series, now), now, false); };
   // what the staff read: each one defensive, so a reader that isn't there (or throws) leaves its teammate quiet, never the team
   function parts(series, now, { bot, deb, proof, kinds, count }) {
     const st = tryIt(() => stackOf(series)), sc = st?.scanFeed, crypto = st?.asset ? st.asset.kind === 'crypto' : true;
@@ -82,7 +97,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0;
       const h = (a.hits[r.role] ||= []); h.push(now); while (h.length && h[0] < now - 3600000) h.shift();
     }
-    s.roster = managed(base, x, series, now); // judged on this reading's time sheet
+    s.roster = fixersFor(series, managed(base, x, series, now), now, true); // judged on this reading's time sheet, then the fixers act
     for (const r of s.roster) if (a.text[r.role] === undefined) { a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0; } // the Manager's own row
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
