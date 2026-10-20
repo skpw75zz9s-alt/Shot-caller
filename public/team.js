@@ -216,7 +216,7 @@ function staffRoster(x, { lv, R, hold, br }) {
   S.late = !lt ? { state: 'idle', status: 'Not reporting', key: 'none' }
     : { state: lt.profitGuard?.paused ? 'warn' : 'ok', status: `${lt.profitGuard?.paused ? 'Paused by the profit guard · ' : ''}${won(lt)}${lt.usd ? ` · ${usd(lt.usd)} per $10` : ''}`, key: `${!!lt.profitGuard?.paused}`, say: lt.profitGuard?.paused ? 'late calls paused' : null };
   S.certain = !ce ? { state: 'idle', status: 'Not reporting', key: 'none' }
-    : { state: ce.profitGuard?.paused ? 'warn' : 'ok', status: `${won(ce)}${ce.usd ? ` · ${usd(ce.usd)} per $10` : ''}${ce.streak?.n ? ` · streak ${ce.streak.n}` : ''}`, key: `${!!ce.profitGuard?.paused}` };
+    : { state: ce.profitGuard?.paused ? 'warn' : 'ok', status: `${ce.profitGuard?.paused ? `Paused by the profit guard: its last ${ce.profitGuard.n} graded calls lost ${usd(-ce.profitGuard.usd)} at $10 each, so Near-certain buy alerts are off until they're back in profit · ` : ''}${won(ce)}${ce.usd ? ` · ${usd(ce.usd)} per $10` : ''}${ce.streak?.n ? ` · streak ${ce.streak.n}` : ''}`, key: `${!!ce.profitGuard?.paused}`, say: ce.profitGuard?.paused ? 'Near-certain paused: its calls are losing money' : 'Near-certain back in profit' };
   const g = rec.guard;
   S.winguard = !g ? { state: 'off', status: 'No win-rate floor at this risk level', key: 'off' }
     : { state: g.floor > 0.9 ? 'warn' : 'ok', status: `Floor ${pct(g.floor)} · recent ${g.n ? `${g.wins} of ${g.n} won` : 'no graded calls yet'}`, key: g.floor > 0.9 ? 'raised' : 'base', say: g.floor > 0.9 ? `raised the bar to ${pct(g.floor)}` : 'the bar is back to normal' };

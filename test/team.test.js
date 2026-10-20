@@ -115,3 +115,9 @@ test('the server staff: each reader is optional, and one that throws leaves the 
   assert.match(r.push.status, /2 phones get push alerts/); assert.equal(r.mechanic.state, 'busy'); assert.match(r.archivist.status, /survives a deploy/);
   assert.equal(r.exchanges.state, 'off', 'no stack: no feeds, said plainly');
 });
+
+test('the Near-certain desk says why it is warning', () => {
+  const r = Object.fromEntries(teamRoster({ now, snap: snap(), record: { certain: { graded: 25, wins: 23, usd: -4.1, profitGuard: { paused: true, n: 25, usd: -4.1 } } } }).map((x) => [x.role, x]));
+  assert.equal(r.certain.state, 'warn');
+  assert.match(r.certain.status, /^Paused by the profit guard: its last 25 graded calls lost \$4\.10 at \$10 each, so Near-certain buy alerts are off until they're back in profit · 23 of 25 won · −\$4\.10 per \$10$/);
+});

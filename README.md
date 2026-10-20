@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### The Near-certain desk says why it's warning (v13.75.1)
+
+The Near-certain desk turned amber when the profit guard paused Near-certain calls, but its line didn't say so. Now it does: *Paused by the profit guard: its last 25 graded calls lost $4.10 at $10 each, so Near-certain buy alerts are off until they're back in profit*.
+
 ### Merit pay (v13.75)
 
 Every teammate now earns or loses **points for what it verifiably did**, never for looking busy:
