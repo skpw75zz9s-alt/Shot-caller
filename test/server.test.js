@@ -50,6 +50,13 @@ test('serves the app shell and blocks traversal', async () => {
   assert.equal((await fetch(`${app}/..%2fserver.js`)).status, 404);
 });
 
+test('/healthz says which version is live', async () => {
+  const { createRequire } = await import('node:module');
+  const h = await (await fetch(`${app}/healthz`)).json();
+  assert.equal(h.ok, true);
+  assert.equal(h.version, createRequire(import.meta.url)('../package.json').version);
+});
+
 test('push API: key, validation and method guards', async () => {
   const key = await (await fetch(`${app}/api/push/key`)).json();
   assert.equal(Buffer.from(key.publicKey, 'base64url').length, 65);

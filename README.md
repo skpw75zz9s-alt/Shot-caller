@@ -1973,7 +1973,7 @@ Your settings and tracked positions sync to the server whenever they change, so 
 **Keep subscriptions across redeploys (Railway):** the server stores its push keys and subscribed phones in a small JSON file. Railway's disk resets on each deploy, so add a volume:
 
 - Service → **Settings → Volumes → + New Volume**, mount path `/data`. That's all: the server finds the volume on its own (Railway sets `RAILWAY_VOLUME_MOUNT_PATH`), and `DATA_DIR` is only needed to override it.
-- As admin, the app's Health check (Settings) warns "Server data resets on every deploy" until the volume is attached. `/healthz` shows `storage.persistent`.
+- As admin, the app's Health check (Settings) warns "Server data resets on every deploy" until the volume is attached. `/healthz` shows `storage.persistent`, and `version` says which build is live.
 
 Without a volume, push still works, but after each redeploy you need to open the app once to resubscribe automatically. If you'd rather pin the keys, run `npm run vapid` and set `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` in Variables. `/healthz` shows how many phones are subscribed and when the bot last ran.
 

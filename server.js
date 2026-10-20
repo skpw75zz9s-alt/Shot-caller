@@ -50,6 +50,7 @@ const KALSHI_DEMO = process.env.KALSHI_DEMO_API || 'https://demo-api.kalshi.co/t
 const COINBASE = process.env.COINBASE_API || 'https://api.exchange.coinbase.com';
 const PAYWALL = process.env.PAYWALL !== 'off';
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+const VERSION = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')).version; // /healthz shows which build is live
 const PUBLIC = join(ROOT, 'public');
 // Where the server keeps its data (members, push subscriptions, what it learned, the bot record). A Railway volume is
 // picked up on its own (Railway sets RAILWAY_VOLUME_MOUNT_PATH when one is attached); DATA_DIR overrides it.
@@ -546,7 +547,7 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
-    if (path === '/healthz') return send(res, 200, { ok: true, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded, discordAlerts: discord.status().alerts === 'off' ? [] : discordAlerts.kinds(), discordAlertsTo: discord.status().alerts } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
+    if (path === '/healthz') return send(res, 200, { ok: true, version: VERSION, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded, discordAlerts: discord.status().alerts === 'off' ? [] : discordAlerts.kinds(), discordAlertsTo: discord.status().alerts } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     // the official website and its public numbers, for everyone
     if (req.method === 'GET' && (path === '/site' || path === '/site.html')) return serveSite(req, res);
