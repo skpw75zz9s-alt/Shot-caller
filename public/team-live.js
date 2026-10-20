@@ -7,6 +7,7 @@
 // rest: its reviews show in each teammate's sheet, and a teammate it flags as hurting or broken gets a red tag.
 // The server serves this page and its data to the admin only.
 import { DEPTS, FLOORS, TEAM_ICON } from './team.js';
+import { routeOf } from './news.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -139,6 +140,14 @@ function render(t) {
   const needs = t.roster.filter((r) => r.helper).flatMap((r) => r.handoffs || []);
   $('needs').hidden = !needs.length;
   if (needs.length) $('needs').innerHTML = `<b>🦺 Needs you</b><ul>${needs.map((n) => `<li><b>${esc(n.name)}</b>${n.tries ? ` (tried ${n.tries}×)` : ''}: ${esc(n.help)}</li>`).join('')}</ul>`;
+  // the News scout's finds: the headlines, who each went to, and the big releases coming up (news.js)
+  const ns = byRole.newsscout, ago = (x) => { const m = Math.round((Date.now() - x) / 60000); return m < 60 ? `${Math.max(1, m)} min ago` : `${Math.round(m / 60)} h ago`; };
+  if (ns) {
+    const ev = (ns.events || []).map((e) => `<li class="ev"><div class="who"><span>📅 ${esc(e.title)}</span><span class="to">${esc(e.country)} · high impact</span><time>${e.t > Date.now() ? `in ${Math.max(1, Math.round((e.t - Date.now()) / 60000))} min` : 'just out'}</time></div></li>`).join('');
+    const hl = (ns.headlines || []).map((h) => { const to = byRole[routeOf(h.title)]; return `<li><div class="who"><span>${h.link ? `<a href="${esc(h.link)}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a>` : esc(h.title)}</span><time>${ago(h.t)}</time></div><div class="say">${esc(h.source || '')}${to ? ` · told ${TEAM_ICON[to.role] || ''} ${esc(to.name)}` : ''}</div></li>`; }).join('');
+    $('news').innerHTML = ev + hl || `<li><span class="empty">${esc(ns.status)}</span></li>`;
+    $('newsWhen').textContent = ns.state === 'off' ? 'off' : '';
+  }
   const mgr = byRole.manager;
   if (mgr) { const b = $('mgr'); b.hidden = false; b.className = `mgr ${mgr.state}`; b.innerHTML = `<b>👔 Manager</b> ${esc(mgr.status)}`; }
   $('counts').innerHTML = `<span><b>${t.roster.length}</b> on the team</span><span class="a"><b>${n('busy')}</b> acting</span><span class="w"><b>${n('warn')}</b> warning</span><span><b>${n('idle')}</b> waiting</span><span><b>${n('off')}</b> off</span><span><b>${talk.length}</b> lines of talk</span>`;

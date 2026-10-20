@@ -10,6 +10,7 @@ import { kalshiFee } from './model.js';
 import { CREW_ICON, crewRoster } from './improve.js';
 import { MANAGER, managerReport } from './manager.js';
 import { FIX_ICON, HELP_ICON } from './fixers.js';
+import { NEWS_ROLE, newsRow } from './news.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -61,6 +62,7 @@ export const STAFF = [
   ['related', 'Related-markets desk', 'what other markets say', 'desk', '🌐', 'judge'],
   ['flows', 'Money-flows desk', 'ETF, stablecoin and whale money', 'desk', '🏦', 'judge'],
   ['markets', 'Market finder', 'finds the markets Kalshi lists', 'desk', '🗺️', 'scout'],
+  [NEWS_ROLE[0], NEWS_ROLE[1], NEWS_ROLE[2], 'desk', NEWS_ROLE[3], 'scout'], // tells whoever each headline concerns (news.js)
   ...LEARNERS.map(([k, name, job, icon, to]) => [`l_${k}`, name, job, 'lab', icon, to]),
   ['flipdesk', 'Flip checker', 'how often the leader loses it', 'lab', '🔁', 'judge'],
   ['proof', 'Proof clerk', 'proves or drops each kind of break', 'xray', '🧪', 'inspector'],
@@ -194,6 +196,7 @@ function staffRoster(x, { lv, R, hold, br }) {
   S.related = { state: p.cross?.proven ? 'busy' : 'idle', status: p.cross?.proven ? 'Its proven read of the related markets argues before the council' : 'Watching the related markets: no proven read yet', key: p.cross?.proven ? 'on' : 'off', say: p.cross?.proven ? 'has a proven read for the council' : 'no proven read right now' };
   S.flows = p.flows == null ? { state: 'off', status: 'No money-flow data for this market', key: 'none' }
     : { state: p.flows.live ? 'ok' : 'idle', status: `${p.flows.live} of ${p.flows.total} money-flow sources reporting${p.flows.err ? ` · ${p.flows.err}` : ''}`, key: `${p.flows.live}` };
+  S.newsscout = newsRow(x.news ?? null, { now, name: x.marketName || 'this market' });
   S.markets = p.markets ? { state: 'ok', status: `${p.markets.listed} markets listed by Kalshi · ${p.markets.running} running a bot`, key: `${p.markets.running}`, say: `${p.markets.running} markets running` } : { state: 'idle', status: 'Not reporting', key: 'none' };
   // the research lab: one researcher per learner, on probation until it proves itself
   const lmap = Object.fromEntries((x.learners || []).map((l) => [l.key, l]));
@@ -254,7 +257,7 @@ export function teamTalk(roster) {
   const by = Object.fromEntries(roster.map((r) => [r.role, r])), out = [];
   for (const r of roster) {
     if (r.state === 'off' || /^Not reporting/.test(r.status || '')) continue;
-    if (r.crew || r.manager || r.fixer || r.helper) { for (const t of r.talks || []) if (by[t.to]) out.push({ from: r.role, to: t.to, text: t.text }); continue; } // the crew coaches: each review, to its teammate
+    if (Array.isArray(r.talks)) { for (const t of r.talks) if (by[t.to]) out.push({ from: r.role, to: t.to, text: t.text }); continue; } // the crew coaches: each review, to its teammate
     const to = r.lead ? LEAD_TO[r.role] || [] : [STAFF.find((s) => s[0] === r.role)?.[5]];
     for (const t of to) if (by[t]) out.push({ from: r.role, to: t, text: r.status });
   }

@@ -77,7 +77,7 @@ test('in the team: a dead exchange feed gets reconnected, and counts as fixed on
   const snap = { spot: 100250, mSpot: 100250, sigmaMin: 0.0005, rows: [] };
   const team = createTeam({ book: { get: () => ({ snap, sig: null }) }, botOf: () => null, watchOf: () => null, clock: () => t,
     stackOf: () => ({ scanFeed: { api: () => ({ feeds: { a: live ? 'live' : 'off', b: live ? 'live' : 'off' } }) }, asset: { kind: 'crypto' } }),
-    markets: () => ({ listed: 1, running: 1 }), fixes: { restartFeeds: (s) => { calls.push(s); return true; } } });
+    markets: () => ({ listed: 1, running: 1 }), news: () => ({ on: true, headlines: [], events: [] }), fixes: { restartFeeds: (s) => { calls.push(s); return true; } } });
   team.observe('S');
   const r1 = by(team.api('S').roster);
   assert.deepEqual(calls, ['S'], 'the Market desk fixer reconnected the feeds');
@@ -117,7 +117,7 @@ test('the floor helpers take what the fixers escalated: the long retries, the bo
 
 test('in the team: a feed that stays down gets the fixer\'s 3 tries, then the helper\'s every 30 minutes, then the admin', () => {
   let t = now; const calls = [];
-  const team = createTeam({ book: { get: () => ({ snap: { spot: 1, mSpot: 1, rows: [] }, sig: null }) }, botOf: () => null, watchOf: () => null, clock: () => t, markets: () => ({ listed: 1, running: 1 }),
+  const team = createTeam({ book: { get: () => ({ snap: { spot: 1, mSpot: 1, rows: [] }, sig: null }) }, botOf: () => null, watchOf: () => null, clock: () => t, markets: () => ({ listed: 1, running: 1 }), news: () => ({ on: true, headlines: [], events: [] }),
     stackOf: () => ({ scanFeed: { api: () => ({ feeds: { a: 'off' } }) }, asset: { kind: 'crypto' } }), fixes: { restartFeeds: () => { calls.push(t); return true; } } });
   const helper = () => team.api('S').roster.find((r) => r.role === 'fh_f1');
   for (let i = 0; i < 4 * 6 + 2; i++) { team.observe('S'); t += 5 * 60000; } // ~2 hours, a reading every 5 minutes

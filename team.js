@@ -12,7 +12,7 @@ import { createFixDesk } from './fixdesk.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
-  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, clock = () => Date.now(), everyMs = 5000 }) {
+  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, news = () => null, nameOf = () => null, clock = () => Date.now(), everyMs = 5000 }) {
   const desk = createFixDesk({ actions: fixes, clock }); // the flag fixers' fixes (fixdesk.js)
   const helpDesk = createFixDesk({ actions: fixes, clock, cooldownMs: 30 * 60000, maxTries: HELP_TRIES }); // the floor helpers': slower, longer
   const per = new Map(); // series -> { at, keys, roster, feed }
@@ -31,6 +31,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       learners: learners && learners.map((u) => ({ key: u.key, name: u.name, on: !!u.on, detail: u.detail })), strength: strength?.api?.(series), autotraders: autotraders(series), discord: discord?.status?.(), ask: askMode(),
       parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
       // what the Improvement crew grades (improve.js)
+      news: tryIt(() => news(series)), marketName: tryIt(() => nameOf(series)), // the News scout (news.js)
       council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result })),
     };
   }

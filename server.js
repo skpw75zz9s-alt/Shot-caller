@@ -25,6 +25,7 @@ import { createMicroFeed } from './microfeed.js';
 import { createFlowsFeed } from './flowsfeed.js';
 import { liqSummary, positioning } from './public/xray.js';
 import { positionCheck } from './public/engine.js';
+import { createNewsFeed } from './newsfeed.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
@@ -164,10 +165,13 @@ const askTools = createAskTools({ book: marketBook, discovery, stacks, marketOf,
 askAI.setTools(askTools);
 freeAsk = createFreeAsk({ tools: askTools });
 // the bot team (team.js, public/team.js): one teammate per action, each with its live status, and a feed of what changed
+// market news for the News scout: headlines for each running market's asset, and the economic calendar (newsfeed.js)
+export const newsFeed = createNewsFeed({ assets: () => [...new Set(stacks.bots().map(([s]) => marketOf(s, discovery.list()).asset))] });
 export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
   markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus(),
+  news: (s) => newsFeed.api(marketOf(s, discovery.list()).asset), nameOf: (s) => marketOf(s, discovery.list()).name, // the News scout (newsfeed.js, public/news.js)
   // the flag fixers' real fixes (public/fixers.js, fixdesk.js): each returns true when it ran
   fixes: {
     restartFeeds: (s) => { const st = stacks.stack(s); if (!st?.scanFeed || process.env.SCAN_FEEDS === 'off' || (st.asset && st.asset.kind !== 'crypto')) return false; st.scanFeed.stop(); st.scanFeed.start(); return true; },
@@ -624,5 +628,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
   if (process.env.MARKETS !== 'off') ready.then(() => stacks.begin()); // every other Kalshi market (stacks.js)
   if (process.env.CROSS !== 'off') crossFeed.start(); // related markets (crossfeed.js)
+  if (process.env.NEWS !== 'off') newsFeed.start(); // market news for the News scout (newsfeed.js)
   ready.then(() => discordRoles.start()); // members' Discord role, every 10 minutes (only when it's set up)
 }

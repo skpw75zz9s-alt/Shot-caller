@@ -43,6 +43,9 @@ const yahooChart = (sym, q) => {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); res.setHeader('content-type', 'application/json');
   if (u.pathname === '/__set') { for (const k of ['yb', 'ya', 'lead']) if (u.searchParams.has(k)) state[k] = +u.searchParams.get(k); return res.end(JSON.stringify(state)); }
+  // stand-ins for the News scout's sources (newsfeed.js): a few headlines and a calendar release
+  if (u.pathname === '/news/rss') { const ago = (m) => new Date(Date.now() - m * 60000).toUTCString(); res.setHeader('content-type', 'application/rss+xml'); return res.end(`<rss><channel>${[['Spot bitcoin ETF inflows top $500M - Reuters', 12], ['Bitcoin surges as shorts get squeezed - Bloomberg', 25], ['Exchange pauses withdrawals after exploit - CoinDesk', 48]].map(([t, m]) => `<item><title>${t.replace('&', '&amp;')}</title><link>https://example.com/n</link><pubDate>${ago(m)}</pubDate></item>`).join('')}</channel></rss>`); }
+  if (u.pathname === '/news/calendar') return res.end(JSON.stringify([{ title: 'CPI m/m', country: 'USD', date: new Date(Date.now() + 40 * 60000).toISOString(), impact: 'High', forecast: '0.3%', previous: '0.4%' }]));
   if (u.pathname.startsWith('/v8/finance/chart/')) { const b = yahooChart(decodeURIComponent(u.pathname.slice(18)), u.searchParams); if (b) return res.end(JSON.stringify(b)); }
   const sc = scaleOf(u.pathname), sz = (r) => [r[0], r[1] * sc, r[2] * sc, r[3] * sc, r[4] * sc, r[5]];
   if (u.pathname.endsWith('/candles')) {

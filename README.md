@@ -276,6 +276,28 @@ Security:
 
 ## Version notes (newest first)
 
+### The News scout (v13.74)
+
+A 🗞️ **News scout** on the Market desk searches the market news and tells whoever it concerns. Two kinds of news, from free sources that need no key:
+
+- **Headlines** for every running market's asset (Google News searches for Bitcoin, the S&P 500, gold…, plus CoinDesk's feed for crypto), every 5 minutes, deduplicated, the last 6 hours.
+- **The economic calendar** (ForexFactory's public calendar), every hour. These are the scheduled releases that move every market at once: CPI, jobs, the Fed.
+
+Each headline goes to the teammate whose part it bears on:
+
+| The headline is about | It goes to |
+|---|---|
+| ETF and fund money | Money-flows desk |
+| hacks, bans, lawsuits | Risk officer |
+| liquidations | Liquidation watcher |
+| the Fed, rates, CPI, jobs | Related-markets desk |
+| a big move (surge, crash) | Analyst |
+| anything else | Scout |
+
+A **high-impact US release** in the next hour gets a heads-up to the Risk officer and the Analyst (*Heads-up: CPI m/m (USD, high impact) in 25 min, forecast 0.3%*), and the Analyst hears again once it's out. The live window has a **Market news** panel: the coming releases, then the headlines with links and who each one was told to.
+
+**News informs; it doesn't change calls.** Headlines have no graded record here, so they get no say in the odds; if a source can't be reached, the News scout says so instead of guessing. Set `NEWS=off` to turn it off, or `NEWS_EVERY_MIN` to change how often it looks.
+
 ### Floor helpers (v13.73)
 
 The office is now a building of **four floors**: the Top floor (Manager, Improvement crew, Grading room, Newsroom), the Calls floor (Call desk, Risk office, Trading floor), the Lab floor (Research lab, X-ray room, Council chamber) and the Ground floor (Market desk, Operations). Each floor has a 🦺 **floor helper**, the second line of support when a teammate on that floor is **still stuck after its team's fixer** has escalated. A flag goes to the helper before it reaches you:
