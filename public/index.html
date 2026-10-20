@@ -174,6 +174,13 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">The lead is how far price is past the target. The move left is how far price usually still travels in the time remaining (price × its 1-minute volatility × √minutes). Their ratio is the cushion: under 0.25 is a razor-thin coin-flip zone, around 1 is solid, 3+ is near-certain. "Rounds actually finished" comes from every round in the last three weeks of 1-minute candles, at the same cushion and time left: history, not the model. In the last 60 seconds of a crypto round Kalshi settles on the average of the final 60 one-second prints, so each second that passes is banked: the settlement watch shows where that average lands if price stays put, and what the seconds left would have to average to flip it. Pressure is buyers vs sellers on the exchanges; the record shows how often the leading side still won when they disagreed. Sessions: when the big markets' trading days open and close, which is when volume and volatility change.</small></details>
       </div>
       <!-- the signal board (v13.42, public/signals.js): every factor, where it stands with the calls, and what it says now -->
+      <div data-pro class="card team-card" id="teamCard">
+        <div class="deep-head"><span>Bot team</span><small id="teamWhen" class="muted"></small></div>
+        <p class="fine-left muted">One teammate for every action the bot takes, and what each is doing right now.</p>
+        <ul class="team-list" id="teamList"></ul>
+        <div class="team-feed-h">What the team did</div>
+        <ol class="team-feed" id="teamFeed"></ol>
+      </div>
       <div class="card board" id="boardCard">
         <div class="deep-head"><span>Signal board</span><b id="sbSum"></b></div>
         <div class="sb-meter" id="sbMeter" aria-hidden="true"></div>
@@ -638,7 +645,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.64.1 · Free Ask</p>
+      <p class="fine" id="version">Shot Caller v13.65 · Bot team</p>
     </section>
   </main>
 
@@ -679,7 +686,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '212';
+    window.SC_BUILD = '213';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

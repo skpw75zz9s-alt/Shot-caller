@@ -42,7 +42,7 @@ import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
-window.SC_BOOT = '212'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '213'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2318,6 +2318,18 @@ function renderStrength() {
   });
   box.addEventListener('pointerleave', hide);
 })();
+
+// ---------- The bot team (public/team.js, team.js, /api/team): one teammate per action, and what each did ----------
+const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰' };
+async function refreshTeam() {
+  if (document.hidden || !shownViews.has('live') || $('teamCard')?.classList.contains('folded')) return;
+  try { state.team = await getJSON(api('team')); } catch { return; }
+  const t = state.team, ago = (x) => { const s = Math.round((Date.now() - x) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : clock(x); };
+  setText($('teamWhen'), `${t.roster.filter((r) => r.state === 'busy' || r.state === 'warn').length} acting now`);
+  setHTML($('teamList'), t.roster.map((r) => `<li class="team-r ${r.state}"><i aria-hidden="true">${TEAM_ICON[r.role] || '•'}</i><div><b>${esc(r.name)}</b><small>${esc(r.job)}</small><p>${esc(r.status)}</p></div><em class="team-dot" title="${r.state}"></em></li>`).join(''));
+  setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
+}
+setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);
 
 // ---------- Simple mode ----------
 function applyMode() {

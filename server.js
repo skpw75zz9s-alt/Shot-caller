@@ -15,6 +15,7 @@ import { createBreakLab } from './breaklab.js';
 import { createStrength } from './strength.js';
 import { createAskTools, createMarketBook } from './asktools.js';
 import { createFreeAsk } from './freeask.js';
+import { createTeam } from './team.js';
 import { createAutoTrade } from './autotrade.js';
 import { createScanFeed } from './scanfeed.js';
 import { createFeeBook } from './feebook.js';
@@ -121,6 +122,7 @@ export const bot = createBot({
     try { council.observe(HOME.series, o.snap, HOME.settle); } catch (e) { console.error('council step failed', e.message); }
     try { strength.observe(HOME.series, o.snap); } catch (e) { console.error('strength meter step failed', e.message); }
     marketBook.observe(HOME.series, o);
+    try { team?.observe(HOME.series); } catch (e) { console.error('bot team step failed', e.message); }
     try { const now = Date.now(); breakLab.observe(HOME.series, o.snap, { kind: HOME.kind, tape: scanFeed.tape(now - 600000), liqs: liqSummary(scanFeed.liqs(), now) }); } catch (e) { console.error('break lab step failed', e.message); }
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
@@ -152,12 +154,15 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, team: () => team, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 // Ask's lookups: any market, live, from the server's own readers (asktools.js)
 const askTools = createAskTools({ book: marketBook, discovery, stacks, marketOf, listed: () => true, isHome, home: { bot, scanFeed, futures }, council, breakLab, strength, crossFeed });
 askAI.setTools(askTools);
 freeAsk = createFreeAsk({ tools: askTools });
+// the bot team (team.js, public/team.js): one teammate per action, each with its live status, and a feed of what changed
+export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
+  council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers') });
 
 // Only read-only market-data endpoints are reachable through the proxy.
 const KALSHI_PUBLIC = /^(markets(\/[A-Za-z0-9._-]+(\/orderbook)?)?|events\/[A-Za-z0-9._-]+|series\/[A-Za-z0-9._-]+)$/;
@@ -530,6 +535,7 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
     if (path === '/api/council') return send(res, 200, council.api(mq || HOME.series)); // the debate behind the calls (council.js)
     if (path === '/api/flows') { const f = ms ? ms.flowsFeed : flowsFeed; return send(res, 200, f ? f.api() : { off: 'money flows are for crypto markets' }); } // money flows (flowsfeed.js)

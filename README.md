@@ -276,6 +276,24 @@ Security:
 
 ## Version notes (newest first)
 
+### The bot team (v13.65)
+
+Every action the bot takes now has **one teammate who owns it**, shown on the Deck's **Bot team** card (Pro) for the market open on the phone:
+
+| Teammate | Owns | Example status |
+|---|---|---|
+| 🔭 Scout | the feeds and Market Watch | *Holding new calls: no fresh price for 30s+* |
+| 🧮 Analyst | the round's odds | *UP 96% · UP ahead by 2.10 typical moves · 9.0 min left* |
+| 🩻 Inspector | the X-ray's breaks | *2 breaks open: High flip risk; Kalshi swing* |
+| ⚖️ Judge | the council | *2 counted, 1 vetoed* |
+| 📣 Caller | the buy signal and the round call | *BUY DOWN at 62% · 80% at its worst-case odds* |
+| 🛡️ Risk officer | every guard that can stop a call | *Calls paused by the profit guard* |
+| 💼 Trader | the server's auto-traders (a count, never anyone's account) | *3 auto-traders trading the official calls* |
+| 🎓 Coach | grading and the learners | *Stronger than a coin flip · 1 of 2 learners proven* |
+| 📰 Reporter | Discord and Ask | *Discord on · 12 posts sent · Ask: free answers* |
+
+The server (`team.js`) reads every part every 5 seconds, per market, and keeps a feed of what each teammate *did*: a line only when its situation changes (*DOWN took the lead*, *held new calls*), never every tick's numbers. The feed is in memory (the last 60 lines per market) and starts empty after a restart. `GET /api/team?market=…` returns the roster and the feed. The team is a view of the bot, not a new decision-maker: every status comes from a part that already existed.
+
 ### The Ask AI is off (v13.64.1)
 
 The AI behind Ask is **off by default**, so it never spends credits, even if `ANTHROPIC_API_KEY` is still set in Railway. Every question gets the free market answers below. To turn the AI back on later, set `ASK_AI=on` in Railway (with a key).

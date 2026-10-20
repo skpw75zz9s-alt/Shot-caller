@@ -1223,3 +1223,19 @@ body.split .blip { display: none; }
 .str-tab { width: 100%; border-collapse: collapse; font: 500 11.5px var(--mono); margin: 4px 0; }
 .str-tab th { text-align: left; color: var(--dim); font-weight: 600; padding: 2px 4px; } .str-tab td { padding: 3px 4px; border-top: 1px solid var(--line); }
 .str-more summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* the bot team (v13.65) */
+.team-list { list-style: none; margin: 6px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.team-r { display: grid; grid-template-columns: 26px 1fr 10px; gap: 8px; align-items: start; padding: 7px 9px; border-radius: 10px; background: var(--panel-2); }
+.team-r > i { font-style: normal; font-size: 17px; line-height: 1.2; }
+.team-r b { font-size: 13px; } .team-r small { color: var(--dim); font: 500 10.5px var(--mono); margin-left: 6px; }
+.team-r p { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.team-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--dim); }
+.team-r.ok .team-dot { background: var(--yes); } .team-r.busy .team-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.team-r.warn .team-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); } .team-r.off { opacity: .6; }
+.team-r.warn p { color: var(--text); }
+.team-feed-h { font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 4px 0; }
+.team-feed { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.team-feed li { padding: 3px 0; border-top: 1px solid var(--line); } .team-feed li:first-child { border-top: 0; }
+.team-feed time { display: inline-block; min-width: 56px; color: var(--dim); font: 500 10.5px var(--mono); }
+.team-feed li.warn b { color: var(--amber); } .team-feed li.busy b { color: var(--accent); }
