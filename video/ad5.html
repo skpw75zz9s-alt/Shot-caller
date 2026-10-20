@@ -1,0 +1,263 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* The v13.77 update video: "a whole team behind every call". 1920x1080. Every frame is drawn by render(t), so the
+     recording is exact and supersampled in time (adrender2.mjs renders 2 frames per output frame for motion blur).
+     Every screen is the real app against sample market data (adcap5.mjs). */
+  * { box-sizing: border-box; margin: 0; transition: none !important; animation: none !important; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #03050b; font-family: 'DejaVu Sans', 'Liberation Sans', sans-serif; color: #eef2f8; }
+  #bgc { position: absolute; inset: 0; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .eyebrow { font: 700 20px 'DejaVu Sans Mono', monospace; letter-spacing: 6px; color: #22d3ee; text-transform: uppercase; }
+  .h { font-weight: 800; font-size: 78px; line-height: 1.04; letter-spacing: -2.4px; }
+  .h .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding: 0.02em 0.05em 0.2em; margin: -0.02em -0.05em -0.2em; }
+  .h .w > span { display: inline-block; }
+  .h em { font-style: normal; } .h em .w > span { background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 29px; line-height: 1.42; color: #b9c3d6; max-width: 760px; }
+  .left { position: absolute; left: 120px; top: 190px; width: 780px; display: flex; flex-direction: column; gap: 24px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font: 800 24px 'DejaVu Sans Mono', monospace; background: #062419; color: #4dfbb8; border: 2px solid #2ee6a688; box-shadow: 0 0 30px #2ee6a633; }
+  .chip.cy { background: #04202a; color: #67e8f9; border-color: #22d3ee88; box-shadow: 0 0 30px #22d3ee33; }
+  .chip.am { background: #2a1d04; color: #fcd34d; border-color: #fbbf2488; box-shadow: 0 0 30px #fbbf2433; }
+  /* a monitor for the live window */
+  .mon { position: absolute; border-radius: 22px; overflow: hidden; background: #000; box-shadow: 0 0 0 3px #1c2740, 0 0 0 6px #2f3d5e, 0 60px 140px #000e, 0 0 160px #22d3ee22; }
+  .mon img { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .mon .bar3 { position: absolute; left: 0; right: 0; top: 0; height: 38px; background: #0b1120; border-bottom: 1px solid #1c2740; z-index: 2; }
+  .mon .bar3 i { position: absolute; top: 13px; width: 12px; height: 12px; border-radius: 50%; } .mon .bar3 i:nth-child(1) { left: 16px; background: #ff5f57; } .mon .bar3 i:nth-child(2) { left: 36px; background: #febc2e; } .mon .bar3 i:nth-child(3) { left: 56px; background: #28c840; }
+  .mon .bar3 span { position: absolute; left: 90px; top: 9px; font: 15px 'DejaVu Sans Mono', monospace; color: #6b7a90; }
+  .mon .gloss, .phone .gloss { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, #ffffff12 45%, transparent 60%); mix-blend-mode: screen; z-index: 3; }
+  /* phones */
+  .phone { position: absolute; width: 430px; height: 930px; border-radius: 58px; background: #000; overflow: hidden;
+    box-shadow: 0 0 0 9px #161e31, 0 0 0 12px #2f3d5e, 0 60px 120px #000d, 0 0 140px #22d3ee2a; }
+  .phone img { position: absolute; left: 0; top: 0; width: 430px; }
+  .phone .notch { position: absolute; left: 50%; top: 14px; width: 130px; height: 36px; margin-left: -65px; border-radius: 20px; background: #000; z-index: 4; }
+  /* cards (a crop of a panel) */
+  .card { position: absolute; border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 2px #22d3ee44, 0 40px 100px #000c, 0 0 80px #22d3ee22; background: #0a0f1a; }
+  .card img { display: block; width: 100%; }
+  /* talk bubbles (the team's real lines from the sample run) */
+  .tb { position: absolute; max-width: 560px; padding: 14px 20px; border-radius: 18px; background: #eef2f8; color: #05070d; font: 600 22px/1.32 'DejaVu Sans', sans-serif; box-shadow: 0 20px 50px #000a; }
+  .tb b { color: #0a6c8a; } .tb::after { content: ''; position: absolute; left: 34px; top: 100%; border: 12px solid transparent; border-top-color: #eef2f8; }
+  /* intro and outro */
+  #logo, #o-logo { position: absolute; left: 50%; border-radius: 48px; box-shadow: 0 0 0 2px #22d3ee66, 0 30px 120px #22d3ee66; }
+  #logo { top: 230px; width: 210px; height: 210px; margin-left: -105px; }
+  #brand { position: absolute; width: 100%; top: 490px; text-align: center; font-weight: 800; font-size: 104px; letter-spacing: 16px; }
+  #brand em { font-style: normal; color: #22d3ee; }
+  #tag { position: absolute; width: 100%; top: 635px; text-align: center; font-size: 38px; color: #b9c3d6; }
+  #ver, #o-ver { position: absolute; left: 50%; transform: translateX(-50%); font: 700 22px 'DejaVu Sans Mono', monospace; letter-spacing: 4px; color: #22d3ee; border: 2px solid #22d3ee77; border-radius: 999px; padding: 10px 26px; background: #04202a88; }
+  #ver { top: 720px; }
+  #sweep { position: absolute; top: 480px; height: 150px; width: 260px; background: linear-gradient(90deg, transparent, #ffffff55, transparent); mix-blend-mode: overlay; transform: skewX(-20deg); }
+  #count { font: 800 150px 'DejaVu Sans Mono', monospace; letter-spacing: -6px; background: linear-gradient(90deg, #22d3ee, #7dffd0); -webkit-background-clip: text; background-clip: text; color: transparent; line-height: 1; }
+  #o-logo { top: 170px; width: 170px; height: 170px; margin-left: -85px; }
+  #o-h { position: absolute; width: 100%; top: 380px; text-align: center; font-size: 104px; }
+  #o-sub { position: absolute; width: 100%; top: 512px; text-align: center; max-width: none; }
+  #o-ver { top: 585px; }
+  #o-cta { position: absolute; left: 50%; top: 670px; transform: translateX(-50%); padding: 22px 54px; border-radius: 22px; background: linear-gradient(90deg, #22d3ee, #5ef2c8); color: #04121a; font: 800 34px 'DejaVu Sans Mono', monospace; letter-spacing: 2px; box-shadow: 0 20px 80px #22d3ee66; white-space: nowrap; }
+  #o-fine { position: absolute; left: 230px; right: 230px; bottom: 60px; text-align: center; font-size: 20px; line-height: 1.5; color: #7f8aa0; }
+  #flash { position: absolute; inset: 0; background: #e9fbff; opacity: 0; mix-blend-mode: screen; pointer-events: none; }
+  #vig { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%); pointer-events: none; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, #22d3ee, #2ee6a6); box-shadow: 0 0 20px #22d3ee; }
+  #note { position: absolute; right: 30px; bottom: 18px; font: 14px 'DejaVu Sans Mono', monospace; color: #4f5a70; letter-spacing: 2px; }
+</style></head>
+<body>
+<canvas id="bgc" width="1920" height="1080"></canvas>
+
+<!-- 0: intro -->
+<div class="scene" id="s0">
+  <img id="logo" src="../public/icon-512.png" alt="">
+  <div id="brand">SHOT <em>CALLER</em></div><div id="sweep"></div>
+  <div id="tag">Now with a whole team behind every call.</div>
+  <div id="ver">v13.77</div>
+</div>
+
+<!-- 1: the office -->
+<div class="scene" id="s1">
+  <div class="left">
+    <div class="eyebrow">The bot team</div>
+    <div id="count">0</div>
+    <div class="h" data-k>A whole <em>team</em> behind every call.</div>
+    <div class="sub">One agent for every part of the bot: the feeds, the odds, the guards, the learners, the record.</div>
+  </div>
+  <div class="mon" id="m1" style="left:930px;top:150px;width:900px;height:780px"><div class="bar3"><i></i><i></i><i></i><span>team-live · admin only</span></div><img src="ad5/office-top.png" width="3200"><div class="gloss"></div></div>
+</div>
+
+<!-- 2: they talk -->
+<div class="scene" id="s2">
+  <div class="left" style="top:230px">
+    <div class="eyebrow">Live</div>
+    <div class="h" data-k>They <em>talk</em> to each other.</div>
+    <div class="sub">Every teammate tells whoever uses its part what it sees, the way the parts hand off in the code. Word for word, every second.</div>
+  </div>
+  <div class="card" id="c2" style="left:1010px;top:110px;width:700px;height:860px"><img src="ad5/chat.png"></div>
+  <div class="tb" id="b2a" style="left:930px;top:180px"><b>💲 Price clerk → 🧮 Analyst</b><br>$100,250.44 · live</div>
+  <div class="tb" id="b2b" style="left:1080px;top:470px"><b>🩻 Inspector → 🛡️ Risk officer</b><br>found: Bot and Kalshi disagree by 64 points</div>
+  <div class="tb" id="b2c" style="left:960px;top:760px"><b>🗞️ News scout → 🏦 Money-flows desk</b><br>Spot bitcoin ETF inflows top $500M</div>
+</div>
+
+<!-- 3: nobody slacks -->
+<div class="scene" id="s3">
+  <div class="left" style="top:150px">
+    <div class="eyebrow">Management</div>
+    <div class="h" data-k>Nobody slacks. <em>Nothing</em> stays broken.</div>
+    <div class="sub">A Manager checks everyone, every reading. A fixer on every team. A helper on every floor. Only what code can't fix comes to you.</div>
+    <div class="chips"><span class="chip">👔 Manager</span><span class="chip cy">🛠️ 11 fixers</span><span class="chip am">🦺 4 floor helpers</span></div>
+  </div>
+  <div class="mon" id="m3" style="left:930px;top:230px;width:900px;height:700px"><div class="bar3"><i></i><i></i><i></i><span>team-live · ground floor</span></div><img src="ad5/office-ground.png" width="3200"><div class="gloss"></div></div>
+  <div class="card" id="c3" style="left:420px;top:90px;width:1180px;height:37px"><img src="ad5/manager.png"></div>
+</div>
+
+<!-- 4: proof -->
+<div class="scene" id="s4">
+  <div class="left" style="top:170px">
+    <div class="eyebrow">Only proof counts</div>
+    <div class="h" data-k>On <em>probation</em> until proven.</div>
+    <div class="sub">Every learner has to beat the bot on rounds it never saw. Trainers track the pace. Coaches grade the records. No shortcuts.</div>
+    <div class="chips"><span class="chip">🎓 Improvement crew</span><span class="chip cy">🏋️ Training room</span><span class="chip am">🏆 Merit pay for verified work</span></div>
+  </div>
+  <div class="card" id="c4" style="left:960px;top:330px;width:860px;height:411px"><img src="ad5/training.png"></div>
+</div>
+
+<!-- 5: news -->
+<div class="scene" id="s5">
+  <div class="left" style="top:250px">
+    <div class="eyebrow">News scout</div>
+    <div class="h" data-k>The <em>news</em>, to whoever it concerns.</div>
+    <div class="sub">Headlines and the economic calendar, routed to the teammate it bears on. A heads-up before CPI, the Fed and jobs.</div>
+  </div>
+  <div class="card" id="c5" style="left:1030px;top:200px;width:720px;height:691px"><img src="ad5/news.png"></div>
+</div>
+
+<!-- 6: phone trader -->
+<div class="scene" id="s6">
+  <div class="left" style="top:230px">
+    <div class="eyebrow">Auto-trader</div>
+    <div class="h" data-k>Your key never <em>leaves</em> your phone.</div>
+    <div class="sub">Auto-trade on this phone: each order is signed here, checked by the server, sent to Kalshi. Test first, then Live.</div>
+    <div class="chips"><span class="chip cy">Off · Test · Live</span><span class="chip">🔐 signed on the phone</span></div>
+  </div>
+  <div class="phone" id="p6" style="left:1230px;top:75px"><img src="ad5/phone-trader.png"><div class="notch"></div><div class="gloss"></div></div>
+</div>
+
+<!-- 7: hiring -->
+<div class="scene" id="s7">
+  <div class="left" style="top:260px">
+    <div class="eyebrow">Hiring center</div>
+    <div class="h" data-k>Hire new agents. <em>You</em> approve.</div>
+    <div class="sub">The Recruiter files an application when the data shows a gap. Every new hire starts on probation, with a trainer.</div>
+  </div>
+  <div class="phone" id="p7" style="left:1230px;top:75px"><img src="ad5/phone-hiring.png"><div class="notch"></div><div class="gloss"></div></div>
+</div>
+
+<!-- 8: outro -->
+<div class="scene" id="s8">
+  <img id="o-logo" src="../public/icon-512.png" alt="">
+  <div id="o-h" class="h">Shot <em>Caller</em></div>
+  <div id="o-sub" class="sub">A whole team behind every call.</div>
+  <div id="o-ver">v13.77</div>
+  <div id="o-cta">Open the app</div>
+  <div id="o-fine">Sample market data. Not financial advice: calls can and do lose, and fees apply. The team reports what the bot is doing; only learners proven on unseen rounds change a call.</div>
+</div>
+
+<div id="flash"></div><div id="vig"></div><div id="bar"></div><div id="note">SHOT CALLER · v13.77</div>
+<script>
+  const DURATION = 50, CUTS = [0, 3.6, 10, 16, 23, 30, 35, 40.5, 45];
+  window.DURATION = DURATION; window.CUTS = CUTS;
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const io = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2), out = (x) => 1 - (1 - x) ** 3, back = (x) => 1 + 2.4 * (x - 1) ** 3 + 1.4 * (x - 1) ** 2;
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  // kinetic headlines: wrap each word
+  for (const h of document.querySelectorAll('.h')) {
+    const wrap = (node) => { for (const c of [...node.childNodes]) { if (c.nodeType === 3) { const f = document.createDocumentFragment(); for (const part of c.textContent.split(/(\s+)/)) { if (!part) continue; if (/^\s+$/.test(part)) { f.append(part); continue; } const w = document.createElement('span'); w.className = 'w'; const i = document.createElement('span'); i.textContent = part; w.append(i); f.append(w); } c.replaceWith(f); } else wrap(c); } };
+    wrap(h);
+  }
+  const words = (scene) => [...$(scene).querySelectorAll('.h .w > span')];
+  function kinetic(scene, lt, at = 0.15) {
+    words(scene).forEach((w, i) => { const p = out(seg(lt, at + i * 0.07, at + i * 0.07 + 0.55)); w.style.transform = `translateY(${(1 - p) * 110}%)`; });
+  }
+  function fadeUp(el, lt, a, d = 0.6) { const p = out(seg(lt, a, a + d)); el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * 30}px)`; }
+  // the background: a slow network of agents (a seeded constellation)
+  const ctx = $('bgc').getContext('2d');
+  let s = 7; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const pts = Array.from({ length: 70 }, () => ({ x: rnd() * 1920, y: rnd() * 1080, vx: (rnd() - 0.5) * 22, vy: (rnd() - 0.5) * 16, r: 1.2 + rnd() * 2.2, ph: rnd() * 6.28 }));
+  function bg(t) {
+    const g = ctx.createRadialGradient(960, 380, 100, 960, 540, 1300); g.addColorStop(0, '#0c1a2e'); g.addColorStop(1, '#03050b');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 1920, 1080);
+    const P = pts.map((p) => ({ x: ((p.x + p.vx * t) % 1920 + 1920) % 1920, y: ((p.y + p.vy * t) % 1080 + 1080) % 1080, r: p.r, a: 0.35 + 0.35 * Math.sin(t * 1.3 + p.ph) }));
+    for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+      const dx = P[i].x - P[j].x, dy = P[i].y - P[j].y, d = Math.hypot(dx, dy);
+      if (d < 190) { ctx.strokeStyle = `rgba(34,211,238,${(1 - d / 190) * 0.16})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(P[i].x, P[i].y); ctx.lineTo(P[j].x, P[j].y); ctx.stroke(); }
+    }
+    for (const p of P) { ctx.fillStyle = `rgba(125,255,208,${p.a})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill(); }
+  }
+  // scenes: [id, start, end, draw(lt, dur)]
+  const SC = [
+    ['s0', 0, 3.6, (lt) => {
+      const p = back(seg(lt, 0.1, 1.0)); $('logo').style.transform = `scale(${0.4 + 0.6 * p}) rotate(${(1 - p) * -12}deg)`; $('logo').style.opacity = clamp(lt / 0.4);
+      fadeUp($('brand'), lt, 0.5, 0.7); fadeUp($('tag'), lt, 1.1, 0.7); fadeUp($('ver'), lt, 1.5, 0.6); $('ver').style.transform += ' translateX(-50%)';
+      $('sweep').style.left = `${-300 + seg(lt, 0.9, 2.1) * 2400}px`;
+    }],
+    ['s1', 3.6, 10, (lt, d) => {
+      kinetic('s1', lt, 0.25); fadeUp($('s1').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s1').querySelector('.sub'), lt, 1.0);
+      $('count').textContent = Math.round(out(seg(lt, 0.3, 2.2)) * 90); fadeUp($('count'), lt, 0.15, 0.5);
+      const m = $('m1'), p = out(seg(lt, 0, 0.9)); m.style.opacity = p; m.style.transform = `translateX(${(1 - p) * 120}px) perspective(1800px) rotateY(${-8 + 6 * io(seg(lt, 0, d))}deg)`;
+      const k = io(seg(lt, 0.6, d)), img = m.querySelector('img'); img.style.transform = `translate(${-110 - 450 * k}px, ${-20 - 190 * k}px) scale(${0.46 + 0.04 * k})`; // stays inside the shot: 2000 × 0.5 − 210 > the monitor's 780
+    }],
+    ['s2', 10, 16, (lt, d) => {
+      kinetic('s2', lt, 0.2); fadeUp($('s2').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s2').querySelector('.sub'), lt, 0.9);
+      const c = $('c2'), p = out(seg(lt, 0, 0.8)); c.style.opacity = p * 0.95; c.style.transform = `translateY(${(1 - p) * 60}px)`;
+      c.querySelector('img').style.transform = `translateY(${-io(seg(lt, 0.6, d)) * 380}px)`;
+      [['b2a', 1.2], ['b2b', 2.2], ['b2c', 3.2]].forEach(([id, a]) => { const q = back(seg(lt, a, a + 0.5)), o = seg(lt, a, a + 0.25) * (1 - seg(lt, a + 2.2, a + 2.6)); const b = $(id); b.style.opacity = o; b.style.transform = `scale(${0.7 + 0.3 * q}) translateY(${(1 - q) * 20}px)`; });
+    }],
+    ['s3', 16, 23, (lt, d) => {
+      kinetic('s3', lt, 0.2); fadeUp($('s3').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s3').querySelector('.sub'), lt, 1.1);
+      $('s3').querySelectorAll('.chip').forEach((ch, i) => { const q = back(seg(lt, 1.8 + i * 0.25, 2.3 + i * 0.25)); ch.style.opacity = clamp(q); ch.style.transform = `scale(${0.6 + 0.4 * q})`; });
+      const m = $('m3'), p = out(seg(lt, 0.2, 1.0)); m.style.opacity = p; m.style.transform = `translateY(${(1 - p) * 80}px)`;
+      { const k = io(seg(lt, 0.6, d)); m.querySelector('img').style.transform = `translate(${-140 - 160 * k}px, ${8 - 60 * k}px) scale(${0.42 + 0.05 * k})`; }
+      const c = $('c3'), q = out(seg(lt, 2.6, 3.3)); c.style.opacity = q; c.style.transform = `translateY(${(1 - q) * -40}px) scale(${0.96 + 0.04 * q})`;
+    }],
+    ['s4', 23, 30, (lt, d) => {
+      kinetic('s4', lt, 0.2); fadeUp($('s4').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s4').querySelector('.sub'), lt, 1.0);
+      $('s4').querySelectorAll('.chip').forEach((ch, i) => { const q = back(seg(lt, 2.0 + i * 0.3, 2.5 + i * 0.3)); ch.style.opacity = clamp(q); ch.style.transform = `scale(${0.6 + 0.4 * q})`; });
+      const c = $('c4'), p = out(seg(lt, 0.3, 1.1)); c.style.opacity = p; c.style.transform = `perspective(1600px) rotateY(${(1 - p) * -18 - 4 + 4 * io(seg(lt, 1, d))}deg) scale(${0.92 + 0.08 * p + 0.04 * io(seg(lt, 1, d))})`;
+    }],
+    ['s5', 30, 35, (lt, d) => {
+      kinetic('s5', lt, 0.2); fadeUp($('s5').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s5').querySelector('.sub'), lt, 1.0);
+      const c = $('c5'), p = out(seg(lt, 0.2, 1.0)); c.style.opacity = p; c.style.transform = `translateY(${(1 - p) * 70}px) scale(${1 + 0.04 * io(seg(lt, 1, d))})`;
+    }],
+    ['s6', 35, 40.5, (lt, d) => {
+      kinetic('s6', lt, 0.2); fadeUp($('s6').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s6').querySelector('.sub'), lt, 1.0);
+      $('s6').querySelectorAll('.chip').forEach((ch, i) => { const q = back(seg(lt, 1.8 + i * 0.3, 2.3 + i * 0.3)); ch.style.opacity = clamp(q); ch.style.transform = `scale(${0.6 + 0.4 * q})`; });
+      const ph = $('p6'), p = out(seg(lt, 0, 0.9)); ph.style.opacity = p; ph.style.transform = `perspective(1800px) translateY(${(1 - p) * 140}px) rotateY(${-14 + 10 * io(seg(lt, 0, d))}deg)`;
+      ph.querySelector('img').style.transform = `translateY(${-io(seg(lt, 1.2, d - 0.5)) * 300}px)`;
+    }],
+    ['s7', 40.5, 45, (lt, d) => {
+      kinetic('s7', lt, 0.2); fadeUp($('s7').querySelector('.eyebrow'), lt, 0.05); fadeUp($('s7').querySelector('.sub'), lt, 1.0);
+      const ph = $('p7'), p = out(seg(lt, 0, 0.9)); ph.style.opacity = p; ph.style.transform = `perspective(1800px) translateY(${(1 - p) * 140}px) rotateY(${14 - 10 * io(seg(lt, 0, d))}deg)`;
+      ph.querySelector('img').style.transform = `translateY(${-120 - io(seg(lt, 1, d)) * 140}px)`;
+    }],
+    ['s8', 45, 50, (lt) => {
+      const p = back(seg(lt, 0.05, 0.8)); $('o-logo').style.transform = `scale(${0.5 + 0.5 * p})`; $('o-logo').style.opacity = clamp(lt / 0.3);
+      fadeUp($('o-h'), lt, 0.35, 0.7); fadeUp($('o-sub'), lt, 0.8); fadeUp($('o-ver'), lt, 1.1); $('o-ver').style.transform += ' translateX(-50%)';
+      const q = back(seg(lt, 1.4, 2.0)); $('o-cta').style.opacity = clamp(q); $('o-cta').style.transform = `translateX(-50%) scale(${0.7 + 0.3 * q})`;
+      fadeUp($('o-fine'), lt, 1.8, 0.8);
+    }],
+  ];
+  function render(t) {
+    bg(t);
+    for (const [id, a, b, draw] of SC) {
+      const el = $(id), on = t >= a - 0.35 && t < b + 0.35;
+      el.style.display = on ? 'block' : 'none';
+      if (!on) continue;
+      // crossfade and a small push between scenes
+      const fin = id === 's0' ? 1 : seg(t, a - 0.35, a + 0.35), fout = id === 's8' ? 1 : 1 - seg(t, b - 0.35, b + 0.35), o = Math.min(fin, fout);
+      el.style.opacity = o; el.style.transform = `scale(${1 + (1 - fin) * 0.04 - (1 - fout) * 0.03})`; el.style.filter = o < 1 ? `blur(${(1 - o) * 6}px)` : 'none';
+      draw(Math.max(0, t - a), b - a);
+    }
+    const near = Math.min(...CUTS.slice(1).map((c) => Math.abs(t - c)));
+    $('flash').style.opacity = near < 0.18 ? (1 - near / 0.18) * 0.22 : 0;
+    $('bar').style.width = `${(t / DURATION) * 100}%`;
+  }
+  window.render = render;
+  Promise.all([...document.images].map((im) => (im.complete ? 1 : new Promise((r) => { im.onload = im.onerror = r; })))).then(() => { render(0); window.ready = true; });
+</script>
+</body></html>
