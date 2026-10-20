@@ -276,6 +276,16 @@ Security:
 
 ## Version notes (newest first)
 
+### Road to graduation (v13.78)
+
+The Training room in the live window now has a **🎓 Road to graduation** panel: a bar for every trainee, closest to its proof first.
+
+- **On probation:** the bar fills as its counter moves (*27% · 40 of 150 rounds · about 28 h to go*), with ticks at 25, 50 and 75%.
+- **Bar reached:** full and pulsing green, *judged on its next test* (judged, not passed: it can still fail).
+- **No counter:** a striped bar, *judged on its own schedule, no shortcuts*. No percentage is made up for a learner that doesn't have one.
+- **Blocked:** an amber striped bar naming what it needs (*Blocked: needs the exchange feeds*), keeping its percentage.
+- **Graduated:** a full gold bar 🎓. New hires on their 24-hour trial show up here too.
+
 ### The hiring center, and new hires start in training (v13.77)
 
 A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has (every hour, or when you tap **Search now**) and files an **application** for each ready-built agent that would fill one. Applications wait in **Settings → Admin → Hiring center**. Each says **why now** (the evidence from the team's own data), **what it would do** and **what it can't**. **Approve** hires it onto the team; **decline** and it won't apply again for a week; **Let go** removes a hire. Kept in `DATA_DIR/hiring.json`.

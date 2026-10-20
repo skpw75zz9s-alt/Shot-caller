@@ -130,6 +130,22 @@
   .log .tag { font: 700 9px var(--mono); letter-spacing: .08em; color: #05070d; background: var(--warn); border-radius: 4px; padding: 1px 4px; }
   .log li.s-warn .who > span:first-child { color: var(--warn); } .log li.s-busy .who > span:first-child { color: var(--busy); }
   .log .empty { color: var(--dim); }
+  /* the road to graduation (the Training room) */
+  .road { margin: 8px 2px 2px; padding: 10px 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+  .road h3 { margin: 0 0 8px; font: 700 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+  .road ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+  .rd { display: grid; grid-template-columns: 150px 1fr; grid-template-rows: auto auto; column-gap: 10px; align-items: center; font-size: 11.5px; }
+  .rd-n { grid-row: span 2; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rd-bar { position: relative; height: 10px; border-radius: 99px; background: #1a2336; overflow: hidden; }
+  .rd-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: linear-gradient(90deg, #0e7490, var(--busy)); box-shadow: 0 0 10px #22d3ee66; transition: width .8s cubic-bezier(.2,.8,.2,1); }
+  .rd-bar b { position: absolute; top: 0; bottom: 0; width: 1px; background: #05070d88; }
+  .rd-l { color: var(--muted); margin-top: 2px; } .rd-l em { font-style: normal; font: 700 11px var(--mono); color: var(--text); }
+  .rd.graduated .rd-bar i { background: linear-gradient(90deg, #b8862b, var(--gold)); box-shadow: 0 0 12px #f5c86b88; } .rd.graduated .rd-l { color: var(--gold); }
+  .rd.judging .rd-bar i { background: linear-gradient(90deg, #0d9466, var(--ok)); animation: pulse 1.4s ease-in-out infinite; } .rd.judging .rd-l { color: var(--ok); }
+  .rd.scheduled .rd-bar i { background: repeating-linear-gradient(45deg, #22d3ee22 0 8px, #22d3ee44 8px 16px); box-shadow: none; }
+  .rd.blocked .rd-bar i { background: repeating-linear-gradient(45deg, #fbbf2433 0 8px, #fbbf2477 8px 16px); box-shadow: none; } .rd.blocked .rd-l { color: var(--warn); }
+  .rd.silent { opacity: .55; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
   .pts { margin-left: auto; font: 700 12px var(--mono); } .pts.up { color: var(--ok); } .pts.dn { color: var(--no); }
   .emp.star::before { content: '🏆'; position: absolute; top: 0; left: 6px; font-size: 14px; z-index: 2; filter: drop-shadow(0 0 6px #f5c86b); }
   .log a { color: var(--text); text-decoration: none; } .log a:hover { text-decoration: underline; }

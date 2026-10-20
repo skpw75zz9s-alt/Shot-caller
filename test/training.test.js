@@ -51,3 +51,22 @@ test('in the team: the pace is measured, and a trainee that proves itself pays i
   assert.equal(r1.tr_l_blend.score.day < 50, true); assert.ok(r2.tr_l_blend.score.day >= 50, 'graduation pays the trainer +50 (plus any hour on the job)');
   assert.ok(r2.l_blend.score.day >= 50, 'the trainee its own +50 (plus an hour on the job)');
 });
+
+test('the road to graduation: every trainee\'s stage, how far along, and the time to go', () => {
+  const roster = [
+    { role: 'l_blend', name: 'Kalshi blender', state: 'idle', status: 'On probation: 40/150 rounds' },
+    { role: 'l_basis', name: 'Settlement matcher', state: 'idle', status: 'On probation: 10 of 10 settlements' },
+    { role: 'l_tune', name: 'Indicator tuner', state: 'idle', status: 'On probation: no setting has predicted the rounds yet' },
+    { role: 'l_voltune', name: 'Volatility tuner', state: 'busy', status: 'In the calls: EWMA 0.94' },
+    { role: 'l_micro', name: 'Micro modeler', state: 'idle', status: 'On probation: …' },
+    { role: 'l_cal', name: 'Calibrator', state: 'idle', status: 'Not reporting for this market' },
+    { role: 'exchanges', name: 'Exchange runner', dept: 'desk', state: 'warn', status: '0 of 14 exchange feeds live' },
+  ];
+  const r = Object.fromEntries(trainerRows(roster, { progress: { l_micro: { n: 120, need: 500, what: 'graded predictions' } }, pace: { l_blend: 4 } }).map((x) => [x.trainee, x.road]));
+  assert.deepEqual({ ...r.l_blend, pct: Math.round(r.l_blend.pct), eta: Math.round(r.l_blend.eta) }, { trainee: 'l_blend', name: 'Kalshi blender', stage: 'probation', pct: 27, n: 40, need: 150, what: 'rounds', eta: 28 });
+  assert.equal(r.l_basis.stage, 'judging'); assert.equal(r.l_basis.pct, 100);
+  assert.equal(r.l_tune.stage, 'scheduled'); assert.equal(r.l_tune.pct, null, 'no counter: no made-up percentage');
+  assert.equal(r.l_voltune.stage, 'graduated'); assert.equal(r.l_voltune.pct, 100);
+  assert.equal(r.l_micro.stage, 'blocked'); assert.equal(r.l_micro.why, 'the exchange feeds'); assert.equal(r.l_micro.pct, 24);
+  assert.equal(r.l_cal.stage, 'silent');
+});

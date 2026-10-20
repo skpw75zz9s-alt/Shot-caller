@@ -37,20 +37,22 @@ export function trainerRows(roster, { progress = {}, pace = {} } = {}) {
     const left = p ? Math.max(0, p.need - p.n) : null, eta = left && rate > 0 ? left / rate : null;
     const where = p ? `${fmt(p.n)} of ${fmt(p.need)}${p.what ? ` ${p.what}` : ''} (${Math.min(100, Math.round((p.n / p.need) * 100))}%)` : null;
     const row = { role: `tr_${role}`, name: `${name} trainer`, job: `trains the ${name} toward its proof`, dept: 'train', trainer: true, trainee: role, talks: [] };
-    if (/^Not reporting/.test(t.status || '')) return { ...row, state: 'idle', status: `${name} isn't reporting: nothing to train on`, key: 'none' };
+    // the road to graduation (the live window's bar): stage, how far along, and the time to go when it's measurable
+    const road = (stage, extra = {}) => ({ trainee: role, name, stage, pct: p ? Math.min(100, (p.n / p.need) * 100) : null, n: p?.n ?? null, need: p?.need ?? null, what: p?.what ?? '', eta, ...extra });
+    if (/^Not reporting/.test(t.status || '')) return { ...row, state: 'idle', status: `${name} isn't reporting: nothing to train on`, key: 'none', road: road('silent') };
     if (proven) {
       row.talks.push({ to: role, text: 'You proved yourself. You stay in the calls only while you keep proving it, so keep at it.' });
-      return { ...row, state: 'ok', status: t.hire ? `${name} graduated its trial: a full member of the team.` : `${name} graduated: proven and shaping the calls. Watching that it keeps proving itself.`, key: 'grad', say: `${name} graduated` };
+      return { ...row, state: 'ok', status: t.hire ? `${name} graduated its trial: a full member of the team.` : `${name} graduated: proven and shaping the calls. Watching that it keeps proving itself.`, key: 'grad', say: `${name} graduated`, road: road('graduated', { pct: 100 }) };
     }
     if (blocked.length) {
       for (const [dep, what] of blocked) row.talks.push({ to: `fx_${by[dep].dept}`, text: `My trainee, the ${name}, can't gather data without ${what} (${by[dep].name}: ${by[dep].status}).` });
       row.talks.push({ to: role, text: `You can't train right now: ${blocked.map(([, what]) => what).join(' and ')} ${blocked.length === 1 ? 'is' : 'are'} down. I've told the fixer.` });
-      return { ...row, state: 'warn', status: `Blocked: the ${name} can't gather data without ${blocked.map(([, what]) => what).join(' and ')}${where ? ` · at ${where}` : ''}`, key: `blocked:${blocked.map(([d]) => d).join(',')}`, say: `${name} is blocked` };
+      return { ...row, state: 'warn', status: `Blocked: the ${name} can't gather data without ${blocked.map(([, what]) => what).join(' and ')}${where ? ` · at ${where}` : ''}`, key: `blocked:${blocked.map(([d]) => d).join(',')}`, say: `${name} is blocked`, road: road('blocked', { why: blocked.map(([, what]) => what).join(' and ') }) };
     }
     const status = where
       ? `On probation · ${where}${left === 0 ? ' · the bar is reached: it\'s judged on its next test' : eta != null ? ` · about ${hrs(eta)} to go at this pace` : ' · not moving yet: it needs new rounds'}`
       : 'On probation · its test reruns on new data on its own schedule; there\'s no counter to push, and rerunning it to fish for a pass would be cheating';
     row.talks.push({ to: role, text: where ? `You're at ${where}${eta != null ? `: about ${hrs(eta)} to go` : ''}. Every new graded round counts; there's no shortcut.` : 'Your test reruns on new data on its own. No shortcuts: you prove yourself on rounds you never saw.' });
-    return { ...row, state: 'busy', status, key: `${p ? Math.floor((p.n / p.need) * 10) : 'x'}:${left === 0}` };
+    return { ...row, state: 'busy', status, key: `${p ? Math.floor((p.n / p.need) * 10) : 'x'}:${left === 0}`, road: road(!p ? 'scheduled' : left === 0 ? 'judging' : 'probation') };
   });
 }

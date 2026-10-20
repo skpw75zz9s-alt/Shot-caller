@@ -43,7 +43,7 @@ function build(roster) {
     if (!team.length) return '';
     return `<section class="room ${team.length >= 8 ? 'wide' : team.length <= 3 ? 'half' : ''}" data-dept="${d}">
       <h2><span>${esc(name)}</span><em id="rw-${d}"></em></h2>
-      <div class="desks">${team.map(empHTML).join('')}</div></section>`;
+      <div class="desks">${team.map(empHTML).join('')}</div>${d === 'train' ? '<div class="road"><h3>🎓 Road to graduation</h3><ol id="roadList"></ol></div>' : ''}</section>`;
   };
   $('rooms').innerHTML = FLOORS.map(([f, fname, ds]) => {
     const helper = roster.find((r) => r.helper && r.floor === f);
@@ -149,6 +149,15 @@ function render(t) {
     $('news').innerHTML = ev + hl || `<li><span class="empty">${esc(ns.status)}</span></li>`;
     $('newsWhen').textContent = ns.state === 'off' ? 'off' : '';
   }
+  // the road to graduation: every trainee's bar (training.js road), closest to its proof first, graduates at the end
+  const roads = t.roster.filter((r) => r.trainer && r.road).map((r) => r.road), ORDER = { judging: 0, probation: 1, blocked: 2, scheduled: 3, silent: 4, graduated: 5 };
+  roads.sort((a, b) => ORDER[a.stage] - ORDER[b.stage] || (b.pct ?? -1) - (a.pct ?? -1));
+  const hrs = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
+  if ($('roadList')) $('roadList').innerHTML = roads.map((r) => {
+    const label = r.stage === 'graduated' ? 'Graduated 🎓' : r.stage === 'judging' ? 'Bar reached: judged on its next test' : r.stage === 'blocked' ? `Blocked: needs ${esc(r.why)}` : r.stage === 'scheduled' ? 'No counter: judged on its own schedule, no shortcuts' : r.stage === 'silent' ? 'Not reporting' : `${(r.n ?? 0).toLocaleString('en-US')} of ${(r.need ?? 0).toLocaleString('en-US')} ${esc(r.what)}${r.eta != null ? ` · about ${hrs(r.eta)} to go` : ' · not moving yet'}`;
+    const w = ['graduated', 'judging', 'scheduled', 'blocked'].includes(r.stage) ? 100 : r.pct ?? 0; // blocked and no-counter: a full striped bar (its % stays in the label)
+    return `<li class="rd ${r.stage}"><span class="rd-n">${TEAM_ICON[r.trainee] || '•'} ${esc(r.name)}</span><span class="rd-bar" role="progressbar" aria-valuenow="${Math.round(w)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${w.toFixed(1)}%"></i><b style="left:25%"></b><b style="left:50%"></b><b style="left:75%"></b></span><span class="rd-l">${r.pct != null && r.stage !== 'graduated' ? `<em>${Math.floor(r.pct)}%</em> ` : ''}${label}</span></li>`;
+  }).join('') || '<li class="empty">No trainees right now.</li>';
   const mgr = byRole.manager;
   // merit pay: the leaderboard (public/incentives.js)
   const lb = mgr?.leaderboard, sg = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
