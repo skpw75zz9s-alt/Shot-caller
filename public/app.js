@@ -43,7 +43,8 @@ import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
-window.SC_BOOT = '215'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { createPhoneTrade } from './phonetrade.js';
+window.SC_BOOT = '216'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -391,6 +392,7 @@ const clock = (t) => TIME_FMT.format(t);
 const int = (v) => INT_FMT.format(Math.round(v));
 let undoTimer = null;
 let autopilot = null; // the Auto-trader (public/autopilot.js), made once the key store is ready
+let phoneTrade = null; // the Auto-trader on this phone (public/phonetrade.js)
 function toast(text, undo) {
   setText($('toastText'), text);
   setHidden($('toastUndo'), !undo);
@@ -3433,7 +3435,9 @@ if (store.get('steadyNote', false)) { store.set('steadyNote', false); setTimeout
 { const last = store.get(LK('lastSpot'), null); // this market's own last price (v13.42.2: it used to be shared, so a switch showed BTC's price on DOGE)
   if (last && Date.now() - last.t < 15 * 60000 && !state.spot) { state.spot = last.p; renderTicker(null); } }
 loadKalshi();
-autopilot = createAutopilot({ $, esc, API, toast, paywalled });
+// the Auto-trader on this phone (phonetrade.js): signs with the Kalshi key linked here, which never leaves the phone
+phoneTrade = createPhoneTrade({ API, cred: () => state.kalshi, onChange: () => { if (autopilot) autopilot.refresh(); } });
+autopilot = createAutopilot({ $, esc, API, toast, paywalled, phone: phoneTrade });
 try { sessionStorage.removeItem('sc_restore'); } catch { /* the app loaded, so any restore worked: re-arm the paywall's auto sign-in */ }
 loadAccess();
 liveConnect();

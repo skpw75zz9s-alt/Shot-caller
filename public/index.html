@@ -72,6 +72,7 @@
   <link rel="modulepreload" href="blip.js">
   <link rel="modulepreload" href="strength.js">
   <link rel="modulepreload" href="team.js">
+  <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -602,16 +603,18 @@
       </div>
       <div class="card push-card at-card" id="atCard">
         <h3>Auto-trader</h3>
+        <div class="risk-btns at-where" id="atWhere" aria-label="Where it runs"></div>
+        <p class="fine" id="atWhereNote"></p>
         <p id="atStatus" class="push-status">Off.</p>
         <div class="risk-btns at-modes" id="atModes"></div>
         <p class="fine"><b>Test</b> trades the bot's official calls (Profit level) on Kalshi's live prices with pretend money: nothing is sent.
           <b>Demo</b> sends real orders to Kalshi's demo exchange (fake money). <b>Live</b> uses real money and unlocks after Test runs clean.
           It buys only the bot's locked calls, sells on its SELL HIGH / BAIL signals, and only uses orders that fill right away or cancel,
-          sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. It runs on the server around the clock: close the app and it keeps going.</p>
+          sized to your cash with Kalshi's fee included, so nothing sits on Kalshi holding money. On this phone, Demo isn't offered (it uses the key linked here).</p>
         <div class="num-grid" id="atLimits"></div>
         <div class="pos-grid at-today" id="atToday"></div>
         <div class="pos-btns"><button id="atStop" class="stop-btn" hidden>STOP</button><button id="atResume" hidden>Resume</button><button id="atResetTest" class="ghost">Reset Test</button></div>
-        <h4>Keys on the server</h4>
+        <h4 id="atKeyH">Keys on the server</h4>
         <p class="push-status" id="atKeyStatus"></p>
         <div id="atKeyForm">
           <div class="adm-row"><label>Which key<select id="atKeyEnv"><option value="live">Kalshi (real money)</option><option value="demo">Kalshi demo (fake money)</option></select></label></div>
@@ -648,7 +651,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.67 · Whole staff</p>
+      <p class="fine" id="version">Shot Caller v13.68 · Phone trader</p>
     </section>
   </main>
 
@@ -689,7 +692,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '215';
+    window.SC_BUILD = '216';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

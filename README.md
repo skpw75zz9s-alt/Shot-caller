@@ -276,6 +276,18 @@ Security:
 
 ## Version notes (newest first)
 
+### Auto-trade on your phone, the key never leaves it (v13.68)
+
+The Auto-trader can now run **on this phone** instead of the server, so you can auto-trade **without giving the server your Kalshi key** (and without setting `KEY_SECRET` in Railway). Settings → Auto-trader → **On this phone**.
+
+- **The key stays on the phone.** It uses the key you link in Settings → Kalshi account: stored as a non-extractable WebCrypto key, so it can sign but nothing (not even the app) can read it back out. Every order is signed on the phone. The server only forwards the signed order to Kalshi, after the same check it gives every order (`validateOrder`: BTC 15-minute markets only, fill-now-or-cancel, the $100 cap, at most 30 orders a minute). It never sees the key.
+- **The same trader, the same calls.** It runs the exact executor the server uses (`public/trader.js`: the sizing, the no-double-buy and never-oversell rules, the error stops), on the same official call. Every 4 seconds the phone asks the server (`POST /api/auto/feed`) for what the server's own traders get each tick: the official call, the round, a sell check (SELL HIGH / BAIL) for each position the phone holds, and any results the server already knows.
+- **Modes: Off, Test, Live.** Test needs no key (a simulator on Kalshi's live book). Live unlocks after 10 clean Test trades *on this phone*, needs the linked key to have **trading permission**, and asks you to confirm. No Demo on the phone: it uses the key linked here.
+- **Never both.** It won't go Live while your Auto-trader on the server is on in Demo or Live, and if that one comes on later, the phone pauses rather than both buying. The card runs one place at a time: turn one off before switching.
+- **The catch: it only trades while the app is open.** A phone freezes a web app in the background, so with the app closed or the screen locked nothing is bought **or sold** (open positions still settle on Kalshi). It keeps the screen awake while it runs where the phone allows it, and when you come back it says how long it was closed. For trading around the clock with the phone off, use the server option.
+
+Built on `public/phonetrade.js` (and `test/phonetrade.test.js`: the full Live flow against a fake server and Kalshi that verify every signature like Kalshi does; the key appears in no request and nothing saved).
+
 ### The whole staff, talking (v13.67)
 
 The bot team grew from 9 to **48 teammates**, one for **every real part of the bot**, in ten departments: the Market desk (price, Kalshi's book, the exchange feeds, the tape, futures, liquidations, related markets, money flows, the market finder), the Research lab (one researcher per learner: volatility, momentum, calibration, the Kalshi blend, the scan, the micro model, indicators, reversals, the forecaster, the predictor, the call filter, the flip check), the X-ray room (with the Proof clerk), the Council chamber (with the Records keeper), the Call desk (early, late and near-certain calls), the Risk office (the win-rate guard, the profit guard, the Fee checker, the Auditor), the Trading floor, the Grading room (the Settlement clerk, the Tune-up mechanic), the Newsroom (push, Ask) and Operations (the Archivist, the Night watch).
@@ -1643,7 +1655,7 @@ Settings → **Auto-trader**. It buys the bot's **Steady** calls (the server's o
 | **Demo** | Real orders on Kalshi's demo exchange (fake money), with a demo key from demo.kalshi.co |
 | **Live** | Real orders, real money, with your Kalshi key (needs trading permission). Locked until Test has settled 10 trades without a serious error, then asks you to confirm |
 
-**One-time setup: `KEY_SECRET`.** The server only holds Kalshi keys if it has this secret.
+**One-time setup: `KEY_SECRET`.** The server only holds Kalshi keys if it has this secret. (Not needed to run it **on this phone** instead, v13.68: the key stays on the phone.)
 1. In Railway, open the service → **Variables** → **New Variable**.
 2. Name it `KEY_SECRET` and give it a long random value (32+ characters; a password manager's generator is fine).
 3. Redeploy, then give the server your key in the Auto-trader card ("Keys on the server").

@@ -216,3 +216,12 @@ test('the live bot-team window and its data: the admin only, paywall or not', as
   assert.ok(t.roster.length >= 45, 'the whole staff'); assert.ok(Array.isArray(t.feed) && Array.isArray(t.talk)); assert.ok('pulse' in t);
   assert.equal(t.markets[0].series, t.series, 'the home market first, and the default');
 });
+
+test('the phone\'s own Auto-trader feed: the call and sell checks for what the phone holds, junk ignored, the server trader\'s mode', async () => {
+  const r = await fetch(`${app}/api/auto/feed`, { method: 'POST', body: JSON.stringify({ open: [{ ticker: 'KXBTC15M-26OCT201300-00', side: 'YES', price: 0.6, count: 3, closeTime: new Date(Date.now() + 6e5).toISOString(), at: 1 }, { ticker: '../x', side: 'UP' }, null] }) });
+  assert.equal(r.status, 200);
+  const f = await r.json();
+  assert.equal(typeof f.ready, 'boolean'); assert.equal(f.server, 'off');
+  if (f.ready) { assert.ok('sig' in f && 'live' in f); assert.ok(Object.keys(f.checks).every((t) => t === 'KXBTC15M-26OCT201300-00')); }
+  assert.equal((await fetch(`${app}/api/auto/feed`)).status, 405, 'POST only');
+});

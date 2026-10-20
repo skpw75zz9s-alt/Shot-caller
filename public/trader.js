@@ -109,6 +109,16 @@ export function sizeBuy({ want, price, cash, held = 0, perTrade, room, depth = I
 }
 
 // What kind of failure an order hit, and what to do about it
+// Kalshi's answer to an order -> { filled, avgPrice, fees, orderId }: its own numbers when it gives them (the real fee and
+// average price; else booked at the max price, the worst case). No fill count: thrown as an unknown outcome, so the
+// trader reads the position back (the server's Auto-trader and the phone's, phonetrade.js, read it the same way)
+export function placedFrom(out) {
+  const x = out?.order || out || {}, num = (v) => (v == null || v === '' ? null : Number(v)), cents = (v) => (num(v) == null ? null : num(v) / 100);
+  const filled = num(x.fill_count_fp) ?? num(x.fill_count) ?? num(x.taker_fill_count);
+  if (filled == null || Number.isNaN(filled)) throw { status: 0, message: 'Kalshi answered without a fill count' }; // checked by position
+  const fee = num(x.taker_fees_dollars) ?? cents(x.taker_fees), cost = num(x.taker_fill_cost_dollars) ?? cents(x.taker_fill_cost);
+  return { filled, avgPrice: filled > 0 && cost != null && cost > 0 ? cost / filled : null, fees: fee, orderId: x.order_id ?? null };
+}
 export function classify(err) {
   const s = err?.status ?? 0, text = `${err?.code || ''} ${err?.message || ''}`.toLowerCase();
   if (/insufficient|balance/.test(text)) return 'cash';            // re-read the cash and try smaller

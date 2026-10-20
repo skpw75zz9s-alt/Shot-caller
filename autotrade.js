@@ -10,12 +10,11 @@
 import crypto from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { MODES, TRADER_DEFAULTS, cleanLimits, createTestExchange, createTrader, liveUnlocked, parseBook } from './public/trader.js';
+import { MODES, TRADER_DEFAULTS, cleanLimits, createTestExchange, createTrader, liveUnlocked, parseBook, placedFrom } from './public/trader.js';
 import { positionCheck } from './public/engine.js';
 import { balanceDollars, parsePosition } from './public/kalshi.js';
 
 const KEY_ENVS = ['live', 'demo'];
-const n = (v) => (v == null || v === '' ? null : Number(v));
 
 // ---------- the vault ----------
 export function createVault(secret) {
@@ -90,16 +89,9 @@ function kalshiExchange(k, cred, validateOrder, onFee = () => {}) {
     async place(o) {
       const bad = validateOrder(o);
       if (bad) throw { status: 422, code: 'refused_by_shot_caller', message: `order refused: ${bad}` };
-      const out = await k.req('POST', '/portfolio/events/orders', { cred: cred(), body: o });
-      const x = out.order || out;
-      const filled = n(x.fill_count_fp) ?? n(x.fill_count) ?? n(x.taker_fill_count);
-      if (filled == null || Number.isNaN(filled)) throw { status: 0, message: 'Kalshi answered without a fill count' }; // checked by position
-      // Kalshi's own numbers when it gives them: the real fee and average price (else booked at the max price, the worst case)
-      const cents = (v) => (n(v) == null ? null : n(v) / 100);
-      const fee = n(x.taker_fees_dollars) ?? cents(x.taker_fees), cost = n(x.taker_fill_cost_dollars) ?? cents(x.taker_fill_cost);
-      const avgPrice = filled > 0 && cost != null && cost > 0 ? cost / filled : null;
-      if (filled > 0 && fee != null) { try { onFee({ id: x.order_id ? `ord-${x.order_id}` : undefined, count: filled, price: avgPrice ?? Number(o.price), fee, taker: true }); } catch { /* learning only */ } }
-      return { filled, avgPrice, fees: fee, orderId: x.order_id ?? null };
+      const r = placedFrom(await k.req('POST', '/portfolio/events/orders', { cred: cred(), body: o }));
+      if (r.filled > 0 && r.fees != null) { try { onFee({ id: r.orderId ? `ord-${r.orderId}` : undefined, count: r.filled, price: r.avgPrice ?? Number(o.price), fee: r.fees, taker: true }); } catch { /* learning only */ } }
+      return r;
     },
   };
 }

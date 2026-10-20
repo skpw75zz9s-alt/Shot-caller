@@ -24,6 +24,7 @@ import { createFutures } from './futures.js';
 import { createMicroFeed } from './microfeed.js';
 import { createFlowsFeed } from './flowsfeed.js';
 import { liqSummary, positioning } from './public/xray.js';
+import { positionCheck } from './public/engine.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
@@ -81,6 +82,7 @@ export const discordRoles = createDiscordRoles({ file: join(DATA_DIR, 'discord-r
 // The Auto-trader runs here, around the clock (autotrade.js). KEY_SECRET (a Railway variable, never stored) encrypts
 // the Kalshi keys it holds.
 export let autotrade = null; // made below, once validateOrder exists
+let homeTick = null, phoneFeedAt = 0; // the home bot's last tick { snap, sig, known }, and when a phone last asked for it (phoneFeed)
 export let crossFeed = null; // made below, with the price layer (the home bot's hooks read it once it exists)
 // The Round scan runs here too, streaming the five exchanges and grading itself every round (scanfeed.js)
 // BTC futures as a leading signal (futures.js): extra Round scan inputs and Market watch events
@@ -127,9 +129,10 @@ export const bot = createBot({
     try { volTuneFeed.observe(); } catch (e) { console.error('volatility tuning step failed', e.message); }
     try { playbook.observe(o); } catch (e) { console.error('reversal watch step failed', e.message); }
     try { crossFeed?.observe('BTC', o); } catch (e) { console.error('related markets step failed', e.message); }
+    homeTick = o; // the phone's own Auto-trader reads the same tick (phoneFeed)
     autotrade?.step(o);
   },
-  keepAlive: () => (autotrade?.running() ?? 0) > 0,
+  keepAlive: () => (autotrade?.running() ?? 0) > 0 || Date.now() - phoneFeedAt < 60000, // a phone trading on its own key needs the ticks too
   liveSpot: () => scanFeed.spot(),
   // every proven nudge argues its case to the council, which vetoes the invalid ones and nets the rest (council.js)
   shifts: () => council.decide(HOME.series, [['scan', scanFeed.shifts()], ['micro', microFeed?.shifts()], ['tune', tuneFeed.shifts()], ['playbook', playbook.shifts()], ['cross', crossFeed?.shifts('BTC')], ['flip', flipFeed.shifts()], ['flows', flowsFeed.shifts()]]),
@@ -313,12 +316,37 @@ async function autoApi(req, res, action, token) {
   if (action === 'state' && req.method === 'GET') return send(res, 200, autotrade.state(owner));
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);
+  if (action === 'feed') { phoneFeedAt = Date.now(); bot.start(); return send(res, 200, phoneFeed(owner, body)); }
   const out = action === 'key' ? await autotrade.setKey(owner, body)
     : action === 'key-delete' ? await autotrade.deleteKey(owner, body)
     : action === 'config' ? await autotrade.configure(owner, body)
     : await autotrade.control(owner, action);
   if (action === 'config' || action === 'key') bot.start(); // make sure the loop is running
   send(res, out.status, out.body);
+}
+
+// The phone's own Auto-trader (v13.68, public/phonetrade.js): the key stays on the phone and signs each order there; the
+// server never sees it. Every few seconds the phone asks for what the server's own traders get each tick: the official
+// call, the round, a sell check for each position the phone holds (positionCheck, exactly as the server checks its
+// own), the results it already knows, and whether this person's server Auto-trader is on (so the two never both buy).
+const phonePos = new Map(); // owner -> Map(id -> the position positionCheck tracks between ticks: its peaks, how long a sell has held)
+const TICKER_RE = /^[A-Z0-9]+-[A-Z0-9-]{1,60}$/;
+function phoneFeed(owner, body) {
+  const o = homeTick, server = autotrade.state(owner).cfg.mode;
+  if (!o?.snap) return { ready: false, server };
+  const open = (Array.isArray(body?.open) ? body.open : []).slice(0, 20)
+    .filter((p) => p && TICKER_RE.test(p.ticker) && (p.side === 'YES' || p.side === 'NO') && p.count > 0 && p.price > 0 && p.price < 1 && Number.isFinite(Date.parse(p.closeTime)));
+  const mine = phonePos.get(owner) ?? new Map(), keep = new Map(), checks = {}, results = {};
+  for (const p of open) {
+    const id = `${p.ticker}:${p.at}`, pos = mine.get(id) ?? { id, ticker: p.ticker, side: p.side, price: p.price, closeTime: p.closeTime, at: p.at, fees: Number(p.fees) || 0, peakBid: null, peakP: null };
+    pos.contracts = p.count; keep.set(id, pos);
+    try { const c = positionCheck(pos, o.snap, {}, o.snap.now); checks[p.ticker] = { bid: c.bid, ex: c.ex }; } catch { /* no check this tick */ }
+    const r = o.known?.get?.(p.ticker);
+    if (r === 'yes' || r === 'no') results[p.ticker] = r;
+  }
+  phonePos.set(owner, keep);
+  if (phonePos.size > 5000) phonePos.delete(phonePos.keys().next().value);
+  return { ready: true, live: o.snap.live ?? null, sig: o.sig ?? null, checks, results, at: o.snap.now, server };
 }
 
 async function readBody(req) {
