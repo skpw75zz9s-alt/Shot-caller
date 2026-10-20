@@ -12,3 +12,7 @@ ad3-music.wav
 ad3-cuts.json
 ad4-music.wav
 ad4-cuts.json
+ad5-music.wav
+ad5-seg-*.mp4
+ad5-clean.mp4
+ad5-w*.log
