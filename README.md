@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### The road to graduation on the Deck too (v13.79)
+
+The **🎓 Road to graduation** bars (v13.78) were only in the admin's live window (Watch them live → Lab floor → Training room). They're now also on the Deck's **Bot team** card, for everyone with Pro, with a count of how many trainees have graduated (*0 of 15 graduated*). Both places draw from one renderer (`training.js` `roadHtml`), so they always show the same thing.
+
 ### Road to graduation (v13.78)
 
 The Training room in the live window now has a **🎓 Road to graduation** panel: a bar for every trainee, closest to its proof first.

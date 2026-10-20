@@ -1247,3 +1247,19 @@ body.split .blip { display: none; }
 .hire-app { padding: 10px 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line, #1a2336); }
 .hire-app .hire-h { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; } .hire-app .hire-h small { color: var(--dim); }
 .hire-app p { margin: 4px 0; font-size: 12.5px; line-height: 1.45; }
+
+/* the road to graduation (v13.79, training.js roadHtml): the Bot team card; the live window has its own copy of these rules */
+.team-road { margin: 4px 0 10px; } .team-road summary { cursor: pointer; font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #f5c86b; padding: 4px 0; }
+.team-road summary small { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.road-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 7px; }
+.rd { display: grid; grid-template-columns: 112px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; font-size: 11.5px; }
+.rd-n { grid-row: span 2; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-bar { position: relative; height: 9px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
+.rd-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: linear-gradient(90deg, #0e7490, var(--accent)); }
+.rd-bar b { position: absolute; top: 0; bottom: 0; width: 1px; background: #05070d88; }
+.rd-l { color: var(--muted); margin-top: 2px; line-height: 1.3; } .rd-l em { font-style: normal; font: 700 11px var(--mono); color: var(--text); }
+.rd.graduated .rd-bar i { background: linear-gradient(90deg, #b8862b, #f5c86b); } .rd.graduated .rd-l { color: #f5c86b; }
+.rd.judging .rd-bar i { background: linear-gradient(90deg, #0d9466, var(--yes)); } .rd.judging .rd-l { color: var(--yes); }
+.rd.scheduled .rd-bar i { background: repeating-linear-gradient(45deg, #22d3ee22 0 8px, #22d3ee44 8px 16px); }
+.rd.blocked .rd-bar i { background: repeating-linear-gradient(45deg, #fbbf2433 0 8px, #fbbf2477 8px 16px); } .rd.blocked .rd-l { color: var(--amber); }
+.rd.silent { opacity: .55; }

@@ -43,8 +43,9 @@ import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
+import { roadHtml } from './training.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '227'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '228'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2331,6 +2332,10 @@ async function refreshTeam() {
   const staff = t.roster.filter((r) => !r.lead), staffWarn = staff.filter((r) => r.state === 'warn');
   setHTML($('teamList'), t.roster.filter((r) => r.lead).map((r) => `<li class="team-r ${r.state}"><i aria-hidden="true">${TEAM_ICON[r.role] || '•'}</i><div><b>${esc(r.name)}</b><small>${esc(r.job)}</small><p>${esc(r.status)}</p></div><em class="team-dot" title="${r.state}"></em></li>`).join('')
     + (staff.length ? `<li class="team-r ${staffWarn.length ? 'warn' : 'ok'}"><i aria-hidden="true">👥</i><div><b>${staff.length} more on the staff</b><small>each owns one part</small><p>${staffWarn.length ? esc(staffWarn.slice(0, 3).map((r) => `${r.name}: ${r.status}`).join(' · ')) : `${staff.filter((r) => r.state === 'busy').length} acting, nothing to flag`}</p></div><em class="team-dot"></em></li>` : ''));
+  // the road to graduation (training.js): every trainee's bar, the same as the live window's Training room
+  const road = roadHtml(t.roster, { icon: TEAM_ICON, esc }), trainees = t.roster.filter((r) => r.trainer && r.road);
+  setHidden($('teamRoadBox'), !road);
+  if (road) { setHTML($('teamRoad'), road); setText($('teamRoadSum'), `${trainees.filter((r) => r.road.stage === 'graduated').length} of ${trainees.length} graduated`); }
   setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
 }
 setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);

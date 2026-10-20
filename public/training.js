@@ -56,3 +56,16 @@ export function trainerRows(roster, { progress = {}, pace = {} } = {}) {
     return { ...row, state: 'busy', status, key: `${p ? Math.floor((p.n / p.need) * 10) : 'x'}:${left === 0}`, road: road(!p ? 'scheduled' : left === 0 ? 'judging' : 'probation') };
   });
 }
+
+// the road to graduation as list items (the live window's Training room and the Deck's Bot team card share it):
+// closest to its proof first, graduates last. icon: { role: emoji }; esc: an HTML escaper
+const ORDER = { judging: 0, probation: 1, blocked: 2, scheduled: 3, silent: 4, graduated: 5 };
+export function roadHtml(roster, { icon = {}, esc = (x) => String(x ?? '') } = {}) {
+  const roads = roster.filter((r) => r.trainer && r.road).map((r) => r.road).sort((a, b) => ORDER[a.stage] - ORDER[b.stage] || (b.pct ?? -1) - (a.pct ?? -1));
+  return roads.map((r) => {
+    const label = r.stage === 'graduated' ? 'Graduated 🎓' : r.stage === 'judging' ? 'Bar reached: judged on its next test' : r.stage === 'blocked' ? `Blocked: needs ${esc(r.why)}` : r.stage === 'scheduled' ? 'No counter: judged on its own schedule, no shortcuts' : r.stage === 'silent' ? 'Not reporting'
+      : `${fmt(r.n ?? 0)} of ${fmt(r.need ?? 0)} ${esc(r.what)}${r.eta != null ? ` · about ${hrs(r.eta)} to go` : ' · not moving yet'}`;
+    const w = ['graduated', 'judging', 'scheduled', 'blocked'].includes(r.stage) ? 100 : r.pct ?? 0; // blocked and no-counter: a full striped bar (its % stays in the label)
+    return `<li class="rd ${r.stage}"><span class="rd-n">${icon[r.trainee] || '•'} ${esc(r.name)}</span><span class="rd-bar" role="progressbar" aria-valuenow="${Math.round(w)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${w.toFixed(1)}%"></i><b style="left:25%"></b><b style="left:50%"></b><b style="left:75%"></b></span><span class="rd-l">${r.pct != null && r.stage !== 'graduated' ? `<em>${Math.floor(r.pct)}%</em> ` : ''}${label}</span></li>`;
+  }).join('');
+}

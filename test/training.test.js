@@ -70,3 +70,17 @@ test('the road to graduation: every trainee\'s stage, how far along, and the tim
   assert.equal(r.l_micro.stage, 'blocked'); assert.equal(r.l_micro.why, 'the exchange feeds'); assert.equal(r.l_micro.pct, 24);
   assert.equal(r.l_cal.stage, 'silent');
 });
+
+test('the road as list items: closest to its proof first, graduates last, and escaped', async () => {
+  const { roadHtml } = await import('../public/training.js');
+  const roster = [
+    { trainer: true, road: { trainee: 'l_voltune', name: 'Volatility tuner', stage: 'graduated', pct: 100 } },
+    { trainer: true, road: { trainee: 'l_blend', name: 'Kalshi <blender>', stage: 'probation', pct: 26.7, n: 40, need: 150, what: 'rounds', eta: 28 } },
+    { trainer: true, road: { trainee: 'l_basis', name: 'Settlement matcher', stage: 'judging', pct: 100, n: 10, need: 10, what: 'settlements' } },
+    { role: 'price' },
+  ];
+  const html = roadHtml(roster, { icon: { l_blend: '🫗' }, esc: (x) => String(x).replace(/</g, '&lt;').replace(/>/g, '&gt;') });
+  assert.deepEqual([...html.matchAll(/class="rd (\w+)"/g)].map((m) => m[1]), ['judging', 'probation', 'graduated']);
+  assert.match(html, /🫗 Kalshi &lt;blender&gt;/); assert.match(html, /<em>26%<\/em> 40 of 150 rounds · about 28 h to go/); assert.match(html, /width:26\.7%/);
+  assert.equal(roadHtml([{ role: 'x' }]), '', 'no trainees: nothing');
+});
