@@ -276,6 +276,19 @@ Security:
 
 ## Version notes (newest first)
 
+### The Manager (v13.70)
+
+A 👔 **Manager** now watches every teammate on every reading and makes sure each one is **doing something, or has a stated reason not to**. Everyone lands in one of four groups:
+
+- **Working:** on it, acting or warning, and for the live readers (the Price clerk, the Analyst) the reading is still moving.
+- **Waiting for a reason:** idle with the reason on show, such as between rounds, on probation, or not enough data yet.
+- **Off by design:** for this market or this server, such as no futures for gold or Discord not set up.
+- **Stuck:** silent (not reporting), frozen (a live reading that hasn't changed in 2 minutes while a round is open), or a bot that has stopped ticking.
+
+The server keeps when each teammate's status last changed, so a frozen reading shows up. Anyone stuck gets a **Stuck** review on their sheet and a red **!** in the live window, and the Manager's line sits on a banner at the top: *24 of 55 working · 28 waiting for a reason · 3 off by design · nobody stuck*. It also talks: it tells each stuck teammate, and briefs every department through its lead (*Market desk: 5 of 10 working, 5 waiting*).
+
+No false alarms by design: between rounds nothing is called frozen, and Kalshi's quotes aren't held to it (they can rightly sit still for minutes). **The Manager reports; it doesn't fix.** Flagging a stuck part to you is the job.
+
 ### The Improvement crew (v13.69)
 
 Seven new teammates whose job is **the other teammates**. Each one grades a part of the team on its graded track record and tells each teammate it coaches what the record says: **helping**, **hurting**, **noise**, **still gathering data**, or **needs attention**. In the admin's live window they have their own room at the top of the office, their reviews show in each teammate's sheet, they talk to the teammates they coach, and a teammate they flag as hurting or broken gets a red **!**.

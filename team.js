@@ -12,6 +12,7 @@ const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
   stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, clock = () => Date.now(), everyMs = 5000 }) {
   const per = new Map(); // series -> { at, keys, roster, feed }
+  const act = new Map(); // series -> { role: when its status last changed } (the Manager: who's frozen)
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
   function read(series, now) {
     const b = book.get(series), bot = botOf(series), deb = council?.api?.(series), proof = breakLab?.api?.(series);
@@ -23,7 +24,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       debate: deb?.debate ?? null, pick: bot?.pick?.() ?? null,
       record: record && { profitGuard: record.profitGuard, guard: record.guard, graded: record.graded, wins: record.wins, usd: record.usd, early: record.early, late: record.late, certain: record.certain },
       learners: learners && learners.map((u) => ({ key: u.key, name: u.name, on: !!u.on, detail: u.detail })), strength: strength?.api?.(series), autotraders: autotraders(series), discord: discord?.status?.(), ask: askMode(),
-      parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
+      parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now), activity: act.get(series)?.at ?? {} },
       // what the Improvement crew grades (improve.js)
       council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result })),
     });
@@ -60,6 +61,9 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     const s = per.get(series) ?? { at: 0, keys: {}, roster: null, feed: [] };
     if (now - s.at < every) return;
     s.at = now; s.roster = read(series, now);
+    const a = act.get(series) ?? { text: {}, at: {} };
+    for (const r of s.roster) if (a.text[r.role] !== r.status) { a.text[r.role] = r.status; a.at[r.role] = now; }
+    act.set(series, a);
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
     per.set(series, s);

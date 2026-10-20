@@ -38,6 +38,9 @@
   .bar { height: 8px; border-radius: 99px; background: #ff4d6d33; overflow: hidden; }
   .bar i { display: block; height: 100%; width: 50%; background: var(--ok); border-radius: 99px; transition: width .8s cubic-bezier(.2,.8,.2,1); }
   .kv { text-align: right; } .kv b { display: block; font: 700 17px var(--mono); font-variant-numeric: tabular-nums; } .kv small { color: var(--dim); font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .mgr { margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid #f5c86b55; background: #f5c86b12; font-size: 12.5px; color: var(--text); }
+  .mgr b { color: var(--gold); margin-right: 4px; } .mgr.warn { border-color: #ff4d6d77; background: #ff4d6d14; } .mgr.warn b { color: var(--no); }
+  .room[data-dept="mgmt"] { border-color: #f5c86b77; }
   .counts { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; font: 700 11px var(--mono); }
   .counts span { padding: 3px 9px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
   .counts b { color: var(--text); } .counts .w b { color: var(--warn); } .counts .a b { color: var(--busy); }
@@ -172,6 +175,7 @@
         <div class="kv"><b id="pLeft">—</b><small>left</small></div>
         <div class="kv"><b id="pGap">—</b><small>vs target</small></div>
       </section>
+      <div class="mgr" id="mgr" hidden aria-live="polite"></div>
       <div class="counts" id="counts"></div>
       <section class="floor" aria-label="The office">
         <svg id="wires" aria-hidden="true"></svg>

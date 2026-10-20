@@ -28,8 +28,8 @@ test('the crew grades each part on its record and tells the teammate it coaches'
     parts: { autoTune: { on: true, everyH: 6, at: now - 2 * 3600000, changed: 1, of: 3, running: false }, learnerSince: { cal: now - 3 * 3600000 }, persistent: false },
   };
   const roster = teamRoster(x), r = by(roster), rv = (role, who) => r[role].reviews?.find((v) => v.by === who);
-  assert.deepEqual(roster.slice(0, CREW.length).map((c) => c.role), CREW.map(([k]) => k), 'the crew sits first, in its own room');
-  assert.ok(roster.slice(0, CREW.length).every((c) => c.dept === 'improve' && c.crew));
+  assert.deepEqual(roster.slice(1, 1 + CREW.length).map((c) => c.role), CREW.map(([k]) => k), 'the crew sits right after the Manager, in its own room');
+  assert.ok(roster.slice(1, 1 + CREW.length).every((c) => c.dept === 'improve' && c.crew));
   // the Tune-up runner: the one that acts, on the tune-up's own rule
   assert.match(r.tuner.status, /Last tune-up 2 h ago: proven settings in use on 1 of 3 markets · runs every 6 h · next in 4 h/);
   // the reviewer: the council's records, voice by voice

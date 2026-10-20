@@ -123,10 +123,12 @@ function render(t) {
     const e = $(`e-${r.role}`); if (!e) continue;
     for (const st of Object.keys(STATE_WORD)) e.classList.toggle(st, st === r.state);
     e.title = `${r.name} (${STATE_WORD[r.state]}): ${r.status}`;
-    e.classList.toggle('flagged', (r.reviews || []).some((v) => v.verdict === 'hurting' || v.verdict === 'broken')); // the crew flagged it
+    e.classList.toggle('flagged', (r.reviews || []).some((v) => v.verdict === 'hurting' || v.verdict === 'broken' || v.verdict === 'stuck')); // the crew or the Manager flagged it
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
   const n = (st) => t.roster.filter((r) => r.state === st).length;
+  const mgr = byRole.manager;
+  if (mgr) { const b = $('mgr'); b.hidden = false; b.className = `mgr ${mgr.state}`; b.innerHTML = `<b>👔 Manager</b> ${esc(mgr.status)}`; }
   $('counts').innerHTML = `<span><b>${t.roster.length}</b> on the team</span><span class="a"><b>${n('busy')}</b> acting</span><span class="w"><b>${n('warn')}</b> warning</span><span><b>${n('idle')}</b> waiting</span><span><b>${n('off')}</b> off</span><span><b>${talk.length}</b> lines of talk</span>`;
   // the round
   const p = t.pulse;
@@ -179,9 +181,9 @@ function sheet(role) {
   $('shName').innerHTML = `${TEAM_ICON[role] || ''} ${esc(r.name)}<span class="chip" style="color:${STATE_COLOR[r.state]}">${STATE_WORD[r.state]}</span>`;
   $('shSub').textContent = `${r.lead ? 'Lead · ' : ''}${dept} · ${r.job}`;
   $('shSt').textContent = r.status;
-  const VERDICT = { helping: ['helping', 'ok'], hurting: ['hurting', 'warn'], noise: ['noise', 'idle'], data: ['gathering data', 'idle'], broken: ['needs attention', 'warn'], ok: ['noted', 'busy'] };
+  const VERDICT = { stuck: ['stuck', 'warn'], helping: ['helping', 'ok'], hurting: ['hurting', 'warn'], noise: ['noise', 'idle'], data: ['gathering data', 'idle'], broken: ['needs attention', 'warn'], ok: ['noted', 'busy'] };
   const rv = (r.reviews || []).map((v) => `<div class="rv"><b>${TEAM_ICON[v.by] || ''} ${esc(byRole[v.by]?.name ?? v.by)}</b><span class="chip" style="color:${STATE_COLOR[VERDICT[v.verdict]?.[1] || 'idle']}">${VERDICT[v.verdict]?.[0] || v.verdict}</span><div>${esc(v.note)}</div></div>`).join('');
-  $('shRel').innerHTML = `${rv ? `<div class="rvs"><b>What the Improvement crew says</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
+  $('shRel').innerHTML = `${rv ? `<div class="rvs"><b>Reviews</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
   $('sheet').classList.add('open');
 }
 $('rooms').addEventListener('click', (e) => { const b = e.target.closest('.emp'); if (b) sheet(b.dataset.role); });
