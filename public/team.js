@@ -13,12 +13,21 @@ export const ROLES = [
   ['coach', 'Coach', 'grades and learns'],
   ['reporter', 'Reporter', 'posts and answers'],
 ];
+export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰' };
 const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);
 const sideOf = (s) => (s === 'YES' ? 'UP' : s === 'NO' ? 'DOWN' : s);
 
+// the round closing soonest that's still open
+const liveRow = (snap) => (snap?.rows || []).filter((r) => r.ev?.minutesLeft > 0).sort((a, b) => a.ev.minutesLeft - b.ev.minutesLeft)[0] ?? null;
+// the round's numbers for the live window's header: { ticker, spot, strike, pYes, minutesLeft } or null between rounds
+export function teamPulse(snap) {
+  const lv = liveRow(snap);
+  return lv ? { ticker: lv.m.ticker, spot: snap.mSpot ?? snap.spot ?? null, strike: lv.strike ?? null, pYes: lv.ev.pYes ?? null, minutesLeft: lv.ev.minutesLeft } : null;
+}
+
 // x: { now, snap, sig, watch, breaks, proven, debate, pick, record, learners, strength, autotraders, discord, ask }
 export function teamRoster(x) {
-  const now = x.now ?? Date.now(), snap = x.snap, lv = (snap?.rows || []).filter((r) => r.ev?.minutesLeft > 0).sort((a, b) => a.ev.minutesLeft - b.ev.minutesLeft)[0] ?? null;
+  const now = x.now ?? Date.now(), snap = x.snap, lv = liveRow(snap);
   const spot = snap?.mSpot ?? snap?.spot, sig = lv ? (lv.sigma ?? snap.sigmaMin) : null;
   const z = lv && spot > 0 && lv.strike > 0 && sig > 0 ? Math.log(spot / lv.strike) / (sig * Math.sqrt(lv.ev.minutesLeft)) : null;
   const R = {};

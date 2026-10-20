@@ -71,6 +71,7 @@
   <link rel="modulepreload" href="council.js">
   <link rel="modulepreload" href="blip.js">
   <link rel="modulepreload" href="strength.js">
+  <link rel="modulepreload" href="team.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
   <link rel="modulepreload" href="flipstudy.js">
@@ -176,6 +177,7 @@
       <!-- the signal board (v13.42, public/signals.js): every factor, where it stands with the calls, and what it says now -->
       <div data-pro class="card team-card" id="teamCard">
         <div class="deep-head"><span>Bot team</span><small id="teamWhen" class="muted"></small></div>
+        <a class="team-live" id="teamLive" href="team-live" target="_blank" rel="noopener" hidden>▶ Watch them live</a>
         <p class="fine-left muted">One teammate for every action the bot takes, and what each is doing right now.</p>
         <ul class="team-list" id="teamList"></ul>
         <div class="team-feed-h">What the team did</div>
@@ -571,6 +573,7 @@
       </div>
       <div class="card admin-card" id="adminCard" hidden>
         <h3>Admin</h3>
+        <a class="team-live" href="team-live" target="_blank" rel="noopener">▶ Watch the bot team live</a>
         <div class="adm-row"><label>Price ($)<input id="admPrice" inputmode="decimal"></label><label>Days<input id="admDays" inputmode="numeric"></label><button id="admSave">Save</button></div>
         <div class="adm-row"><input id="admCode" placeholder="SC-XXXXXX" autocomplete="off"><button id="admApprove">Approve code</button></div>
         <p class="err" id="admErr"></p>
@@ -645,7 +648,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.65 · Bot team</p>
+      <p class="fine" id="version">Shot Caller v13.66 · Team live</p>
     </section>
   </main>
 
@@ -686,7 +689,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '213';
+    window.SC_BUILD = '214';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

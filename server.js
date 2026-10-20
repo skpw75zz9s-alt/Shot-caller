@@ -179,6 +179,9 @@ const TYPES = {
 // Files anyone can load: the paywall page and what it (and "Add to Home Screen") needs.
 const OPEN_FILES = new Set(['/site.html', '/site.js', '/robots.txt', '/paywall.html', '/paywall.js', '/styles.css', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/sw.js']);
 
+// The admin's live window on the bot team: served to the admin only (v13.66).
+const LIVE_FILES = new Set(['/team-live', '/team-live.html', '/team-live.js']);
+
 const cache = new Map(); // tiny ~1s cache so several open phones don't multiply upstream calls
 const lastGood = new Map(); // the last OK answer per upstream URL, for a brief upstream hiccup
 
@@ -376,6 +379,12 @@ async function adminApi(req, res, action, token) {
     const markets = stacks.bots().map(([series, b]) => ({ series, name: marketOf(series, discovery.list()).name, bot: b, stack: stacks.stack(series) }));
     return send(res, 200, { ...(await tuneUp.run(markets)), settings: tuneUp.status().settings });
   }
+  // the bot team, read fresh every second, for the admin's live window (v13.66, public/team-live.js)
+  if (action === 'team' && req.method === 'GET') {
+    const q = new URL(req.url, 'http://localhost').searchParams.get('m'), series = q && (isHome(q) || stacks.has(q)) ? q : HOME.series;
+    const markets = [HOME.series, ...stacks.bots().map(([m]) => m).filter((m) => !isHome(m))].map((m) => ({ series: m, name: marketOf(m, discovery.list()).name }));
+    return send(res, 200, { ...team.live(series), series, markets });
+  }
   if (action === 'members' && req.method === 'GET') { const out = access.listMembers(), dv = discordRoles.adminView(); out.body.members = out.body.members.map((m) => (dv[m.code] ? { ...m, discord: dv[m.code] } : m)); out.body.discord = discordRoles.config().on; return reply(req, res, out); }
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
   const body = await readBody(req);
@@ -466,6 +475,8 @@ export const server = http.createServer(async (req, res) => {
     if (dsc) return await discordApi(req, res, dsc[1], token, url);
 
     const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
+    // the admin's live window on the bot team (v13.66): the admin only, paywall or not
+    if (LIVE_FILES.has(rel)) return access.isAdminToken(token) ? serveFile(req, res, rel === '/team-live' ? '/team-live.html' : rel) : send(res, 403, 'Admin only.', 'text/plain; charset=utf-8');
     const allowed = !PAYWALL || access.hasAccess(token);
     if (!allowed) {
       if (OPEN_FILES.has(rel) && req.method === 'GET') return serveFile(req, res, rel);

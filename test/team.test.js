@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ROLES, teamChanges, teamRoster } from '../public/team.js';
+import { ROLES, TEAM_ICON, teamChanges, teamPulse, teamRoster } from '../public/team.js';
 import { createTeam } from '../team.js';
 
 const now = 1e12;
@@ -50,4 +50,17 @@ test('the server team reads each part every 5 seconds and keeps the feed', () =>
   const a = team.api('S');
   assert.equal(a.roster.length, ROLES.length); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.ok(createTeam({ book: { get: () => null }, botOf: () => null, watchOf: () => null }).api('X').roster.length, 'answers before its first reading');
+});
+
+test('the live window: a fresh reading at most once a second, the round\'s numbers, and an icon for everyone', () => {
+  let t = now, b = snap(100250), reads = 0;
+  const team = createTeam({ book: { get: () => ({ snap: b, sig: null }) }, botOf: () => { reads++; return null; }, watchOf: () => null, clock: () => t });
+  team.live('S'); t += 400; team.live('S');
+  assert.equal(reads, 1, 'twice within a second: one reading');
+  b = snap(99900, 0.2); t += 700;
+  const a = team.live('S');
+  assert.equal(reads, 2); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
+  assert.deepEqual(a.pulse, { ticker: 'T1', spot: 99900, strike: 100000, pYes: 0.2, minutesLeft: 9 });
+  assert.equal(teamPulse(null), null); assert.equal(teamPulse({ rows: [{ m: { ticker: 'X' }, ev: { minutesLeft: 0 } }] }), null, 'between rounds');
+  assert.deepEqual(Object.keys(TEAM_ICON), ROLES.map(([k]) => k));
 });

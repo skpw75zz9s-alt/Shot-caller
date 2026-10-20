@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### Watch the bot team live (v13.66, admin only)
+
+A separate window for the admin: **▶ Watch them live** on the Bot team card, or **▶ Watch the bot team live** in the Admin card, opens `/team-live`. The nine teammates are little robots on a snaking line (Scout → Analyst → Inspector → Judge → Caller → Risk officer → Trader → Coach → Reporter), read fresh **every second** from `GET /api/admin/team?m=…`:
+
+- **Each robot acts out its state:** green and bobbing when it's on it; cyan, fast and talking when it's acting; amber with a shake and a pulsing ring when it's warning; grey and slow when it's waiting; eyes shut with a floating *z* when it's off. The state is also written under its name, and its live status line updates every second.
+- **When a teammate changes position** (*DOWN took the lead*, *found: High flip risk*), it pops a speech bubble and sends a bright packet down the wire to the next teammate, which flashes when it arrives. A faint packet runs the whole line on every reading.
+- **Up top:** the round's UP/DOWN odds bar, a live countdown and the price vs the target. Underneath: everything the team did, newest first, with new lines sliding in. A market picker switches between the running markets.
+- With *Reduce Motion* on, everything still updates, just without the movement.
+
+**Only the admin can open it.** The server checks the admin sign-in on the page, its script and its data (`team-live.html`, `team-live.js`, `/api/admin/team`); everyone else gets *403 Admin only*, paywall or not. Inside the installed app it opens in place (the app keeps its own sign-in), with **← App** to go back; in a browser it opens in a new tab.
+
 ### The bot team (v13.65)
 
 Every action the bot takes now has **one teammate who owns it**, shown on the Deck's **Bot team** card (Pro) for the market open on the phone:

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'shot-srv-'));
 process.env.PAYWALL = 'off'; // paywall has its own tests
+process.env.ADMIN_CODE = 'test-only-admin'; // a throwaway code for the admin-only tests here
 delete process.env.ANTHROPIC_API_KEY; // Ask's AI is off here (askai.test.js tests it with a stand-in client)
 
 // Mock upstream standing in for both Kalshi and Coinbase.
@@ -201,4 +202,17 @@ test('a made-up market name never starts a bot, and only admins see which Discor
   const { stacks } = await import('../server.js');
   assert.equal(stacks.has('KXBTCMADEUP15M'), false);
   assert.equal('missing' in await (await fetch(`${app}/api/discord/status`)).json(), false);
+});
+
+test('the live bot-team window and its data: the admin only, paywall or not', async () => {
+  for (const p of ['/team-live', '/team-live.html', '/team-live.js', '/api/admin/team']) assert.equal((await fetch(`${app}${p}`)).status, 403, p);
+  const login = await fetch(`${app}/api/access/admin`, { method: 'POST', body: JSON.stringify({ code: 'test-only-admin', device: 'dev-live' }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0], h = { headers: { cookie } };
+  const page = await fetch(`${app}/team-live`, h);
+  assert.equal(page.status, 200); assert.match(await page.text(), /<title>Bot Team Live<\/title>/);
+  assert.equal((await fetch(`${app}/team-live.js`, h)).status, 200);
+  const t = await (await fetch(`${app}/api/admin/team`, h)).json();
+  assert.equal(t.roster.length, 9); assert.ok(Array.isArray(t.feed)); assert.ok('pulse' in t);
+  assert.equal(t.markets[0].series, t.series, 'the home market first, and the default');
 });

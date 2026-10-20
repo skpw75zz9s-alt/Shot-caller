@@ -42,7 +42,8 @@ import { findBreaks, hiddenStats, trackBreaks, xraySvg } from './xray.js';
 import { councilFacts, debate } from './council.js';
 import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
-window.SC_BOOT = '213'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+import { TEAM_ICON } from './team.js';
+window.SC_BOOT = '214'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2320,7 +2321,6 @@ function renderStrength() {
 })();
 
 // ---------- The bot team (public/team.js, team.js, /api/team): one teammate per action, and what each did ----------
-const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰' };
 async function refreshTeam() {
   if (document.hidden || !shownViews.has('live') || $('teamCard')?.classList.contains('folded')) return;
   try { state.team = await getJSON(api('team')); } catch { return; }
@@ -2330,6 +2330,8 @@ async function refreshTeam() {
   setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
 }
 setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);
+// the live window opens in a new tab in a browser; inside the installed app (its own cookies), it opens in place
+if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) document.querySelectorAll('a.team-live').forEach((a) => a.removeAttribute('target'));
 
 // ---------- Simple mode ----------
 function applyMode() {
@@ -2745,6 +2747,7 @@ async function loadAccess() {
       : st.open ? 'Open: this server doesn\'t need a sign-in' : 'No access');
     setHidden($('signOut'), !!st.open && !st.access);
     setHidden($('adminCard'), st.role !== 'admin');
+    setHidden($('teamLive'), st.role !== 'admin'); // the admin's live window on the bot team (v13.66): the server serves it to the admin only
     setHidden($('adminLogin'), st.role === 'admin');
     if (st.role === 'admin') { loadAdmin(); loadTuneUp(); }
     loadDiscord();

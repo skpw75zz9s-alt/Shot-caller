@@ -3,7 +3,8 @@
 //   observe(series)   reads every part (the market book's snapshot, Market Watch, the X-ray, the council, the round
 //                     call, the guards, the auto-traders, the learners, the strength meter, Discord, Ask)
 //   api(series)       the roster and the feed
-import { teamChanges, teamRoster } from './public/team.js';
+//   live(series)      the same, read fresh (at most once a second): the admin's live window (v13.66, public/team-live.js)
+import { teamChanges, teamPulse, teamRoster } from './public/team.js';
 
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers', clock = () => Date.now(), everyMs = 5000 }) {
   const per = new Map(); // series -> { at, keys, roster, feed }
@@ -19,9 +20,9 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       learners: learners && learners.map((u) => ({ on: !!u.on })), strength: strength?.api?.(series), autotraders: autotraders(series), discord: discord?.status?.(), ask: askMode(),
     });
   }
-  function observe(series, now = clock()) {
+  function observe(series, now = clock(), every = everyMs) {
     const s = per.get(series) ?? { at: 0, keys: {}, roster: null, feed: [] };
-    if (now - s.at < everyMs) return;
+    if (now - s.at < every) return;
     s.at = now; s.roster = read(series, now);
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
@@ -31,5 +32,9 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     const now = clock(), s = per.get(series);
     return { roster: s?.roster ?? read(series, now), feed: s?.feed ?? [], at: s?.at || now };
   }
-  return { observe, api };
+  function live(series, liveMs = 1000) {
+    observe(series, clock(), liveMs);
+    return { ...api(series), pulse: teamPulse(book.get(series)?.snap ?? null) };
+  }
+  return { observe, api, live };
 }
