@@ -22,7 +22,7 @@ note = lambda n: 440 * 2 ** ((n - 69) / 12)
 saw = lambda f, tt, ph=0: 2 * ((tt * f + ph) % 1) - 1
 
 def env(n, a, r):
-    e = np.ones(n); ai, ri = int(a * SR), int(r * SR)
+    e = np.ones(n); ai, ri = min(n, int(a * SR)), min(n, int(r * SR))  # (a short last block)
     if ai: e[:ai] = np.linspace(0, 1, ai)
     if ri: e[-ri:] *= np.linspace(1, 0, ri)
     return e
