@@ -276,6 +276,15 @@ Security:
 
 ## Version notes (newest first)
 
+### The Training room (v13.76)
+
+A 🏋️ **trainer for every learner** (the 14 in the Research lab, and the Flip checker), in a new Training room on the Lab floor. What gets a learner off probation is **new graded rounds**: it has to beat what the bot does now on data it never saw. Nothing can hurry that without cheating (rerunning the test until one run passes by luck), so a trainer does what's real:
+
+- **The pace.** Where its trainee stands against the bar it has to reach, and about how long that will take: *On probation · 40 of 150 rounds (27%) · about 28 h to go at this pace*. The counter comes from the server where it knows it directly (minutes of history toward a week for the Clock watcher, graded predictions toward 500 for the Micro modeler, graded rounds toward 600 for the Flip checker), else from the trainee's own status. The pace is measured from how fast that counter actually moved over the last 6 hours. "To go" means **until it's judged, not until it passes**: it can still fail.
+- **The path.** A trainee that can't gather data because something it reads is broken (the exchange feeds for the Scan analyst, the Micro modeler and the Flip checker; the futures for the Micro modeler) shows **Blocked**, and its trainer tells that team's fixer.
+- **No shortcuts.** For a learner whose test reruns on its own schedule with no counter, the trainer says exactly that, and never reruns a test to fish for a pass.
+- **Graduation.** A trainee that proves itself earns its trainer **+50 merit**, and the trainer keeps watching: a proven learner stays in the calls only while it keeps proving itself.
+
 ### The Near-certain desk says why it's warning (v13.75.1)
 
 The Near-certain desk turned amber when the profit guard paused Near-certain calls, but its line didn't say so. Now it does: *Paused by the profit guard: its last 25 graded calls lost $4.10 at $10 each, so Near-certain buy alerts are off until they're back in profit*.

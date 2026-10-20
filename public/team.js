@@ -25,13 +25,13 @@ export const ROLES = [
 ];
 // departments, in the order the live window lays out its rooms
 export const DEPTS = [
-  ['mgmt', 'Manager\'s office'], ['improve', 'Improvement crew'], ['desk', 'Market desk'], ['lab', 'Research lab'], ['xray', 'X-ray room'], ['council', 'Council chamber'], ['calls', 'Call desk'],
+  ['mgmt', 'Manager\'s office'], ['improve', 'Improvement crew'], ['desk', 'Market desk'], ['lab', 'Research lab'], ['train', 'Training room'], ['xray', 'X-ray room'], ['council', 'Council chamber'], ['calls', 'Call desk'],
   ['risk', 'Risk office'], ['trade', 'Trading floor'], ['grade', 'Grading room'], ['news', 'Newsroom'], ['ops', 'Operations'],
 ];
 // the building: four floors of rooms, top to bottom, each with a floor helper (public/fixers.js)
 export const FLOORS = [
   ['f4', 'Top floor', ['mgmt', 'improve', 'grade', 'news']], ['f3', 'Calls floor', ['calls', 'risk', 'trade']],
-  ['f2', 'Lab floor', ['lab', 'xray', 'council']], ['f1', 'Ground floor', ['desk', 'ops']],
+  ['f2', 'Lab floor', ['lab', 'train', 'xray', 'council']], ['f1', 'Ground floor', ['desk', 'ops']],
 ];
 export const LEAD_DEPT = { scout: 'desk', analyst: 'lab', inspector: 'xray', judge: 'council', caller: 'calls', risk: 'risk', trader: 'trade', coach: 'grade', reporter: 'news' };
 // the learners (bot.js learnStatus().using), one researcher each: [learner key, name, what it does, icon, who it reports to]
@@ -81,7 +81,8 @@ export const STAFF = [
   ['archivist', 'Archivist', 'saves everything', 'ops', '💾', 'clerk'],
   ['nightwatch', 'Night watch', 'keeps the bot ticking', 'ops', '🌃', 'scout'],
 ];
-export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])), ...Object.fromEntries(FLOORS.map(([f]) => [`fh_${f}`, HELP_ICON])) };
+export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])), ...Object.fromEntries(FLOORS.map(([f]) => [`fh_${f}`, HELP_ICON])),
+  ...Object.fromEntries([...LEARNERS.map(([k]) => `l_${k}`), 'flipdesk'].map((r) => [`tr_${r}`, '🏋️'])) }; // the trainers (training.js)
 // who each lead tells (the staff each report to one: STAFF's last field)
 const LEAD_TO = { scout: ['risk', 'analyst'], analyst: ['caller'], inspector: ['risk'], judge: ['caller'], caller: ['trader', 'reporter', 'push'], risk: ['caller'], trader: ['clerk'], coach: ['mechanic'], reporter: [] };
 const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);

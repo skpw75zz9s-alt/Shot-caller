@@ -3,7 +3,7 @@
 // the calls only by being right, and loses it by being wrong). This makes the rest visible: a score per teammate, an
 // Employee of the hour, and a word from the Manager for whoever is in the red. Points don't change any call.
 //   +20  a fix that cleared a flag (the fixer or floor helper who made it)
-//   +50  a learner proving itself on rounds it never saw          −25  one dropped back to probation
+//   +50  a learner proving itself on rounds it never saw (and +50 to its trainer)   −25  one dropped back to probation
 //   +5   back on track: a flag of its own cleared                 −10  flagged stuck    −5 slacking    −3 hurting or broken
 //   −5   a fixer or helper that had to hand a flag to the admin
 //   +10 × (result − price)  each graded official call, to the Caller: a win at 90¢ is +1, a loss at 90¢ is −9
@@ -16,7 +16,7 @@ export function snapshot(roster) {
   const flags = {}, on = {}, working = {};
   for (const r of roster) {
     flags[r.role] = FLAG.filter((v) => (r.reviews || []).some((x) => x.verdict === v));
-    if (r.role.startsWith('l_')) on[r.role] = r.state === 'busy';
+    if (r.role.startsWith('l_') || r.role === 'flipdesk') on[r.role] = r.state === 'busy';
     working[r.role] = r.state !== 'off' && !flags[r.role].some((v) => v === 'stuck' || v === 'slacking');
   }
   return { flags, on, working };
