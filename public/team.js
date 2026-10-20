@@ -80,7 +80,7 @@ const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);
 const sideOf = (s) => (s === 'YES' ? 'UP' : s === 'NO' ? 'DOWN' : s);
 
 // the round closing soonest that's still open
-const liveRow = (snap) => (snap?.rows || []).filter((r) => r.ev?.minutesLeft > 0).sort((a, b) => a.ev.minutesLeft - b.ev.minutesLeft)[0] ?? null;
+export const liveRow = (snap) => (snap?.rows || []).filter((r) => r.ev?.minutesLeft > 0).sort((a, b) => a.ev.minutesLeft - b.ev.minutesLeft)[0] ?? null;
 // the round's numbers for the live window's header: { ticker, spot, strike, pYes, minutesLeft } or null between rounds
 export function teamPulse(snap) {
   const lv = liveRow(snap);
@@ -92,7 +92,8 @@ export function teamPulse(snap) {
 // (learners: [{ key, name, on, detail }]; parts: what the staff read, see staffRoster; council, kinds, calls and
 // parts.autoTune / learnerSince: the records the Improvement crew grades, see improve.js). Each teammate the crew
 // coaches carries its reviews: [{ by, verdict, note }]
-export function teamRoster(x) {
+// everyone but the Manager: the leads, the staff and the Improvement crew
+export function teamBase(x) {
   const now = x.now ?? Date.now(), snap = x.snap, lv = liveRow(snap);
   const spot = snap?.mSpot ?? snap?.spot, sig = lv ? (lv.sigma ?? snap.sigmaMin) : null;
   const z = lv && spot > 0 && lv.strike > 0 && sig > 0 ? Math.log(spot / lv.strike) / (sig * Math.sqrt(lv.ev.minutesLeft)) : null;
@@ -140,10 +141,21 @@ export function teamRoster(x) {
   const leads = ROLES.map(([role, name, job]) => ({ role, name, job, dept: LEAD_DEPT[role], lead: true, ...R[role] }));
   const team = [...leads, ...staffRoster(x, { lv, R, hold, br })], { crew, reviews } = crewRoster(x, team);
   for (const r of team) if (reviews[r.role]) r.reviews = reviews[r.role];
-  // the Manager: everyone accounted for, anyone stuck flagged (parts.activity: when each status last changed, from the server)
-  const everyone = [...crew, ...team], lead = Object.fromEntries(Object.entries(LEAD_DEPT).map(([role, d]) => [d, role]));
-  const m = managerReport(everyone, { now: x.now ?? Date.now(), live: !!lv, activity: x.parts?.activity || {}, depts: DEPTS, leads: lead });
-  for (const r of everyone) if (m.flags[r.role]) (r.reviews ||= []).push({ by: 'manager', verdict: 'stuck', note: m.flags[r.role] });
+  return [...crew, ...team];
+}
+// the whole roster: everyone, then the Manager over them
+export const teamRoster = (x) => withManager(teamBase(x), x);
+// the Manager: everyone accounted for, anyone stuck or slacking flagged (parts.activity / roundsQuiet / workload: each
+// teammate's time sheet, kept by the server, which records this reading's changes before the Manager judges)
+export function withManager(everyone, x) {
+  const lead = Object.fromEntries(Object.entries(LEAD_DEPT).map(([role, d]) => [d, role]));
+  const m = managerReport(everyone, { now: x.now ?? Date.now(), live: !!liveRow(x.snap), activity: x.parts?.activity || {}, rounds: x.parts?.roundsQuiet || {}, autoTune: x.parts?.autoTune, depts: DEPTS, leads: lead });
+  for (const r of everyone) {
+    if (m.flags[r.role]) (r.reviews ||= []).push({ by: 'manager', ...m.flags[r.role] });
+    // the time sheet: when it last did something, how often in the last hour, and how many rounds since
+    const w = x.parts?.workload?.[r.role];
+    if (w) r.timesheet = { last: x.parts.activity?.[r.role] ?? null, hour: w, rounds: x.parts.roundsQuiet?.[r.role] ?? 0 };
+  }
   return [m.row, ...everyone];
 }
 const usd = (v) => `${v < 0 ? '−' : ''}$${Math.abs(v) >= 1e6 ? `${(Math.abs(v) / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(Math.abs(v) / 1e3).toFixed(1)}k` : Math.abs(v).toFixed(2)}`;

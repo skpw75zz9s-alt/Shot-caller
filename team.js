@@ -5,30 +5,33 @@
 //   api(series)       the roster and the feed
 //   live(series)      the same, read fresh (at most once a second): the admin's live window (v13.66, public/team-live.js)
 //   (the staff, v13.67: each asset's readers from stackOf, the related markets, the tune-up, the market list, storage)
-import { teamChanges, teamPulse, teamRoster, teamTalk } from './public/team.js';
+import { liveRow, teamBase, teamChanges, teamPulse, teamTalk, withManager } from './public/team.js';
 import { liqSummary, positioning } from './public/xray.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
   stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, clock = () => Date.now(), everyMs = 5000 }) {
   const per = new Map(); // series -> { at, keys, roster, feed }
-  const act = new Map(); // series -> { role: when its status last changed } (the Manager: who's frozen)
+  const act = new Map(); // series -> { text, at, rounds, hits, round }: each teammate's last status, when it changed, rounds since, changes this hour (the Manager)
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
-  function read(series, now) {
+  // everything the roster is built from (the Manager's time sheet is added last, see read and observe)
+  function inputs(series, now) {
     const b = book.get(series), bot = botOf(series), deb = council?.api?.(series), proof = breakLab?.api?.(series);
     const record = tryIt(() => bot?.record?.() ?? null), learners = tryIt(() => bot?.learnStatus?.()?.using ?? null);
     const kinds = proof ? Object.values(proof.kinds) : [], count = (st) => kinds.filter((v) => v.status === st).length;
-    return teamRoster({
+    return {
       now, snap: b?.snap ?? null, sig: b?.sig ?? null, watch: watchOf(series)?.status?.() ?? null,
       breaks: breakLab?.open?.(series) ?? [], proven: proof ? count('proven') + count('opposite') : null,
       debate: deb?.debate ?? null, pick: bot?.pick?.() ?? null,
       record: record && { profitGuard: record.profitGuard, guard: record.guard, graded: record.graded, wins: record.wins, usd: record.usd, early: record.early, late: record.late, certain: record.certain },
       learners: learners && learners.map((u) => ({ key: u.key, name: u.name, on: !!u.on, detail: u.detail })), strength: strength?.api?.(series), autotraders: autotraders(series), discord: discord?.status?.(), ask: askMode(),
-      parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now), activity: act.get(series)?.at ?? {} },
+      parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
       // what the Improvement crew grades (improve.js)
       council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result })),
-    });
+    };
   }
+  const managed = (base, x, series, now) => withManager(base, { ...x, parts: { ...x.parts, ...timesheet(series, now) } });
+  const read = (series, now) => { const x = inputs(series, now); return managed(teamBase(x), x, series, now); };
   // what the staff read: each one defensive, so a reader that isn't there (or throws) leaves its teammate quiet, never the team
   function parts(series, now, { bot, deb, proof, kinds, count }) {
     const st = tryIt(() => stackOf(series)), sc = st?.scanFeed, crypto = st?.asset ? st.asset.kind === 'crypto' : true;
@@ -57,13 +60,30 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     since.set(series, m);
     return out;
   }
+  function timesheet(series, now) {
+    const a = act.get(series);
+    if (!a) return { activity: {}, roundsQuiet: {}, workload: {} };
+    return { activity: a.at, roundsQuiet: a.rounds, workload: Object.fromEntries(Object.entries(a.hits).map(([r, h]) => [r, h.filter((t) => t >= now - 3600000).length])) };
+  }
   function observe(series, now = clock(), every = everyMs) {
     const s = per.get(series) ?? { at: 0, keys: {}, roster: null, feed: [] };
     if (now - s.at < every) return;
-    s.at = now; s.roster = read(series, now);
-    const a = act.get(series) ?? { text: {}, at: {} };
-    for (const r of s.roster) if (a.text[r.role] !== r.status) { a.text[r.role] = r.status; a.at[r.role] = now; }
+    // a round ended when the soonest-closing open round's close time moves on: everyone's count of quiet rounds goes up
+    // (counted before the reading, so the Manager and the time sheet see it now)
+    const a = act.get(series) ?? { text: {}, at: {}, rounds: {}, hits: {}, round: null };
+    const round = liveRow(book.get(series)?.snap ?? null)?.m?.close_time ?? null;
+    if (round && a.round && round !== a.round) for (const role of Object.keys(a.text)) a.rounds[role] = (a.rounds[role] ?? 0) + 1;
+    if (round) a.round = round;
     act.set(series, a);
+    s.at = now;
+    const x = inputs(series, now), base = teamBase(x);
+    for (const r of base) {
+      if (a.text[r.role] === r.status) continue;
+      a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0;
+      const h = (a.hits[r.role] ||= []); h.push(now); while (h.length && h[0] < now - 3600000) h.shift();
+    }
+    s.roster = managed(base, x, series, now); // judged on this reading's time sheet
+    for (const r of s.roster) if (a.text[r.role] === undefined) { a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0; } // the Manager's own row
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
     per.set(series, s);

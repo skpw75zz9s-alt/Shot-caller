@@ -138,6 +138,8 @@
   .rvs > b { display: block; font: 700 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-bottom: 4px; }
   .rv { padding: 4px 0; } .rv + .rv { border-top: 1px solid var(--line); } .rv > div { color: var(--text); }
   .emp.flagged::after { content: '!'; position: absolute; top: 2px; right: 8px; width: 15px; height: 15px; border-radius: 50%; background: var(--no); color: #fff; font: 800 10px/15px var(--sans); text-align: center; }
+  .emp.slacking::after { content: 'z'; position: absolute; top: 2px; right: 8px; width: 15px; height: 15px; border-radius: 50%; background: var(--warn); color: #05070d; font: 800 10px/15px var(--mono); text-align: center; }
+  .ts { margin: 0 0 8px; font-size: 12px; color: var(--muted); } .ts b { font: 700 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-right: 6px; }
   .room[data-dept="improve"] { border-color: #f5c86b55; background: linear-gradient(180deg, #f5c86b0d, transparent 60%), color-mix(in srgb, var(--panel) 85%, transparent); }
   .chip { display: inline-flex; gap: 5px; align-items: center; font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 1px 7px; border-radius: 99px; border: 1px solid currentColor; margin-left: 6px; vertical-align: 2px; }
 

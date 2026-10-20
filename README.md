@@ -276,6 +276,21 @@ Security:
 
 ## Version notes (newest first)
 
+### The Manager catches slacking (v13.71)
+
+The Manager now makes sure **nobody is slacking**, as well as nobody stuck. **Slacking** means not stuck, but not producing: a teammate whose work has to move every round, and that many rounds have passed with nothing new from it. Only work that *must* move counts, so a calm market or a proven setting sitting still is never called slacking:
+
+| Teammate | Has to | Slacking after |
+|---|---|---|
+| Quote clerk | see Kalshi's bid or ask move | 4 rounds without a cent of change |
+| Caller | make a round call (or a buy) each round | 3 rounds |
+| Accuracy coach | grade every settled round (its count goes up each one) | 3 rounds |
+| Proof clerk | grade the break lab's cases (every minute) | 3 rounds |
+| Kalshi blender, Settlement matcher | count rounds toward their proof, while on probation | 3 rounds |
+| Tune-up runner | keep to its schedule | its tune-up overdue by more than an hour |
+
+The server counts rounds as they end and keeps a **time sheet** for every teammate: when it last did something, how many updates in the last hour, and how many rounds since. It's on each teammate's sheet in the live window. A slacker gets a *Slacking* review, an amber **z** on its desk (stuck stays a red **!**), and a word from the Manager: *nothing new in 3 rounds, and its work should move every round. Get back to it.* The banner counts them: *… · 1 slacking: Caller · nobody stuck*. The Manager judges each reading only after recording that reading's changes, so a teammate that acts in the same moment a round ends is never caught by mistake. Off by design is never slacking. As before, **the Manager reports; it doesn't fix.**
+
 ### The Manager (v13.70)
 
 A 👔 **Manager** now watches every teammate on every reading and makes sure each one is **doing something, or has a stated reason not to**. Everyone lands in one of four groups:
