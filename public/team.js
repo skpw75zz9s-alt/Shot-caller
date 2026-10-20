@@ -11,6 +11,7 @@ import { CREW_ICON, crewRoster } from './improve.js';
 import { MANAGER, managerReport } from './manager.js';
 import { FIX_ICON, HELP_ICON } from './fixers.js';
 import { NEWS_ROLE, newsRow } from './news.js';
+import { HIRE_ICON, hireRows } from './hires.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -82,7 +83,8 @@ export const STAFF = [
   ['nightwatch', 'Night watch', 'keeps the bot ticking', 'ops', '🌃', 'scout'],
 ];
 export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])), ...Object.fromEntries(FLOORS.map(([f]) => [`fh_${f}`, HELP_ICON])),
-  ...Object.fromEntries([...LEARNERS.map(([k]) => `l_${k}`), 'flipdesk'].map((r) => [`tr_${r}`, '🏋️'])) }; // the trainers (training.js)
+  ...Object.fromEntries([...LEARNERS.map(([k]) => `l_${k}`), 'flipdesk'].map((r) => [`tr_${r}`, '🏋️'])), // the trainers (training.js)
+  ...HIRE_ICON, ...Object.fromEntries(Object.keys(HIRE_ICON).map((r) => [`tr_${r}`, '🏋️'])), recruiter: '🧑‍💼' }; // the hiring center (hires.js), and its trainees' trainers
 // who each lead tells (the staff each report to one: STAFF's last field)
 const LEAD_TO = { scout: ['risk', 'analyst'], analyst: ['caller'], inspector: ['risk'], judge: ['caller'], caller: ['trader', 'reporter', 'push'], risk: ['caller'], trader: ['clerk'], coach: ['mechanic'], reporter: [] };
 const pct = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`);
@@ -148,9 +150,19 @@ export function teamBase(x) {
   const ds = x.discord;
   R.reporter = { state: ds?.on ? 'ok' : 'off', status: `${ds?.on ? `Discord on · ${ds.sent} post${ds.sent === 1 ? '' : 's'} sent` : 'Discord off'} · Ask: ${x.ask || 'free answers'}`, key: `${!!ds?.on}:${x.ask}` };
   const leads = ROLES.map(([role, name, job]) => ({ role, name, job, dept: LEAD_DEPT[role], lead: true, ...R[role] }));
-  const team = [...leads, ...staffRoster(x, { lv, R, hold, br })], { crew, reviews } = crewRoster(x, team);
+  const team = [...leads, ...staffRoster(x, { lv, R, hold, br }), ...hiringRows(x)], { crew, reviews } = crewRoster(x, team);
   for (const r of team) if (reviews[r.role]) r.reviews = reviews[r.role];
   return [...crew, ...team];
+}
+// the hiring center (hires.js): the Recruiter, and whoever the admin has hired. x.hires: { hired: [key], pending, ctx }
+function hiringRows(x) {
+  const h = x.hires;
+  if (!h) return [];
+  const rec = { role: 'recruiter', name: 'Recruiter', job: 'looks for agents that would help, and files their applications', dept: 'mgmt',
+    state: h.pending ? 'busy' : 'ok', status: `${h.pending ? `${h.pending} application${h.pending === 1 ? '' : 's'} waiting for your approval (Settings → Admin → Hiring center)` : 'No applications waiting'} · ${h.hired.length} hired`,
+    key: `${h.pending}:${h.hired.length}`, say: h.pending ? `filed ${h.pending} application${h.pending === 1 ? '' : 's'} for the admin` : null,
+    talks: h.pending ? [{ to: 'manager', text: `${h.pending} application${h.pending === 1 ? '' : 's'} waiting for the admin's approval.` }] : [] };
+  return [rec, ...hireRows(h.hired, h.ctx)];
 }
 // the whole roster: everyone, then the Manager over them
 export const teamRoster = (x) => withManager(teamBase(x), x);

@@ -11,8 +11,9 @@
 // learner stays only while it keeps proving itself.
 import { LEARNERS } from './team.js';
 
-// every trainee: the learners, and the Flip checker (the server adds the trainers, team.js; read lazily: team.js is still loading when this one is)
-export const trainees = () => [...LEARNERS.map(([k, name]) => [`l_${k}`, name]), ['flipdesk', 'Flip checker']];
+// every trainee: the learners, the Flip checker, and every hire still on its trial (hires.js): picked up the moment it
+// joins (the server adds the trainers, team.js; read lazily: team.js is still loading when this one is)
+export const trainees = (roster = []) => [...LEARNERS.map(([k, name]) => [`l_${k}`, name]), ['flipdesk', 'Flip checker'], ...roster.filter((r) => r.hire).map((r) => [r.role, r.name])];
 // what each trainee reads that can break: [teammate role, what it gives]
 const NEEDS = { l_scan: [['exchanges', 'the exchange feeds']], l_micro: [['exchanges', 'the exchange feeds'], ['futures', 'the futures feed']], flipdesk: [['exchanges', 'the exchange feeds']] };
 // a counter in a trainee's own status: "40/150 rounds", "3 of 10 settlements", "0/120 graded calls"
@@ -29,9 +30,9 @@ const fmt = (n) => n.toLocaleString('en-US');
 // predictions…), else the trainee's own counter; pace: { role: counter per hour, lately }
 export function trainerRows(roster, { progress = {}, pace = {} } = {}) {
   const by = Object.fromEntries(roster.map((r) => [r.role, r]));
-  return trainees().filter(([role]) => by[role]).map(([role, name]) => {
-    const t = by[role], proven = t.state === 'busy' && /^(In the calls|Its proven)/.test(t.status || '');
-    const p = progress[role] ?? counterOf(t.status), rate = pace[role];
+  return trainees(roster).filter(([role]) => by[role]).map(([role, name]) => {
+    const t = by[role], proven = t.hire ? !t.trial : t.state === 'busy' && /^(In the calls|Its proven)/.test(t.status || '');
+    const p = progress[role] ?? t.trialProgress ?? counterOf(t.status), rate = pace[role] ?? (t.trial ? 1 : undefined); // a trial moves an hour an hour
     const blocked = (NEEDS[role] || []).filter(([dep]) => by[dep] && (by[dep].state === 'warn' || by[dep].state === 'off'));
     const left = p ? Math.max(0, p.need - p.n) : null, eta = left && rate > 0 ? left / rate : null;
     const where = p ? `${fmt(p.n)} of ${fmt(p.need)}${p.what ? ` ${p.what}` : ''} (${Math.min(100, Math.round((p.n / p.need) * 100))}%)` : null;
@@ -39,7 +40,7 @@ export function trainerRows(roster, { progress = {}, pace = {} } = {}) {
     if (/^Not reporting/.test(t.status || '')) return { ...row, state: 'idle', status: `${name} isn't reporting: nothing to train on`, key: 'none' };
     if (proven) {
       row.talks.push({ to: role, text: 'You proved yourself. You stay in the calls only while you keep proving it, so keep at it.' });
-      return { ...row, state: 'ok', status: `${name} graduated: proven and shaping the calls. Watching that it keeps proving itself.`, key: 'grad', say: `${name} graduated` };
+      return { ...row, state: 'ok', status: t.hire ? `${name} graduated its trial: a full member of the team.` : `${name} graduated: proven and shaping the calls. Watching that it keeps proving itself.`, key: 'grad', say: `${name} graduated` };
     }
     if (blocked.length) {
       for (const [dep, what] of blocked) row.talks.push({ to: `fx_${by[dep].dept}`, text: `My trainee, the ${name}, can't gather data without ${what} (${by[dep].name}: ${by[dep].status}).` });

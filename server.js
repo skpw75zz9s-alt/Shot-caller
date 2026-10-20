@@ -26,6 +26,9 @@ import { createFlowsFeed } from './flowsfeed.js';
 import { liqSummary, positioning } from './public/xray.js';
 import { positionCheck } from './public/engine.js';
 import { createNewsFeed } from './newsfeed.js';
+import { createHiring } from './hiring.js';
+import { parseBook } from './public/trader.js';
+import { liveRow } from './public/team.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createTuneFeed } from './tunefeed.js';
 import { createFlipFeed } from './flipfeed.js';
@@ -165,12 +168,30 @@ const askTools = createAskTools({ book: marketBook, discovery, stacks, marketOf,
 askAI.setTools(askTools);
 freeAsk = createFreeAsk({ tools: askTools });
 // the bot team (team.js, public/team.js): one teammate per action, each with its live status, and a feed of what changed
+// the hiring center (hiring.js, public/hires.js): applications for agents that would fill a gap, approved by the admin
+export const hiring = createHiring({ file: join(DATA_DIR, 'hiring.json') });
+// the Liquidity scout's reading of Kalshi's book near the price (only once it's hired), every 30 seconds per market
+const depthCache = new Map();
+function depthOf(series) {
+  if (!hiring.hired().includes('liquidity')) return null;
+  const lv = liveRow(marketBook.get(series)?.snap ?? null), c = depthCache.get(series);
+  if (!lv) return null;
+  if (!c || Date.now() - c.at > 30000) {
+    depthCache.set(series, { ...c, at: Date.now() });
+    fetchJSONs(`${KALSHI}/markets/${encodeURIComponent(lv.m.ticker)}/orderbook`).then((j) => {
+      const book = parseBook(j), near = (side) => { const bids = side === 'yes' ? book.no : book.yes, asks = bids.map(([p, q]) => [Math.round((1 - p) * 100) / 100, q]); const best = Math.min(...asks.map(([a]) => a)); return Number.isFinite(best) ? { usd: asks.filter(([a]) => a <= best + 0.02 + 1e-9).reduce((t, [a, q]) => t + a * q, 0), best } : { usd: 0, best: null }; };
+      depthCache.set(series, { at: Date.now(), depth: { yes: near('yes'), no: near('no') } });
+    }).catch(() => {});
+  }
+  return c?.depth ?? null;
+}
 // market news for the News scout: headlines for each running market's asset, and the economic calendar (newsfeed.js)
 export const newsFeed = createNewsFeed({ assets: () => [...new Set(stacks.bots().map(([s]) => marketOf(s, discovery.list()).asset))] });
 export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bot : stacks.bot(s)), watchOf: (s) => (isHome(s) ? marketWatch : stacks.stack(s)?.marketWatch),
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
   markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus(),
+  hiring, depthOf, searchFor: (s) => isHome(s), running: () => stacks.bots().map(([s]) => { const m = marketOf(s, discovery.list()); return { series: s, name: m.name, kind: m.kind }; }),
   news: (s) => newsFeed.api(marketOf(s, discovery.list()).asset), nameOf: (s) => marketOf(s, discovery.list()).name, // the News scout (newsfeed.js, public/news.js)
   // the flag fixers' real fixes (public/fixers.js, fixdesk.js): each returns true when it ran
   fixes: {
@@ -333,7 +354,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -434,6 +455,15 @@ async function adminApi(req, res, action, token) {
     if (req.method === 'GET') return send(res, 200, tuneUp.status());
     if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
     return send(res, 200, { ...(await tuneUp.run(tuneMarkets())), settings: tuneUp.status().settings });
+  }
+  // the hiring center (v13.77): the applications, approve / decline / let go, and search now
+  if (action === 'hiring') {
+    if (req.method === 'GET') return send(res, 200, hiring.api());
+    if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+    const b = await readBody(req);
+    if (b.search) { hiring.search(team.hireCtx(HOME.series), { force: true }); return send(res, 200, hiring.api()); }
+    const out = await hiring.decide(String(b.id || ''), String(b.decision || ''));
+    return send(res, out.error ? 400 : 200, out.error ? out : hiring.api());
   }
   // the bot team, read fresh every second, for the admin's live window (v13.66, public/team-live.js)
   if (action === 'team' && req.method === 'GET') {

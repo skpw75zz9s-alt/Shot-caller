@@ -14,12 +14,17 @@ import { counterOf, trainees, trainerRows } from './public/training.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
-  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, news = () => null, nameOf = () => null, clock = () => Date.now(), everyMs = 5000 }) {
+  stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, news = () => null, nameOf = () => null,
+  hiring = null, running = () => [], depthOf = () => null, searchFor = () => true, clock = () => Date.now(), everyMs = 5000 }) {
   const desk = createFixDesk({ actions: fixes, clock }); // the flag fixers' fixes (fixdesk.js)
   const helpDesk = createFixDesk({ actions: fixes, clock, cooldownMs: 30 * 60000, maxTries: HELP_TRIES }); // the floor helpers': slower, longer
   const per = new Map(); // series -> { at, keys, roster, feed }
   const act = new Map(); // series -> { text, at, rounds, hits, round }: each teammate's last status, when it changed, rounds since, changes this hour (the Manager)
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
+  // what the hiring center's candidates read (public/hires.js)
+  function hireCtxOf(series, now, record = tryIt(() => botOf(series)?.record?.())) {
+    return { now, markets: tryIt(() => running()) || [], calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result, at: e.at })), depth: tryIt(() => depthOf(series)), uptime: hiring?.uptime?.() ?? null, traders: autotraders(series) };
+  }
   // everything the roster is built from (the Manager's time sheet is added last, see read and observe)
   function inputs(series, now) {
     const b = book.get(series), bot = botOf(series), deb = council?.api?.(series), proof = breakLab?.api?.(series);
@@ -34,7 +39,8 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       parts: { ...parts(series, now, { bot, deb, proof, kinds, count, minutes: ls?.minutes }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
       // what the Improvement crew grades (improve.js)
       news: tryIt(() => news(series)), marketName: tryIt(() => nameOf(series)), // the News scout (news.js)
-      council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ ticker: e.ticker, side: e.side, price: e.price, result: e.result })),
+      council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ ticker: e.ticker, side: e.side, price: e.price, result: e.result, at: e.at })),
+      hires: hiring ? { hired: hiring.hired(), pending: hiring.api().applications.length, ctx: { ...hireCtxOf(series, now, record), trials: hiring.trials?.() ?? {} } } : null, // the hiring center (hires.js)
     };
   }
   const managed = (base, x, series, now) => withManager(base, { ...x, parts: { ...x.parts, ...timesheet(series, now) } });
@@ -58,8 +64,8 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
   const paceLog = new Map(); // series -> { role: [{ t, n }] }
   const withTrainers = (series, roster, x, now, record) => {
     const by = Object.fromEntries(roster.map((r) => [r.role, r])), log = paceLog.get(series) ?? {}, progress = {}, pace = {};
-    for (const [role] of trainees()) {
-      const p = x.parts?.training?.[role] ?? counterOf(by[role]?.status);
+    for (const [role] of trainees(roster)) {
+      const p = x.parts?.training?.[role] ?? by[role]?.trialProgress ?? counterOf(by[role]?.status);
       if (!p) continue;
       progress[role] = p;
       const l = (log[role] ||= []);
@@ -181,6 +187,10 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     }
     s.roster = withTrainers(series, fixersFor(series, managed(base, x, series, now), now, true), x, now, true); // judged on this reading's time sheet, then the fixers act, then the trainers report
     score(series, s.roster, x, now); // merit pay (public/incentives.js)
+    if (hiring && x.hires && searchFor(series)) {
+      hiring.search(x.hires.ctx); // the Recruiter looks for gaps (an hour apart)
+      for (const r of s.roster) if (r.hire && r.trial && (r.reviews || []).some((v) => v.verdict === 'stuck' || v.verdict === 'broken')) hiring.restartTrial?.(r.role.replace(/^h_/, '')); // flagged on trial: it starts again
+    }
     for (const r of s.roster) if (a.text[r.role] === undefined) { a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0; } // the Manager's own row
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
@@ -196,5 +206,5 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     observe(series, clock(), liveMs);
     return { ...api(series), pulse: teamPulse(book.get(series)?.snap ?? null) };
   }
-  return { observe, api, live };
+  return { observe, api, live, hireCtx: (series) => hireCtxOf(series, clock()) };
 }

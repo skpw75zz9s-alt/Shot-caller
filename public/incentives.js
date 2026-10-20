@@ -17,6 +17,7 @@ export function snapshot(roster) {
   for (const r of roster) {
     flags[r.role] = FLAG.filter((v) => (r.reviews || []).some((x) => x.verdict === v));
     if (r.role.startsWith('l_') || r.role === 'flipdesk') on[r.role] = r.state === 'busy';
+    if (r.hire) on[r.role] = !r.trial; // a new hire graduating its trial
     working[r.role] = r.state !== 'off' && !flags[r.role].some((v) => v === 'stuck' || v === 'slacking');
   }
   return { flags, on, working };

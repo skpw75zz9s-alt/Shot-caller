@@ -225,3 +225,18 @@ test('the phone\'s own Auto-trader feed: the call and sell checks for what the p
   if (f.ready) { assert.ok('sig' in f && 'live' in f); assert.ok(Object.keys(f.checks).every((t) => t === 'KXBTC15M-26OCT201300-00')); }
   assert.equal((await fetch(`${app}/api/auto/feed`)).status, 405, 'POST only');
 });
+
+test('the hiring center: the admin only; search, approve, and the hire is on the team', async () => {
+  assert.equal((await fetch(`${app}/api/admin/hiring`)).status, 403);
+  const login = await fetch(`${app}/api/access/admin`, { method: 'POST', body: JSON.stringify({ code: 'test-only-admin', device: 'dev-hire' }) });
+  const h = { headers: { cookie: login.headers.get('set-cookie').split(';')[0] } };
+  const s = await (await fetch(`${app}/api/admin/hiring`, { ...h, method: 'POST', body: JSON.stringify({ search: true }) })).json();
+  const app1 = s.applications.find((a) => a.key === 'restarts');
+  assert.ok(app1, 'the Restart watcher always applies'); assert.ok(app1.why && app1.does && app1.cant);
+  const after = await (await fetch(`${app}/api/admin/hiring`, { ...h, method: 'POST', body: JSON.stringify({ id: app1.id, decision: 'approve' }) })).json();
+  assert.ok(after.hired.some((x) => x.key === 'restarts'));
+  assert.equal((await fetch(`${app}/api/admin/hiring`, { ...h, method: 'POST', body: JSON.stringify({ id: 'nope', decision: 'approve' }) })).status, 400);
+  await new Promise((r) => setTimeout(r, 1100)); // the live window reads fresh at most once a second
+  const t = await (await fetch(`${app}/api/admin/team`, h)).json();
+  assert.ok(t.roster.some((r) => r.role === 'h_restarts' && r.trial) && t.roster.some((r) => r.role === 'tr_h_restarts'), 'on the team, on probation, with a trainer');
+});

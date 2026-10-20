@@ -276,6 +276,20 @@ Security:
 
 ## Version notes (newest first)
 
+### The hiring center, and new hires start in training (v13.77)
+
+A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has (every hour, or when you tap **Search now**) and files an **application** for each ready-built agent that would fill one. Applications wait in **Settings → Admin → Hiring center**. Each says **why now** (the evidence from the team's own data), **what it would do** and **what it can't**. **Approve** hires it onto the team; **decline** and it won't apply again for a week; **Let go** removes a hire. Kept in `DATA_DIR/hiring.json`.
+
+| Candidate | Applies when | What it does once hired |
+|---|---|---|
+| ⏰ Market-hours keeper | a running market trades on hours (an index, gold, silver, oil) | tracks the stock market's hours (9:30-4:00 ET, weekdays) and CME's (Sunday 6pm to Friday 5pm ET, with a daily break), and tells the Scout and the Caller as a session opens or closes. It doesn't know holidays |
+| 📉 Drawdown watcher | 30+ graded official calls | follows the record as $10 calls after fees: how far below its best, its worst drop, and warns the Risk officer when a drop is the deepest yet |
+| 🕐 Hour-of-day coach | 120+ graded official calls | splits the record into six 4-hour blocks (ET) and flags a block that clearly loses to its prices (30+ calls, z ≤ −2) |
+| 🌊 Liquidity scout | calls are being made or traded | reads Kalshi's order book every 30 seconds and tells the Trader and the Caller how many dollars of each side are for sale within 2¢ of the best price |
+| 🔄 Restart watcher | always | records each server start: how long it's been up, and how often it restarts (each restart empties the team's memory) |
+
+**Every new hire starts on probation**: a **24-hour trial**, restarted if it's flagged stuck or broken while on it. The **Training room picks it up the moment it joins**: a trainer appears on the same reading, tracking the trial (*0 of 24 hours of its trial · about 24 h to go*). When the hire graduates, the hire and its trainer each earn **+50 merit**. Like everyone on the team, a hire reports and informs: none of them changes a call.
+
 ### The Training room (v13.76)
 
 A 🏋️ **trainer for every learner** (the 14 in the Research lab, and the Flip checker), in a new Training room on the Lab floor. What gets a learner off probation is **new graded rounds**: it has to beat what the bot does now on data it never saw. Nothing can hurry that without cheating (rerunning the test until one run passes by luck), so a trainer does what's real:

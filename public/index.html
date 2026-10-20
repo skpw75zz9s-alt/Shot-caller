@@ -78,6 +78,7 @@
   <link rel="modulepreload" href="news.js">
   <link rel="modulepreload" href="incentives.js">
   <link rel="modulepreload" href="training.js">
+  <link rel="modulepreload" href="hires.js">
   <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
@@ -592,6 +593,11 @@
         <p class="fine-left">Reruns every learner on the latest candles now, then tests the round call's blend (bot vs Kalshi) and calibration on graded rounds they never saw. A change is kept only if it clearly beats what the bot does now; otherwise nothing changes. Takes a few seconds; run it whenever you like.</p>
         <button id="tuRun">Run tune-up</button>
         <div id="tuReport" class="tu-report"></div>
+        <h4>Hiring center <small id="hireWhen" class="muted"></small></h4>
+        <p class="fine-left">The Recruiter files an application when the team's own data shows a gap a new agent would fill. Each says why now, what it would do and what it can't. Approve to hire it onto the team; decline and it won't apply again for a week. Like everyone on the team, a hire reports and informs: it never changes a call.</p>
+        <div id="hireApps" class="hire-apps"></div>
+        <ul id="hireHired" class="adm-list"></ul>
+        <button id="hireSearch" class="ghost">Search now</button>
       </div>
       <div data-pro class="card push-card kalshi-card">
         <h3>Kalshi account</h3>
@@ -657,7 +663,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.76 · Training room</p>
+      <p class="fine" id="version">Shot Caller v13.77 · Hiring center</p>
     </section>
   </main>
 
@@ -698,7 +704,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '225';
+    window.SC_BUILD = '226';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

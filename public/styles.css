@@ -1241,3 +1241,9 @@ body.split .blip { display: none; }
 .team-feed li { padding: 3px 0; border-top: 1px solid var(--line); } .team-feed li:first-child { border-top: 0; }
 .team-feed time { display: inline-block; min-width: 56px; color: var(--dim); font: 500 10.5px var(--mono); }
 .team-feed li.warn b { color: var(--amber); } .team-feed li.busy b { color: var(--accent); }
+
+/* the hiring center (v13.77) */
+.hire-apps { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.hire-app { padding: 10px 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line, #1a2336); }
+.hire-app .hire-h { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; } .hire-app .hire-h small { color: var(--dim); }
+.hire-app p { margin: 4px 0; font-size: 12.5px; line-height: 1.45; }

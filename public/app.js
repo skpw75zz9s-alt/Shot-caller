@@ -44,7 +44,7 @@ import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '225'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '226'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2753,7 +2753,7 @@ async function loadAccess() {
     setHidden($('adminCard'), st.role !== 'admin');
     setHidden($('teamLive'), st.role !== 'admin'); // the admin's live window on the bot team (v13.66): the server serves it to the admin only
     setHidden($('adminLogin'), st.role === 'admin');
-    if (st.role === 'admin') { loadAdmin(); loadTuneUp(); }
+    if (st.role === 'admin') { loadAdmin(); loadTuneUp(); loadHiring(); }
     loadDiscord();
   } catch { /* offline */ }
 }
@@ -2833,6 +2833,31 @@ function tuneUpHtml(st) {
     return `<div class="tu-m"><b>${esc(m.name || m.series)}</b>${lines.map((x) => `<small>${x}</small>`).join('')}</div>`;
   }).join('');
 }
+// ---------- the hiring center (hiring.js, public/hires.js): approve or decline the Recruiter's applications, admins only ----------
+function hiringHtml(h) {
+  const apps = h.applications.map((a) => `<div class="hire-app"><div class="hire-h"><b>${a.icon} ${esc(a.name)}</b><small>${esc(a.job)}</small></div>
+    <p><b>Why now:</b> ${esc(a.why)}</p><p><b>What it would do:</b> ${esc(a.does)}</p><p class="muted"><b>What it can't:</b> ${esc(a.cant)}</p>
+    <div class="pos-btns"><button data-hire="${esc(a.id)}" data-decision="approve">Approve: hire</button><button class="ghost" data-hire="${esc(a.id)}" data-decision="decline">Decline</button></div></div>`).join('');
+  return apps || '<p class="fine-left muted">No applications waiting. The Recruiter looks every hour, or tap Search now.</p>';
+}
+async function loadHiring() {
+  try {
+    const h = await getJSON('admin/hiring');
+    setHTML($('hireApps'), hiringHtml(h));
+    setHTML($('hireHired'), h.hired.length ? h.hired.map((x) => `<li><span>${x.icon} <b>${esc(x.name)}</b> · ${esc(x.job)}</span><button class="ghost" data-hire="${esc(x.key)}" data-decision="fire">Let go</button></li>`).join('') : '');
+    setText($('hireWhen'), h.applications.length ? `${h.applications.length} waiting` : h.hired.length ? `${h.hired.length} hired` : '');
+  } catch { /* next time */ }
+}
+$('hireSearch').addEventListener('click', async () => { try { await postJSON('admin/hiring', { search: true }); } catch (e) { toast(e.message); } loadHiring(); });
+$('adminCard').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-hire]');
+  if (!b) return;
+  if (b.dataset.decision === 'fire' && !confirm('Let this agent go? It leaves the team; the Recruiter can put it forward again later.')) return;
+  b.disabled = true;
+  try { await postJSON('admin/hiring', { id: b.dataset.hire, decision: b.dataset.decision }); toast(b.dataset.decision === 'approve' ? 'Hired: it joins the team on the next reading' : b.dataset.decision === 'fire' ? 'Let go' : 'Declined'); } catch (e2) { toast(e2.message); }
+  loadHiring();
+});
+
 async function loadTuneUp() {
   try { const st = await getJSON('admin/tuneup'); setText($('tuWhen'), st.last ? `last run ${clock(st.last.at)} · ${day(st.last.at)}` : ''); setHTML($('tuReport'), tuneUpHtml(st)); } catch { /* next time */ }
 }
