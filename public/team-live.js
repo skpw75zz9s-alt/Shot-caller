@@ -132,6 +132,7 @@ function render(t) {
     for (const st of Object.keys(STATE_WORD)) e.classList.toggle(st, st === r.state);
     e.title = `${r.name} (${STATE_WORD[r.state]}): ${r.status}`;
     e.classList.toggle('flagged', (r.reviews || []).some((v) => v.verdict === 'hurting' || v.verdict === 'broken' || v.verdict === 'stuck')); // the crew or the Manager flagged it
+    e.classList.toggle('star', !!r.star); // the Employee of the hour (merit pay, public/incentives.js)
     e.classList.toggle('slacking', !e.classList.contains('flagged') && (r.reviews || []).some((v) => v.verdict === 'slacking')); // caught slacking (amber)
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
@@ -149,6 +150,10 @@ function render(t) {
     $('newsWhen').textContent = ns.state === 'off' ? 'off' : '';
   }
   const mgr = byRole.manager;
+  // merit pay: the leaderboard (public/incentives.js)
+  const lb = mgr?.leaderboard, sg = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
+  if (lb) $('board').innerHTML = [...lb.top.map((x, i) => `<li><div class="who"><span>${i === 0 && byRole[x.role]?.star ? '🏆' : `${i + 1}.`} ${TEAM_ICON[x.role] || ''} ${esc(x.name)}</span><span class="pts up">${sg(x.day)}</span></div><div class="say">${x.last ? `last: ${sg(x.last.d)} ${esc(x.last.why)}` : ''}</div></li>`),
+    ...lb.bottom.map((x) => `<li class="red"><div class="who"><span>${TEAM_ICON[x.role] || ''} ${esc(x.name)}</span><span class="pts dn">${sg(x.day)}</span></div><div class="say">${x.last ? `last: ${sg(x.last.d)} ${esc(x.last.why)}` : ''}</div></li>`)].join('') || '<li><span class="empty">No points yet: they come from verified work (a fix that clears a flag, a learner proving itself, a graded call), not from looking busy.</span></li>';
   if (mgr) { const b = $('mgr'); b.hidden = false; b.className = `mgr ${mgr.state}`; b.innerHTML = `<b>👔 Manager</b> ${esc(mgr.status)}`; }
   $('counts').innerHTML = `<span><b>${t.roster.length}</b> on the team</span><span class="a"><b>${n('busy')}</b> acting</span><span class="w"><b>${n('warn')}</b> warning</span><span><b>${n('idle')}</b> waiting</span><span><b>${n('off')}</b> off</span><span><b>${talk.length}</b> lines of talk</span>`;
   // the round
@@ -205,7 +210,9 @@ function sheet(role) {
   const VERDICT = { stuck: ['stuck', 'stuck'], slacking: ['slacking', 'warn'], helping: ['helping', 'ok'], hurting: ['hurting', 'warn'], noise: ['noise', 'idle'], data: ['gathering data', 'idle'], broken: ['needs attention', 'warn'], ok: ['noted', 'busy'] };
   const rv = (r.reviews || []).map((v) => `<div class="rv"><b>${TEAM_ICON[v.by] || ''} ${esc(byRole[v.by]?.name ?? v.by)}</b><span class="chip" style="color:${STATE_COLOR[VERDICT[v.verdict]?.[1] || 'idle'] || '#ff4d6d'}">${VERDICT[v.verdict]?.[0] || v.verdict}</span><div>${esc(v.note)}</div></div>`).join('');
   const ts = r.timesheet, ago = (t) => { const x = Math.round((Date.now() - t) / 1000); return x < 90 ? `${x}s ago` : x < 5400 ? `${Math.round(x / 60)} min ago` : `${Math.round(x / 3600)} h ago`; };
-  const sheetLine = ts ? `<div class="ts"><b>Time sheet</b> last did something ${ts.last ? ago(ts.last) : '—'} · ${ts.hour} update${ts.hour === 1 ? '' : 's'} in the last hour · ${ts.rounds} round${ts.rounds === 1 ? '' : 's'} since</div>` : '';
+  const sc = r.score, sgn = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
+  const meritLine = sc ? `<div class="ts"><b>Merit</b> ${sgn(sc.day)} today · ${sgn(sc.hour)} this hour${sc.last ? ` · last: ${sgn(sc.last.d)} ${esc(sc.last.why)}` : ''}${r.star ? ' · 🏆 Employee of the hour' : ''}</div>` : '';
+  const sheetLine = meritLine + (ts ? `<div class="ts"><b>Time sheet</b> last did something ${ts.last ? ago(ts.last) : '—'} · ${ts.hour} update${ts.hour === 1 ? '' : 's'} in the last hour · ${ts.rounds} round${ts.rounds === 1 ? '' : 's'} since</div>` : '');
   $('shRel').innerHTML = `${sheetLine}${rv ? `<div class="rvs"><b>Reviews</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
   $('sheet').classList.add('open');
 }

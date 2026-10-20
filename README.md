@@ -276,6 +276,23 @@ Security:
 
 ## Version notes (newest first)
 
+### Merit pay (v13.75)
+
+Every teammate now earns or loses **points for what it verifiably did**, never for looking busy:
+
+| Earns | | Loses | |
+|---|---|---|---|
+| a fix that cleared a flag (the fixer or floor helper who made it) | +20 | flagged stuck | −10 |
+| a learner proving itself on rounds it never saw | +50 | flagged slacking | −5 |
+| back on track: its own flag cleared | +5 | flagged hurting or broken | −3 |
+| each hour on the job | +1 | a flag handed to the admin (fixer or helper) | −5 |
+| each headline the News scout routes (10 an hour at most) | +1 | a learner dropped back to probation | −25 |
+| each graded official call, to the Caller | +10 × (result − price) | (a win at 90¢ is +1; a loss at 90¢ is −9) | |
+
+Points count the last 24 hours, and there's **no back-pay**: nothing that was already true when the server started earns or costs anything. The top scorer of the last hour is **Employee of the hour**, with a 🏆 on its desk and on the Manager's banner, and the Manager tells it to keep it up. Anyone in the red this hour hears *Your score is −10 this hour (last: flagged stuck). Turn it around.* Each teammate's sheet shows its merit (today, this hour, the last thing it earned or lost for), and the live window has a **Merit pay** leaderboard (the top five, and the bottom three).
+
+**The incentive that actually changes the bot was already there: proof earns influence.** A learner or a council voice gets a say in the calls only by being right on graded rounds, and loses it by being wrong. Merit pay makes the rest of the team's work visible and ranked. Points themselves change no call and no trade.
+
 ### The News scout (v13.74)
 
 A 🗞️ **News scout** on the Market desk searches the market news and tells whoever it concerns. Two kinds of news, from free sources that need no key:

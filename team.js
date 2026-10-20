@@ -9,6 +9,7 @@ import { DEPTS, FLOORS, liveRow, teamBase, teamChanges, teamPulse, teamTalk, wit
 import { liqSummary, positioning } from './public/xray.js';
 import { HELP_TRIES, fixerRows, helpPlans, helperRows, planFixes } from './public/fixers.js';
 import { createFixDesk } from './fixdesk.js';
+import { POINTS, callPoints, pts, scoreChanges, snapshot, standings } from './public/incentives.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
@@ -32,7 +33,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       parts: { ...parts(series, now, { bot, deb, proof, kinds, count }), autoTune: tryIt(() => autoTune()), learnerSince: learnerSince(series, learners, now) },
       // what the Improvement crew grades (improve.js)
       news: tryIt(() => news(series)), marketName: tryIt(() => nameOf(series)), // the News scout (news.js)
-      council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result })),
+      council: deb?.records ?? null, kinds: proof?.kinds ?? null, calls: (record?.calls || []).map((e) => ({ ticker: e.ticker, side: e.side, price: e.price, result: e.result })),
     };
   }
   const managed = (base, x, series, now) => withManager(base, { ...x, parts: { ...x.parts, ...timesheet(series, now) } });
@@ -86,6 +87,56 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     if (!a) return { activity: {}, roundsQuiet: {}, workload: {} };
     return { activity: a.at, roundsQuiet: a.rounds, workload: Object.fromEntries(Object.entries(a.hits).map(([r, h]) => [r, h.filter((t) => t >= now - 3600000).length])) };
   }
+  // ---------- merit pay (public/incentives.js): points for what each teammate verifiably did, the last 24 hours ----------
+  const pay = new Map(); // series -> { ledger, prev, seenCalls, fixedT, helpT, esc, onJob, lastObs, headlines }
+  function score(series, roster, x, now) {
+    const p = pay.get(series) ?? { ledger: {}, prev: null, seenCalls: null, fixedT: null, helpT: null, esc: new Set(), onJob: {}, lastObs: now, headlines: null, newsHour: [] };
+    const names = Object.fromEntries(roster.map((r) => [r.role, r.name])), cur = snapshot(roster), evs = scoreChanges(p.prev, cur, names);
+    const earn = (role, d, why) => evs.push({ role, d, why });
+    // fixes that cleared a flag: to the fixer, or the floor helper, who made them (none back-paid from before a restart)
+    const fixed = desk.state(series).fixed, helped = helpDesk.state(series).fixed;
+    if (p.fixedT != null) for (const f of fixed.filter((f) => f.t > p.fixedT)) earn(`fx_${f.dept}`, POINTS.fixed, `fixed ${f.name}`);
+    if (p.helpT != null) for (const f of helped.filter((f) => f.t > p.helpT)) { const fl = FLOORS.find(([, , ds]) => ds.includes(f.dept)); if (fl) earn(`fh_${fl[0]}`, POINTS.fixed, `got ${f.name} back on track`); }
+    p.fixedT = now; p.helpT = now; // paid up to this reading
+    // a flag handed to the admin: the fixer or helper who had to
+    const esc = new Set(roster.flatMap((r) => (r.escalations || r.handoffs || []).map((e) => `${r.role}>${e.role}`)));
+    for (const k of esc) if (p.prev && !p.esc.has(k)) earn(k.split('>')[0], POINTS.escalated, `handed ${names[k.split('>')[1]] || k.split('>')[1]} to the admin`);
+    p.esc = esc;
+    // each graded official call, to the Caller, by how it did against its price
+    const graded = (x.calls || []).filter((c) => (c.result === 'yes' || c.result === 'no') && c.ticker);
+    if (p.seenCalls) for (const c of graded) if (!p.seenCalls.has(c.ticker)) earn('caller', callPoints(c), `a call ${String(c.side).toLowerCase() === c.result ? 'won' : 'lost'} at ${Math.round(c.price * 100)}¢`);
+    p.seenCalls = new Set(graded.map((c) => c.ticker));
+    // an hour on the job
+    for (const [role, ok] of Object.entries(cur.working)) {
+      if (!ok || !p.prev?.working[role]) { p.onJob[role] = 0; continue; }
+      p.onJob[role] = (p.onJob[role] ?? 0) + (now - p.lastObs);
+      if (p.onJob[role] >= 3600000) { p.onJob[role] -= 3600000; earn(role, POINTS.hour, 'an hour on the job'); }
+    }
+    // headlines the News scout routed (10 an hour at most)
+    const heads = (roster.find((r) => r.role === 'newsscout')?.headlines || []).map((h) => h.title);
+    p.newsHour = p.newsHour.filter((t) => t > now - 3600000);
+    if (p.headlines) for (const h of heads) if (!p.headlines.has(h) && p.newsHour.length < 10) { p.newsHour.push(now); earn('newsscout', POINTS.headline, 'routed a headline'); }
+    p.headlines = new Set(heads);
+    for (const e of evs) if (e.d) (p.ledger[e.role] ||= []).push({ t: now, d: e.d, why: e.why });
+    for (const [role, l] of Object.entries(p.ledger)) { const keep = l.filter((e) => e.t > now - 86400000); if (keep.length) p.ledger[role] = keep; else delete p.ledger[role]; }
+    p.prev = cur; p.lastObs = now;
+    pay.set(series, p);
+    paySlips(series, roster, now);
+  }
+  // each teammate's score on its row; the Employee of the hour; the Manager's word for the best and for anyone in the red
+  function paySlips(series, roster, now) {
+    const st = standings(pay.get(series)?.ledger ?? {}, now), name = (r) => roster.find((x) => x.role === r)?.name ?? r;
+    for (const r of roster) { r.score = st.score[r.role] ?? { day: 0, hour: 0, last: null }; r.star = r.role === st.star; }
+    const m = roster.find((r) => r.manager);
+    if (!m) return;
+    if (st.star) {
+      const s0 = st.score[st.star];
+      m.status += ` · Employee of the hour: ${name(st.star)} (${pts(s0.hour)})`;
+      m.talks.push({ to: st.star, text: `Employee of the hour: ${pts(s0.hour)} this hour${s0.last ? ` (last: ${s0.last.why})` : ''}. Keep it up.` });
+    }
+    for (const r of st.red.slice(0, 2)) { const s1 = st.score[r]; m.talks.push({ to: r, text: `Your score is ${pts(s1.hour)} this hour${s1.last ? ` (last: ${s1.last.why})` : ''}. Turn it around.` }); }
+    m.leaderboard = { top: st.top.map((r) => ({ role: r, name: name(r), ...st.score[r] })), bottom: st.bottom.map((r) => ({ role: r, name: name(r), ...st.score[r] })) };
+  }
   function observe(series, now = clock(), every = everyMs) {
     const s = per.get(series) ?? { at: 0, keys: {}, roster: null, feed: [] };
     if (now - s.at < every) return;
@@ -104,6 +155,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       const h = (a.hits[r.role] ||= []); h.push(now); while (h.length && h[0] < now - 3600000) h.shift();
     }
     s.roster = fixersFor(series, managed(base, x, series, now), now, true); // judged on this reading's time sheet, then the fixers act
+    score(series, s.roster, x, now); // merit pay (public/incentives.js)
     for (const r of s.roster) if (a.text[r.role] === undefined) { a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0; } // the Manager's own row
     const { events, keys } = teamChanges(s.keys, s.roster, now);
     s.keys = keys; s.feed.unshift(...events.reverse()); if (s.feed.length > 60) s.feed.length = 60;
@@ -112,6 +164,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
   function api(series) {
     const now = clock(), s = per.get(series);
     const roster = s?.roster ?? read(series, now);
+    if (!s) paySlips(series, roster, now);
     return { roster, talk: teamTalk(roster), feed: s?.feed ?? [], at: s?.at || now };
   }
   function live(series, liveMs = 1000) {
