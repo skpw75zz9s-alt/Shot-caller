@@ -87,3 +87,56 @@ test('in the team: a dead exchange feed gets reconnected, and counts as fixed on
   assert.match(r2.fx_desk.status, /No flags to fix · fixed 1 in the last day \(last: Exchange runner/);
   assert.ok(team.api('S').feed.some((e) => e.role === 'fx_desk' && /fixed Exchange runner/.test(e.text)));
 });
+
+// ---------- the floor helpers ----------
+import http from 'node:http';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { HELP_TRIES, helpPlans, helperRows } from '../public/fixers.js';
+import { FLOORS } from '../public/team.js';
+import { createBot } from '../bot.js';
+
+test('the floor helpers take what the fixers escalated: the long retries, the bot watchdog, or the hand-off', () => {
+  const plans = planFixes([flagged('exchanges', 'desk', 'broken', 'medic', 'Exchange runner'), flagged('price', 'desk', 'stuck', 'manager', 'Price clerk'), flagged('futures', 'desk', 'stuck', 'manager', 'Futures watcher'), flagged('archivist', 'ops', 'broken', 'medic', 'Archivist'), flagged('l_blend', 'lab', 'slacking', 'manager', 'Kalshi blender')]);
+  const desk = { open: { 'exchanges:broken:medic': { tries: 3, status: 'escalated' }, 'price:stuck:manager': { tries: 3, status: 'escalated' }, 'futures:stuck:manager': { tries: 1, status: 'fixing' }, 'l_blend:slacking:manager': { tries: 3, status: 'escalated' } } };
+  const hp = by(helpPlans(plans, desk));
+  assert.deepEqual([hp.exchanges.how, hp.exchanges.action, hp.exchanges.fixerTries], ['fix', 'restartFeeds', 3]);
+  assert.equal(hp.price.action, 'unstickBot', 'a frozen reading after the fixer\'s tries: the watchdog');
+  assert.ok(!hp.futures, 'still with its fixer');
+  assert.equal(hp.archivist.how, 'handoff'); assert.equal(hp.l_blend.how, 'handoff', 'the tune-up didn\'t do it: nothing more in code');
+  const rows = by(helperRows([], Object.values(hp), { open: { 'exchanges:broken:medic': { tries: 2, status: 'fixing' } } }, { now, floors: FLOORS, depts: DEPTS }));
+  assert.deepEqual(Object.keys(rows), FLOORS.map(([f]) => `fh_${f}`), 'one helper per floor');
+  assert.match(rows.fh_f1.status, /Helping: Exchange runner \(keep reconnecting the exchange feeds every 30 minutes, try 2 of 6\); Price clerk \(let go of a hung bot cycle and restart the loop, try 1 of 6\) · Handed to the admin: Archivist/);
+  assert.ok(rows.fh_f1.talks.some((t) => t.to === 'exchanges' && /^I've got you: the Market desk fixer tried 3 times/.test(t.text)));
+  assert.ok(rows.fh_f1.talks.some((t) => t.to === 'fx_desk'));
+  assert.deepEqual(rows.fh_f1.handoffs.map((h) => h.name), ['Archivist']);
+  assert.match(rows.fh_f2.status, /Handed to the admin: Kalshi blender/);
+  assert.match(rows.fh_f3.status, /^Nobody stuck on this floor$/);
+});
+
+test('in the team: a feed that stays down gets the fixer\'s 3 tries, then the helper\'s every 30 minutes, then the admin', () => {
+  let t = now; const calls = [];
+  const team = createTeam({ book: { get: () => ({ snap: { spot: 1, mSpot: 1, rows: [] }, sig: null }) }, botOf: () => null, watchOf: () => null, clock: () => t, markets: () => ({ listed: 1, running: 1 }),
+    stackOf: () => ({ scanFeed: { api: () => ({ feeds: { a: 'off' } }) }, asset: { kind: 'crypto' } }), fixes: { restartFeeds: () => { calls.push(t); return true; } } });
+  const helper = () => team.api('S').roster.find((r) => r.role === 'fh_f1');
+  for (let i = 0; i < 4 * 6 + 2; i++) { team.observe('S'); t += 5 * 60000; } // ~2 hours, a reading every 5 minutes
+  assert.equal(calls.filter((c) => c < now + 25 * 60000).length, 3, 'the fixer: 3 tries, 10 minutes apart (the helper steps in at minute 30)');
+  assert.ok(calls.length >= 5, `then the helper keeps going (${calls.length} reconnects)`);
+  assert.match(helper().status, /Helping: Exchange runner \(keep reconnecting the exchange feeds every 30 minutes, try \d of 6\)/);
+  for (let i = 0; i < 12 * 4; i++) { team.observe('S'); t += 5 * 60000; } // four more hours
+  assert.equal(calls.length, 3 + HELP_TRIES, 'and stops after its 6');
+  assert.match(helper().status, /Handed to the admin: Exchange runner/); assert.equal(helper().handoffs[0].tries, 3 + HELP_TRIES);
+});
+
+test('the watchdog: a bot tick that hangs is let go of, so the next one can run', async () => {
+  const hang = http.createServer(() => {}); // takes the request and never answers
+  await new Promise((r) => hang.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${hang.address().port}`;
+  const b = createBot({ kalshi: base, coinbase: base, dataFile: join(mkdtempSync(join(tmpdir(), 'wd-')), 'bot.json'), env: { INDEX: 'off' }, log: { warn() {}, error() {}, log() {} }, keepAlive: () => true });
+  assert.equal(b.unstick(), 'running', 'nothing hung: it just makes sure the loop runs');
+  b.stop();
+  b.tick(); await new Promise((r) => setTimeout(r, 300));
+  assert.equal(b.unstick(Date.now(), 100), 'reset', 'hung past the limit: let go');
+  b.stop(); hang.closeAllConnections(); hang.close();
+});

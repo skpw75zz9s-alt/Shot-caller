@@ -276,6 +276,16 @@ Security:
 
 ## Version notes (newest first)
 
+### Floor helpers (v13.73)
+
+The office is now a building of **four floors**: the Top floor (Manager, Improvement crew, Grading room, Newsroom), the Calls floor (Call desk, Risk office, Trading floor), the Lab floor (Research lab, X-ray room, Council chamber) and the Ground floor (Market desk, Operations). Each floor has a 🦺 **floor helper**, the second line of support when a teammate on that floor is **still stuck after its team's fixer** has escalated. A flag goes to the helper before it reaches you:
+
+- **A feed still down** after the fixer's 3 reconnects: exchanges come back after outages, so the helper keeps **reconnecting every 30 minutes, 6 more times** (3 hours).
+- **The bot's loop frozen**: the helper uses a new **watchdog** (`bot.js` `unstick`). A bot cycle that has hung for 2 minutes is let go of so the next one can run, and the loop is restarted. (Every request in a cycle has an 8-second timeout, so this should never be needed; now it's covered if it is.)
+- **Anything else** (no fix in code, or the helper's tries ran out too): **handed to you**. The live window's **Needs you** panel lists what the helpers hand off, with what to do and how many tries it got.
+
+A fix counts only when the flag actually clears (*got 1 back on track in the last day*). The helper tells the stuck teammate (*I've got you: the Market desk fixer tried 3 times, so I'll keep reconnecting…*) and the fixer it took over from. The Manager's banner counts the helpers too.
+
 ### A flag fixer for every team (v13.72)
 
 Each team (department) now has its own 🛠️ **fixer**: eleven of them, one per room in the live window. Every flag on its team (*stuck* or *slacking* from the Manager, *hurting* or *broken* from the Improvement crew) gets one of three answers:

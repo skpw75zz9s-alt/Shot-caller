@@ -42,7 +42,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   const candleRows = (o = {}) => (prices ? prices.candleRows(ASSET, { gran: 60, ...o }) : getJSON(`${coinbase}/products/${ASSET.product || 'BTC-USD'}/candles?granularity=60${o.start ? `&start=${new Date(o.start).toISOString()}&end=${new Date(o.end).toISOString()}` : ''}`));
   const extraHosts = (env.PUSH_HOST_ALLOW || '').split(',').filter(Boolean);
   const devices = new Map(); // endpoint -> device
-  let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0;
+  let vapid = null, saveTimer = null, timer = null, busy = false, dirty = false, lastSave = 0, busySince = 0, tickNo = 0;
   const results = new Map(); // ticker -> 'yes' | 'no' once Kalshi settles it
   const market = { spot: null, delayed: false, candles: [], candlesAt: 0, indexAt: 0, feedOffset: 0, gradedAt: 0, markets: {}, strikes: {}, quoteLogs: {}, chosen: {}, lastTick: 0, lastError: null };
   // the price the bot calls on: none while it's delayed (a stale index or futures print would make confident calls on old news)
@@ -323,7 +323,8 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
 
   async function tick(now = Date.now()) {
     if (busy || (!devices.size && !learn && !keepAlive())) return;
-    busy = true;
+    busy = true; busySince = Date.now();
+    const me = ++tickNo; // a tick the watchdog let go of (unstick) must not clear the next one's busy flag when it finally ends
     try {
       await refresh(now);
       market.lastTick = now; market.lastError = null;
@@ -392,8 +393,20 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
       market.lastError = e.message;
       log.warn('bot tick failed', e.message);
     } finally {
-      busy = false;
+      if (me === tickNo) busy = false;
     }
+  }
+  // The watchdog (v13.73, the floor helpers: public/fixers.js): a tick that has been running for hungMs (every request in
+  // it has an 8-second timeout, so this shouldn't happen) is let go of, so the next one can run; and the loop is started
+  // if it isn't. Returns 'reset' when it let go of a hung tick, 'running' otherwise.
+  function unstick(now = Date.now(), hungMs = 120000) {
+    if (busy && now - busySince > hungMs) {
+      log.warn(`a bot tick hung for ${Math.round((now - busySince) / 1000)}s: let go of it so the next one runs`);
+      busy = false; tickNo++; start();
+      return 'reset';
+    }
+    start();
+    return 'running';
   }
 
   // A new 15-minute window has opened for this phone: time for an update. Waits up to 4 minutes
@@ -694,6 +707,6 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   function stop() { clearInterval(timer); timer = null; clearTimeout(saveTimer); backfillStop = true; }
 
   const status = () => ({ devices: devices.size, lastTick: market.lastTick || null, lastError: market.lastError, learnedMinutes: learned.vol.minutes, learnedWindows: learned.windows });
-  return { load, save, start, stop, tick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, vapidKeys: () => (vapid ? { publicKey: vapid.publicKey, privateKey: vapid.privateKey } : null), market: () => ({ series: MK.series, asset: ASSET.key, freq: MK.freq, delayed: market.delayed }), devices,
+  return { load, save, start, stop, tick, unstick, sync, unsubscribe, test, report, notifyWhere, status, publicKey: () => vapid.publicKey, vapidKeys: () => (vapid ? { publicKey: vapid.publicKey, privateKey: vapid.privateKey } : null), market: () => ({ series: MK.series, asset: ASSET.key, freq: MK.freq, delayed: market.delayed }), devices,
     learned: () => publicLearned(learned), learnStatus, picks: () => pickRecord, record: officialRecord, pick: pickNowApi, lessons: lessonsApi, saveRecord, index: () => index.read(), backfill, saveLearned, startLearning };
 }

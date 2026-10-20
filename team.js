@@ -5,15 +5,16 @@
 //   api(series)       the roster and the feed
 //   live(series)      the same, read fresh (at most once a second): the admin's live window (v13.66, public/team-live.js)
 //   (the staff, v13.67: each asset's readers from stackOf, the related markets, the tune-up, the market list, storage)
-import { DEPTS, liveRow, teamBase, teamChanges, teamPulse, teamTalk, withManager } from './public/team.js';
+import { DEPTS, FLOORS, liveRow, teamBase, teamChanges, teamPulse, teamTalk, withManager } from './public/team.js';
 import { liqSummary, positioning } from './public/xray.js';
-import { fixerRows, planFixes } from './public/fixers.js';
+import { HELP_TRIES, fixerRows, helpPlans, helperRows, planFixes } from './public/fixers.js';
 import { createFixDesk } from './fixdesk.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
   stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, clock = () => Date.now(), everyMs = 5000 }) {
   const desk = createFixDesk({ actions: fixes, clock }); // the flag fixers' fixes (fixdesk.js)
+  const helpDesk = createFixDesk({ actions: fixes, clock, cooldownMs: 30 * 60000, maxTries: HELP_TRIES }); // the floor helpers': slower, longer
   const per = new Map(); // series -> { at, keys, roster, feed }
   const act = new Map(); // series -> { text, at, rounds, hits, round }: each teammate's last status, when it changed, rounds since, changes this hour (the Manager)
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
@@ -39,12 +40,16 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     const plans = planFixes(roster);
     if (run) desk.step(series, plans);
     const fx = fixerRows(roster, plans, desk.state(series), { now, depts: DEPTS }), m = roster.find((r) => r.manager);
-    if (m && fx.length) { // the Manager accounts for the fixers too
-      const fixing = fx.filter((r) => r.state === 'busy').length, up = fx.filter((r) => r.state === 'warn').length;
-      m.status += ` · ${fx.length} fixers: ${fixing} fixing, ${up} with something escalated to you`;
+    // what the fixers escalated goes to the floor helpers first
+    const hp = helpPlans(plans, desk.state(series));
+    if (run) helpDesk.step(series, hp);
+    const fh = helperRows(roster, hp, helpDesk.state(series), { now, floors: FLOORS, depts: DEPTS });
+    if (m && fx.length) { // the Manager accounts for the fixers and the floor helpers too
+      const fixing = fx.filter((r) => r.state === 'busy').length, helping = fh.filter((r) => r.state === 'busy').length, up = fh.filter((r) => r.state === 'warn').length;
+      m.status += ` · ${fx.length} fixers: ${fixing} fixing · ${fh.length} floor helpers: ${helping} helping, ${up} with something handed to you`;
       if (up) m.state = 'warn';
     }
-    return [...roster, ...fx];
+    return [...roster, ...fx, ...fh];
   };
   const read = (series, now) => { const x = inputs(series, now); return fixersFor(series, managed(teamBase(x), x, series, now), now, false); };
   // what the staff read: each one defensive, so a reader that isn't there (or throws) leaves its teammate quiet, never the team

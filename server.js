@@ -173,6 +173,7 @@ export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bo
     restartFeeds: (s) => { const st = stacks.stack(s); if (!st?.scanFeed || process.env.SCAN_FEEDS === 'off' || (st.asset && st.asset.kind !== 'crypto')) return false; st.scanFeed.stop(); st.scanFeed.start(); return true; },
     restartFutures: (s) => { const f = stacks.stack(s)?.futures; if (!f || process.env.FUTURES === 'off') return false; f.stop(); f.start(); return true; },
     kickBot: (s) => { const b = isHome(s) ? bot : stacks.bot(s); if (!b?.start) return false; b.start(); return true; },
+    unstickBot: (s) => { const b = isHome(s) ? bot : stacks.bot(s); return !!b?.unstick?.(); }, // the floor helpers: let go of a hung tick (bot.js)
     tuneUp: () => { if (!tuneUp.status().running) tuneUp.run(tuneMarkets()).catch((e) => console.error('tune-up (flag fixer) failed', e.message)); return true; },
   } });
 

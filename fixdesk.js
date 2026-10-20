@@ -6,7 +6,8 @@
 // actions: { restartFeeds(series), restartFutures(series), kickBot(series), tuneUp() }: each returns true when it ran.
 import { MAX_TRIES, fixKey } from './public/fixers.js';
 
-export function createFixDesk({ actions = {}, clock = () => Date.now(), cooldownMs = 10 * 60000, tuneEveryMs = 3600000, log = console } = {}) {
+// (the floor helpers use a second desk: a 30-minute cooldown and 6 tries, v13.73)
+export function createFixDesk({ actions = {}, clock = () => Date.now(), cooldownMs = 10 * 60000, tuneEveryMs = 3600000, maxTries = MAX_TRIES, log = console } = {}) {
   const per = new Map(); // series -> { open, fixed }
   let lastTune = 0;
   const lastRun = new Map(); // `${series}:${action}` -> ms (one action fixes every flag it covers: run it once per cooldown)
@@ -17,7 +18,7 @@ export function createFixDesk({ actions = {}, clock = () => Date.now(), cooldown
       const k = fixKey(p), o = (s.open[k] ||= { tries: 0, last: 0, status: 'fixing', role: p.role, name: p.name, dept: p.dept, action: p.action });
       seen.add(k);
       if (o.status === 'escalated') continue;
-      if (o.tries >= MAX_TRIES) { if (now - o.last >= cooldownMs) o.status = 'escalated'; continue; } // still up a cooldown after the last try: it needs the admin
+      if (o.tries >= maxTries) { if (now - o.last >= cooldownMs) o.status = 'escalated'; continue; } // still up a cooldown after the last try: it needs the admin
       if (now - o.last < cooldownMs) continue;
       const runKey = `${series}:${p.action}`;
       const due = p.action === 'tuneUp' ? now - lastTune >= tuneEveryMs : now - (lastRun.get(runKey) ?? 0) >= cooldownMs;

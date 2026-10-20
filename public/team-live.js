@@ -6,7 +6,7 @@
 // just changed speaks first, marked CHANGED in the conversation log. The Improvement crew (v13.69, improve.js) coaches the
 // rest: its reviews show in each teammate's sheet, and a teammate it flags as hurting or broken gets a red tag.
 // The server serves this page and its data to the admin only.
-import { DEPTS, TEAM_ICON } from './team.js';
+import { DEPTS, FLOORS, TEAM_ICON } from './team.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -22,16 +22,7 @@ let byRole = {}, talk = [], turn = 0, built = '', open = null;
 const keys = {}, queue = [], chat = [];
 
 // ---------- the office ----------
-function build(roster) {
-  const sig = roster.map((r) => r.role).join();
-  if (sig === built) return;
-  built = sig;
-  $('rooms').innerHTML = DEPTS.map(([d, name]) => {
-    const team = roster.filter((r) => r.dept === d);
-    if (!team.length) return '';
-    return `<section class="room ${team.length >= 8 ? 'wide' : team.length <= 3 ? 'half' : ''}" data-dept="${d}">
-      <h2><span>${esc(name)}</span><em id="rw-${d}"></em></h2>
-      <div class="desks">${team.map((r) => `
+const empHTML = (r) => `
         <button class="emp idle${r.lead ? ' lead' : ''}" id="e-${r.role}" data-role="${r.role}" aria-label="${esc(r.name)}">
           <div class="bubble" id="b-${r.role}"></div>
           <div class="rig" aria-hidden="true">
@@ -40,7 +31,23 @@ function build(roster) {
             <div class="badge">${TEAM_ICON[r.role] || '•'}</div><span class="zz">z</span>
           </div>
           <span class="nm">${esc(r.name)}</span>
-        </button>`).join('')}</div></section>`;
+        </button>`;
+// the building: each floor (top to bottom) with its helper at the front, then its rooms
+function build(roster) {
+  const sig = roster.map((r) => r.role).join();
+  if (sig === built) return;
+  built = sig;
+  const room = ([d, name]) => {
+    const team = roster.filter((r) => r.dept === d && !r.helper);
+    if (!team.length) return '';
+    return `<section class="room ${team.length >= 8 ? 'wide' : team.length <= 3 ? 'half' : ''}" data-dept="${d}">
+      <h2><span>${esc(name)}</span><em id="rw-${d}"></em></h2>
+      <div class="desks">${team.map(empHTML).join('')}</div></section>`;
+  };
+  $('rooms').innerHTML = FLOORS.map(([f, fname, ds]) => {
+    const helper = roster.find((r) => r.helper && r.floor === f);
+    return `<section class="floor-s" data-floor="${f}"><div class="floor-h"><span>${esc(fname)}</span>${helper ? `<div class="floor-helper">${empHTML(helper)}</div>` : ''}</div>
+      <div class="rooms-grid">${DEPTS.filter(([d]) => ds.includes(d)).map(room).join('')}</div></section>`;
   }).join('');
 }
 
@@ -128,10 +135,10 @@ function render(t) {
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
   const n = (st) => t.roster.filter((r) => r.state === st).length;
-  // what the flag fixers couldn't fix: it needs the admin (public/fixers.js)
-  const needs = t.roster.filter((r) => r.fixer).flatMap((r) => r.escalations || []);
+  // what neither the flag fixers nor the floor helpers could fix: it needs the admin (public/fixers.js)
+  const needs = t.roster.filter((r) => r.helper).flatMap((r) => r.handoffs || []);
   $('needs').hidden = !needs.length;
-  if (needs.length) $('needs').innerHTML = `<b>🛠️ Needs you</b><ul>${needs.map((n) => `<li><b>${esc(n.name)}</b>${n.tries ? ` (tried ${n.tries}×)` : ''}: ${esc(n.help)}</li>`).join('')}</ul>`;
+  if (needs.length) $('needs').innerHTML = `<b>🦺 Needs you</b><ul>${needs.map((n) => `<li><b>${esc(n.name)}</b>${n.tries ? ` (tried ${n.tries}×)` : ''}: ${esc(n.help)}</li>`).join('')}</ul>`;
   const mgr = byRole.manager;
   if (mgr) { const b = $('mgr'); b.hidden = false; b.className = `mgr ${mgr.state}`; b.innerHTML = `<b>👔 Manager</b> ${esc(mgr.status)}`; }
   $('counts').innerHTML = `<span><b>${t.roster.length}</b> on the team</span><span class="a"><b>${n('busy')}</b> acting</span><span class="w"><b>${n('warn')}</b> warning</span><span><b>${n('idle')}</b> waiting</span><span><b>${n('off')}</b> off</span><span><b>${talk.length}</b> lines of talk</span>`;

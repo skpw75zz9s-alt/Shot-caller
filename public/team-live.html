@@ -52,7 +52,12 @@
   #wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 4; }
   .talk-line { fill: none; stroke-width: 1.6; stroke-dasharray: 4 5; animation: flow .6s linear infinite; transition: opacity .4s; }
   .pk { filter: drop-shadow(0 0 6px currentColor); }
-  .rooms { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .floor-s { margin-bottom: 14px; padding: 8px 8px 10px; border-radius: 16px; border: 1px dashed #2a3550; }
+  .floor-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 4px 8px; font: 700 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .floor-helper .emp { flex-direction: row; gap: 6px; padding: 2px 8px 2px 2px; border: 1px solid var(--line); border-radius: 99px; background: var(--panel); }
+  .floor-helper .rig { zoom: .42; } .floor-helper .nm { font: 600 11px var(--sans); letter-spacing: 0; text-transform: none; -webkit-line-clamp: 1; }
+  .floor-helper .bubble { left: auto; right: 0; transform: translate(0, 6px) scale(.85); } .floor-helper .bubble.show { transform: none; }
+  .rooms-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .room { grid-column: span 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 8px 6px 6px; min-width: 0; }
   .room.half { grid-column: span 1; }
   .room h2 { margin: 0 2px 4px; font: 700 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; }
@@ -60,7 +65,7 @@
   .desks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 2px; }
   .half .desks { grid-template-columns: repeat(2, 1fr); }
   @media (min-width: 900px) {
-    .rooms { grid-template-columns: repeat(4, 1fr); }
+    .rooms-grid { grid-template-columns: repeat(4, 1fr); }
     .room, .room.half { grid-column: span 1; } .room.wide { grid-column: span 2; }
     .desks, .half .desks { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
   }
