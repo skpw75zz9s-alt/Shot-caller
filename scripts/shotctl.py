@@ -690,7 +690,7 @@ def save_conf(conf: dict) -> None:
 
 
 def live_base(args) -> str:
-    url = args.url or os.environ.get('SHOTCALLER_URL') or load_conf().get('url') or f'http://localhost:{port()}'
+    url = getattr(args, 'url', None) or os.environ.get('SHOTCALLER_URL') or load_conf().get('url') or f'http://localhost:{port()}'
     return url.rstrip('/')
 
 
@@ -759,11 +759,22 @@ def cmd_live(args) -> int:
             print(f'{m["code"]:<10}{m["status"]:<10}{"yes" if m.get("paidAt") else "no":<6}{exp:<18}{m.get("devices", 0)}')
         print(f'\n{len(rows)} member(s)')
     elif a in ('approve', 'deny', 'revoke'):
+        if a == 'approve' and args.code.lower() == 'new':  # same alphabet as access.js newCode (no 0/O, 1/I/L)
+            args.code = 'SC-' + ''.join(secrets.choice('ABCDEFGHJKMNPQRSTUVWXYZ23456789') for _ in range(6))
         body = {'code': args.code}
-        if a == 'approve' and args.days:
+        if a == 'approve' and args.until:
+            # the server adds days to now, so turn the date into days left until 11:59 pm that day (local time)
+            try:
+                end = time.mktime(time.strptime(args.until + ' 23:59', '%Y-%m-%d %H:%M'))
+            except ValueError:
+                die(f'--until takes a date like 2026-11-15, not {args.until!r}')
+            if end <= time.time():
+                die(f'{args.until} has already passed')
+            body['days'] = (end - time.time()) / 86400
+        elif a == 'approve' and args.days:
             body['days'] = args.days
         m = call(args, 'POST', f'/api/admin/{a}', body).get('member', {})
-        exp = time.strftime('%Y-%m-%d', time.localtime(m['expires'] / 1000)) if m.get('expires') else '-'
+        exp = time.strftime('%Y-%m-%d %H:%M', time.localtime(m['expires'] / 1000)) if m.get('expires') else '-'
         print(f'{m.get("code", args.code)}: {m.get("status")} (expires {exp})')
     elif a == 'config':
         if args.price is None and args.days is None:
@@ -827,20 +838,23 @@ def main() -> int:
     s.add_argument('--user', help='user the service runs as (default: you)')
     s.set_defaults(fn=cmd_install_service)
 
-    s = sub.add_parser('live', help='talk to a running app (local or hosted)')
-    s.add_argument('--url', help='app address (default: the one you logged in to, else localhost)')
+    # --url works before or after the action (live --url X login, or live login --url X)
+    url_opt = argparse.ArgumentParser(add_help=False)
+    url_opt.add_argument('--url', default=argparse.SUPPRESS, help='app address (default: the one you logged in to, else localhost)')
+    s = sub.add_parser('live', help='talk to a running app (local or hosted)', parents=[url_opt])
     ls = s.add_subparsers(dest='live_action', required=True, metavar='action')
-    ls.add_parser('health')
-    ls.add_parser('record')
-    x = ls.add_parser('login'); x.add_argument('--code', help='admin code (default: prompt, or SHOTCALLER_ADMIN_CODE)')
-    ls.add_parser('logout')
-    x = ls.add_parser('members'); x.add_argument('--status', choices=['pending', 'active', 'denied', 'revoked'])
-    x = ls.add_parser('approve'); x.add_argument('code'); x.add_argument('--days', type=int)
-    x = ls.add_parser('deny'); x.add_argument('code')
-    x = ls.add_parser('revoke'); x.add_argument('code')
-    x = ls.add_parser('config'); x.add_argument('--price', type=float); x.add_argument('--days', type=int)
-    x = ls.add_parser('tuneup'); x.add_argument('--run', action='store_true', help='run it now instead of showing the last report')
-    x = ls.add_parser('hiring'); x.add_argument('--decide', nargs=2, metavar=('ID', 'DECISION'), help='DECISION is approve, decline, or fire (let a hire go; ID is then its key)')
+    ls.add_parser('health', parents=[url_opt])
+    ls.add_parser('record', parents=[url_opt])
+    x = ls.add_parser('login', parents=[url_opt]); x.add_argument('--code', help='admin code (default: prompt, or SHOTCALLER_ADMIN_CODE)')
+    ls.add_parser('logout', parents=[url_opt])
+    x = ls.add_parser('members', parents=[url_opt]); x.add_argument('--status', choices=['pending', 'active', 'denied', 'revoked'])
+    x = ls.add_parser('approve', parents=[url_opt]); x.add_argument('code', help='a code like SC-ABC234, or "new" to make one up')
+    g = x.add_mutually_exclusive_group(); g.add_argument('--days', type=float); g.add_argument('--until', metavar='YYYY-MM-DD', help='access ends at 11:59 pm that day')
+    x = ls.add_parser('deny', parents=[url_opt]); x.add_argument('code')
+    x = ls.add_parser('revoke', parents=[url_opt]); x.add_argument('code')
+    x = ls.add_parser('config', parents=[url_opt]); x.add_argument('--price', type=float); x.add_argument('--days', type=int)
+    x = ls.add_parser('tuneup', parents=[url_opt]); x.add_argument('--run', action='store_true', help='run it now instead of showing the last report')
+    x = ls.add_parser('hiring', parents=[url_opt]); x.add_argument('--decide', nargs=2, metavar=('ID', 'DECISION'), help='DECISION is approve, decline, or fire (let a hire go; ID is then its key)')
     s.set_defaults(fn=cmd_live)
 
     for stream in (sys.stdout, sys.stderr):  # a Windows console can't print every character; never crash over one
