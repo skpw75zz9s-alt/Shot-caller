@@ -2057,6 +2057,13 @@ Choose one:
 - **Railway.** On railway.com: **Login with GitHub** → **New Project** → **Deploy from GitHub repo** → `Shot-caller`. `railway.json` sets the start command and health check. When the deploy goes green, open the service → **Settings → Networking → Generate Domain** (leave the port blank or enter `8080`). That gives you your `https://…up.railway.app` URL, and every push to `master` redeploys. Open the HTTPS URL on your phone, then:
   - **iPhone:** Safari → Share → *Add to Home Screen*
   - **Android:** Chrome → ⋮ → *Install app*
+- **Your own computer or server, no Railway** (`scripts/shotctl.py`, Python 3.9+, nothing to install). It scans the code, fixes what it safely can, runs the server as a real app and website, and manages the live app:
+  - `python3 scripts/shotctl.py scan` checks Node, dependencies, every `.js` file, the tests, `.env`, the data folder and the running server. `fix` installs dependencies, creates `.env` with a fresh `ACCESS_SECRET`, `KEY_SECRET` and pinned VAPID keys, and creates the data folder.
+  - `env set KEY=VALUE` / `env unset KEY` / `env list` edit `.env`, which takes the place of Railway's Variables (secrets are masked when listed).
+  - `start` / `stop` / `restart` / `status` / `logs` run the server in the background and restart it if it crashes. `deploy` pulls, installs, tests and restarts, and rolls back to the last commit if the tests or the health check fail.
+  - Public address: `tunnel` gives a free `https://….trycloudflare.com` address through [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no domain needed). For your own domain, `install-service --domain shotcaller.example.com` writes a systemd unit (starts on boot) and a Caddyfile (automatic HTTPS) and sets `APP_URL`.
+  - `live login --url https://your-app` signs in with the admin code, then `live health`, `live members`, `live approve CODE --days 30`, `live deny`, `live revoke`, `live config --price 5 --days 30`, `live tuneup --run` and `live hiring` work against that app, wherever it's hosted (Railway included).
+  - Moving off Railway: copy the volume's files into `data/`, and set `ACCESS_SECRET` to `<RAILWAY_PROJECT_ID>:<RAILWAY_SERVICE_ID>` (before running `fix`) so members' saved passes keep working.
 - **Same Wi-Fi.** Run `npm start` on your computer, then open `http://<computer-ip>:8080` on your phone. Install and notifications need HTTPS, but the live view works.
 - **Android only, on the device.** Install Termux, then `pkg install nodejs git`, clone the repo, run `npm start`, and open `localhost:8080`.
 
