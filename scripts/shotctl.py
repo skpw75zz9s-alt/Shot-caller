@@ -72,6 +72,8 @@ VAPID_PRIVATE_KEY VAPID_PUBLIC_KEY VAPID_SUBJECT WHALE_ALERT_API_KEY WHALE_FILTE
 '''.split())
 
 WINDOWS = os.name == 'nt'
+# variables this tool reads (not the server): TUNNEL_TOKEN runs your named Cloudflare tunnel in `up`
+TOOL_VARS = {'TUNNEL_TOKEN'}
 USE_COLOR = sys.stdout.isatty() and os.environ.get('NO_COLOR') is None
 
 
@@ -249,7 +251,7 @@ def cmd_scan(args) -> int:
     if not ENV_FILE.exists():
         warn('no .env yet (fix: creates one with fresh secrets)'); fixable.append('env')
     else:
-        unknown = sorted(k for k in env if k not in KNOWN_VARS)
+        unknown = sorted(k for k in env if k not in KNOWN_VARS | TOOL_VARS)
         for k in unknown:
             warn(f'{k} is set but the server never reads it (typo?)')
         if not env.get('ADMIN_CODE'):
@@ -422,7 +424,7 @@ def cmd_env(args) -> int:
         if not env:
             print('No .env yet. Create one with: shotctl.py fix')
         for k, v in env.items():
-            flag = '' if k in KNOWN_VARS else paint('33', '  (not read by the server)')
+            flag = '' if k in KNOWN_VARS | TOOL_VARS else paint('33', '  (not read by the server)')
             print(f'{k}={v if args.show else mask(k, v)}{flag}')
         return 0
     if args.action == 'set':
@@ -433,7 +435,7 @@ def cmd_env(args) -> int:
             k, v = pair.split('=', 1)
             if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', k):
                 die(f'bad variable name {k!r}')
-            if k not in KNOWN_VARS:
+            if k not in KNOWN_VARS | TOOL_VARS:
                 warn(f'{k} is not a variable the server reads (setting it anyway)')
             updates[k] = v
         write_env(updates)
@@ -625,7 +627,11 @@ def cmd_deploy(args) -> int:
     after = sh(['git', 'rev-parse', 'HEAD'], capture=True).stdout.strip() if git else None
 
     step('Install')
-    sh(['npm', 'ci'] if (ROOT / 'package-lock.json').exists() else ['npm', 'install'])
+    lock_changed = git and before != after and sh(['git', 'diff', '--quiet', before, after, '--', 'package.json', 'package-lock.json'], check=False).returncode
+    if lock_changed or not deps_installed():
+        sh(['npm', 'ci'] if (ROOT / 'package-lock.json').exists() else ['npm', 'install'])
+    else:
+        ok('dependencies unchanged')
 
     if not args.skip_tests:
         step('Test')
@@ -651,11 +657,157 @@ def cmd_deploy(args) -> int:
     return 1
 
 
+# ---------- up: keep it all running, update itself, never lose data ----------
+
+BACKUPS = '.backups'
+
+
+def data_dir() -> Path:
+    return Path(server_env()['DATA_DIR'])
+
+
+def backup_data(keep: int = 10) -> Path | None:
+    """Copy everything the app has saved (members, record, what it learned...) into DATA_DIR/.backups/<time>."""
+    src = data_dir()
+    if not src.is_dir():
+        return None
+    dest = src / BACKUPS / time.strftime('%Y%m%d-%H%M%S')
+    n = 1
+    while dest.exists():  # two backups in the same second
+        dest, n = src / BACKUPS / f'{time.strftime("%Y%m%d-%H%M%S")}-{n}', n + 1
+    shutil.copytree(src, dest, ignore=lambda d, names: [n for n in names if Path(d) == src and n in (BACKUPS, '.shotctl')])
+    for old in sorted((src / BACKUPS).iterdir())[:-keep]:
+        shutil.rmtree(old, ignore_errors=True)
+    return dest
+
+
+def cmd_backup(args) -> int:
+    if args.restore:
+        src = data_dir() / BACKUPS / args.restore
+        if not src.is_dir():
+            die(f'no backup {args.restore}. Backups: {", ".join(sorted(p.name for p in (data_dir() / BACKUPS).iterdir())) or "none"}')
+        was_up = bool(local_health())
+        stop_background()
+        backup_data()  # the current data too, in case this was a mistake
+        for item in data_dir().iterdir():  # the data becomes exactly the backup (the backups and this tool's files stay)
+            if item.name not in (BACKUPS, '.shotctl'):
+                shutil.rmtree(item) if item.is_dir() else item.unlink()
+        for item in src.iterdir():
+            (shutil.copytree if item.is_dir() else shutil.copy2)(item, data_dir() / item.name)
+        print(f'Restored {args.restore}.')
+        return 0 if not was_up or start_background() else 1
+    dest = backup_data(args.keep)
+    print(f'Backed up to {dest}' if dest else 'Nothing to back up yet.')
+    return 0
+
+
+def find_cloudflared() -> str | None:
+    found = shutil.which('cloudflared')
+    if found or not WINDOWS:
+        return found
+    for base in (os.environ.get('ProgramFiles(x86)'), os.environ.get('ProgramFiles')):  # a fresh install isn't on PATH yet
+        exe = Path(base or '') / 'cloudflared' / 'cloudflared.exe'
+        if base and exe.exists():
+            return str(exe)
+    return None
+
+
+def behind_by(branch: str) -> int:
+    if sh(['git', 'fetch', '-q', 'origin', branch], capture=True, check=False).returncode:
+        return 0  # offline for a moment: try again next time
+    r = sh(['git', 'rev-list', '--count', f'HEAD..origin/{branch}'], capture=True, check=False)
+    return int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+
+
+def cmd_up(args) -> int:
+    """Run the app (and the tunnel) and keep them up. Restarts only for a crash or an update; data is backed up first."""
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = open(RUN_DIR / 'up.log', 'a', encoding='utf-8')
+
+    def say(msg: str) -> None:
+        line = f'{time.strftime("%Y-%m-%d %H:%M:%S")}  {msg}'
+        print(line, flush=True)
+        log_file.write(line + '\n'); log_file.flush()
+
+    git = (ROOT / '.git').exists() and shutil.which('git')
+    branch = args.branch or (sh(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], capture=True).stdout.strip() if git else None)
+    token = read_env().get('TUNNEL_TOKEN') or os.environ.get('TUNNEL_TOKEN')
+    exe = find_cloudflared() if token else None
+    if token and not exe:
+        say('TUNNEL_TOKEN is set but cloudflared is not installed: running without the tunnel')
+    say(f'Shot Caller up: app on http://localhost:{port()}' + (', tunnel on' if exe else ', no tunnel (set TUNNEL_TOKEN to run it here)')
+        + (f', checking {branch} for updates every ' + (f'{args.check_every // 60} min' if args.check_every >= 60 else f'{args.check_every}s') if git and not args.no_update else ''))
+
+    if not local_health() and not start_background(args.health_timeout):
+        say('the app did not start: see `shotctl.py logs`')
+    tunnel: subprocess.Popen | None = None
+    tunnel_log = open(RUN_DIR / 'tunnel.log', 'a', encoding='utf-8') if exe else None
+    misses, next_check, last_failed = 0, 0.0, None
+    try:
+        while True:
+            if exe and (tunnel is None or tunnel.poll() is not None):
+                if tunnel is not None:
+                    say(f'the tunnel stopped (exit {tunnel.returncode}): starting it again')
+                # the token goes in through the environment, never on the command line
+                tunnel = subprocess.Popen([exe, 'tunnel', '--no-autoupdate', 'run'], cwd=ROOT, env={**os.environ, 'TUNNEL_TOKEN': token},
+                                          stdout=tunnel_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            if local_health(timeout=5):
+                misses = 0
+            else:
+                misses += 1
+                if misses >= 3:  # down for ~90 seconds, not just a busy moment
+                    say('the app is not answering: restarting it (data is kept)')
+                    stop_background()
+                    start_background(args.health_timeout)
+                    misses = 0
+            if git and not args.no_update and time.time() >= next_check:
+                next_check = time.time() + args.check_every
+                if behind_by(branch):
+                    remote = sh(['git', 'rev-parse', f'origin/{branch}'], capture=True).stdout.strip()
+                    if remote != last_failed:
+                        say(f'update found ({remote[:7]}): backing up the data, then installing')
+                        dest = backup_data()
+                        if dest:
+                            say(f'data backed up to {dest}')
+                        try:
+                            code = cmd_deploy(argparse.Namespace(branch=branch, no_pull=False, skip_tests=args.skip_tests, health_timeout=args.health_timeout))
+                        except SystemExit as e:
+                            code = e.code or 1
+                        if code:
+                            last_failed = remote  # don't retry the same broken version every 5 minutes
+                            say(f'update {remote[:7]} was not installed (tests or health check failed); still running the old version')
+                        else:
+                            say(f'updated to {remote[:7]}; all data kept')
+            time.sleep(30)
+    except KeyboardInterrupt:
+        say('stopping the tunnel (the app keeps running; `shotctl.py stop` stops it)')
+        return 0
+    finally:
+        if tunnel and tunnel.poll() is None:
+            tunnel.terminate()
+
+
+def cmd_install_startup(args) -> int:
+    """Start `up` when you log in (Windows Startup folder; no admin needed)."""
+    if not WINDOWS:
+        print('On Linux use install-service (systemd); on a Mac, add `shotctl.py up` to Login Items.')
+        return 1
+    folder = Path(os.environ['APPDATA']) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup'
+    target = folder / 'Shot Caller.cmd'
+    if args.remove:
+        target.unlink(missing_ok=True)
+        print('Removed: Shot Caller no longer starts when you log in.')
+        return 0
+    target.write_text(f'@echo off\r\ncd /d "{ROOT}"\r\nstart "Shot Caller" /min "{sys.executable}" "{Path(__file__).resolve()}" up\r\n')
+    print(f'Shot Caller now starts when you log in (minimized window "Shot Caller").\n  {target}\nRemove it with: shotctl.py install-startup --remove')
+    return 0
+
+
 # ---------- going public ----------
 
 def cmd_tunnel(args) -> int:
     """A free public https:// address through a Cloudflare quick tunnel."""
-    exe = shutil.which('cloudflared')
+    exe = find_cloudflared()
     if not exe:
         print('cloudflared is not installed. Install it, then close and reopen this window:\n'
               '  Windows: winget install --id Cloudflare.cloudflared\n'
@@ -908,6 +1060,20 @@ def main() -> int:
     s.add_argument('--health-timeout', type=int, default=90)
     s.set_defaults(fn=cmd_deploy)
 
+    s = sub.add_parser('up', help='run the app and tunnel, keep them up, install updates (data backed up first)')
+    s.add_argument('--check-every', type=int, default=300, help='seconds between update checks (default 300)')
+    s.add_argument('--branch', help='branch to follow (default: the current one)')
+    s.add_argument('--no-update', action='store_true', help='never install updates')
+    s.add_argument('--skip-tests', action='store_true', help='install updates without running the tests first')
+    s.add_argument('--health-timeout', type=int, default=90)
+    s.set_defaults(fn=cmd_up)
+    s = sub.add_parser('install-startup', help='start `up` when you log in to Windows')
+    s.add_argument('--remove', action='store_true')
+    s.set_defaults(fn=cmd_install_startup)
+    s = sub.add_parser('backup', help='copy all saved data to data/.backups (or --restore one)')
+    s.add_argument('--keep', type=int, default=10)
+    s.add_argument('--restore', metavar='NAME', help='a backup folder name, e.g. 20261021-153000')
+    s.set_defaults(fn=cmd_backup)
     sub.add_parser('tunnel', help='public https address through Cloudflare (no domain needed)').set_defaults(fn=cmd_tunnel)
     s = sub.add_parser('install-service', help='write a systemd unit, and a Caddyfile for HTTPS on your domain')
     s.add_argument('--domain', help='e.g. shotcaller.example.com')
