@@ -72,6 +72,7 @@ NEWS_GOOGLE NEWS_EVERY_MIN PAYWALL PAYWALL_PRICE PLAYBOOK PORT PUSH_HOST_ALLOW S
 VAPID_PRIVATE_KEY VAPID_PUBLIC_KEY VAPID_SUBJECT WHALE_ALERT_API_KEY WHALE_FILTER_MIN YAHOO_API
 '''.split())
 
+WINDOWS = os.name == 'nt'
 USE_COLOR = sys.stdout.isatty() and os.environ.get('NO_COLOR') is None
 
 
@@ -92,6 +93,8 @@ def die(msg: str, code: int = 1) -> None:
 
 def sh(cmd: list[str], *, check: bool = True, capture: bool = False, env: dict | None = None, timeout: int | None = None):
     """Run a command in the repo. capture=True returns the CompletedProcess with text output."""
+    # Windows runs npm as npm.cmd, which subprocess only finds by its full path
+    cmd = [shutil.which(cmd[0]) or cmd[0], *cmd[1:]]
     try:
         return subprocess.run(cmd, cwd=ROOT, check=check, text=True, env=env, timeout=timeout,
                               stdout=subprocess.PIPE if capture else None, stderr=subprocess.STDOUT if capture else None)
@@ -262,7 +265,7 @@ def cmd_scan(args) -> int:
             bad('APP_URL must start with https://'); problems += 1
         if env.get('ADMIN_CODE') or env.get('ACCESS_SECRET'):
             ok('.env present')
-    if ENV_FILE.exists() and ENV_FILE.stat().st_mode & 0o077:
+    if not WINDOWS and ENV_FILE.exists() and ENV_FILE.stat().st_mode & 0o077:
         warn('.env is readable by other users (fix: chmod 600)'); fixable.append('perms')
     tracked = sh(['git', 'ls-files', '--error-unmatch', '.env'], capture=True, check=False) if shutil.which('git') else None
     if tracked and tracked.returncode == 0:
@@ -350,7 +353,7 @@ def cmd_fix(args) -> int:
         if not ENV_FILE.exists():
             ENV_FILE.write_text('# Shot Caller server settings (managed by scripts/shotctl.py). Never commit this file.\n')
         write_env(updates)
-    if ENV_FILE.exists() and ENV_FILE.stat().st_mode & 0o077 and act('chmod 600 .env'):
+    if not WINDOWS and ENV_FILE.exists() and ENV_FILE.stat().st_mode & 0o077 and act('chmod 600 .env'):
         os.chmod(ENV_FILE, 0o600)
 
     data = Path(server_env()['DATA_DIR'])
@@ -420,6 +423,9 @@ def wait_healthy(seconds: int) -> dict | None:
 def read_pid() -> int | None:
     try:
         pid = int(PID_FILE.read_text().strip())
+        if WINDOWS:  # os.kill(pid, 0) would end the process on Windows, so ask tasklist instead
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True, text=True).stdout
+            return pid if str(pid) in out else None
         os.kill(pid, 0)
         return pid
     except (OSError, ValueError):
@@ -456,7 +462,7 @@ def cmd_run(args) -> int:
     while True:
         started = time.time()
         print(paint('1', f'shotctl: starting Shot Caller on http://localhost:{port()}'), flush=True)
-        child = subprocess.Popen(['node', 'server.js'], cwd=ROOT, env=server_env())
+        child = subprocess.Popen([shutil.which('node') or 'node', 'server.js'], cwd=ROOT, env=server_env())
         code = child.wait()
         if code == 0:
             print('shotctl: server exited cleanly'); return 0
@@ -468,6 +474,20 @@ def cmd_run(args) -> int:
         time.sleep(delay)
 
 
+def detach() -> dict:
+    """Popen options that keep the background server running after this terminal closes."""
+    if WINDOWS:
+        return {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {'start_new_session': True}
+
+
+def kill_tree(pid: int, force: bool) -> None:
+    if WINDOWS:
+        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True)
+    else:
+        os.killpg(pid, signal.SIGKILL if force else signal.SIGTERM)
+
+
 def start_background(wait: int = 60) -> bool:
     if read_pid():
         print(f'Already running (pid {read_pid()}).'); return True
@@ -475,7 +495,7 @@ def start_background(wait: int = 60) -> bool:
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log = open(LOG_FILE, 'a')
     proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'run'], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, start_new_session=True)
+                            stdin=subprocess.DEVNULL, **detach())
     PID_FILE.write_text(str(proc.pid))
     h = wait_healthy(wait)
     if h:
@@ -490,13 +510,13 @@ def stop_background() -> None:
     pid = read_pid()
     if not pid:
         print('Not running.'); return
-    os.killpg(pid, signal.SIGTERM)
+    kill_tree(pid, force=False)
     for _ in range(30):
         if not read_pid():
             break
         time.sleep(0.5)
     else:
-        os.killpg(pid, signal.SIGKILL)
+        kill_tree(pid, force=True)
     PID_FILE.unlink(missing_ok=True)
     print('Stopped.')
 
@@ -524,9 +544,19 @@ def cmd_status(args) -> int:
 def cmd_logs(args) -> int:
     if not LOG_FILE.exists():
         print('No log yet.'); return 0
-    if args.follow:
-        return subprocess.call(['tail', '-n', str(args.lines), '-f', str(LOG_FILE)])
-    print('\n'.join(LOG_FILE.read_text().splitlines()[-args.lines:]))
+    print('\n'.join(LOG_FILE.read_text(errors='replace').splitlines()[-args.lines:]))
+    if args.follow:  # like tail -f, and works on Windows too
+        with open(LOG_FILE, errors='replace') as f:
+            f.seek(0, os.SEEK_END)
+            try:
+                while True:
+                    line = f.readline()
+                    if line:
+                        print(line, end='', flush=True)
+                    else:
+                        time.sleep(0.5)
+            except KeyboardInterrupt:
+                pass
     return 0
 
 
@@ -579,9 +609,10 @@ def cmd_tunnel(args) -> int:
     """A free public https:// address through a Cloudflare quick tunnel."""
     exe = shutil.which('cloudflared')
     if not exe:
-        print('cloudflared is not installed. Get it from:\n'
-              '  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/\n'
-              '(macOS: brew install cloudflared · Debian/Ubuntu: the .deb on that page)')
+        print('cloudflared is not installed. Install it, then close and reopen this window:\n'
+              '  Windows: winget install --id Cloudflare.cloudflared\n'
+              '  macOS:   brew install cloudflared\n'
+              '  Linux:   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/')
         return 1
     if not local_health() and not start_background():
         return 1
@@ -809,6 +840,11 @@ def main() -> int:
     x = ls.add_parser('hiring'); x.add_argument('--decide', nargs=2, metavar=('ID', 'DECISION'), help='DECISION is approve, decline, or fire (let a hire go; ID is then its key)')
     s.set_defaults(fn=cmd_live)
 
+    for stream in (sys.stdout, sys.stderr):  # a Windows console can't print every character; never crash over one
+        try:
+            stream.reconfigure(errors='replace')
+        except AttributeError:
+            pass
     args = p.parse_args()
     return args.fn(args)
 
