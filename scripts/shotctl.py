@@ -381,7 +381,13 @@ def env_import(args) -> int:
     have = read_env()
     added, kept, skipped = [], [], []
     updates: dict[str, str | None] = {}
-    for line in text.splitlines():
+    lines = text.splitlines()
+    if text.strip().startswith('{'):  # Railway's Raw Editor also offers JSON
+        try:
+            lines = [f'{k}={v}' for k, v in json.loads(text).items()]
+        except (ValueError, AttributeError):
+            die('that looks like JSON but isn\'t valid: copy the ENV tab of the Raw Editor instead')
+    for line in lines:
         m = re.match(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$', line)
         if not m or line.lstrip().startswith('#'):
             continue
@@ -396,7 +402,7 @@ def env_import(args) -> int:
             updates[key] = val
             added.append(key)
     if not (added or kept or skipped):
-        die('no KEY=VALUE lines found (in Railway: Variables -> Raw Editor, copy everything)')
+        die('no KEY=VALUE lines found. In Railway: Variables -> Raw Editor, copy everything, paste it into the file, save it')
     if updates:
         write_env(updates)
     print(f'Imported: {", ".join(added) or "nothing new"}')
