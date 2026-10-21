@@ -9,6 +9,7 @@
 import { DEPTS, FLOORS, TEAM_ICON } from './team.js';
 import { routeOf } from './news.js';
 import { roadHtml } from './training.js';
+import { TRIAGE, clinicHtml } from './doctor.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -132,9 +133,9 @@ function render(t) {
     const e = $(`e-${r.role}`); if (!e) continue;
     for (const st of Object.keys(STATE_WORD)) e.classList.toggle(st, st === r.state);
     e.title = `${r.name} (${STATE_WORD[r.state]}): ${r.status}`;
-    e.classList.toggle('flagged', (r.reviews || []).some((v) => v.verdict === 'hurting' || v.verdict === 'broken' || v.verdict === 'stuck')); // the crew or the Manager flagged it
+    e.classList.toggle('flagged', (r.reviews || []).some((v) => !v.cleared && (v.verdict === 'hurting' || v.verdict === 'broken' || v.verdict === 'stuck'))); // the crew or the Manager flagged it (and the Doctor didn't clear it)
     e.classList.toggle('star', !!r.star); // the Employee of the hour (merit pay, public/incentives.js)
-    e.classList.toggle('slacking', !e.classList.contains('flagged') && (r.reviews || []).some((v) => v.verdict === 'slacking')); // caught slacking (amber)
+    e.classList.toggle('slacking', !e.classList.contains('flagged') && (r.reviews || []).some((v) => !v.cleared && v.verdict === 'slacking')); // caught slacking (amber)
   }
   for (const [d] of DEPTS) { const w = t.roster.filter((r) => r.dept === d && r.state === 'warn').length, el = $(`rw-${d}`); if (el) el.textContent = w ? `${w} ⚠` : ''; }
   const n = (st) => t.roster.filter((r) => r.state === st).length;
@@ -142,6 +143,15 @@ function render(t) {
   const needs = t.roster.filter((r) => r.helper).flatMap((r) => r.handoffs || []);
   $('needs').hidden = !needs.length;
   if (needs.length) $('needs').innerHTML = `<b>🦺 Needs you</b><ul>${needs.map((n) => `<li><b>${esc(n.name)}</b>${n.tries ? ` (tried ${n.tries}×)` : ''}: ${esc(n.help)}</li>`).join('')}</ul>`;
+  // the Doctor's rounds (doctor.js): open when someone is critical or needs you
+  const doc = byRole.doctor;
+  $('clinic').hidden = !doc;
+  if (doc) {
+    $('clinicList').innerHTML = clinicHtml(t.roster, { icon: TEAM_ICON, esc });
+    const urgent = (doc.charts || []).filter((c) => c.triage === 'critical' || c.triage === 'you').length;
+    $('clinicSum').textContent = doc.status;
+    if (urgent && !$('clinic').dataset.seen) { $('clinic').open = true; $('clinic').dataset.seen = '1'; }
+  }
   // the News scout's finds: the headlines, who each went to, and the big releases coming up (news.js)
   const ns = byRole.newsscout, ago = (x) => { const m = Math.round((Date.now() - x) / 60000); return m < 60 ? `${Math.max(1, m)} min ago` : `${Math.round(m / 60)} h ago`; };
   if (ns) {
@@ -211,12 +221,13 @@ function sheet(role) {
   $('shSub').textContent = `${r.lead ? 'Lead · ' : ''}${dept} · ${r.job}`;
   $('shSt').textContent = r.status;
   const VERDICT = { stuck: ['stuck', 'stuck'], slacking: ['slacking', 'warn'], helping: ['helping', 'ok'], hurting: ['hurting', 'warn'], noise: ['noise', 'idle'], data: ['gathering data', 'idle'], broken: ['needs attention', 'warn'], ok: ['noted', 'busy'] };
-  const rv = (r.reviews || []).map((v) => `<div class="rv"><b>${TEAM_ICON[v.by] || ''} ${esc(byRole[v.by]?.name ?? v.by)}</b><span class="chip" style="color:${STATE_COLOR[VERDICT[v.verdict]?.[1] || 'idle'] || '#ff4d6d'}">${VERDICT[v.verdict]?.[0] || v.verdict}</span><div>${esc(v.note)}</div></div>`).join('');
+  const rv = (r.reviews || []).map((v) => { const [word, st] = v.cleared ? ['cleared by the Doctor', 'ok'] : VERDICT[v.verdict] || [v.verdict, 'idle']; return `<div class="rv"><b>${TEAM_ICON[v.by] || ''} ${esc(byRole[v.by]?.name ?? v.by)}</b><span class="chip" style="color:${STATE_COLOR[st] || '#ff4d6d'}">${word}</span><div>${esc(v.note)}${v.cleared ? ` <i>Doctor: ${esc(v.cleared)}</i>` : ''}</div></div>`; }).join('');
   const ts = r.timesheet, ago = (t) => { const x = Math.round((Date.now() - t) / 1000); return x < 90 ? `${x}s ago` : x < 5400 ? `${Math.round(x / 60)} min ago` : `${Math.round(x / 3600)} h ago`; };
   const sc = r.score, sgn = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
   const meritLine = sc ? `<div class="ts"><b>Merit</b> ${sgn(sc.day)} today · ${sgn(sc.hour)} this hour${sc.last ? ` · last: ${sgn(sc.last.d)} ${esc(sc.last.why)}` : ''}${r.star ? ' · 🏆 Employee of the hour' : ''}</div>` : '';
   const sheetLine = meritLine + (ts ? `<div class="ts"><b>Time sheet</b> last did something ${ts.last ? ago(ts.last) : '—'} · ${ts.hour} update${ts.hour === 1 ? '' : 's'} in the last hour · ${ts.rounds} round${ts.rounds === 1 ? '' : 's'} since</div>` : '');
-  $('shRel').innerHTML = `${sheetLine}${rv ? `<div class="rvs"><b>Reviews</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
+  const ch = r.chart, chartLine = ch ? `<div class="chart"><b>🧑‍⚕️ Doctor's chart</b> <span class="chip">${TRIAGE[ch.triage]?.[0] ?? ''} ${TRIAGE[ch.triage]?.[1] ?? ''}</span><p>${esc(ch.dx)}</p>${ch.cause ? `<p>Root cause: the ${esc(ch.cause)}</p>` : ''}${ch.symptoms?.length ? `<p>Root cause of: ${esc(ch.symptoms.join(', '))}</p>` : ''}<p>${esc(ch.rx)}</p></div>` : '';
+  $('shRel').innerHTML = `${chartLine}${sheetLine}${rv ? `<div class="rvs"><b>Reviews</b>${rv}</div>` : ''}<div><b>Tells:</b> ${names(talk.filter((m) => m.from === role).map((m) => m.to))}</div><div><b>Hears from:</b> ${names(talk.filter((m) => m.to === role).map((m) => m.from))}</div>`;
   $('sheet').classList.add('open');
 }
 $('rooms').addEventListener('click', (e) => { const b = e.target.closest('.emp'); if (b) sheet(b.dataset.role); });

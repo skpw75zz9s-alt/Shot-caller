@@ -36,7 +36,7 @@ export function planFixes(roster) {
   for (const r of roster) {
     if (r.manager || r.fixer) continue;
     for (const v of r.reviews || []) {
-      if (!FLAGS.has(v.verdict)) continue;
+      if (!FLAGS.has(v.verdict) || v.cleared) continue; // (cleared: the Doctor's second opinion, doctor.js)
       const rule = RULES.find((x) => (!x.roles || x.roles.test(r.role)) && (!x.verdicts || x.verdicts.includes(v.verdict)) && (!x.by || x.by === v.by));
       const how = rule?.action ? 'fix' : rule?.handled ? 'handled' : 'escalate';
       out.push({ dept: r.dept, role: r.role, name: r.name, verdict: v.verdict, by: v.by, note: v.note, how, action: rule?.action ?? null, help: rule?.handled ?? rule?.escalate ?? v.note });

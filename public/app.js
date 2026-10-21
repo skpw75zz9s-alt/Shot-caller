@@ -44,8 +44,9 @@ import { blip } from './blip.js';
 import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
 import { roadHtml } from './training.js';
+import { clinicHtml } from './doctor.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '228'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '229'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2336,6 +2337,16 @@ async function refreshTeam() {
   const road = roadHtml(t.roster, { icon: TEAM_ICON, esc }), trainees = t.roster.filter((r) => r.trainer && r.road);
   setHidden($('teamRoadBox'), !road);
   if (road) { setHTML($('teamRoad'), road); setText($('teamRoadSum'), `${trainees.filter((r) => r.road.stage === 'graduated').length} of ${trainees.length} graduated`); }
+  // the Doctor's rounds (doctor.js): everyone who needs attention, what's wrong, why, and who's treating it; open when
+  // someone is critical or needs you
+  const doc = t.roster.find((r) => r.doctor), clinic = clinicHtml(t.roster, { icon: TEAM_ICON, esc });
+  setHidden($('teamClinicBox'), !doc);
+  if (doc) {
+    setHTML($('teamClinic'), clinic);
+    const urgent = (doc.charts || []).filter((c) => c.triage === 'critical' || c.triage === 'you').length, care = (doc.charts || []).filter((c) => c.triage !== 'watch').length;
+    setText($('teamClinicSum'), care ? `${care} need${care === 1 ? 's' : ''} care${urgent ? ` · ${urgent} urgent` : ''}` : 'everyone healthy');
+    if (urgent && !$('teamClinicBox').dataset.seen) { $('teamClinicBox').open = true; $('teamClinicBox').dataset.seen = '1'; }
+  }
   setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
 }
 setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);

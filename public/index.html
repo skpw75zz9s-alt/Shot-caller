@@ -78,6 +78,7 @@
   <link rel="modulepreload" href="news.js">
   <link rel="modulepreload" href="incentives.js">
   <link rel="modulepreload" href="training.js">
+  <link rel="modulepreload" href="doctor.js">
   <link rel="modulepreload" href="hires.js">
   <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
@@ -188,6 +189,7 @@
         <a class="team-live" id="teamLive" href="team-live" target="_blank" rel="noopener" hidden>▶ Watch them live</a>
         <p class="fine-left muted">One teammate for every action the bot takes, and what each is doing right now.</p>
         <ul class="team-list" id="teamList"></ul>
+        <details class="team-clinic" id="teamClinicBox" hidden><summary>🧑‍⚕️ Doctor's rounds <small id="teamClinicSum" class="muted"></small></summary><ol class="clinic-list" id="teamClinic"></ol></details>
         <details class="team-road" id="teamRoadBox" open hidden><summary>🎓 Road to graduation <small id="teamRoadSum" class="muted"></small></summary><ol class="road-list" id="teamRoad"></ol></details>
         <div class="team-feed-h">What the team did</div>
         <ol class="team-feed" id="teamFeed"></ol>
@@ -664,7 +666,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.79 · Road to graduation</p>
+      <p class="fine" id="version">Shot Caller v13.80 · The Doctor</p>
     </section>
   </main>
 
@@ -705,7 +707,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '228';
+    window.SC_BUILD = '229';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

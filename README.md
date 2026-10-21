@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The Doctor (v13.80)
+
+A **🧑‍⚕️ Doctor** in the Manager's office makes the rounds of every teammate that needs attention (a warning, or a flag from the Manager or the Improvement crew) and writes each one a chart (`public/doctor.js`). The rounds are on the Deck's **Bot team** card (*Doctor's rounds*, opened on its own when someone is critical or needs you) and at the top of the live window; tap a teammate there to see its chart.
+
+- **Triage.** 🔴 critical (the calls can't run without it: the bot's loop, the price, the odds), 🟣 needs you (only the admin can fix it), 🟠 serious (broken, stuck, slacking or hurting), 🟢 just watching (a warning that is the report itself, like a guard doing its job).
+- **Root cause.** When one part fails, the parts that read it go quiet too: the bot's loop stops and the price, the odds and Kalshi's quotes freeze; the price feed falls behind and the Scout holds; the exchange feeds drop and the tape starves. Each symptom is charted under its cause (*Treat the cause: the Night watch is down*), and the cause's fixer is told what fixing it clears.
+- **Treatment.** Who's actually on it: its team's fixer (try 1 of 3), its floor's helper (try 1 of 6), a rule that already handles it, or you, with what to do.
+- **Second opinion.** The Feed medic flagged every warning on the Market desk as broken, including ones that are the market, not a fault: a wide or crossed Kalshi spread, a wave of liquidations, Market Watch holding calls on purpose. The fixers then reconnected the exchange feeds or kicked the bot for them, the worst time to drop data. The Doctor now clears those flags before the fixers plan: no reconnects, nothing handed to you, no merit lost. The warning itself stays on show.
+
+The Doctor diagnoses and refers. The fixes are still the fixers' and the floor helpers', and nothing it says changes a call.
+
 ### The road to graduation on the Deck too (v13.79)
 
 The **🎓 Road to graduation** bars (v13.78) were only in the admin's live window (Watch them live → Lab floor → Training room). They're now also on the Deck's **Bot team** card, for everyone with Pro, with a count of how many trainees have graduated (*0 of 15 graduated*). Both places draw from one renderer (`training.js` `roadHtml`), so they always show the same thing.

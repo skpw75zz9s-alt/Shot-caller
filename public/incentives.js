@@ -15,7 +15,7 @@ const FLAG = ['stuck', 'slacking', 'hurting', 'broken'];
 export function snapshot(roster) {
   const flags = {}, on = {}, working = {};
   for (const r of roster) {
-    flags[r.role] = FLAG.filter((v) => (r.reviews || []).some((x) => x.verdict === v));
+    flags[r.role] = FLAG.filter((v) => (r.reviews || []).some((x) => x.verdict === v && !x.cleared)); // (not a flag the Doctor cleared)
     if (r.role.startsWith('l_') || r.role === 'flipdesk') on[r.role] = r.state === 'busy';
     if (r.hire) on[r.role] = !r.trial; // a new hire graduating its trial
     working[r.role] = r.state !== 'off' && !flags[r.role].some((v) => v === 'stuck' || v === 'slacking');

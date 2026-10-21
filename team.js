@@ -11,6 +11,7 @@ import { HELP_TRIES, fixerRows, helpPlans, helperRows, planFixes } from './publi
 import { createFixDesk } from './fixdesk.js';
 import { POINTS, callPoints, pts, scoreChanges, snapshot, standings } from './public/incentives.js';
 import { counterOf, trainees, trainerRows } from './public/training.js';
+import { careOf, doctorRound, secondOpinion } from './public/doctor.js';
 
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
@@ -44,9 +45,10 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     };
   }
   const managed = (base, x, series, now) => withManager(base, { ...x, parts: { ...x.parts, ...timesheet(series, now) } });
-  // a team's flag fixers join last: they act on the Manager's and the crew's flags (the fixes run in observe)
+  // a team's flag fixers join last: they act on the Manager's and the crew's flags (the fixes run in observe). The Doctor
+  // first clears the false alarms (doctor.js secondOpinion), and makes its rounds once the fixers and helpers are on them
   const fixersFor = (series, roster, now, run) => {
-    const plans = planFixes(roster);
+    const cleared = secondOpinion(roster), plans = planFixes(roster);
     if (run) desk.step(series, plans);
     const fx = fixerRows(roster, plans, desk.state(series), { now, depts: DEPTS }), m = roster.find((r) => r.manager);
     // what the fixers escalated goes to the floor helpers first
@@ -58,7 +60,8 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       m.status += ` · ${fx.length} fixers: ${fixing} fixing · ${fh.length} floor helpers: ${helping} helping, ${up} with something handed to you`;
       if (up) m.state = 'warn';
     }
-    return [...roster, ...fx, ...fh];
+    const doc = doctorRound([...roster, ...fx, ...fh], { care: careOf(plans, desk.state(series), hp, helpDesk.state(series), { depts: DEPTS, floors: FLOORS }), cleared });
+    return [...roster, doc, ...fx, ...fh];
   };
   // the trainers (training.js): each trainee's progress, and its pace from how fast that has moved over the last 6 hours
   const paceLog = new Map(); // series -> { role: [{ t, n }] }

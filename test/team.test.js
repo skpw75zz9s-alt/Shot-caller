@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DEPTS, LEARNERS, ROLES, STAFF, TEAM_ICON, teamChanges, teamPulse, teamRoster, teamTalk } from '../public/team.js';
 import { CREW } from '../public/improve.js';
 import { MANAGER } from '../public/manager.js';
+import { DOCTOR } from '../public/doctor.js';
 import { createTeam } from '../team.js';
 
 const now = 1e12;
@@ -50,7 +51,7 @@ test('the server team reads each part every 5 seconds and keeps the feed', () =>
   assert.equal(team.api('S').feed.length, 0, 'within 5 seconds: not read again');
   t += 5000; team.observe('S');
   const a = team.api('S');
-  assert.equal(a.roster.filter((x) => !x.fixer && !x.helper && !x.trainer).length, 1 + CREW.length + ROLES.length + STAFF.length); assert.ok(a.roster.some((x) => x.fixer), 'and a fixer per team'); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
+  assert.equal(a.roster.filter((x) => !x.fixer && !x.helper && !x.trainer).length, 2 + CREW.length + ROLES.length + STAFF.length); // (the Manager and the Doctor) assert.ok(a.roster.some((x) => x.fixer), 'and a fixer per team'); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.ok(createTeam({ book: { get: () => null }, botOf: () => null, watchOf: () => null }).api('X').roster.length, 'answers before its first reading');
 });
 
@@ -64,7 +65,7 @@ test('the live window: a fresh reading at most once a second, the round\'s numbe
   assert.equal(reads, 2); assert.deepEqual(a.feed.map((e) => e.text), ['DOWN took the lead']);
   assert.deepEqual(a.pulse, { ticker: 'T1', spot: 99900, strike: 100000, pYes: 0.2, minutesLeft: 9 });
   assert.equal(teamPulse(null), null); assert.equal(teamPulse({ rows: [{ m: { ticker: 'X' }, ev: { minutesLeft: 0 } }] }), null, 'between rounds');
-  assert.deepEqual(Object.keys(TEAM_ICON).filter((k) => !/^(f[xh]|tr|h)_/.test(k) && k !== 'recruiter').sort(), [MANAGER, ...CREW, ...ROLES, ...STAFF].map(([k]) => k).sort());
+  assert.deepEqual(Object.keys(TEAM_ICON).filter((k) => !/^(f[xh]|tr|h)_/.test(k) && k !== 'recruiter').sort(), [MANAGER, DOCTOR, ...CREW, ...ROLES, ...STAFF].map(([k]) => k).sort());
   assert.ok(a.roster.every((x) => TEAM_ICON[x.role]), 'an icon for everyone, the fixers too');
 });
 
@@ -111,7 +112,7 @@ test('the server staff: each reader is optional, and one that throws leaves the 
   const team = createTeam({ book: { get: () => ({ snap: snap(), sig: null }) }, botOf: () => ({ status: () => ({ devices: 2, lastTick: now }), record: () => { throw new Error('x'); } }), watchOf: () => null,
     stackOf: () => { throw new Error('no stack'); }, tuneUp: { status: () => ({ running: true }) }, markets: () => ({ listed: 4, running: 2 }), persistent: true, clock: () => now });
   const a = team.api('S'), r = by(a.roster);
-  assert.equal(a.roster.filter((x) => !x.fixer && !x.helper && !x.trainer).length, 1 + CREW.length + ROLES.length + STAFF.length); assert.ok(a.roster.some((x) => x.fixer), 'and a fixer per team'); assert.ok(a.talk.length > 10);
+  assert.equal(a.roster.filter((x) => !x.fixer && !x.helper && !x.trainer).length, 2 + CREW.length + ROLES.length + STAFF.length); // (the Manager and the Doctor) assert.ok(a.roster.some((x) => x.fixer), 'and a fixer per team'); assert.ok(a.talk.length > 10);
   assert.match(r.push.status, /2 phones get push alerts/); assert.equal(r.mechanic.state, 'busy'); assert.match(r.archivist.status, /survives a deploy/);
   assert.equal(r.exchanges.state, 'off', 'no stack: no feeds, said plainly');
 });

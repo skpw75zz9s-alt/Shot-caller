@@ -1263,3 +1263,16 @@ body.split .blip { display: none; }
 .rd.scheduled .rd-bar i { background: repeating-linear-gradient(45deg, #22d3ee22 0 8px, #22d3ee44 8px 16px); }
 .rd.blocked .rd-bar i { background: repeating-linear-gradient(45deg, #fbbf2433 0 8px, #fbbf2477 8px 16px); } .rd.blocked .rd-l { color: var(--amber); }
 .rd.silent { opacity: .55; }
+
+/* the Doctor's rounds (v13.80, doctor.js clinicHtml): the Bot team card; the live window has its own copy of these rules */
+.team-clinic { margin: 4px 0 10px; } .team-clinic summary { cursor: pointer; font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); padding: 4px 0; }
+.team-clinic summary small { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.clinic-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.dx { padding: 7px 9px; border-radius: 10px; background: var(--panel-2); border-left: 3px solid var(--pass); font-size: 12px; line-height: 1.35; }
+.dx-h { display: flex; justify-content: space-between; gap: 8px; } .dx-h em { font: 700 9.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-style: normal; color: var(--muted); white-space: nowrap; }
+.dx p { margin: 3px 0 0; color: var(--muted); overflow-wrap: anywhere; } .dx .dx-rx { color: var(--text); } .dx .dx-root { color: var(--amber); }
+.dx.critical { border-left-color: var(--no); } .dx.critical .dx-h em { color: var(--no); }
+.dx.you { border-left-color: var(--violet); } .dx.you .dx-h em { color: var(--violet); }
+.dx.serious { border-left-color: var(--amber); } .dx.serious .dx-h em { color: var(--amber); }
+.dx.watch, .dx.cleared { border-left-color: var(--yes); } .dx.cleared .dx-h em { color: var(--yes); }
+.dx.empty { border-left-color: var(--yes); color: var(--muted); }

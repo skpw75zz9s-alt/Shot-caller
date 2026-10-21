@@ -12,6 +12,7 @@ import { MANAGER, managerReport } from './manager.js';
 import { FIX_ICON, HELP_ICON } from './fixers.js';
 import { NEWS_ROLE, newsRow } from './news.js';
 import { HIRE_ICON, hireRows } from './hires.js';
+import { DOCTOR } from './doctor.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -82,7 +83,7 @@ export const STAFF = [
   ['archivist', 'Archivist', 'saves everything', 'ops', '💾', 'clerk'],
   ['nightwatch', 'Night watch', 'keeps the bot ticking', 'ops', '🌃', 'scout'],
 ];
-export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])), ...Object.fromEntries(FLOORS.map(([f]) => [`fh_${f}`, HELP_ICON])),
+export const TEAM_ICON = { scout: '🔭', analyst: '🧮', inspector: '🩻', judge: '⚖️', caller: '📣', risk: '🛡️', trader: '💼', coach: '🎓', reporter: '📰', ...Object.fromEntries(STAFF.map((r) => [r[0], r[4]])), ...CREW_ICON, [MANAGER[0]]: MANAGER[3], [DOCTOR[0]]: DOCTOR[3], ...Object.fromEntries(DEPTS.map(([d]) => [`fx_${d}`, FIX_ICON])), ...Object.fromEntries(FLOORS.map(([f]) => [`fh_${f}`, HELP_ICON])),
   ...Object.fromEntries([...LEARNERS.map(([k]) => `l_${k}`), 'flipdesk'].map((r) => [`tr_${r}`, '🏋️'])), // the trainers (training.js)
   ...HIRE_ICON, ...Object.fromEntries(Object.keys(HIRE_ICON).map((r) => [`tr_${r}`, '🏋️'])), recruiter: '🧑‍💼' }; // the hiring center (hires.js), and its trainees' trainers
 // who each lead tells (the staff each report to one: STAFF's last field)
