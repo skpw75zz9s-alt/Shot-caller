@@ -38,6 +38,7 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
+import { createMovedServer, movedTarget } from './moved.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
@@ -666,7 +667,11 @@ export const server = http.createServer(async (req, res) => {
   }
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const MOVED_TO = movedTarget();
+if (process.argv[1] === fileURLToPath(import.meta.url) && MOVED_TO) {
+  // the app moved (moved.js): only redirect, and start none of the bots, feeds or Discord posts
+  createMovedServer(MOVED_TO).listen(PORT, () => console.log(`Shot Caller moved: sending everyone to ${MOVED_TO}`));
+} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server

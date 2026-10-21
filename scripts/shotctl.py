@@ -56,7 +56,6 @@ RUN_DIR = ROOT / 'data' / '.shotctl'  # data/ is git-ignored
 PID_FILE = RUN_DIR / 'server.pid'
 LOG_FILE = RUN_DIR / 'server.log'
 STATE_DIR = Path.home() / '.shotctl'
-COOKIE_FILE = STATE_DIR / 'cookies.txt'
 CONF_FILE = STATE_DIR / 'config.json'
 
 # Variables that hold secrets: masked when listed
@@ -371,7 +370,47 @@ def cmd_fix(args) -> int:
 
 # ---------- env ----------
 
+# never copied from another host: they belong to that host, or point at its old address
+IMPORT_SKIP = re.compile(r'^(RAILWAY_|RENDER_)|^(PORT|DATA_DIR|APP_URL|DISCORD_REDIRECT_URI|MOVED_TO|NODE_VERSION)$')
+
+
+def env_import(args) -> int:
+    """Copy variables from another host's .env-style text (Railway: Variables -> Raw Editor), keeping what's set here."""
+    src = args.pairs[0] if args.pairs else '-'
+    text = sys.stdin.read() if src == '-' else Path(src).read_text()
+    have = read_env()
+    added, kept, skipped = [], [], []
+    updates: dict[str, str | None] = {}
+    for line in text.splitlines():
+        m = re.match(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$', line)
+        if not m or line.lstrip().startswith('#'):
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in '"\'':
+            val = val[1:-1]
+        if IMPORT_SKIP.search(key):
+            skipped.append(key)
+        elif have.get(key) and not args.overwrite:
+            kept.append(key)
+        else:
+            updates[key] = val
+            added.append(key)
+    if not (added or kept or skipped):
+        die('no KEY=VALUE lines found (in Railway: Variables -> Raw Editor, copy everything)')
+    if updates:
+        write_env(updates)
+    print(f'Imported: {", ".join(added) or "nothing new"}')
+    if kept:
+        print(f'Kept this computer\'s value for: {", ".join(kept)} (add --overwrite to take the imported ones)')
+    if skipped:
+        print(f'Skipped (they belong to the old host): {", ".join(skipped)}')
+    print('Restart to load them: shotctl.py restart')
+    return 0
+
+
 def cmd_env(args) -> int:
+    if args.action == 'import':
+        return env_import(args)
     if args.action == 'list':
         env = read_env()
         if not env:
@@ -694,17 +733,23 @@ def live_base(args) -> str:
     return url.rstrip('/')
 
 
-def opener() -> tuple[urllib.request.OpenerDirector, http.cookiejar.MozillaCookieJar]:
-    jar = http.cookiejar.MozillaCookieJar(str(COOKIE_FILE))
-    if COOKIE_FILE.exists():
+def cookie_file(base: str) -> Path:
+    # one sign-in per address: cookies don't tell ports apart, so two servers on localhost would share one
+    return STATE_DIR / f'cookies-{re.sub(r"[^A-Za-z0-9.-]+", "_", base.split("://", 1)[-1])}.txt'
+
+
+def opener(base: str) -> tuple[urllib.request.OpenerDirector, http.cookiejar.MozillaCookieJar]:
+    jar = http.cookiejar.MozillaCookieJar(str(cookie_file(base)))
+    if cookie_file(base).exists():
         jar.load(ignore_discard=True, ignore_expires=True)
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar)), jar
 
 
-def call(args, method: str, path: str, body: dict | None = None) -> dict:
-    op, jar = opener()
+def call(args, method: str, path: str, body: dict | None = None, base: str | None = None) -> dict:
+    base = base or live_base(args)
+    op, jar = opener(base)
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(live_base(args) + path, data=data, method=method,
+    req = urllib.request.Request(base + path, data=data, method=method,
                                  headers={'content-type': 'application/json', 'user-agent': 'shotctl'})
     try:
         with op.open(req, timeout=60) as r:
@@ -715,13 +760,13 @@ def call(args, method: str, path: str, body: dict | None = None) -> dict:
         except ValueError:
             msg = None
         if e.code == 403 and path.startswith('/api/admin/'):
-            die(f'{msg or "admin only"}: sign in first with `shotctl.py live login --url {live_base(args)}`')
+            die(f'{msg or "admin only"}: sign in first with `shotctl.py live login --url {base}`')
         die(f'{method} {path}: HTTP {e.code} {msg or e.reason}')
     except urllib.error.URLError as e:
-        die(f'could not reach {live_base(args)}: {e.reason}')
+        die(f'could not reach {base}: {e.reason}')
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     jar.save(ignore_discard=True, ignore_expires=True)
-    os.chmod(COOKIE_FILE, 0o600)
+    os.chmod(cookie_file(base), 0o600)
     return out
 
 
@@ -744,7 +789,7 @@ def cmd_live(args) -> int:
         print(f'Signed in to {conf["url"]} as admin (role: {out.get("role", "admin")}). The live commands use this address from now on.')
     elif a == 'logout':
         call(args, 'POST', '/api/access/logout', {})
-        COOKIE_FILE.unlink(missing_ok=True)
+        cookie_file(live_base(args)).unlink(missing_ok=True)
         print('Signed out.')
     elif a == 'members':
         out = call(args, 'GET', '/api/admin/members')
@@ -783,6 +828,30 @@ def cmd_live(args) -> int:
             show(call(args, 'POST', '/api/admin/config', {k: v for k, v in (('price', args.price), ('days', args.days)) if v is not None}))
     elif a == 'tuneup':
         show(call(args, 'POST' if args.run else 'GET', '/api/admin/tuneup', {} if args.run else None))
+    elif a == 'migrate':
+        old = args.old.rstrip('/')
+        if old == live_base(args):
+            die('--from is the same address as this server')
+        call(args, 'GET', '/api/admin/members')  # signed in here? (stops with how to sign in if not)
+        code = os.environ.get('SHOTCALLER_OLD_ADMIN_CODE') or getpass.getpass(f'Admin code for the OLD site {old}: ')
+        call(args, 'POST', '/api/access/admin', {'code': code, 'device': 'shotctl'}, base=old)
+        theirs = call(args, 'GET', '/api/admin/members', base=old)
+        cfg = theirs.get('config', {})
+        if cfg.get('price') or cfg.get('days'):
+            call(args, 'POST', '/api/admin/config', {'price': cfg.get('price'), 'days': cfg.get('days')})
+            print(f'Price ${cfg.get("price")} for {cfg.get("days")} days copied.')
+        now_ms = time.time() * 1000
+        moved = waiting = 0
+        for m in theirs.get('members', []):
+            if m.get('status') == 'active' and m.get('expires', 0) > now_ms:
+                call(args, 'POST', '/api/admin/approve', {'code': m['code'], 'days': (m['expires'] - now_ms) / 86400000})
+                print(f'  {m["code"]}  active until {time.strftime("%Y-%m-%d %H:%M", time.localtime(m["expires"] / 1000))}')
+                moved += 1
+            elif m.get('status') == 'pending' and m.get('paidAt'):
+                print(f'  {m["code"]}  says they paid, not approved yet: approve it here once you\'ve checked Cash App')
+                waiting += 1
+        print(f'{moved} active member(s) copied to {live_base(args)}' + (f', {waiting} waiting for approval' if waiting else '') + '.')
+        print('They sign in on the new site with the same code ("Already paid on another device? Enter your code").')
     elif a == 'hiring':
         if args.decide:
             show(call(args, 'POST', '/api/admin/hiring', {'id': args.decide[0], 'decision': args.decide[1]}))
@@ -808,8 +877,9 @@ def main() -> int:
     s.set_defaults(fn=cmd_fix)
 
     s = sub.add_parser('env', help='list / set / unset server variables in .env')
-    s.add_argument('action', choices=['list', 'set', 'unset'], nargs='?', default='list')
-    s.add_argument('pairs', nargs='*', help='KEY=VALUE for set, KEY for unset')
+    s.add_argument('action', choices=['list', 'set', 'unset', 'import'], nargs='?', default='list')
+    s.add_argument('pairs', nargs='*', help='KEY=VALUE for set, KEY for unset, a file (or - for pasted text) for import')
+    s.add_argument('--overwrite', action='store_true', help='import: replace values already set here')
     s.add_argument('--show', action='store_true', help='show secret values in full')
     s.set_defaults(fn=cmd_env)
 
@@ -854,6 +924,8 @@ def main() -> int:
     x = ls.add_parser('revoke', parents=[url_opt]); x.add_argument('code')
     x = ls.add_parser('config', parents=[url_opt]); x.add_argument('--price', type=float); x.add_argument('--days', type=int)
     x = ls.add_parser('tuneup', parents=[url_opt]); x.add_argument('--run', action='store_true', help='run it now instead of showing the last report')
+    x = ls.add_parser('migrate', parents=[url_opt], help='copy active members (and the price) from the old site')
+    x.add_argument('--from', dest='old', required=True, metavar='URL', help='the old site, e.g. https://shot-caller.up.railway.app')
     x = ls.add_parser('hiring', parents=[url_opt]); x.add_argument('--decide', nargs=2, metavar=('ID', 'DECISION'), help='DECISION is approve, decline, or fire (let a hire go; ID is then its key)')
     s.set_defaults(fn=cmd_live)
 

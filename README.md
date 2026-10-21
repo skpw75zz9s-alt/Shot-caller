@@ -276,6 +276,15 @@ Security:
 
 ## Version notes (newest first)
 
+### Moving day (v13.82.3)
+
+The app can move to a new address and take its people with it.
+
+- **The old address sends everyone to the new one.** Set `MOVED_TO` on the old host (for example Railway) to the new site's `https://` address. Every page and API call is redirected there (`moved.js`), and an installed copy of the app at the old address replaces its service worker, removes it and opens the new address. Nothing else starts on the old host: no bots, feeds, push or Discord posts, so nothing runs twice. `/healthz` still answers, so the host's health check passes.
+- **Members come along.** `python3 scripts/shotctl.py live migrate --from https://old-address` (signed in to the new site first) copies every active member with the same code and expiry, and the price and days. Paid-but-unapproved codes are listed for you to approve. Members sign in on the new site with their code once.
+- **Settings come along.** In Railway, Variables → Raw Editor, copy everything; then `Get-Clipboard | py scripts\shotctl.py env import` (Windows) or `shotctl.py env import railway.env` adds the variables this computer doesn't have yet (Discord, Anthropic, Whale Alert keys...). It skips the old host's own (`RAILWAY_*`, `APP_URL`, `DISCORD_REDIRECT_URI`, `PORT`, `DATA_DIR`).
+- **Discord.** With `APP_URL` set to the new address, the Discord posts link there, the website's *Join the Discord* button uses `DISCORD_INVITE`, and the members' role linking sends people back to `APP_URL/api/discord/callback`: add that address under OAuth2 → Redirects in the Discord Developer Portal.
+
 ### Opens faster (v13.82.2)
 
 Every time the app opened, the phone downloaded all of its ~100 files again (about 1.8 MB), because the server never told it which files hadn't changed. Files now carry an ETag: the phone asks "still this version?" and gets a tiny *not modified* answer, so only changed files are downloaded. It matters most when the server is far from the phone or behind a slow link, such as a home computer behind a Cloudflare tunnel.
