@@ -1,6 +1,7 @@
 // Zero-dependency server: serves the PWA, proxies the public Kalshi and Coinbase market-data
 // APIs so the phone browser never hits CORS limits, runs the push bot, and enforces the paywall.
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
 import { extname, join, posix } from 'node:path';
@@ -252,6 +253,13 @@ function compressed(entry, enc) {
     : gzipSync(entry.raw, { level: 6 }));
 }
 function sendEntry(req, res, status, entry, type, extra = {}) {
+  // files from disk (they carry an mtime) get an ETag, so a phone that already has a file gets a tiny 304 instead of
+  // the whole file again: opening the app re-checks ~100 files, which is slow over a home connection or a tunnel
+  if (entry.mtime !== undefined) {
+    entry.etag ??= `"${createHash('sha1').update(entry.raw).digest('base64url')}"`;
+    extra = { ...extra, etag: entry.etag };
+    if (status === 200 && req.headers['if-none-match'] === entry.etag) { res.writeHead(304, { vary: 'accept-encoding', ...extra }); return res.end(); }
+  }
   const enc = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? encodingFor(req) : null; // PNGs are already compressed
   const body = compressed(entry, enc);
   res.writeHead(status, { 'content-type': type, vary: 'accept-encoding', ...(body ? { 'content-encoding': enc } : {}), 'content-length': (body || entry.raw).length, ...extra });

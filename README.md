@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### Opens faster (v13.82.2)
+
+Every time the app opened, the phone downloaded all of its ~100 files again (about 1.8 MB), because the server never told it which files hadn't changed. Files now carry an ETag: the phone asks "still this version?" and gets a tiny *not modified* answer, so only changed files are downloaded. It matters most when the server is far from the phone or behind a slow link, such as a home computer behind a Cloudflare tunnel.
+
 ### Runs on Windows (v13.82.1)
 
 On a Windows computer every page answered `{"error":"payment required"}`, the sign-in page included, so nobody could get in. The server matched the page's address against the pages open to everyone with the operating system's path rules, and Windows writes paths with backslashes, so `/paywall.html` never matched. It now uses web-style paths on every system. Linux hosts (Railway, Render) were never affected.
