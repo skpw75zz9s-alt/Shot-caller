@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The Whale filter (v13.82)
+
+A **🐋 Whale filter** on the Market desk tells the whales that move the market from the ones that don't (`public/whales.js`, `whalefilter.js`, one per crypto market).
+
+- **Every whale is graded.** Each trade of $100k or more on a USD exchange (`WHALE_FILTER_MIN` to change it) is checked a minute later: did the price move its way by at least one typical minute's move (**moved**), go the other way as much (**faded**), or neither (**no real move**)? The typical minute's move comes from the same price stream, sampled every 5 seconds over the last 2 hours.
+- **It learns which kinds move it.** The whales are grouped by what's known the moment they print: size ($100k-250k, $250k-1M, $1M+), exchange, buy or sell, and alone or in a sweep (another whale the same way within 30 seconds). A group is proven to **move the market** once it has 30 graded whales and its average move its way has a t of 2 or more; otherwise it's **noise** (or proven to **fade**, t of −2 or less). Up to 5,000 graded whales per market are kept in `DATA_DIR`, so it keeps learning across restarts.
+- **The filter.** A new whale is a **likely mover** when one of its groups is proven to move, **likely noise** when its size group is proven noise. On the Deck, the **Whale filter** card shows which groups move the market, the last whales and what the price did next, and the likely movers' dollars in the last 15 minutes. On the live tape, ⚡ marks a likely mover and 💤 likely noise. Discord whale alerts say what the filter expects; set `DISCORD_WHALES=movers` to skip the whales it has proven are noise (the ones it can't say yet still post).
+- **On the team.** It tells the Scout and the Judge when the whales that move the market lean one way.
+
+It measures what the price did after each whale, not why: a whale can buy into a rise that was coming anyway. Context only: no call uses it.
+
 ### The Recruiter never stops (v13.81)
 
 - **Searches nonstop.** The Recruiter looks every 5 seconds on its own timer (it used to look once an hour, and only while the bot was ticking), and again the moment you approve, decline or let someone go.

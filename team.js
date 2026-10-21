@@ -94,6 +94,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
       hasFutures: !!st?.futures, futures: tryIt(() => positioning(st?.futures?.context?.())),
       liqs: crypto && sc?.liqs ? tryIt(() => liqSummary(sc.liqs(), now)) : null,
       cross: { proven: !!tryIt(() => crossFeed?.shifts?.(st?.asset?.key ?? 'BTC')) },
+      whales: crypto ? tryIt(() => st?.whaleFilter?.api?.() ?? null) : null, // the Whale filter (whalefilter.js)
       flows: fl ? { live: flowSrc.filter((k) => fl[k].read != null).length, total: flowSrc.length, err: flowSrc.map((k) => fl[k].err).find(Boolean) ?? null } : null,
       markets: tryIt(() => markets()), flip: flip ? { inCalls: !!flip.inCalls, live: !!flip.live } : null,
       proof: proof ? { proven: count('proven'), opposite: count('opposite'), testing: count('testing'), graded: kinds.reduce((a, v) => a + (v.n || 0), 0) } : null,

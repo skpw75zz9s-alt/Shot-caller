@@ -1276,3 +1276,18 @@ body.split .blip { display: none; }
 .dx.serious { border-left-color: var(--amber); } .dx.serious .dx-h em { color: var(--amber); }
 .dx.watch, .dx.cleared { border-left-color: var(--yes); } .dx.cleared .dx-h em { color: var(--yes); }
 .dx.empty { border-left-color: var(--yes); color: var(--muted); }
+
+/* the Whale filter (v13.82, public/whales.js) */
+.wf-say { margin: 2px 0 8px; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.wf-groups { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 5px; }
+.wf-groups li { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; padding: 6px 9px; border-radius: 9px; background: var(--panel-2); border-left: 3px solid var(--pass); font-size: 12px; }
+.wf-groups li em { font: 700 9.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-style: normal; color: var(--muted); align-self: center; }
+.wf-groups li small { grid-column: 1 / -1; color: var(--muted); }
+.wf-groups li.good { border-left-color: var(--yes); } .wf-groups li.good em { color: var(--yes); }
+.wf-groups li.warn { border-left-color: var(--amber); } .wf-groups li.warn em { color: var(--amber); }
+.wf-list { list-style: none; margin: 4px 0 6px; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.wf-list li { display: grid; grid-template-columns: auto auto 1fr auto; gap: 2px 8px; align-items: center; padding: 4px 2px; border-bottom: 1px solid var(--line, #1a2336); }
+.wf-list li time { font: 11px var(--mono); color: var(--muted); } .wf-list li .sd { font: 700 10px var(--mono); }
+.wf-list li.buy .sd { color: var(--yes); } .wf-list li.sell .sd { color: var(--no); }
+.wf-list li em { font-style: normal; font-weight: 600; white-space: nowrap; } .wf-list li em.good { color: var(--yes); } .wf-list li em.bad { color: var(--no); } .wf-list li em.muted { color: var(--muted); }
+.wf-list li small { grid-column: 3 / -1; color: var(--muted); }

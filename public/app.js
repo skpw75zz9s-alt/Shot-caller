@@ -45,8 +45,9 @@ import { STRENGTH } from './strength.js';
 import { TEAM_ICON } from './team.js';
 import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
+import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '230'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '231'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -622,7 +623,7 @@ function renderTape(force = false) {
   setHTML($('tape'), rows.map((x, i) => {
     const fresh = seen && rows.indexOf(seen) > i ? ' new' : '';
     if (x.kalshi) return `<li class="kalshi ${x.side === 'YES' ? 'buy' : 'sell'}${fresh}"><time>${hms(x.t)}</time><span class="ex">Kalshi</span><span class="sd">${x.side === 'YES' ? 'UP' : 'DOWN'}</span><span>${int(x.count)} @ ${(x.price * 100).toFixed(0)}¢</span><span class="amt">${cash(x.usd)}</span></li>`;
-    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size >= 100 ? int(x.size) : x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${x.price >= 1000 ? int(x.price) : x.price.toFixed(MKT.digits)}</span><span class="amt">${x.whale ? '🐋 ' : ''}${cash(x.price * x.size)}</span></li>`;
+    return `<li class="${x.side}${x.whale ? ' whale' : ''}${fresh}"><time>${hms(x.t)}</time><span class="ex">${x.ex.replace('.US', '')}</span><span class="sd">${x.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${x.size >= 100 ? int(x.size) : x.size < 0.001 ? x.size.toFixed(5) : x.size.toFixed(4)} @${x.price >= 1000 ? int(x.price) : x.price.toFixed(MKT.digits)}</span><span class="amt">${x.whale ? `🐋${whaleMark(x)} ` : ''}${cash(x.price * x.size)}</span></li>`;
   }).join('') || `<li class="empty">${tab === 'kalshi' ? 'No Kalshi trades on this contract yet.' : 'Waiting for trades…'}</li>`);
 }
 
@@ -2350,6 +2351,32 @@ async function refreshTeam() {
   setHTML($('teamFeed'), t.feed.length ? t.feed.slice(0, 12).map((e) => `<li class="${e.state}"><time>${ago(e.t)}</time><b>${esc(e.name)}</b> ${esc(e.text)}</li>`).join('') : '<li class="muted">Nothing has changed since the server started watching: the feed fills as the team acts.</li>');
 }
 setInterval(refreshTeam, 5000); setTimeout(refreshTeam, 2500);
+
+// ---------- the Whale filter (whalefilter.js, public/whales.js): which whales move the market, graded a minute later ----------
+const WF_VERDICT = { movers: ['moves the market', 'good'], faders: ['fades', 'warn'], noise: ['noise', 'muted'], grading: ['grading', 'muted'] };
+const WF_OUT = { moved: ['moved its way', 'good'], faded: ['faded', 'bad'], nothing: ['no real move', 'muted'] };
+// on the live tape: ⚡ a likely mover, 💤 likely noise (once the filter has proven which is which)
+function whaleMark(x) {
+  const g = state.whales?.groups;
+  if (!g || x.price * x.size < (state.whales.minUsd || 1e5)) return '';
+  const v = whaleSays({ ex: x.ex, side: x.side, usd: x.price * x.size, sweep: false }, g).label;
+  return v === 'likely mover' ? '⚡' : v === 'likely noise' ? '💤' : '';
+}
+async function refreshWhales() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
+  try { state.whales = await getJSON(api('whales')); } catch { return; }
+  const w = state.whales;
+  if (!w || w.off) return setHidden($('whaleCard'), true);
+  setHidden($('whaleCard'), false);
+  const gs = Object.values(w.groups || {}).filter((g) => g.key !== 'all'), all = w.groups?.all, order = { movers: 0, faders: 1, noise: 2, grading: 3 };
+  setText($('wfSum'), all ? `${all.n} graded` : 'grading');
+  const p = w.pressure || {};
+  setText($('wfSay'), !all || all.n < 30 ? `Grading every whale a minute after it prints: ${all?.n ?? 0} of 30 before it says which kinds move the market.`
+    : `${Math.round((all.moved / all.n) * 100)}% of ${all.n} whales moved the price their way within a minute.${p.n ? ` Likely movers in the last 15 min: ${cash(p.buy)} bought, ${cash(p.sell)} sold.` : ''}`);
+  setHTML($('wfGroups'), gs.sort((a, b) => order[a.verdict] - order[b.verdict] || b.n - a.n).slice(0, 8).map((g) => `<li class="${WF_VERDICT[g.verdict][1]}"><span>${esc(g.label)}</span><em>${WF_VERDICT[g.verdict][0]}</em><small>${g.n} graded · moved its way ${Math.round((g.moved / g.n) * 100)}%${g.n >= 30 ? ` · t ${g.t.toFixed(1)}` : ''}</small></li>`).join(''));
+  setHTML($('wfList'), (w.recent || []).slice(0, 8).map((c) => `<li class="${c.side}"><time>${hms(c.t)}</time><span class="sd">${c.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${cash(c.usd)} on ${esc(String(c.ex).replace('.US', ''))}${c.sweep ? ' · sweep' : ''}</span><em class="${c.out ? WF_OUT[c.out][1] : 'muted'}">${c.out ? `${WF_OUT[c.out][0]}${c.z != null ? ` (${c.z >= 0 ? '+' : '−'}${Math.abs(c.z).toFixed(1)}×)` : ''}` : 'grading…'}</em>${c.expected && c.expected !== 'not proven yet' ? `<small>expected: ${esc(c.expected)}</small>` : ''}</li>`).join('') || '<li class="muted">No whales yet: the filter grades every trade of $100k or more.</li>');
+}
+setInterval(refreshWhales, 15000); setTimeout(refreshWhales, 3000);
 // the live window opens in a new tab in a browser; inside the installed app (its own cookies), it opens in place
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) document.querySelectorAll('a.team-live').forEach((a) => a.removeAttribute('target'));
 

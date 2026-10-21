@@ -50,8 +50,8 @@ export const alertEmbeds = {
     description: `${mk.key} ${px(spot, mk)} vs the target ${px(strike, mk)}, ${minsLeft.toFixed(1)} minutes left in the round.` }),
   trend: ({ bull, price, mk = BTC }) => ({ title: bull ? '🐂 Chart turns bull' : '🐻 Chart turns bear', color: bull ? COLORS.up : COLORS.down,
     description: `EMA 9 crossed ${bull ? 'above' : 'below'} EMA 21 on the 1-minute chart (${mk.key} ${px(price, mk)}). A trend read, not a call.` }),
-  whale: ({ x, mk = BTC }) => ({ title: `🐋 Whale ${x.side === 'buy' ? 'buy' : 'sell'}: ${money(x.price * x.size)}`, color: x.side === 'buy' ? COLORS.up : COLORS.down,
-    description: `${qty(x.size)} ${mk.key} at ${px(x.price, mk)} on ${x.ex}.` }),
+  whale: ({ x, mk = BTC, filter = null }) => ({ title: `🐋 Whale ${x.side === 'buy' ? 'buy' : 'sell'}: ${money(x.price * x.size)}`, color: x.side === 'buy' ? COLORS.up : COLORS.down,
+    description: `${qty(x.size)} ${mk.key} at ${px(x.price, mk)} on ${x.ex}.${filter ? ` Whale filter: ${filter.label} (${filter.why}).` : ''}` }),
   liquidation: ({ side, usd, n, mk = BTC }) => ({ title: `💥 Liquidation cascade: ${money(usd)} of ${side === 'long' ? 'longs' : 'shorts'} force-closed`, color: side === 'long' ? COLORS.down : COLORS.up,
     description: `${n} liquidations in the last minute on the futures exchanges: forced ${side === 'long' ? 'selling' : 'buying'}, which often pushes ${mk.key} ${side === 'long' ? 'down' : 'up'} for a few minutes. A read, not a call.` }),
   hold: ({ h }) => ({ title: '⚠️ Market watch: new calls on hold', color: COLORS.warn, description: `${h.why}\nOn hold until ${ts(h.until)}.` }),
@@ -64,7 +64,7 @@ export const alertEmbeds = {
 };
 
 // The watcher: fed the official bot's every tick (bot.js onTick), each settled round (onRound) and big trades (whale)
-export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS } = {}) {
+export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS, moversOnly = process.env.DISCORD_WHALES === 'movers' } = {}) {
   const rounds = new Map(); // ticker -> what's been posted this round
   const sent = []; // times of the last hour's alerts
   let trendBull = null, trendAt = 0, whaleAt = 0, prev = null, liqAt = 0;
@@ -127,10 +127,13 @@ export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), w
     if (called || rounds.get(ticker)?.called) return false;
     return send('sitout', { ticker, result, value, strike }, now);
   }
-  function whale(x, now = Date.now()) {
+  // filter: the Whale filter's word on it (public/whales.js predict); DISCORD_WHALES=movers skips the whales it has
+  // proven are noise (or that fade), and still posts the ones it can't say yet
+  function whale(x, now = Date.now(), filter = null) {
     if (!(x?.price * x?.size >= whaleMin) || now - whaleAt < limits.whaleGapMs) return false;
+    if (moversOnly && filter && (filter.label === 'likely noise' || filter.label === 'likely to fade')) return false;
     whaleAt = now;
-    return send('whale', { x }, now);
+    return send('whale', { x, filter }, now);
   }
   // a liquidation (public/liquidations.js): one side's last minute adding up to a cascade
   function liquidation(x, now = Date.now()) {

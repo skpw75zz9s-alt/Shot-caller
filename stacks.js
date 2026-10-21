@@ -12,6 +12,7 @@ import { liqSummary } from './public/xray.js';
 import { join } from 'node:path';
 import { createBot } from './bot.js';
 import { createScanFeed } from './scanfeed.js';
+import { createWhaleFilter } from './whalefilter.js';
 import { createFutures } from './futures.js';
 import { createPlaybook } from './playbookfeed.js';
 import { createMarketWatch } from './marketwatch.js';
@@ -42,7 +43,8 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     const dir = join(dataDir, 'assets', key), crypto = a.kind === 'crypto';
     const discordAlerts = createAlertWatcher({ market: { key: a.key, digits: a.digits }, post: (embed) => (say(key) ? discord.alert({ ...embed, title: `[${key}] ${embed.title || ''}` }) : null) });
     const futures = crypto && a.sym?.hyper ? createFutures({ coin: a.sym.hyper }) : null;
-    const scanFeed = crypto ? createScanFeed({ file: join(dir, 'scan.json'), futures, asset: a, onTrade: (x, now) => discordAlerts.whale(x, now), onLiq: (x, now) => discordAlerts.liquidation(x, now) }) : nullScan();
+    const whaleFilter = crypto ? createWhaleFilter({ file: join(dir, 'whales.json'), clock }) : null; // which whales move this market (whalefilter.js)
+    const scanFeed = crypto ? createScanFeed({ file: join(dir, 'scan.json'), futures, asset: a, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) }) : nullScan();
     const playbook = createPlaybook({ coinbase, file: join(dir, 'bars.json'), candleRows: (o = {}) => prices.candleRows(a, { gran: 60, ...o }) });
     if (futures) playbook.setOi(() => { const c = futures.context(); return c?.live ? c : null; });
     playbook.setFlow(() => scanFeed.imbalance(clock() - 900000));
@@ -50,8 +52,8 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     const tuneFeed = createTuneFeed({ playbook, settle: a.settle }), volTuneFeed = createVolTuneFeed({ playbook }), flipFeed = createFlipFeed({ playbook, scanFeed });
     const microFeed = createMicroFeed({ file: join(dir, 'micro.json'), scanFeed, futures, marketWatch, playbook });
     const flowsFeed = crypto ? createFlowsFeed({ asset: a, file: join(dir, 'flows.json'), prices, playbook, env, log }) : null; // money flows (flowsfeed.js)
-    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, flowsFeed, discordAlerts, ready: null };
-    st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load(), flowsFeed?.load()]).then(() => {
+    const st = { asset: a, scanFeed, futures, playbook, marketWatch, tuneFeed, volTuneFeed, flipFeed, microFeed, flowsFeed, discordAlerts, whaleFilter, ready: null };
+    st.ready = Promise.all([scanFeed.load(), microFeed.load(), playbook.load(), flowsFeed?.load(), whaleFilter?.load()]).then(() => {
       if (crypto && on('SCAN_FEEDS')) scanFeed.start();
       if (futures && on('FUTURES')) futures.start();
       if (on('PLAYBOOK')) playbook.start();

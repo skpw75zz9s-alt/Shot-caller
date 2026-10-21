@@ -79,6 +79,7 @@
   <link rel="modulepreload" href="incentives.js">
   <link rel="modulepreload" href="training.js">
   <link rel="modulepreload" href="doctor.js">
+  <link rel="modulepreload" href="whales.js">
   <link rel="modulepreload" href="hires.js">
   <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
@@ -216,6 +217,15 @@
           <div class="tile"><label>To ceiling</label><b id="ceilDist">—</b><small>round high</small></div>
         </div>
         <small class="fine-left">Flow and whales are context: they aren't part of the call (not yet proven to predict the 15-minute result).</small>
+      </div>
+
+      <div data-crypto-only data-pro class="card whales-card" id="whaleCard" hidden>
+        <div class="deep-head"><span>🐋 Whale filter</span><b id="wfSum"></b></div>
+        <p class="wf-say" id="wfSay"></p>
+        <ul class="wf-groups" id="wfGroups"></ul>
+        <div class="team-feed-h">The last whales, and what the price did next</div>
+        <ul class="wf-list" id="wfList"></ul>
+        <details class="how"><summary>How it works</summary><small class="fine-left">Every trade of $100k or more on a USD exchange is graded a minute later on what the price did: <b>moved</b> its way by at least a typical minute's move, <b>faded</b> (went the other way as much), or <b>no real move</b>. The whales are grouped by what's known the moment they print (size, exchange, buy or sell, alone or in a sweep). A group is proven to move the market once it has 30 graded whales and its average move its way is clearly more than chance (t of 2 or more); otherwise it's noise. A new whale is a <b>likely mover</b> when one of its groups is proven to move. On the live tape, ⚡ marks a likely mover and 💤 likely noise. Moving its way afterwards is what's measured, not why: a whale can buy into a rise that was coming anyway. Context only: no call uses it.</small></details>
       </div>
 
       <div data-pro class="card watch" id="watchCard">
@@ -666,7 +676,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.81 · Recruiter never stops</p>
+      <p class="fine" id="version">Shot Caller v13.82 · Whale filter</p>
     </section>
   </main>
 
@@ -707,7 +717,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '230';
+    window.SC_BUILD = '231';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

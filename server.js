@@ -27,6 +27,7 @@ import { liqSummary, positioning } from './public/xray.js';
 import { positionCheck } from './public/engine.js';
 import { createNewsFeed } from './newsfeed.js';
 import { createHiring } from './hiring.js';
+import { createWhaleFilter } from './whalefilter.js';
 import { parseBook } from './public/trader.js';
 import { liveRow } from './public/team.js';
 import { createPlaybook } from './playbookfeed.js';
@@ -96,7 +97,9 @@ export const futures = createFutures();
 // market alerts (discordalerts.js: DISCORD_ALERTS picks which, DISCORD_ALERTS_WEBHOOK_URL gives them their own channel)
 export const discord = createDiscord();
 export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
-export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => discordAlerts.whale(x, now), onLiq: (x, now) => discordAlerts.liquidation(x, now) });
+// the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
+export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
+export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
 // Market watch: the bot's sharp eye on every detail, every second (marketwatch.js, public/watch.js)
@@ -162,7 +165,7 @@ export const prices = createPrices({ coinbase: COINBASE, yahoo: process.env.YAHO
 // market that nudges its calls once proven. CROSS=off turns it off.
 crossFeed = createCrossFeed({ prices });
 export const discovery = createDiscovery({ kalshi: KALSHI, fetchJSON: fetchJSONs });
-export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, team: () => team, tuned: (s) => tuneUp.get(s),
+export const stacks = createStacks({ home: { bot, scanFeed, futures, playbook, marketWatch, microFeed, tuneFeed, volTuneFeed, discordAlerts, flipFeed, flowsFeed, whaleFilter }, dataDir: DATA_DIR, kalshi: KALSHI, coinbase: COINBASE, prices, discovery, discord, crossFeed, council, breakLab, strength, book: marketBook, team: () => team, tuned: (s) => tuneUp.get(s),
   canNotify: (d) => !PAYWALL || access.hasAccess(d.token) });
 // Ask's lookups: any market, live, from the server's own readers (asktools.js)
 const askTools = createAskTools({ book: marketBook, discovery, stacks, marketOf, listed: () => true, isHome, home: { bot, scanFeed, futures }, council, breakLab, strength, crossFeed });
@@ -355,7 +358,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 // the Recruiter searches nonstop (v13.81): every 5 seconds on its own, whether or not the bot is ticking, once the
 // hiring center's file has loaded (so a search can never overwrite it)
 ready.then(() => setInterval(() => { try { hiring.search(team.hireCtx(HOME.series)); } catch (e) { console.error('recruiter search failed', e.message); } }, 5000).unref()).catch(() => {});
@@ -637,6 +640,7 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/whales') { const wf = ms ? ms.whaleFilter : whaleFilter; return send(res, 200, wf ? wf.api() : { off: 'whales are for crypto markets' }); } // the Whale filter (whalefilter.js)
     if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
     if (path === '/api/council') return send(res, 200, council.api(mq || HOME.series)); // the debate behind the calls (council.js)

@@ -13,6 +13,7 @@ import { FIX_ICON, HELP_ICON } from './fixers.js';
 import { NEWS_ROLE, newsRow } from './news.js';
 import { CANDIDATES, HIRE_ICON, hireRows } from './hires.js';
 import { DOCTOR } from './doctor.js';
+import { whaleRow } from './whales.js';
 
 export const ROLES = [
   ['scout', 'Scout', 'watches the market'],
@@ -63,6 +64,7 @@ export const STAFF = [
   ['liqs', 'Liquidation watcher', 'forced buying and selling', 'desk', '💥', 'inspector'],
   ['related', 'Related-markets desk', 'what other markets say', 'desk', '🌐', 'judge'],
   ['flows', 'Money-flows desk', 'ETF, stablecoin and whale money', 'desk', '🏦', 'judge'],
+  ['whales', 'Whale filter', 'tells the whales that move the market from the ones that don\'t', 'desk', '🐋', 'scout'],
   ['markets', 'Market finder', 'finds the markets Kalshi lists', 'desk', '🗺️', 'scout'],
   [NEWS_ROLE[0], NEWS_ROLE[1], NEWS_ROLE[2], 'desk', NEWS_ROLE[3], 'scout'], // tells whoever each headline concerns (news.js)
   ...LEARNERS.map(([k, name, job, icon, to]) => [`l_${k}`, name, job, 'lab', icon, to]),
@@ -210,6 +212,7 @@ function staffRoster(x, { lv, R, hold, br }) {
   S.related = { state: p.cross?.proven ? 'busy' : 'idle', status: p.cross?.proven ? 'Its proven read of the related markets argues before the council' : 'Watching the related markets: no proven read yet', key: p.cross?.proven ? 'on' : 'off', say: p.cross?.proven ? 'has a proven read for the council' : 'no proven read right now' };
   S.flows = p.flows == null ? { state: 'off', status: 'No money-flow data for this market', key: 'none' }
     : { state: p.flows.live ? 'ok' : 'idle', status: `${p.flows.live} of ${p.flows.total} money-flow sources reporting${p.flows.err ? ` · ${p.flows.err}` : ''}`, key: `${p.flows.live}` };
+  S.whales = whaleRow(p.whales ?? null); // the Whale filter (whales.js)
   S.newsscout = newsRow(x.news ?? null, { now, name: x.marketName || 'this market' });
   S.markets = p.markets ? { state: 'ok', status: `${p.markets.listed} markets listed by Kalshi · ${p.markets.running} running a bot`, key: `${p.markets.running}`, say: `${p.markets.running} markets running` } : { state: 'idle', status: 'Not reporting', key: 'none' };
   // the research lab: one researcher per learner, on probation until it proves itself
