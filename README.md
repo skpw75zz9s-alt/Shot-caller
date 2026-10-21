@@ -276,6 +276,19 @@ Security:
 
 ## Version notes (newest first)
 
+### The Recruiter never stops (v13.81)
+
+- **Searches nonstop.** The Recruiter looks every 5 seconds on its own timer (it used to look once an hour, and only while the bot was ticking), and again the moment you approve, decline or let someone go.
+- **Always at least one applicant.** When no gap in the team's data calls for anyone, the next ready agent stands by, and its application says so (*Standing by: no gap in the team's data calls for it yet*). If the data later calls for it, its application updates with why. Decline one and the next steps up. A declined agent still waits a week before applying for a gap, but comes back to stand by if nobody else is left. Only when you've hired the whole catalog is there nobody to put forward, and the Recruiter says so.
+- **Five more agents (10 in all),** each real code that reads the official record:
+  - 🔥 **Streak watcher** (Risk office): the run of wins or losses now, and the longest losing run before it; tells the Risk officer when a losing run is as long as the worst yet.
+  - 💵 **Price-band coach** (Grading room): splits the record by the price paid and flags a band that clearly loses to its prices (30+ calls, z of −2 or worse).
+  - ↕️ **UP/DOWN checker** (Grading room): the UP calls and the DOWN calls apart, the same test.
+  - 📅 **Weekday coach** (Grading room): by day of the week (Eastern time), the same test.
+  - 🤫 **Quiet-spell watcher** (Call desk): tells the Caller when the gap since the last official call is three times the usual and over two hours.
+
+Like every hire, they start on a 24-hour trial with a trainer, report and inform, and never change a call.
+
 ### The Doctor (v13.80)
 
 A **🧑‍⚕️ Doctor** in the Manager's office makes the rounds of every teammate that needs attention (a warning, or a flag from the Manager or the Improvement crew) and writes each one a chart (`public/doctor.js`). The rounds are on the Deck's **Bot team** card (*Doctor's rounds*, opened on its own when someone is critical or needs you) and at the top of the live window; tap a teammate there to see its chart.

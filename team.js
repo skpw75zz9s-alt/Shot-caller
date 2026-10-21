@@ -191,7 +191,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
     s.roster = withTrainers(series, fixersFor(series, managed(base, x, series, now), now, true), x, now, true); // judged on this reading's time sheet, then the fixers act, then the trainers report
     score(series, s.roster, x, now); // merit pay (public/incentives.js)
     if (hiring && x.hires && searchFor(series)) {
-      hiring.search(x.hires.ctx); // the Recruiter looks for gaps (an hour apart)
+      hiring.search(x.hires.ctx); // the Recruiter looks on every reading too (and on its own timer, server.js)
       for (const r of s.roster) if (r.hire && r.trial && (r.reviews || []).some((v) => v.verdict === 'stuck' || v.verdict === 'broken')) hiring.restartTrial?.(r.role.replace(/^h_/, '')); // flagged on trial: it starts again
     }
     for (const r of s.roster) if (a.text[r.role] === undefined) { a.text[r.role] = r.status; a.at[r.role] = now; a.rounds[r.role] = 0; } // the Manager's own row

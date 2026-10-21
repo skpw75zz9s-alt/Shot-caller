@@ -46,7 +46,7 @@ import { TEAM_ICON } from './team.js';
 import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '229'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '230'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2852,9 +2852,9 @@ function tuneUpHtml(st) {
 // ---------- the hiring center (hiring.js, public/hires.js): approve or decline the Recruiter's applications, admins only ----------
 function hiringHtml(h) {
   const apps = h.applications.map((a) => `<div class="hire-app"><div class="hire-h"><b>${a.icon} ${esc(a.name)}</b><small>${esc(a.job)}</small></div>
-    <p><b>Why now:</b> ${esc(a.why)}</p><p><b>What it would do:</b> ${esc(a.does)}</p><p class="muted"><b>What it can't:</b> ${esc(a.cant)}</p>
+    <p><b>${a.standby ? 'Standing by:' : 'Why now:'}</b> ${esc(a.why)}</p><p><b>What it would do:</b> ${esc(a.does)}</p><p class="muted"><b>What it can't:</b> ${esc(a.cant)}</p>
     <div class="pos-btns"><button data-hire="${esc(a.id)}" data-decision="approve">Approve: hire</button><button class="ghost" data-hire="${esc(a.id)}" data-decision="decline">Decline</button></div></div>`).join('');
-  return apps || '<p class="fine-left muted">No applications waiting. The Recruiter looks every hour, or tap Search now.</p>';
+  return apps || '<p class="fine-left muted">No applications waiting: everyone in the catalog is hired.</p>';
 }
 async function loadHiring() {
   try {

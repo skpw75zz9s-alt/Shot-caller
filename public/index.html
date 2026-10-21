@@ -597,7 +597,7 @@
         <button id="tuRun">Run tune-up</button>
         <div id="tuReport" class="tu-report"></div>
         <h4>Hiring center <small id="hireWhen" class="muted"></small></h4>
-        <p class="fine-left">The Recruiter files an application when the team's own data shows a gap a new agent would fill. Each says why now, what it would do and what it can't. Approve to hire it onto the team; decline and it won't apply again for a week. Like everyone on the team, a hire reports and informs: it never changes a call.</p>
+        <p class="fine-left">The Recruiter searches nonstop and files an application when the team's own data shows a gap a new agent would fill. Each says why now, what it would do and what it can't. There's always at least one waiting: when no gap calls for anyone, the next ready agent stands by, and says so. Approve to hire it onto the team; decline and someone else steps up (a declined agent comes back only after a week, or when nobody else is left). Like everyone on the team, a hire reports and informs: it never changes a call.</p>
         <div id="hireApps" class="hire-apps"></div>
         <ul id="hireHired" class="adm-list"></ul>
         <button id="hireSearch" class="ghost">Search now</button>
@@ -666,7 +666,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.80 · The Doctor</p>
+      <p class="fine" id="version">Shot Caller v13.81 · Recruiter never stops</p>
     </section>
   </main>
 
@@ -707,7 +707,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '229';
+    window.SC_BUILD = '230';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

@@ -32,15 +32,17 @@ test('drawdown and the hours that lose', () => {
   assert.ok(row.talks.some((t) => t.to === 'caller'));
 });
 
-test('the Recruiter files what fits, an hour apart; approve hires, decline waits a week, let go removes', async () => {
+test('the Recruiter searches nonstop and files what fits; approve hires, decline waits a week, let go removes', async () => {
   let t = et('2026-10-20T12:00:00-04:00');
   const h = createHiring({ file: join(mkdtempSync(join(tmpdir(), 'hire-')), 'hiring.json'), clock: () => t });
   await h.load();
   const ctx = { now: t, markets: [{ series: 'KXBTC15M', name: 'Bitcoin', kind: 'crypto' }, { series: 'KXINX', name: 'S&P 500', kind: 'index' }], calls: Array.from({ length: 40 }, (_, i) => call(i % 5 !== 0)), traders: 0, uptime: h.uptime() };
   const apps = h.search(ctx);
-  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'restarts'], 'the hour-of-day coach needs 120 graded calls');
-  assert.match(apps.find((a) => a.key === 'hours').why, /S&P 500/);
-  assert.deepEqual(h.search(ctx), [], 'not again within the hour');
+  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'restarts', 'streak'], 'the coaches need more graded calls; the Quiet-spell watcher needs times');
+  assert.match(apps.find((a) => a.key === 'hours').why, /S&P 500/); assert.ok(apps.every((a) => !a.standby));
+  t += 5000;
+  assert.deepEqual(h.search(ctx), [], 'it looks again on the next reading: nobody new, nobody filed twice');
+  assert.equal(h.api().searches, 2);
   const id = (k) => h.api().applications.find((a) => a.key === k).id;
   await h.decide(id('hours'), 'approve'); await h.decide(id('liquidity'), 'decline');
   assert.deepEqual(h.hired(), ['hours']);
@@ -54,14 +56,60 @@ test('the Recruiter files what fits, an hour apart; approve hires, decline waits
   assert.equal(h2.uptime().starts.length, 1, 'each start recorded (the Restart watcher)');
 });
 
+test('always at least one applicant: when no gap calls for anyone, the next ready agent stands by', async () => {
+  let t = et('2026-10-20T12:00:00-04:00');
+  const h = createHiring({ file: join(mkdtempSync(join(tmpdir(), 'hire-')), 'hiring.json'), clock: () => t });
+  await h.load();
+  const ctx = { now: t, markets: [{ series: 'KXBTC15M', name: 'Bitcoin', kind: 'crypto' }], calls: [], traders: 0, uptime: h.uptime() };
+  const pending = () => h.api().applications;
+  assert.deepEqual(h.search(ctx).map((a) => a.key), ['restarts'], 'with no record yet, only the Restart watcher fits');
+  await h.decide(pending()[0].id, 'approve');
+  const s1 = h.search(ctx);
+  assert.deepEqual(s1.map((a) => [a.key, !!a.standby]), [['hours', true]], 'nobody fits: the first ready agent stands by');
+  assert.match(s1[0].why, /^No gap in the team's data calls for it yet: it's standing by/);
+  await h.decide(pending()[0].id, 'decline'); t += 1000;
+  assert.deepEqual(h.search(ctx).map((a) => a.key), ['drawdown'], 'decline it and the next one steps up');
+  // the data now calls for the one standing by: its application says why
+  const calls = Array.from({ length: 40 }, (_, i) => call(i % 5 !== 0));
+  h.search({ ...ctx, calls });
+  const dd = pending().find((a) => a.key === 'drawdown');
+  assert.ok(!dd.standby); assert.match(dd.why, /^40 graded official calls/);
+  // everyone declined: the one declined longest ago comes back, and says so
+  for (let i = 0; i < 12 && !/nobody else is left/.test(pending()[0]?.why); i++) { for (const a of pending()) await h.decide(a.id, 'decline'); t += 60000; h.search(ctx); }
+  const back = pending();
+  assert.equal(back.length, 1); assert.equal(back[0].key, 'hours', 'declined first, so it comes back first');
+  assert.match(back[0].why, /you declined it \d+ min ago, and nobody else is left/);
+  // everyone hired: nobody left to put forward
+  for (const c of CANDIDATES) if (!h.hired().includes(c.key)) { const a = pending().find((x) => x.key === c.key) ?? (h.search(ctx, { force: true }), pending().find((x) => x.key === c.key)); if (a) await h.decide(a.id, 'approve'); }
+  for (let i = 0; i < 12 && h.hired().length < CANDIDATES.length; i++) { h.search(ctx, { force: true }); for (const a of pending()) await h.decide(a.id, 'approve'); }
+  assert.equal(h.hired().length, CANDIDATES.length); h.search(ctx);
+  assert.deepEqual(pending(), [], 'the whole catalog is hired'); assert.equal(h.api().catalog, 10);
+});
+
+test('the five newer hires: runs of losses, prices, sides and weekdays that lose, and quiet spells', () => {
+  const now = et('2026-10-21T12:00:00-04:00'), mon = et('2026-10-19T12:00:00-04:00'), tue = et('2026-10-20T12:00:00-04:00');
+  const run = [call(true, 0.8, 1), call(false, 0.8, 2), call(false, 0.8, 3), call(false, 0.8, 4), call(true, 0.8, 5), ...Array.from({ length: 6 }, (_, i) => call(true, 0.8, 6 + i)), call(false, 0.8, 20), call(false, 0.8, 21), call(false, 0.8, 22)];
+  const st = hireRows(['streak'], { now, markets: [], calls: run })[0];
+  assert.equal(st.state, 'warn'); assert.match(st.status, /^3 losses in a row · longest losing run before this: 3$/); assert.ok(st.talks.some((x) => x.to === 'risk'));
+  // 40 calls at 90¢ that won 60%: a losing band, a losing side, a losing weekday
+  const bad = Array.from({ length: 40 }, (_, i) => ({ side: 'NO', price: 0.9, result: i < 24 ? 'no' : 'yes', at: mon })), good = Array.from({ length: 40 }, () => ({ side: 'YES', price: 0.75, result: 'yes', at: tue }));
+  const [pc, sc, wd] = hireRows(['pricecoach', 'sidecoach', 'weekday'], { now, markets: [], calls: [...bad, ...good] });
+  assert.match(pc.status, /^Losing: bought at 85-95¢ \(40 calls, −\$\d+\.\d\d, z −\d\.\d\)$/);
+  assert.match(sc.status, /^Losing: on DOWN \(40 calls/); assert.match(wd.status, /^Losing: on Mondays \(40 calls/);
+  assert.equal(hireRows(['pricecoach'], { now, markets: [], calls: good.slice(0, 10) })[0].state, 'idle', 'too few to split');
+  // calls an hour apart, then nothing for 6 hours
+  const q = hireRows(['quiet'], { now, markets: [], calls: Array.from({ length: 10 }, (_, i) => ({ side: 'YES', price: 0.8, at: now - 6 * 3600000 - i * 3600000 })) })[0];
+  assert.equal(q.state, 'warn'); assert.match(q.status, /^Last official call 6 h 0 min ago · the usual gap: 1 h 0 min$/); assert.ok(q.talks.some((x) => x.to === 'caller'));
+});
+
 test('in the team: the Recruiter with what\'s waiting, and a hire at work', () => {
   const now = et('2026-10-20T15:50:00-04:00');
   const r = Object.fromEntries(teamRoster({ now, snap: null, hires: { hired: ['hours', 'restarts'], pending: 2, ctx: { now, markets: [{ series: 'KXINX', name: 'S&P 500', kind: 'index' }], calls: [], uptime: { since: now - 3 * 3600000, starts: [now - 3 * 3600000] } } } }).map((x) => [x.role, x]));
-  assert.match(r.recruiter.status, /^2 applications waiting for your approval \(Settings → Admin → Hiring center\) · 2 hired$/);
+  assert.match(r.recruiter.status, /^2 applications waiting for your approval \(Settings → Admin → Hiring center\) · 2 hired · searching nonstop$/);
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
   assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 start in the last week$/);
-  assert.equal(CANDIDATES.length, 5);
+  assert.equal(CANDIDATES.length, 10);
 });
 
 // ---------- a new hire starts on probation, and the Training room picks it up the moment it joins ----------

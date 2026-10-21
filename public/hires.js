@@ -38,6 +38,35 @@ export function byHour(calls) {
   return blocks.map((b) => ({ ...b, z: b.v > 0 ? (b.wins - b.need) / Math.sqrt(b.v) : 0 }));
 }
 const hh = (h) => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
+// the official record split by any key (a price band, a side, a weekday): each group's calls, wins, the wins its prices
+// needed, and its z against them; a group clearly losing has 30+ calls and z ≤ −2
+export function splitBy(calls, keyOf) {
+  const out = {};
+  for (const c of graded(calls)) {
+    const k = keyOf(c); if (k == null) continue;
+    const g = (out[k] ||= { n: 0, wins: 0, need: 0, v: 0, usd: 0 });
+    g.n++; g.wins += won(c) ? 1 : 0; g.need += c.price; g.v += c.price * (1 - c.price); g.usd += pnl10(c.price, won(c));
+  }
+  for (const g of Object.values(out)) g.z = g.v > 0 ? (g.wins - g.need) / Math.sqrt(g.v) : 0;
+  return out;
+}
+const losing = (g) => g.n >= 30 && g.z <= -2;
+// the current run of wins or losses, and the longest losing run before it (graded calls, oldest first)
+export function streaks(calls) {
+  const runs = []; // [{ won, n }], oldest first
+  for (const c of graded(calls).slice().sort((x, y) => (x.at ?? 0) - (y.at ?? 0))) { const w = won(c); if (runs.at(-1)?.won === w) runs.at(-1).n++; else runs.push({ won: w, n: 1 }); }
+  return { n: runs.reduce((t, r) => t + r.n, 0), cur: runs.at(-1)?.n ?? 0, won: runs.at(-1)?.won ?? null, longestLossBefore: Math.max(0, ...runs.slice(0, -1).filter((r) => !r.won).map((r) => r.n)) };
+}
+const BANDS = [[0, 0.7, 'under 70¢'], [0.7, 0.85, '70-85¢'], [0.85, 0.95, '85-95¢'], [0.95, 1, '95¢ and up']];
+const bandOf = (c) => BANDS.find(([lo, hi]) => c.price >= lo && c.price < hi)?.[2] ?? null;
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// a split's row: the groups that clearly lose, told to whoever the hire tells
+const splitRow = (groups, { what, few, to, label = (k) => k }) => {
+  const n = Object.values(groups).reduce((a, g) => a + g.n, 0), bad = Object.entries(groups).filter(([, g]) => losing(g));
+  if (n < 30) return { state: 'idle', status: `${n} graded calls: too few to split by ${what}`, key: 'few', talks: [] };
+  return { state: bad.length ? 'warn' : 'ok', status: bad.length ? `Losing: ${bad.map(([k, g]) => `${label(k)} (${g.n} calls, ${usd(g.usd)}, z ${zs(g.z)})`).join('; ')}` : `No ${what} clearly loses yet (${n} calls${few ? `, ${few}` : ''})`, key: bad.map(([k]) => k).join(','),
+    say: bad.length ? `found a losing ${what}: ${label(bad[0][0])}` : null, talks: bad.map(([k, g]) => ({ to, text: `Calls ${label(k)} have lost ${usd(g.usd)} over ${g.n} (z ${zs(g.z)}).` })) };
+};
 
 // the catalog. ctx: { now, markets: [{ series, name, kind }], calls (the official record: side, price, result, at),
 // depth: { yes: { usd, at }, no: { usd, at } } near the price | null, uptime: { since, starts: [ms] } }
@@ -100,6 +129,50 @@ export const CANDIDATES = [
       if (!u?.since) return { state: 'idle', status: 'Not reporting', key: 'none', talks: [] };
       return { state: week > 10 ? 'warn' : 'ok', status: `Up ${dur((c.now - u.since) / 60000)} · ${week} start${week === 1 ? '' : 's'} in the last week`, key: week > 10 ? 'many' : 'ok', say: week > 10 ? 'the server keeps restarting' : null,
         talks: week > 10 ? [{ to: 'nightwatch', text: `${week} restarts in a week: every one empties the team's memory.` }] : [] };
+    } },
+  // ---------- v13.81: five more, so the Recruiter always has someone to put forward ----------
+  { key: 'streak', role: 'h_streak', name: 'Streak watcher', icon: '🔥', dept: 'risk',
+    job: 'watches the runs of wins and losses',
+    does: 'Follows the official record call by call: the run it\'s on now, and the longest losing run before it, and tells the Risk officer when a losing run is as long as the worst one yet.',
+    cant: 'Runs happen by chance too: a long one is a reason to look, not proof something broke.',
+    fit: (c) => { const s = streaks(c.calls); return s.n >= 20 ? `${s.n} graded official calls, and nobody watches for losing runs (the longest so far: ${s.longestLossBefore}).` : null; },
+    row: (c) => {
+      const s = streaks(c.calls);
+      if (s.n < 10) return { state: 'idle', status: `${s.n} graded official calls: too few to follow runs yet`, key: 'few', talks: [] };
+      const worst = s.won === false && s.cur >= 3 && s.cur >= s.longestLossBefore;
+      return { state: worst ? 'warn' : s.won === false && s.cur >= 3 ? 'busy' : 'ok', status: `${s.cur} ${s.won ? 'win' : 'loss'}${s.cur === 1 ? '' : s.won ? 's' : 'es'} in a row · longest losing run before this: ${s.longestLossBefore}`, key: worst ? 'worst' : `${s.won}`,
+        say: worst ? `${s.cur} losses in a row: as bad as it's been` : null, talks: worst ? [{ to: 'risk', text: `${s.cur} official calls lost in a row: as long as the worst run yet (${s.longestLossBefore}).` }] : [] };
+    } },
+  { key: 'pricecoach', role: 'h_pricecoach', name: 'Price-band coach', icon: '💵', dept: 'grade',
+    job: 'finds the prices where the calls lose',
+    does: 'Splits the official record by the price paid (under 70¢, 70-85¢, 85-95¢, 95¢ and up) and flags a band that clearly loses to its prices (30+ calls, z of −2 or worse).',
+    cant: 'It only flags: whether to skip a band is a decision for you (or for the Call filter, if it proves it).',
+    fit: (c) => { const n = graded(c.calls).length; return n >= 120 ? `${n} graded official calls: enough to look for prices that lose, and nobody does.` : null; },
+    row: (c) => splitRow(splitBy(c.calls, bandOf), { what: 'price band', to: 'caller', label: (k) => `bought at ${k}` }) },
+  { key: 'sidecoach', role: 'h_sidecoach', name: 'UP/DOWN checker', icon: '↕️', dept: 'grade',
+    job: 'checks the UP calls and the DOWN calls apart',
+    does: 'Splits the official record into UP calls and DOWN calls and flags a side that clearly loses to its prices (30+ calls, z of −2 or worse), so a lean toward one side shows.',
+    cant: 'A side can lose for a stretch because the market trended the other way: it flags, it doesn\'t explain.',
+    fit: (c) => { const n = graded(c.calls).length; return n >= 60 ? `${n} graded official calls, and nobody checks the UP calls against the DOWN calls.` : null; },
+    row: (c) => splitRow(splitBy(c.calls, (x) => (String(x.side).toUpperCase() === 'YES' ? 'UP' : 'DOWN')), { what: 'side', to: 'caller', label: (k) => `on ${k}` }) },
+  { key: 'weekday', role: 'h_weekday', name: 'Weekday coach', icon: '📅', dept: 'grade',
+    job: 'finds the days when the calls lose',
+    does: 'Splits the official record by day of the week (Eastern time) and flags a day that clearly loses to its prices (30+ calls, z of −2 or worse).',
+    cant: 'It doesn\'t know holidays, and a day can lose for a stretch by chance: it flags, you decide.',
+    fit: (c) => { const n = graded(c.calls).filter((x) => x.at).length; return n >= 140 ? `${n} graded official calls with times: enough to look for days that lose, and nobody does.` : null; },
+    row: (c) => splitRow(splitBy(c.calls, (x) => (x.at ? ET(x.at).day : null)), { what: 'weekday', to: 'caller', label: (k) => `on ${DAYS[k]}s` }) },
+  { key: 'quiet', role: 'h_quiet', name: 'Quiet-spell watcher', icon: '🤫', dept: 'calls',
+    job: 'notices when the calls stop coming',
+    does: 'Keeps the usual gap between official calls and tells the Caller when the gap since the last one is three times that and over two hours, so a quiet spell that isn\'t the market gets looked at.',
+    cant: 'Quiet can be right (a calm market, a guard holding): it says how long, the Doctor and the guards say why.',
+    fit: (c) => { const n = (c.calls || []).filter((x) => x.at).length; return n >= 10 ? `${n} official calls, and nobody notices when they stop coming.` : null; },
+    row: (c) => {
+      const t = (c.calls || []).map((x) => x.at).filter(Boolean).sort((a, b) => a - b);
+      if (t.length < 5) return { state: 'idle', status: `${t.length} official calls with times: too few to know the usual gap`, key: 'few', talks: [] };
+      const gaps = t.slice(1).map((x, i) => x - t[i]).sort((a, b) => a - b), usual = gaps[Math.floor(gaps.length / 2)], since = c.now - t.at(-1);
+      const long = since > 3 * usual && since > 2 * 3600000;
+      return { state: long ? 'warn' : 'ok', status: `Last official call ${dur(since / 60000)} ago · the usual gap: ${dur(usual / 60000)}`, key: long ? 'quiet' : 'ok',
+        say: long ? `no call in ${dur(since / 60000)}` : null, talks: long ? [{ to: 'caller', text: `No official call in ${dur(since / 60000)}: three times the usual gap (${dur(usual / 60000)}).` }] : [] };
     } },
 ];
 export const HIRE_ICON = Object.fromEntries(CANDIDATES.map((c) => [c.role, c.icon]));

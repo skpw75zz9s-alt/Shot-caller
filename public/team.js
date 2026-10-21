@@ -11,7 +11,7 @@ import { CREW_ICON, crewRoster } from './improve.js';
 import { MANAGER, managerReport } from './manager.js';
 import { FIX_ICON, HELP_ICON } from './fixers.js';
 import { NEWS_ROLE, newsRow } from './news.js';
-import { HIRE_ICON, hireRows } from './hires.js';
+import { CANDIDATES, HIRE_ICON, hireRows } from './hires.js';
 import { DOCTOR } from './doctor.js';
 
 export const ROLES = [
@@ -160,7 +160,7 @@ function hiringRows(x) {
   const h = x.hires;
   if (!h) return [];
   const rec = { role: 'recruiter', name: 'Recruiter', job: 'looks for agents that would help, and files their applications', dept: 'mgmt',
-    state: h.pending ? 'busy' : 'ok', status: `${h.pending ? `${h.pending} application${h.pending === 1 ? '' : 's'} waiting for your approval (Settings → Admin → Hiring center)` : 'No applications waiting'} · ${h.hired.length} hired`,
+    state: h.pending ? 'busy' : 'ok', status: `${h.pending ? `${h.pending} application${h.pending === 1 ? '' : 's'} waiting for your approval (Settings → Admin → Hiring center)` : 'No applications waiting'} · ${h.hired.length} hired · ${h.hired.length >= CANDIDATES.length ? `everyone in the catalog (${CANDIDATES.length}) is hired: nobody left to put forward` : 'searching nonstop'}`,
     key: `${h.pending}:${h.hired.length}`, say: h.pending ? `filed ${h.pending} application${h.pending === 1 ? '' : 's'} for the admin` : null,
     talks: h.pending ? [{ to: 'manager', text: `${h.pending} application${h.pending === 1 ? '' : 's'} waiting for the admin's approval.` }] : [] };
   return [rec, ...hireRows(h.hired, h.ctx)];

@@ -356,6 +356,9 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
 const ready = Promise.all([hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+// the Recruiter searches nonstop (v13.81): every 5 seconds on its own, whether or not the bot is ticking, once the
+// hiring center's file has loaded (so a search can never overwrite it)
+ready.then(() => setInterval(() => { try { hiring.search(team.hireCtx(HOME.series)); } catch (e) { console.error('recruiter search failed', e.message); } }, 5000).unref()).catch(() => {});
 
 // /api/auto/*: the phone's controls for its owner's server-side Auto-trader
 const ownerOf = (token) => { const c = access.check(token); return c.role === 'admin' && c.access ? 'admin' : c.member?.code && c.access ? c.member.code : PAYWALL ? null : 'local'; };
@@ -464,6 +467,7 @@ async function adminApi(req, res, action, token) {
     const b = await readBody(req);
     if (b.search) { hiring.search(team.hireCtx(HOME.series), { force: true }); return send(res, 200, hiring.api()); }
     const out = await hiring.decide(String(b.id || ''), String(b.decision || ''));
+    if (!out.error) hiring.search(team.hireCtx(HOME.series), { force: true }); // someone new stands by at once
     return send(res, out.error ? 400 : 200, out.error ? out : hiring.api());
   }
   // the bot team, read fresh every second, for the admin's live window (v13.66, public/team-live.js)
