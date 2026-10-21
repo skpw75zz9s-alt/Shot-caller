@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { createBot } from './bot.js';
@@ -568,7 +568,8 @@ export const server = http.createServer(async (req, res) => {
     const dsc = path.match(/^\/api\/discord\/(\w+)$/);
     if (dsc) return await discordApi(req, res, dsc[1], token, url);
 
-    const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
+    // posix: URL paths use / on every OS; Windows' normalize turns them into backslashes and nothing would match OPEN_FILES
+    const rel = posix.normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
     // the admin's live window on the bot team (v13.66): the admin only, paywall or not
     if (LIVE_FILES.has(rel)) return access.isAdminToken(token) ? serveFile(req, res, rel === '/team-live' ? '/team-live.html' : rel) : send(res, 403, 'Admin only.', 'text/plain; charset=utf-8');
     const allowed = !PAYWALL || access.hasAccess(token);

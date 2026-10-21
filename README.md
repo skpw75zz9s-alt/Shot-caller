@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### Runs on Windows (v13.82.1)
+
+On a Windows computer every page answered `{"error":"payment required"}`, the sign-in page included, so nobody could get in. The server matched the page's address against the pages open to everyone with the operating system's path rules, and Windows writes paths with backslashes, so `/paywall.html` never matched. It now uses web-style paths on every system. Linux hosts (Railway, Render) were never affected.
+
 ### The Whale filter (v13.82)
 
 A **🐋 Whale filter** on the Market desk tells the whales that move the market from the ones that don't (`public/whales.js`, `whalefilter.js`, one per crypto market).
