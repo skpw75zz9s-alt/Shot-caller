@@ -490,7 +490,10 @@ def kill_tree(pid: int, force: bool) -> None:
 
 def start_background(wait: int = 60) -> bool:
     if read_pid():
-        print(f'Already running (pid {read_pid()}).'); return True
+        if local_health(timeout=5):
+            print(f'Already running (pid {read_pid()}).'); return True
+        print(f'Process {read_pid()} is up but the server isn\'t answering: restarting it.')
+        stop_background()
     preflight()
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log = open(LOG_FILE, 'a')
