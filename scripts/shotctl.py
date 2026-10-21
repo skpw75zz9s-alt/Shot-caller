@@ -73,7 +73,7 @@ VAPID_PRIVATE_KEY VAPID_PUBLIC_KEY VAPID_SUBJECT WHALE_ALERT_API_KEY WHALE_FILTE
 
 WINDOWS = os.name == 'nt'
 # variables this tool reads (not the server): TUNNEL_TOKEN runs your named Cloudflare tunnel in `up`
-TOOL_VARS = {'TUNNEL_TOKEN'}
+TOOL_VARS = {'TUNNEL_TOKEN', 'BUGWATCH_WEBHOOK'}  # BUGWATCH_WEBHOOK: scripts/bugwatch.py's alerts
 USE_COLOR = sys.stdout.isatty() and os.environ.get('NO_COLOR') is None
 
 
