@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### A quieter activity log (v13.83.2)
+
+On the live book the Pending orders log filled with about 40 events in 10 minutes: $30k walls and market makers sliding orders a few dollars. Now only **big walls** are logged (at least 2% of the dollars waiting within 0.5% on an average side: about $300k on Bitcoin's Kraken book), and a wall that disappears while one at least 60% its size stands within 0.15% on the same side counts as **moved**, not pulled, and isn't logged. Smaller walls still show on the card while they stand.
+
 ### The self-heal keeps a copy (v13.83.1)
 
 When the Deck can't draw a market for 10 seconds, the phone clears that market's saved data and reloads. It used to delete it, scorecards and call logs included. It now keeps the last copy of each as `<key>.bak` in the phone's storage, so nothing is gone for good. Updates themselves never touched this data: they only refresh the app's files.

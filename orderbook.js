@@ -55,22 +55,28 @@ export function summarizeBook(rawBids, rawAsks) {
 //   up      a wall has stood 30 seconds (logged once)
 //   hit     a wall that stood is gone and the price reached it: it was traded into
 //   pulled  a wall that stood is gone, the price never reached it, and its price now holds under a fifth of it:
-//           cancelled. (A wall that only shrank a little, slipped out of the 500-level view, or stopped counting as a
-//           wall because the prices around it grew is not called pulled.)
+//           cancelled. (A wall that only shrank a little, slipped out of the 500-level view, stopped counting as a
+//           wall because the prices around it grew, or moved: a wall at least 60% its size now stands within 0.15% on
+//           the same side, a trader repricing, is not called pulled.)
+// Only big walls go in the log: at least 2% of the dollars waiting within 0.5% on an average side (and the wall bar).
+// Smaller walls still show on the card while they stand; logging them all buried the big ones in market makers'
+// constant repricing.
+export const logBar = (s) => Math.max(s.wallBar, (0.02 * (s.bands[1].bid + s.bands[1].ask)) / 2);
 export function trackWalls(seen, s, now) {
-  const next = new Map(), events = [];
+  const next = new Map(), events = [], big = logBar(s);
   for (const w of s.walls) {
     const key = `${w.side}:${w.price}`, was = seen.get(key);
     const cur = { ...w, since: was?.since ?? now, seenAt: now, logged: was?.logged ?? false };
-    if (!cur.logged && now - cur.since >= STOOD) { cur.logged = true; events.push({ kind: 'up', side: w.side, price: w.price, usd: w.usd, at: now }); }
+    if (!cur.logged && now - cur.since >= STOOD && w.usd >= big) { cur.logged = true; events.push({ kind: 'up', side: w.side, price: w.price, usd: w.usd, at: now }); }
     next.set(key, cur);
   }
   for (const [key, w] of seen) {
-    if (next.has(key) || !w.logged) continue; // still there, or only flickered
+    if (next.has(key) || !w.logged) continue; // still there, or never logged (a flicker or a small wall)
     const reached = w.side === 'buy' ? s.bid <= w.price : s.ask >= w.price;
     const stood = w.seenAt - w.since;
+    const moved = s.walls.some((x) => x.side === w.side && x.usd >= w.usd * 0.6 && Math.abs(x.price - w.price) / s.mid <= 0.0015);
     if (reached) events.push({ kind: 'hit', side: w.side, price: w.price, usd: w.usd, stood, at: now });
-    else if (s.inView(w.side, w.price) && s.usdAt(w.side, w.price) < w.usd / 5) events.push({ kind: 'pulled', side: w.side, price: w.price, usd: w.usd, stood, at: now });
+    else if (!moved && s.inView(w.side, w.price) && s.usdAt(w.side, w.price) < w.usd / 5) events.push({ kind: 'pulled', side: w.side, price: w.price, usd: w.usd, stood, at: now });
   }
   return { seen: next, events };
 }

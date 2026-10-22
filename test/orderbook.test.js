@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOrderBook, summarizeBook, trackWalls } from '../orderbook.js';
+import { createOrderBook, logBar, summarizeBook, trackWalls } from '../orderbook.js';
 
 // a book around $100: 1 unit at every 1 cent, plus a buy wall at 99.50 and a sell wall at 101.00
 const side = (from, step, n) => Array.from({ length: n }, (_, i) => [String((from + step * i).toFixed(2)), '1', 0]);
-const book = ({ buyWall = '2000', sellWall = '900', shift = 0 } = {}) => ({
-  bids: [...side(99.99 + shift, -0.01, 300), ...(buyWall ? [['99.50', buyWall, 0]] : [])],
+const book = ({ buyWall = '2000', sellWall = '900', shift = 0, buyAt = '99.50', extra = [] } = {}) => ({
+  bids: [...side(99.99 + shift, -0.01, 300), ...(buyWall ? [[buyAt, buyWall, 0]] : []), ...extra],
   asks: [...side(100.01 + shift, 0.01, 300), ...(sellWall ? [['101.00', sellWall, 0]] : [])],
 });
 const sum = (o) => { const b = book(o); return summarizeBook(b.bids, b.asks); };
@@ -85,4 +85,21 @@ test('the feed: reads Kraken at most every 3 s for a phone, keeps a history and 
   const e = await again.api('BTC');
   assert.equal(e.events[0].kind, 'pulled', 'the log came back after the restart');
   assert.deepEqual(await ob.api('SPX'), { off: 'pending orders are for BTC, ETH, SOL, XRP and DOGE' });
+});
+
+test('only big walls go in the log, and a wall that moved a little is not called pulled', () => {
+  // thin $100 levels, two $2M walls inside 0.5% (so a log-worthy wall is about $40k+), and a $29.9k wall at 99.80
+  const deep = (o = {}) => summarizeBook([...book(o).bids, ['99.70', '20000', 0], ['99.80', '300', 0]], [...book(o).asks, ['100.30', '20000', 0]]);
+  const s0 = deep();
+  assert.ok(s0.walls.some((w) => w.price === 99.8), 'still shown on the card as a wall');
+  assert.ok(logBar(s0) > 29940, 'but under the bar for the log');
+  let t = trackWalls(new Map(), s0, 0);
+  t = trackWalls(t.seen, s0, 40000);
+  assert.deepEqual(t.events.filter((e) => e.price === 99.8), []);
+  assert.ok(t.events.some((e) => e.price === 99.7), 'the $2M wall is logged');
+  // the buy wall at 99.50 slides to 99.45 (0.05% away, same size): a trader repricing, not a pull
+  let m = trackWalls(new Map(), sum(), 0);
+  m = trackWalls(m.seen, sum(), 40000);
+  const slid = trackWalls(m.seen, sum({ buyAt: '99.45' }), 55000);
+  assert.deepEqual(slid.events.filter((e) => e.kind === 'pulled'), []);
 });
