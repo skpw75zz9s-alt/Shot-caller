@@ -4,9 +4,10 @@
 // candidate stands by (said plainly on its application), until everyone in the catalog is hired. Kept in
 // DATA_DIR/hiring.json: the applications, who's hired, and the server's start times (the Restart watcher). A declined
 // candidate doesn't apply again for a week, unless it's the only one left to stand by.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { CANDIDATES, TRIAL_H } from './public/hires.js';
+import { writeAtomic } from './atomicfile.js';
 
 const WEEK = 7 * 86400000;
 const ago = (ms) => (ms < 3600000 ? `${Math.max(1, Math.round(ms / 60000))} min` : ms < 172800000 ? `${Math.round(ms / 3600000)} h` : `${Math.round(ms / 86400000)} days`);
@@ -18,7 +19,7 @@ export function createHiring({ file, clock = () => Date.now(), log = console, ev
     await save();
   }
   async function save() {
-    try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(db)); await rename(`${file}.tmp`, file); } catch (e) { log.error?.('saving the hiring center failed', e.message); }
+    try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(db)); } catch (e) { log.error?.('saving the hiring center failed', e.message); }
   }
   // ctx: what the candidates read (public/hires.js). Files an application for each candidate that fits and isn't hired,
   // waiting, or declined in the last week; then, if nobody is waiting, one candidate stands by. Returns the new applications.

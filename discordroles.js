@@ -15,8 +15,9 @@
 // Without them the feature is off and Settings says so. The secret and the bot token are never logged or sent to a phone;
 // the only thing kept per member is their Discord ID and name.
 import crypto from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { writeAtomic } from './atomicfile.js';
 
 const API = 'https://discord.com/api/v10';
 const SNOWFLAKE = /^\d{5,30}$/;
@@ -43,7 +44,7 @@ export function createDiscordRoles({ file, env = process.env, base = null, isAct
   async function load() { try { links = JSON.parse(await readFile(file, 'utf8')).links || {}; } catch { /* first run */ } }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(save, 500); saveTimer.unref?.(); }
   async function save() {
-    try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify({ links })); await rename(`${file}.tmp`, file); }
+    try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ links })); }
     catch (e) { log.error('discord roles save failed', e.message); }
   }
 

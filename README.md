@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### Saves that don't trip over each other (v13.82.4)
+
+Every saved file (the records, what the bot learned, members, the Auto-trader's history...) was written to one shared `<file>.tmp` and then renamed into place. When two saves of the same file overlapped, the second found its temp file already renamed away and failed (`ENOENT ... record-pick.json.tmp`), so that save was lost. Slower disks and Windows antivirus made the overlap common. Every save now goes through `atomicfile.js`: its own temp name each time, and a short retry when Windows briefly holds the file.
+
 ### Moving day (v13.82.3)
 
 The app can move to a new address and take its people with it.

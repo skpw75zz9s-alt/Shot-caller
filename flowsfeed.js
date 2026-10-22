@@ -3,9 +3,10 @@
 // a probation factor until it proves itself on data it never trained on; a proven one nudges the live round's odds a
 // little (flowShift). Every source says whether it's working and, if not, why (api().<source>.err), since any of them can
 // block or change its page.
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { FLOWS, dailyCloses, dailyTest, flowShift, parseFarside, parseStables, stablesChange, whaleNet, whaleTest } from './public/flows.js';
+import { writeAtomic } from './atomicfile.js';
 
 const HOUR = 3600000;
 const UA = { 'user-agent': 'Mozilla/5.0 (compatible; ShotCaller; daily flow reader)', accept: 'text/html,application/json' };
@@ -114,7 +115,7 @@ export function createFlowsFeed({ asset, file, prices, playbook = null, fetchImp
     return total ? { [lastLive.ticker]: Math.max(-0.03, Math.min(0.03, total)) } : null;
   }
   async function load() { try { const j = JSON.parse(await readFile(file, 'utf8')); if (Array.isArray(j?.whale)) s.whale.log = j.whale; } catch { /* none yet */ } }
-  async function save() { try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify({ whale: s.whale.log })); await rename(`${file}.tmp`, file); } catch (e) { log.error?.('saving flows failed', e.message); } }
+  async function save() { try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ whale: s.whale.log })); } catch (e) { log.error?.('saving flows failed', e.message); } }
   function api(now = clock()) {
     const r = reads(now), slim = (t) => (t ? { n: t.n, dir: t.dir, test: t.test, train: t.train, proven: t.proven, need: t.need, zNeed: t.zNeed, unit: t.unit } : null);
     return {

@@ -1,6 +1,6 @@
 // Server-side bot: watches the markets on its own and sends Web Push notifications
 // to subscribed phones, so alerts arrive even when the app is closed.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULTS, EXIT_DEFAULTS, OFFICIAL_LEVEL, RISK_LEVELS, quote, riskLevelOf, riskSettings } from './public/model.js';
 import { earlyProof, profitGuard } from './public/profitguard.js';
@@ -18,6 +18,7 @@ import { callStats, logCall, settleCalls, streaks, unsettledCalls } from './publ
 import { basisOf, calTable, learnBasis, learnCandles, learnWindow, newLearned, publicLearned, volFactor, volProfile } from './public/learner.js';
 import { newPulse, prunePulse, pulseBlend, pulseRound, pulseSecond, pulseSettle, pulseStatus } from './public/pulse.js';
 import { learnGate } from './public/callgate.js';
+import { writeAtomic } from './atomicfile.js';
 
 const DEVICE_DEFAULTS = { series: 'KXBTC15M', waitForDip: false, notifyBuy: true, notifySell: true, notifyUpdates: true, updateMinutes: 60, ...DEFAULTS, ...EXIT_DEFAULTS };
 const MAX_DEVICES = 100;
@@ -142,8 +143,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     learnDirty = false; learnSavedAt = Date.now();
     try {
       await mkdir(dirname(learnFile), { recursive: true });
-      await writeFile(`${learnFile}.tmp`, JSON.stringify(learned));
-      await rename(`${learnFile}.tmp`, learnFile);
+      await writeAtomic(learnFile, JSON.stringify(learned));
     } catch (e) { log.error('saving what was learned failed', e.message); }
   }
 
@@ -175,8 +175,7 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     const data = { vapid: fromEnv ? undefined : { publicKey: vapid.publicKey, privateKey: vapid.privateKey }, devices: [...devices.values()] };
     try {
       await mkdir(dirname(dataFile), { recursive: true });
-      await writeFile(`${dataFile}.tmp`, JSON.stringify(data));
-      await rename(`${dataFile}.tmp`, dataFile);
+      await writeAtomic(dataFile, JSON.stringify(data));
     } catch (e) { log.error('save failed', e.message); }
   }
 
@@ -515,13 +514,12 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
     recordDirty = false; recordSavedAt = Date.now();
     try {
       await mkdir(dirname(recordFile), { recursive: true });
-      await writeFile(`${recordFile}.tmp`, JSON.stringify(record));
-      await rename(`${recordFile}.tmp`, recordFile);
+      await writeAtomic(recordFile, JSON.stringify(record));
     } catch (e) { log.error('saving the bot record failed', e.message); }
   }
   async function savePick() {
     pickDirty = false;
-    try { await mkdir(dirname(pickFile), { recursive: true }); await writeFile(`${pickFile}.tmp`, JSON.stringify(pickRecord)); await rename(`${pickFile}.tmp`, pickFile); } catch (e) { log.error('saving the pick record failed', e.message); }
+    try { await mkdir(dirname(pickFile), { recursive: true }); await writeAtomic(pickFile, JSON.stringify(pickRecord)); } catch (e) { log.error('saving the pick record failed', e.message); }
   }
   // ---------- receipts (v13.41): each call sealed with a hash of itself and the receipt before it, so the record can't be
   // quietly edited: changing or removing any call breaks every receipt after it (posted to Discord with the call) ----------
@@ -578,11 +576,11 @@ export function createBot({ kalshi, coinbase, dataFile, env = process.env, log =
   }
   async function saveEarly() {
     earlyDirty = false;
-    try { await mkdir(dirname(earlyFile), { recursive: true }); await writeFile(`${earlyFile}.tmp`, JSON.stringify(earlyRecord)); await rename(`${earlyFile}.tmp`, earlyFile); } catch (e) { log.error('saving the early record failed', e.message); }
+    try { await mkdir(dirname(earlyFile), { recursive: true }); await writeAtomic(earlyFile, JSON.stringify(earlyRecord)); } catch (e) { log.error('saving the early record failed', e.message); }
   }
   async function saveCertain() {
     certainDirty = false;
-    try { await mkdir(dirname(certainFile), { recursive: true }); await writeFile(`${certainFile}.tmp`, JSON.stringify(certainRecord)); await rename(`${certainFile}.tmp`, certainFile); } catch (e) { log.error('saving the near-certain record failed', e.message); }
+    try { await mkdir(dirname(certainFile), { recursive: true }); await writeAtomic(certainFile, JSON.stringify(certainRecord)); } catch (e) { log.error('saving the near-certain record failed', e.message); }
   }
   function officialRecord() {
     const cur = currentRecord(), before = record.filter((e) => e.lv !== OFFICIAL_LEVEL);

@@ -3,9 +3,10 @@
 // whale, grades it a minute later, and keeps the graded cases (the last 5,000 per market, in DATA_DIR/whales.json) and
 // each group's record. api(): { minUsd, groups, recent (the last 20, newest first, each with what was expected of it),
 // pressure (the likely movers' dollars in the last 15 minutes) }; verdict(trade): what to expect of a whale right now.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { WHALE, grade, groupStats, predict, sigmaOf } from './public/whales.js';
+import { writeAtomic } from './atomicfile.js';
 
 const MAX_CASES = 5000, RING_MS = 2 * 3600000, SAMPLE_MS = 5000;
 export function createWhaleFilter({ file, clock = () => Date.now(), minUsd = Number(process.env.WHALE_FILTER_MIN) || WHALE.minUsd, log = console } = {}) {
@@ -16,7 +17,7 @@ export function createWhaleFilter({ file, clock = () => Date.now(), minUsd = Num
   function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
-      try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify({ cases })); await rename(`${file}.tmp`, file); } catch (e) { log.error?.('saving the whale filter failed', e.message); }
+      try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ cases })); } catch (e) { log.error?.('saving the whale filter failed', e.message); }
     }, 5000);
     saveTimer.unref?.();
   }

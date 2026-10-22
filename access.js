@@ -2,8 +2,9 @@
 // admin: each buyer gets a code to put in the payment note, taps "I've paid", and an admin
 // approves the code. Access is a server-side session cookie, so nothing is unlocked client-side.
 import crypto from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { writeAtomic } from './atomicfile.js';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const DAY = 86400000;
@@ -57,8 +58,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   async function save() {
     try {
       await mkdir(dirname(file), { recursive: true });
-      await writeFile(`${file}.tmp`, JSON.stringify(db));
-      await rename(`${file}.tmp`, file);
+      await writeAtomic(file, JSON.stringify(db));
     } catch (e) { log.error('access save failed', e.message); }
   }
 
