@@ -47,7 +47,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '232'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '233'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -1599,7 +1599,8 @@ function renderFailed(e) {
   let healed = true; try { healed = !!sessionStorage.getItem(key); } catch { /* storage blocked */ }
   setText($('reason'), `Couldn't draw this round (${e.message}). ${!stuck ? 'Retrying…' : healed ? 'Still failing after clearing this market\'s saved data: send a screenshot of this.' : 'Clearing this market\'s saved data on the phone…'}`);
   if (!stuck || healed) return;
-  try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) localStorage.removeItem(LK(k)); } catch { /* storage blocked */ }
+  // set aside, not deleted: each one is kept as <key>.bak (the last copy), so the logs and the scorecard can be recovered
+  try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) { const v = localStorage.getItem(LK(k)); if (v != null) localStorage.setItem(`${LK(k)}.bak`, v); localStorage.removeItem(LK(k)); } } catch { /* storage blocked */ }
   location.reload();
 }
 function renderNow() {

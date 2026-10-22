@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### The self-heal keeps a copy (v13.83.1)
+
+When the Deck can't draw a market for 10 seconds, the phone clears that market's saved data and reloads. It used to delete it, scorecards and call logs included. It now keeps the last copy of each as `<key>.bak` in the phone's storage, so nothing is gone for good. Updates themselves never touched this data: they only refresh the app's files.
+
 ### Pending orders (v13.83)
 
 A **📖 Pending orders** card on the Deck (Pro, crypto markets: BTC, ETH, SOL, XRP and DOGE) shows the orders waiting on Kraken's order book (`orderbook.js`):
