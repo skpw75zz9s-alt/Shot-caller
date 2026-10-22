@@ -11,7 +11,9 @@ Runs next to `shotctl.py up` (Python 3.9+, standard library only). Every minute 
   disk           logs over 20 MB                                                      -> rotate them
                  under 1 GB free                                                      -> keep only the 3 newest backups
   errors         new errors and stack traces in the server's log                      -> grouped in the report
-  tests          the test suite, after every code change and every 12 hours           -> failures in the report
+  tests          only with --tests: the suite after every code change and every 12 hours -> failures in the report
+                 (off by default: `shotctl.py up` already tests every update before installing it, and a test
+                 run takes the whole CPU for minutes, slowing the live app)
 
 What it can't fix (a failing test, an error that keeps coming back) goes in the report, and to Discord when
 BUGWATCH_WEBHOOK is set to a webhook of a private channel. Code bugs are fixed upstream and arrive through
@@ -317,7 +319,7 @@ class Watch:
         self.check_disk()
         if int(time.time() // 60) % 10 == 0 or self.args.once:  # every 10 minutes
             self.check_data()
-        if not self.args.no_tests:
+        if self.args.tests and not self.args.no_tests:
             self.run_tests()
         self.save()
 
@@ -339,7 +341,8 @@ def install_startup(remove: bool) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(prog='bugwatch.py', description=__doc__.split('\n\n')[0])
     p.add_argument('--once', action='store_true', help='one round of checks, then exit')
-    p.add_argument('--no-tests', action='store_true', help="don't run the test suite")
+    p.add_argument('--tests', action='store_true', help='also run the test suite after each code change and every 12 hours (heavy on CPU)')
+    p.add_argument('--no-tests', action='store_true', help=argparse.SUPPRESS)  # the default now; kept so old commands still work
     p.add_argument('--every', type=int, default=60, help='seconds between rounds (default 60)')
     p.add_argument('--install-startup', action='store_true', help='start it when you log in to Windows')
     p.add_argument('--remove-startup', action='store_true')
