@@ -76,7 +76,8 @@ test('the feed: reads Kraken at most every 3 s for a phone, keeps a history and 
   assert.deepEqual(c.events.map((e) => e.kind), ['pulled', 'up', 'up']);
   assert.equal(c.history.length, 2, 'one point a minute');
   now = 80000; fail = true;
-  const d = await ob.api('BTC');
+  assert.equal((await ob.api('BTC')).bid, 99.99, 'a phone still gets the last read at once');
+  const d = await ob.refresh('BTC'); // the read itself fails: the last book, marked stale
   assert.equal(d.stale, true);
   assert.equal(d.bid, 99.99);
   await ob.save();
@@ -102,4 +103,16 @@ test('only big walls go in the log, and a wall that moved a little is not called
   m = trackWalls(m.seen, sum(), 40000);
   const slid = trackWalls(m.seen, sum({ buyAt: '99.45' }), 55000);
   assert.deepEqual(slid.events.filter((e) => e.kind === 'pulled'), []);
+});
+
+test('a phone gets the last read at once while a fresh one is fetched in the background', async () => {
+  let now = 0, calls = 0, release;
+  const fetchImpl = async () => { calls++; if (calls > 1) await new Promise((r) => { release = r; }); return { ok: true, status: 200, json: async () => ({ error: [], result: { X: book() } }) }; };
+  const ob = createOrderBook({ fetchImpl, clock: () => now });
+  const first = await ob.api('BTC');
+  now = 5000;
+  const second = await ob.api('BTC'); // Kraken is slow now: the answer must not wait for it
+  assert.equal(second, first);
+  assert.equal(calls, 2, 'a background read started');
+  release();
 });

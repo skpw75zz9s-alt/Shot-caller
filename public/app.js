@@ -47,7 +47,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '233'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '234'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2383,7 +2383,11 @@ const agoShort = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : ms < 360000
 async function refreshBook() {
   if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
   let b;
-  try { b = await getJSON(api('book')); } catch { return; }
+  try { b = await getJSON(api('book')); } catch (e) {
+    // shown, not hidden: a card that silently never appears can't be told apart from a missing feature
+    if (!$('obBid').textContent.startsWith('$')) { setHidden($('bookCard'), false); setText($('obSay'), `Couldn't load the pending orders yet (${e.message}). Retrying every 3 seconds.`); }
+    return;
+  }
   if (!b || b.off) return setHidden($('bookCard'), true);
   setHidden($('bookCard'), false);
   if (b.error) { setText($('obSay'), b.error); return; }

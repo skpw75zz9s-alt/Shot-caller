@@ -137,11 +137,14 @@ export function createOrderBook({ file = null, fetchImpl = (...a) => fetch(...a)
     return b.pending;
   }
 
-  // a phone asking: the last read if it's under 3 seconds old, else a fresh one
+  // a phone asking: answered at once from the last read (the tracker keeps it under 15 seconds old), and a read older
+  // than 3 seconds is refreshed in the background for the next ask. Only the very first ask, or one after a minute
+  // without a good read, waits for Kraken: on a busy server that wait outlasted the phone's 10-second patience.
   async function api(asset) {
     if (!BOOK_PAIRS[asset]) return { off: 'pending orders are for BTC, ETH, SOL, XRP and DOGE' };
-    const b = book(asset);
-    if (b.out && clock() - b.at < every) return b.out;
+    const b = book(asset), age = clock() - b.at;
+    if (b.out && age < every) return b.out;
+    if (b.out && age < 60000) { refresh(asset); return b.out; }
     return refresh(asset);
   }
 
