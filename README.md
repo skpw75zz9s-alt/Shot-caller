@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### Run only the markets you want (v13.83.4)
+
+Every running market is a full bot, ticking every second. A small home server running all of Kalshi's 15-minute markets (the coins, the stock indexes, gold, oil) answered phones so slowly that requests timed out, and a phone could end up with half-updated app files. `MARKETS_ONLY=BTC,ETH,SOL,XRP,DOGE` lists and runs only those assets (any of BTC, ETH, SOL, XRP, DOGE, SPX, NDX, DJI, GOLD, SILVER, OIL); without it every market runs, as before.
+
 ### Pending orders answer at once (v13.83.3)
 
 On a busy home server the Pending orders card never appeared: each phone request waited for a fresh read of Kraken's book, which could outlast the phone's 10-second limit, and the card stayed hidden on any failure. The server now answers from its last read straight away (the tracker keeps it under 15 seconds old) and refreshes in the background; only a first request, or one after a minute without a good read, waits for Kraken. If the card still can't load, it shows why instead of staying hidden.
