@@ -47,7 +47,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '231'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '232'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2377,6 +2377,39 @@ async function refreshWhales() {
   setHTML($('wfList'), (w.recent || []).slice(0, 8).map((c) => `<li class="${c.side}"><time>${hms(c.t)}</time><span class="sd">${c.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${cash(c.usd)} on ${esc(String(c.ex).replace('.US', ''))}${c.sweep ? ' · sweep' : ''}</span><em class="${c.out ? WF_OUT[c.out][1] : 'muted'}">${c.out ? `${WF_OUT[c.out][0]}${c.z != null ? ` (${c.z >= 0 ? '+' : '−'}${Math.abs(c.z).toFixed(1)}×)` : ''}` : 'grading…'}</em>${c.expected && c.expected !== 'not proven yet' ? `<small>expected: ${esc(c.expected)}</small>` : ''}</li>`).join('') || '<li class="muted">No whales yet: the filter grades every trade of $100k or more.</li>');
 }
 setInterval(refreshWhales, 15000); setTimeout(refreshWhales, 3000);
+// ---------- Pending orders (orderbook.js): the buy and sell orders waiting on Kraken's book ----------
+const agoShort = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : ms < 3600000 ? `${Math.round(ms / 60000)} min` : `${(ms / 3600000).toFixed(1)} h`);
+async function refreshBook() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
+  let b;
+  try { b = await getJSON(api('book')); } catch { return; }
+  if (!b || b.off) return setHidden($('bookCard'), true);
+  setHidden($('bookCard'), false);
+  if (b.error) { setText($('obSay'), b.error); return; }
+  const px = (v) => usd(v, v >= 1000 ? 0 : Math.max(2, MKT.digits ?? 2));
+  const half = b.bands.find((x) => x.band === 0.5) || b.bands[0], tot = half.bid + half.ask, sellShare = tot ? half.ask / tot : 0.5;
+  setText($('obLean'), b.lean === 'buyers' ? 'buyers stacked' : b.lean === 'sellers' ? 'sellers stacked' : 'even');
+  $('obLean').className = b.lean === 'buyers' ? 'ok' : b.lean === 'sellers' ? 'bad' : '';
+  $('obFill').style.width = `${(sellShare * 100).toFixed(1)}%`; $('obMark').style.left = `calc(${(sellShare * 100).toFixed(1)}% - 1px)`;
+  setText($('obSay'), `${cash(half.bid)} waiting to buy and ${cash(half.ask)} waiting to sell within 0.5% of the price.${b.stale ? ' (Kraken didn\'t answer just now: this is the last book.)' : ''}`);
+  setText($('obBid'), px(b.bid)); setText($('obAsk'), px(b.ask));
+  setText($('obBidSub'), `spread ${b.spreadBps.toFixed(1)} bps`); setText($('obAskSub'), `as of ${hms(b.at)}`);
+  setHTML($('obBands'), b.bands.map((x) => `<li><span>within ${x.band}%${x.partial ? '*' : ''}</span><em class="good">${cash(x.bid)} buy</em><em class="bad">${cash(x.ask)} sell</em></li>`).join('')
+    + (b.bands.some((x) => x.partial) ? '<li class="fine"><span>* Kraken shows 500 prices a side, which don\'t reach this far</span></li>' : ''));
+  const wallRow = (w, extra) => `<li class="${w.side}"><span class="sd">${w.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${px(w.price)}</span><em class="${w.side === 'buy' ? 'good' : 'bad'}">${cash(w.usd)}</em><small>${w.away.toFixed(2)}% ${w.side === 'buy' ? 'below' : 'above'} · ${extra}</small></li>`;
+  setHTML($('obWalls'), b.walls.length ? b.walls.map((w) => wallRow(w, `there for ${agoShort(w.standing)}`)).join('') : '<li><small>No walls within 2% right now.</small></li>');
+  const h = b.history || [];
+  if (h.length < 2) setHTML($('obHist'), '<small class="muted">Building up: one point a minute.</small>');
+  else {
+    const W = 300, H = 56, t0 = h[0].t, span = Math.max(1, h[h.length - 1].t - t0), x = (p) => ((p.t - t0) / span) * W, y = (p) => H / 2 - (p.imb * H) / 2;
+    const line = h.map((p, i) => `${i ? 'L' : 'M'}${x(p).toFixed(1)},${y(p).toFixed(1)}`).join('');
+    setHTML($('obHist'), `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Buyers versus sellers stacked over the last ${agoShort(span)}"><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" class="mid"/><path d="${line}L${W},${H / 2}L0,${H / 2}Z" class="area"/><path d="${line}" class="ln"/></svg><small class="muted"><span>${agoShort(span)} ago</span><span>▲ buyers · ▼ sellers</span><span>now</span></small>`);
+  }
+  const KIND = { up: ['went up', ''], hit: ['hit', 'muted'], pulled: ['pulled', 'warn'] };
+  setHTML($('obEvents'), (b.events || []).slice(0, 12).map((e) => wallRow({ ...e, away: Math.abs((e.price - b.mid) / b.mid) * 100 },
+    `<b class="${KIND[e.kind][1]}">${KIND[e.kind][0]}</b> ${agoShort(Date.now() - e.at)} ago${e.stood ? ` after ${agoShort(e.stood)}` : ''}`)).join('') || '<li><small>Nothing yet: walls are logged once they stand 30 seconds.</small></li>');
+}
+setInterval(refreshBook, 3000); setTimeout(refreshBook, 2000);
 // the live window opens in a new tab in a browser; inside the installed app (its own cookies), it opens in place
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) document.querySelectorAll('a.team-live').forEach((a) => a.removeAttribute('target'));
 

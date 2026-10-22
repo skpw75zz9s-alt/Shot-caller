@@ -39,6 +39,7 @@ import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
 import { createMovedServer, movedTarget } from './moved.js';
+import { createOrderBook } from './orderbook.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
@@ -101,6 +102,7 @@ export const discord = createDiscord();
 export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
+const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
@@ -367,7 +369,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([orderBook.load(), whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 // the Recruiter searches nonstop (v13.81): every 5 seconds on its own, whether or not the bot is ticking, once the
 // hiring center's file has loaded (so a search can never overwrite it)
 ready.then(() => setInterval(() => { try { hiring.search(team.hireCtx(HOME.series)); } catch (e) { console.error('recruiter search failed', e.message); } }, 5000).unref()).catch(() => {});
@@ -650,6 +652,7 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/book') return send(res, 200, await orderBook.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // pending orders (orderbook.js)
     if (path === '/api/whales') { const wf = ms ? ms.whaleFilter : whaleFilter; return send(res, 200, wf ? wf.api() : { off: 'whales are for crypto markets' }); } // the Whale filter (whalefilter.js)
     if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
@@ -676,6 +679,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && MOVED_TO) {
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
+  if (process.env.BOOK !== 'off') ready.then(() => orderBook.start()); // BOOK=off: pending orders only while a phone looks
   if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
   if (process.env.PLAYBOOK !== 'off') ready.then(() => playbook.start()); // PLAYBOOK=off: no candle history or strategy check
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });

@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### Pending orders (v13.83)
+
+A **📖 Pending orders** card on the Deck (Pro, crypto markets: BTC, ETH, SOL, XRP and DOGE) shows the orders waiting on Kraken's order book (`orderbook.js`):
+
+- **Who's stacked.** The dollars waiting to buy and to sell within 0.1%, 0.5%, 1% and 2% of the price, a bar comparing the two within 0.5%, and a label: *buyers stacked*, *sellers stacked* or *even*.
+- **Best orders.** The best buy and sell order and the spread.
+- **Walls.** A price holding at least 5 times what a typical price within 2% holds, with how far away it is and how long it's been there.
+- **Tracked around the clock.** The server reads all five coins' books every 15 seconds, phones or not (`BOOK=off` to read only while a phone looks). A chart shows which side was stacked within 0.5%, minute by minute, for the last 2 hours. An **activity log** lists walls going **up** (stood 30 seconds), getting **hit** (the price reached them) and getting **pulled** (gone before the price got there, with under a fifth of the wall left at that price). Big orders are often placed to look like support or resistance and taken away before they fill. A wall that only shrank a little, slid out of the 500-level view or stopped counting because the prices around it grew is not called pulled. History and log are kept in `DATA_DIR/orderbook.json`.
+
+Kraken's public book (`/0/public/Depth`, no key) gives up to 500 prices a side; a band those don't reach is marked with an asterisk. A phone that's looking gets a fresh read at most every 3 seconds, shared between phones. One exchange's book, not the whole market, and orders can be cancelled any moment: context only, no call uses it.
+
 ### Saves that don't trip over each other (v13.82.4)
 
 Every saved file (the records, what the bot learned, members, the Auto-trader's history...) was written to one shared `<file>.tmp` and then renamed into place. When two saves of the same file overlapped, the second found its temp file already renamed away and failed (`ENOENT ... record-pick.json.tmp`), so that save was lost. Slower disks and Windows antivirus made the overlap common. Every save now goes through `atomicfile.js`: its own temp name each time, and a short retry when Windows briefly holds the file.
