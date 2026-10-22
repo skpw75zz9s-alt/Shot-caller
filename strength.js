@@ -1,9 +1,10 @@
 // The strength meter on the server (v13.62; public/strength.js has the scoring): every second, the live round's odds at
 // each stage (the bot's price math, after Kalshi's blend, after the council) and Kalshi's own price; at settlement every
 // second is scored against the result. Per market, the last 3,000 rounds are kept in DATA_DIR/strength.json.
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { STRENGTH, addSecond, newRound, scoreRound, strengthSummary } from './public/strength.js';
+import { writeAtomic } from './atomicfile.js';
 
 export function createStrength({ file, clock = () => Date.now(), log = console }) {
   let state = { rounds: {}, open: {} }, dirty = false, saving = null;
@@ -37,7 +38,7 @@ export function createStrength({ file, clock = () => Date.now(), log = console }
   async function save() {
     if (saving || !dirty) return saving;
     dirty = false;
-    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(state)); await rename(`${file}.tmp`, file); })()
+    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(state)); })()
       .catch((e) => log.error?.('saving the strength meter failed', e.message)).finally(() => { saving = null; });
     return saving;
   }

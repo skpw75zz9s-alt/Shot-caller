@@ -1,9 +1,10 @@
 // Zero-dependency server: serves the PWA, proxies the public Kalshi and Coinbase market-data
 // APIs so the phone browser never hits CORS limits, runs the push bot, and enforces the paywall.
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { createBot } from './bot.js';
@@ -37,6 +38,8 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
+import { createMovedServer, movedTarget } from './moved.js';
+import { createOrderBook } from './orderbook.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
@@ -99,6 +102,7 @@ export const discord = createDiscord();
 export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
+const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
@@ -252,6 +256,13 @@ function compressed(entry, enc) {
     : gzipSync(entry.raw, { level: 6 }));
 }
 function sendEntry(req, res, status, entry, type, extra = {}) {
+  // files from disk (they carry an mtime) get an ETag, so a phone that already has a file gets a tiny 304 instead of
+  // the whole file again: opening the app re-checks ~100 files, which is slow over a home connection or a tunnel
+  if (entry.mtime !== undefined) {
+    entry.etag ??= `"${createHash('sha1').update(entry.raw).digest('base64url')}"`;
+    extra = { ...extra, etag: entry.etag };
+    if (status === 200 && req.headers['if-none-match'] === entry.etag) { res.writeHead(304, { vary: 'accept-encoding', ...extra }); return res.end(); }
+  }
   const enc = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? encodingFor(req) : null; // PNGs are already compressed
   const body = compressed(entry, enc);
   res.writeHead(status, { 'content-type': type, vary: 'accept-encoding', ...(body ? { 'content-encoding': enc } : {}), 'content-length': (body || entry.raw).length, ...extra });
@@ -358,7 +369,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([orderBook.load(), whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 // the Recruiter searches nonstop (v13.81): every 5 seconds on its own, whether or not the bot is ticking, once the
 // hiring center's file has loaded (so a search can never overwrite it)
 ready.then(() => setInterval(() => { try { hiring.search(team.hireCtx(HOME.series)); } catch (e) { console.error('recruiter search failed', e.message); } }, 5000).unref()).catch(() => {});
@@ -568,7 +579,8 @@ export const server = http.createServer(async (req, res) => {
     const dsc = path.match(/^\/api\/discord\/(\w+)$/);
     if (dsc) return await discordApi(req, res, dsc[1], token, url);
 
-    const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
+    // posix: URL paths use / on every OS; Windows' normalize turns them into backslashes and nothing would match OPEN_FILES
+    const rel = posix.normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
     // the admin's live window on the bot team (v13.66): the admin only, paywall or not
     if (LIVE_FILES.has(rel)) return access.isAdminToken(token) ? serveFile(req, res, rel === '/team-live' ? '/team-live.html' : rel) : send(res, 403, 'Admin only.', 'text/plain; charset=utf-8');
     const allowed = !PAYWALL || access.hasAccess(token);
@@ -640,6 +652,7 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/book') return send(res, 200, await orderBook.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // pending orders (orderbook.js)
     if (path === '/api/whales') { const wf = ms ? ms.whaleFilter : whaleFilter; return send(res, 200, wf ? wf.api() : { off: 'whales are for crypto markets' }); } // the Whale filter (whalefilter.js)
     if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
@@ -657,11 +670,16 @@ export const server = http.createServer(async (req, res) => {
   }
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const MOVED_TO = movedTarget();
+if (process.argv[1] === fileURLToPath(import.meta.url) && MOVED_TO) {
+  // the app moved (moved.js): only redirect, and start none of the bots, feeds or Discord posts
+  createMovedServer(MOVED_TO).listen(PORT, () => console.log(`Shot Caller moved: sending everyone to ${MOVED_TO}`));
+} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
+  if (process.env.BOOK !== 'off') ready.then(() => orderBook.start()); // BOOK=off: pending orders only while a phone looks
   if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
   if (process.env.PLAYBOOK !== 'off') ready.then(() => playbook.start()); // PLAYBOOK=off: no candle history or strategy check
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });

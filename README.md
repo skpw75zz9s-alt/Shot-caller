@@ -276,6 +276,54 @@ Security:
 
 ## Version notes (newest first)
 
+### Run only the markets you want (v13.83.4)
+
+Every running market is a full bot, ticking every second. A small home server running all of Kalshi's 15-minute markets (the coins, the stock indexes, gold, oil) answered phones so slowly that requests timed out, and a phone could end up with half-updated app files. `MARKETS_ONLY=BTC,ETH,SOL,XRP,DOGE` lists and runs only those assets (any of BTC, ETH, SOL, XRP, DOGE, SPX, NDX, DJI, GOLD, SILVER, OIL); without it every market runs, as before.
+
+### Pending orders answer at once (v13.83.3)
+
+On a busy home server the Pending orders card never appeared: each phone request waited for a fresh read of Kraken's book, which could outlast the phone's 10-second limit, and the card stayed hidden on any failure. The server now answers from its last read straight away (the tracker keeps it under 15 seconds old) and refreshes in the background; only a first request, or one after a minute without a good read, waits for Kraken. If the card still can't load, it shows why instead of staying hidden.
+
+### A quieter activity log (v13.83.2)
+
+On the live book the Pending orders log filled with about 40 events in 10 minutes: $30k walls and market makers sliding orders a few dollars. Now only **big walls** are logged (at least 2% of the dollars waiting within 0.5% on an average side: about $300k on Bitcoin's Kraken book), and a wall that disappears while one at least 60% its size stands within 0.15% on the same side counts as **moved**, not pulled, and isn't logged. Smaller walls still show on the card while they stand.
+
+### The self-heal keeps a copy (v13.83.1)
+
+When the Deck can't draw a market for 10 seconds, the phone clears that market's saved data and reloads. It used to delete it, scorecards and call logs included. It now keeps the last copy of each as `<key>.bak` in the phone's storage, so nothing is gone for good. Updates themselves never touched this data: they only refresh the app's files.
+
+### Pending orders (v13.83)
+
+A **📖 Pending orders** card on the Deck (Pro, crypto markets: BTC, ETH, SOL, XRP and DOGE) shows the orders waiting on Kraken's order book (`orderbook.js`):
+
+- **Who's stacked.** The dollars waiting to buy and to sell within 0.1%, 0.5%, 1% and 2% of the price, a bar comparing the two within 0.5%, and a label: *buyers stacked*, *sellers stacked* or *even*.
+- **Best orders.** The best buy and sell order and the spread.
+- **Walls.** A price holding at least 5 times what a typical price within 2% holds, with how far away it is and how long it's been there.
+- **Tracked around the clock.** The server reads all five coins' books every 15 seconds, phones or not (`BOOK=off` to read only while a phone looks). A chart shows which side was stacked within 0.5%, minute by minute, for the last 2 hours. An **activity log** lists walls going **up** (stood 30 seconds), getting **hit** (the price reached them) and getting **pulled** (gone before the price got there, with under a fifth of the wall left at that price). Big orders are often placed to look like support or resistance and taken away before they fill. A wall that only shrank a little, slid out of the 500-level view or stopped counting because the prices around it grew is not called pulled. History and log are kept in `DATA_DIR/orderbook.json`.
+
+Kraken's public book (`/0/public/Depth`, no key) gives up to 500 prices a side; a band those don't reach is marked with an asterisk. A phone that's looking gets a fresh read at most every 3 seconds, shared between phones. One exchange's book, not the whole market, and orders can be cancelled any moment: context only, no call uses it.
+
+### Saves that don't trip over each other (v13.82.4)
+
+Every saved file (the records, what the bot learned, members, the Auto-trader's history...) was written to one shared `<file>.tmp` and then renamed into place. When two saves of the same file overlapped, the second found its temp file already renamed away and failed (`ENOENT ... record-pick.json.tmp`), so that save was lost. Slower disks and Windows antivirus made the overlap common. Every save now goes through `atomicfile.js`: its own temp name each time, and a short retry when Windows briefly holds the file.
+
+### Moving day (v13.82.3)
+
+The app can move to a new address and take its people with it.
+
+- **The old address sends everyone to the new one.** Set `MOVED_TO` on the old host (for example Railway) to the new site's `https://` address. Every page and API call is redirected there (`moved.js`), and an installed copy of the app at the old address replaces its service worker, removes it and opens the new address. Nothing else starts on the old host: no bots, feeds, push or Discord posts, so nothing runs twice. `/healthz` still answers, so the host's health check passes.
+- **Members come along.** `python3 scripts/shotctl.py live migrate --from https://old-address` (signed in to the new site first) copies every active member with the same code and expiry, and the price and days. Paid-but-unapproved codes are listed for you to approve. Members sign in on the new site with their code once.
+- **Settings come along.** In Railway, Variables → Raw Editor, copy everything; then `Get-Clipboard | py scripts\shotctl.py env import` (Windows) or `shotctl.py env import railway.env` adds the variables this computer doesn't have yet (Discord, Anthropic, Whale Alert keys...). It skips the old host's own (`RAILWAY_*`, `APP_URL`, `DISCORD_REDIRECT_URI`, `PORT`, `DATA_DIR`).
+- **Discord.** With `APP_URL` set to the new address, the Discord posts link there, the website's *Join the Discord* button uses `DISCORD_INVITE`, and the members' role linking sends people back to `APP_URL/api/discord/callback`: add that address under OAuth2 → Redirects in the Discord Developer Portal.
+
+### Opens faster (v13.82.2)
+
+Every time the app opened, the phone downloaded all of its ~100 files again (about 1.8 MB), because the server never told it which files hadn't changed. Files now carry an ETag: the phone asks "still this version?" and gets a tiny *not modified* answer, so only changed files are downloaded. It matters most when the server is far from the phone or behind a slow link, such as a home computer behind a Cloudflare tunnel.
+
+### Runs on Windows (v13.82.1)
+
+On a Windows computer every page answered `{"error":"payment required"}`, the sign-in page included, so nobody could get in. The server matched the page's address against the pages open to everyone with the operating system's path rules, and Windows writes paths with backslashes, so `/paywall.html` never matched. It now uses web-style paths on every system. Linux hosts (Railway, Render) were never affected.
+
 ### The Whale filter (v13.82)
 
 A **🐋 Whale filter** on the Market desk tells the whales that move the market from the ones that don't (`public/whales.js`, `whalefilter.js`, one per crypto market).
@@ -2057,6 +2105,15 @@ Choose one:
 - **Railway.** On railway.com: **Login with GitHub** → **New Project** → **Deploy from GitHub repo** → `Shot-caller`. `railway.json` sets the start command and health check. When the deploy goes green, open the service → **Settings → Networking → Generate Domain** (leave the port blank or enter `8080`). That gives you your `https://…up.railway.app` URL, and every push to `master` redeploys. Open the HTTPS URL on your phone, then:
   - **iPhone:** Safari → Share → *Add to Home Screen*
   - **Android:** Chrome → ⋮ → *Install app*
+- **Your own computer or server, no Railway** (`scripts/shotctl.py`, Python 3.9+, nothing to install). It scans the code, fixes what it safely can, runs the server as a real app and website, and manages the live app:
+  - `python3 scripts/shotctl.py scan` checks Node, dependencies, every `.js` file, the tests, `.env`, the data folder and the running server. `fix` installs dependencies, creates `.env` with a fresh `ACCESS_SECRET`, `KEY_SECRET` and pinned VAPID keys, and creates the data folder.
+  - `env set KEY=VALUE` / `env unset KEY` / `env list` edit `.env`, which takes the place of Railway's Variables (secrets are masked when listed).
+  - `start` / `stop` / `restart` / `status` / `logs` run the server in the background and restart it if it crashes. `deploy` pulls, installs, tests and restarts, and rolls back to the last commit if the tests or the health check fail.
+  - `up` runs everything and keeps it running: the app, your named Cloudflare tunnel (`env set TUNNEL_TOKEN=...`, the token from the tunnel's install command), and updates. It restarts the app only if it stops answering (for 90 seconds) or an update arrives. Every 5 minutes it checks GitHub; on a new commit it backs up the data folder (`data/.backups`, last 10 kept), then pulls, installs (only if dependencies changed), tests and restarts, and keeps the old version running if the update fails. Members, the record, what it learned and the Auto-trader's history all live in the data folder, so nothing is lost. `install-startup` starts `up` when you log in to Windows. `backup` makes a copy by hand; `backup --restore NAME` puts one back.
+  - `scripts/bugwatch.py` never stops looking for problems, and fixes the ones it safely can. Every minute: the app (restarts it after 5 minutes without an answer, a backstop to `up`), the website (restarts a stuck tunnel), Kalshi (reconnects Cloudflare WARP when it's blocked), the bot (restarts the app if it stopped ticking while Kalshi answers), the server log (groups new errors), logs over 20 MB (rotated) and disk space (old backups pruned). Every 10 minutes it reads every saved data file and restores a damaged one from the newest good backup. With `--tests` it also runs the test suite after every code change and every 12 hours (off by default: `up` already tests each update, and a test run takes the whole CPU for minutes). What it can't fix goes in `data/.shotctl/bugwatch.md`, and to Discord if `BUGWATCH_WEBHOOK` is set (use a private channel). `--install-startup` starts it at login on Windows; `--once` runs one round.
+  - Public address: `tunnel` gives a free `https://….trycloudflare.com` address through [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no domain needed). For your own domain, `install-service --domain shotcaller.example.com` writes a systemd unit (starts on boot) and a Caddyfile (automatic HTTPS) and sets `APP_URL`.
+  - `live login --url https://your-app` signs in with the admin code, then `live health`, `live members`, `live approve CODE --days 30`, `live deny`, `live revoke`, `live config --price 5 --days 30`, `live tuneup --run` and `live hiring` work against that app, wherever it's hosted (Railway included).
+  - Moving off Railway: copy the volume's files into `data/`, and set `ACCESS_SECRET` to `<RAILWAY_PROJECT_ID>:<RAILWAY_SERVICE_ID>` (before running `fix`) so members' saved passes keep working.
 - **Same Wi-Fi.** Run `npm start` on your computer, then open `http://<computer-ip>:8080` on your phone. Install and notifications need HTTPS, but the live view works.
 - **Android only, on the device.** Install Termux, then `pkg install nodejs git`, clone the repo, run `npm start`, and open `localhost:8080`.
 

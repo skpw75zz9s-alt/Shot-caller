@@ -4,9 +4,10 @@
 //   decide(series, voices)  voices: [[key, { ticker: pts } | null], …]; returns { ticker: net pts } for the bot
 //   settle(series, ticker)  grades what each feature argued in that round (before its last minute) against the result
 // One council for every market; records are kept per market in DATA_DIR/council.json.
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { COUNCIL, FAMILIES, MEMBERS, councilFacts, credibility, debate } from './public/council.js';
+import { writeAtomic } from './atomicfile.js';
 
 export function createCouncil({ file, clock = () => Date.now(), log = console }) {
   let state = { records: {}, heard: {} }, dirty = false, saving = null;
@@ -47,7 +48,7 @@ export function createCouncil({ file, clock = () => Date.now(), log = console })
   async function save() {
     if (saving || !dirty) return saving;
     dirty = false;
-    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(state)); await rename(`${file}.tmp`, file); })()
+    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(state)); })()
       .catch((e) => log.error?.('saving the council failed', e.message)).finally(() => { saving = null; });
     return saving;
   }

@@ -228,6 +228,24 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">Every trade of $100k or more on a USD exchange is graded a minute later on what the price did: <b>moved</b> its way by at least a typical minute's move, <b>faded</b> (went the other way as much), or <b>no real move</b>. The whales are grouped by what's known the moment they print (size, exchange, buy or sell, alone or in a sweep). A group is proven to move the market once it has 30 graded whales and its average move its way is clearly more than chance (t of 2 or more); otherwise it's noise. A new whale is a <b>likely mover</b> when one of its groups is proven to move. On the live tape, ⚡ marks a likely mover and 💤 likely noise. Moving its way afterwards is what's measured, not why: a whale can buy into a rise that was coming anyway. Context only: no call uses it.</small></details>
       </div>
 
+      <div data-crypto-only data-pro class="card book-card" id="bookCard" hidden>
+        <div class="deep-head"><span>📖 Pending orders · Kraken</span><b id="obLean"></b></div>
+        <p class="wf-say" id="obSay"></p>
+        <div class="tug-bar" title="Dollars waiting to buy (green) vs to sell (red) within 0.5% of the price"><i id="obFill"></i><em id="obMark"></em></div>
+        <div class="tiles2">
+          <div class="tile"><label>Best buy order</label><b id="obBid">—</b><small id="obBidSub"></small></div>
+          <div class="tile"><label>Best sell order</label><b id="obAsk">—</b><small id="obAskSub"></small></div>
+        </div>
+        <ul class="ob-bands" id="obBands"></ul>
+        <div class="team-feed-h">Walls: one price holding far more than the prices around it</div>
+        <ul class="wf-list ob-walls" id="obWalls"></ul>
+        <div class="team-feed-h">Who's stacked, the last 2 hours</div>
+        <div class="ob-hist" id="obHist"></div>
+        <div class="team-feed-h">Activity: walls going up, getting hit, getting pulled</div>
+        <ul class="wf-list ob-walls" id="obEvents"></ul>
+        <details class="how"><summary>How it works</summary><small class="fine-left">These are the orders waiting on Kraken's order book: people offering to buy below the price and to sell above it, up to 500 prices on each side, refreshed every 3 seconds while you watch. The bar compares the dollars waiting to buy against the dollars waiting to sell within 0.5% of the price. A <b>wall</b> is one price holding at least 5 times what a typical nearby price holds. The server tracks all five coins around the clock, every 15 seconds. A wall that stands 30 seconds goes in the activity log as <b>up</b>. If the price then reaches it, it was <b>hit</b> (traded into). If it vanishes before the price gets there, it was <b>pulled</b>: big orders are often placed to look like support or resistance and removed before they fill. The chart shows which side was stacked within 0.5% of the price, minute by minute (up = buyers, down = sellers). Orders can be cancelled at any moment, so this shows intent, not a promise. One exchange's book, not the whole market. Context only: no call uses it.</small></details>
+      </div>
+
       <div data-pro class="card watch" id="watchCard">
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
@@ -676,7 +694,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.82 · Whale filter</p>
+      <p class="fine" id="version">Shot Caller v13.83 · Pending orders</p>
     </section>
   </main>
 
@@ -717,7 +735,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '231';
+    window.SC_BUILD = '234';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

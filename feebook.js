@@ -1,10 +1,11 @@
 // The server's record of real Kalshi fees (public/fees.js): fills the phones report from your Kalshi account and the
 // Auto-trader's own orders. The measured rates are applied to every fee the server figures (model.js setFeeRates)
 // and shared with the phones through /api/learn. Kept in DATA_DIR/fees.json (the latest 1,000 fills).
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { feeSample, learnFeeRates } from './public/fees.js';
 import { setFeeRates } from './public/model.js';
+import { writeAtomic } from './atomicfile.js';
 
 export function createFeeBook({ file, log = console }) {
   let samples = [], ids = new Set(), rates = null, timer = null;
@@ -16,7 +17,7 @@ export function createFeeBook({ file, log = console }) {
   function save() {
     clearTimeout(timer);
     timer = setTimeout(async () => {
-      try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify({ samples })); await rename(`${file}.tmp`, file); } catch (e) { log.error('saving fees failed', e.message); }
+      try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ samples })); } catch (e) { log.error('saving fees failed', e.message); }
     }, 2000);
     timer.unref?.();
   }

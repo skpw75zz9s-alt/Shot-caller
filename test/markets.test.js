@@ -69,6 +69,12 @@ test('discovery finds Kalshi\'s series, sorts them into assets and marks which c
   assert.equal(st.KXETHD, 'closed'); assert.equal(st.KXRAIN, undefined);
   assert.equal(d.list().find((m) => m.series === 'KXBTCD').strikes, 2);
   assert.ok(d.running().includes('KXBTCD') && d.running().includes('KXBTC15M') && !d.running().includes('KXBTCMAXY'));
+  // MARKETS_ONLY: a small server runs just the assets it names (stock indexes, gold and oil left out here)
+  const crypto = createDiscovery({ kalshi: 'https://k', fetchJSON, env: { MARKETS_FREQ: 'all', MARKETS_ONLY: 'btc, ETH' }, clock: () => now, log: { warn() {} } });
+  assert.deepEqual(crypto.running(), ['KXBTC15M', 'KXETH15M'], 'before the first scan, only the wanted seeds');
+  await crypto.refresh(now);
+  assert.ok(crypto.list().every((m) => m.asset === 'BTC' || m.asset === 'ETH'));
+  assert.ok(crypto.running().includes('KXBTCD') && !crypto.running().includes('KXINXU') && !crypto.running().includes('KXSOL15M'));
 });
 
 test('Yahoo prices for indexes, gold and oil come out in Coinbase\'s shapes, and a stale print is marked delayed', async () => {

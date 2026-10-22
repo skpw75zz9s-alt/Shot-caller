@@ -8,11 +8,12 @@
 // only ever used here, to sign requests to Kalshi, and are never sent back to any phone. Every order also passes
 // validateOrder (BTC 15-minute markets only, fill-now-or-cancel, the dollar cap) before it leaves.
 import crypto from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { MODES, TRADER_DEFAULTS, cleanLimits, createTestExchange, createTrader, liveUnlocked, parseBook, placedFrom } from './public/trader.js';
 import { positionCheck } from './public/engine.js';
 import { balanceDollars, parsePosition } from './public/kalshi.js';
+import { writeAtomic } from './atomicfile.js';
 
 const KEY_ENVS = ['live', 'demo'];
 
@@ -111,8 +112,7 @@ export function createAutoTrade({ file, secret, kalshi, kalshiDemo, validateOrde
     clearTimeout(saveTimer); saveTimer = null;
     try {
       await mkdir(dirname(file), { recursive: true });
-      await writeFile(`${file}.tmp`, JSON.stringify(db));
-      await rename(`${file}.tmp`, file);
+      await writeAtomic(file, JSON.stringify(db));
     } catch (e) { log.error('saving the auto-trader failed', e.message); }
   }
   const soon = () => { if (!saveTimer) { saveTimer = setTimeout(save, 1500); saveTimer.unref?.(); } };
