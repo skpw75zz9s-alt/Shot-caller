@@ -136,7 +136,7 @@ class Watch:
                     exe = str(cand)
         if not exe:
             return False
-        r = subprocess.run([exe, 'connect'], capture_output=True, text=True)
+        r = subprocess.run([exe, 'connect'], capture_output=True, text=True, encoding='utf-8', errors='replace')
         if r.returncode == 0:
             self.fixed('reconnected Cloudflare WARP (Kalshi was blocked)')
             return True

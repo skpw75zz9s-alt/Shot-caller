@@ -97,7 +97,8 @@ def sh(cmd: list[str], *, check: bool = True, capture: bool = False, env: dict |
     # Windows runs npm as npm.cmd, which subprocess only finds by its full path
     cmd = [shutil.which(cmd[0]) or cmd[0], *cmd[1:]]
     try:
-        return subprocess.run(cmd, cwd=ROOT, check=check, text=True, env=env, timeout=timeout,
+        # UTF-8 with replacement: Windows would decode as cp1252 and crash on the ✔ and emoji that npm and wrangler print
+        return subprocess.run(cmd, cwd=ROOT, check=check, text=True, encoding='utf-8', errors='replace', env=env, timeout=timeout,
                               stdout=subprocess.PIPE if capture else None, stderr=subprocess.STDOUT if capture else None)
     except FileNotFoundError:
         die(f'{cmd[0]} is not installed')
@@ -473,7 +474,7 @@ def read_pid() -> int | None:
     try:
         pid = int(PID_FILE.read_text().strip())
         if WINDOWS:  # os.kill(pid, 0) would end the process on Windows, so ask tasklist instead
-            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True, text=True).stdout
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True, text=True, errors='replace').stdout
             return pid if str(pid) in out else None
         os.kill(pid, 0)
         return pid
@@ -807,7 +808,7 @@ def cmd_cloud_backup(args) -> int:
     npx = [shutil.which('npx'), '-y', 'wrangler@4']
 
     def wr(*a, input_text=None, capture=False):
-        return subprocess.run([*npx, *a], cwd=folder, text=True, input=input_text,
+        return subprocess.run([*npx, *a], cwd=folder, text=True, encoding='utf-8', errors='replace', input=input_text,
                               stdout=subprocess.PIPE if capture or input_text is not None else None, stderr=subprocess.STDOUT if capture or input_text is not None else None)
 
     step('Cloudflare sign-in')
