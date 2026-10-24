@@ -1,7 +1,7 @@
 // Zero-dependency server: serves the PWA, proxies the public Kalshi and Coinbase market-data
 // APIs so the phone browser never hits CORS limits, runs the push bot, and enforces the paywall.
 import http from 'node:http';
-import { createHash } from 'node:crypto';
+import crypto, { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
 import { extname, join, posix } from 'node:path';
@@ -438,7 +438,12 @@ function send(res, status, body, type = 'application/json', headers = {}) {
 const cookieToken = (req) => (req.headers.cookie || '').split(/;\s*/).map((c) => c.split('=')).find(([k]) => k === 'sc_session')?.[1] || null;
 // The platform proxy (Railway) appends the real client address as the LAST X-Forwarded-For entry;
 // earlier entries are whatever the client sent, so trusting them would let anyone dodge rate limits.
-const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?';
+// Behind the Cloudflare backup Worker (cloudflare/worker.js) every visitor would look like Cloudflare, so the Worker
+// passes the visitor's address in x-sc-client-ip, trusted only with the shared EDGE_SECRET it sends beside it.
+const EDGE = process.env.EDGE_SECRET ? Buffer.from(process.env.EDGE_SECRET) : null;
+const fromEdge = (req) => { const h = Buffer.from(String(req.headers['x-sc-edge'] || '')); return !!EDGE && h.length === EDGE.length && crypto.timingSafeEqual(h, EDGE); };
+export const clientIp = (req) => (fromEdge(req) && /^[\w.:-]{2,64}$/.test(req.headers['x-sc-client-ip'] || '') ? req.headers['x-sc-client-ip']
+  : (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?');
 function sessionCookie(req, token) {
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
   return { 'set-cookie': `sc_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}` };

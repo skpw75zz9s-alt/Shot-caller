@@ -276,6 +276,20 @@ Security:
 
 ## Version notes (newest first)
 
+### Backup mode on Cloudflare (v13.84)
+
+When the home server is off, the site no longer goes dark. A Cloudflare Worker (`cloudflare/worker.js`, free plan) sits in front of the app's address:
+
+- **Home server up:** every request goes to it through the tunnel (`ORIGIN`), as before. The Worker adds the visitor's address with the shared `EDGE_SECRET`, so the server's sign-in limits still count each visitor separately (`clientIp` trusts `x-sc-client-ip` only with that secret).
+- **Home server down** (unreachable, over 20 seconds, or Cloudflare's dead-tunnel page): the Worker serves the website and the app's files itself, behind the same paywall. Members get in with the signed pass their phone already keeps: the Worker checks it with the server's `ACCESS_SECRET` and gives the phone its own signed cookie until the pass runs out. The admin code works too (`ADMIN_CODE`). It fetches the market data the phone needs (Kalshi's and Coinbase's public prices, the same read-only paths the server allows) and a snapshot of Kraken's order book (`bookmath.js`, shared with the server). The phone works out the calls itself, so prices, the chart and the bot's calls keep going, under a *Backup mode* banner.
+- **What waits for the server:** Discord, push, the Auto-trader, the official record, the bot team and the other server-side cards, and buying or approving codes. Those answer "offline". The Worker stores nothing, so nothing is lost or split: everything picks up when the server is back.
+
+Set up (Cloudflare dashboard):
+1. **The tunnel:** add a second route to the tunnel, `home.<your domain>` → `HTTP` `localhost:8080`. That's `ORIGIN`.
+2. **The Worker:** Workers & Pages → your Worker → Settings → Build → connect this GitHub repo, branch the server follows, root directory `cloudflare`. The Worker's name must match `name` in `cloudflare/wrangler.jsonc`.
+3. **Its settings:** Variables and Secrets: `ORIGIN` (text, `https://home.<your domain>`), and as secrets `ACCESS_SECRET`, `EDGE_SECRET` and `ADMIN_CODE`, copied from the server's `.env` (`shotctl.py fix` creates `EDGE_SECRET`; restart the server after).
+4. **The address:** Settings → Domains & Routes → add your domain as a Custom Domain (Cloudflare replaces the old tunnel record for it).
+
 ### Run only the markets you want (v13.83.4)
 
 Every running market is a full bot, ticking every second. A small home server running all of Kalshi's 15-minute markets (the coins, the stock indexes, gold, oil) answered phones so slowly that requests timed out, and a phone could end up with half-updated app files. `MARKETS_ONLY=BTC,ETH,SOL,XRP,DOGE` lists and runs only those assets (any of BTC, ETH, SOL, XRP, DOGE, SPX, NDX, DJI, GOLD, SILVER, OIL); without it every market runs, as before.

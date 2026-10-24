@@ -1,0 +1,10 @@
+// The backup Worker (cloudflare/worker.js). Deployed from GitHub by Cloudflare (Workers → your Worker → Settings →
+// Build: root directory "cloudflare"), or by hand with `npx wrangler deploy` in this folder.
+{
+  "name": "shotcaller",
+  "main": "worker.js",
+  "compatibility_date": "2025-09-01",
+  // the app's files; the Worker runs first so the paywall still decides who gets them
+  "assets": { "directory": "../public", "binding": "ASSETS", "run_worker_first": true },
+  "observability": { "enabled": true }
+}
