@@ -789,6 +789,62 @@ def cmd_up(args) -> int:
             tunnel.terminate()
 
 
+BACKUP_WORKER = 'shotcaller-backup'
+
+
+def cmd_cloud_backup(args) -> int:
+    """Put the Cloudflare backup (cloudflare/worker.js) online and give it its settings, in one go."""
+    if not shutil.which('npx'):
+        die('npx (part of Node.js) is not installed')
+    env = read_env()
+    if not env.get('ACCESS_SECRET') or not env.get('EDGE_SECRET'):
+        die('ACCESS_SECRET or EDGE_SECRET is missing from .env: run `shotctl.py fix`, then `shotctl.py restart`, then this again')
+    app_url = env.get('APP_URL', '')
+    origin = args.origin or (f"https://home.{app_url.split('://', 1)[-1].strip('/')}" if app_url else None)
+    if not origin or not origin.startswith('https://'):
+        die('give the home server\'s tunnel address: --origin https://home.yourdomain.com')
+    folder = ROOT / 'cloudflare'
+    npx = [shutil.which('npx'), '-y', 'wrangler@4']
+
+    def wr(*a, input_text=None, capture=False):
+        return subprocess.run([*npx, *a], cwd=folder, text=True, input=input_text,
+                              stdout=subprocess.PIPE if capture or input_text is not None else None, stderr=subprocess.STDOUT if capture or input_text is not None else None)
+
+    step('Cloudflare sign-in')
+    who = wr('whoami', capture=True)
+    if who.returncode or 'not authenticated' in who.stdout.lower():
+        print('A browser window opens: sign in to Cloudflare and click Allow.')
+        if wr('login').returncode:
+            die('the Cloudflare sign-in did not finish')
+    else:
+        ok('signed in')
+
+    step(f'Upload the backup ({BACKUP_WORKER})')
+    if wr('deploy', '--name', BACKUP_WORKER).returncode:
+        die('the upload failed (see above)')
+
+    step('Its settings')
+    values = {'ORIGIN': origin, 'ACCESS_SECRET': env['ACCESS_SECRET'], 'EDGE_SECRET': env['EDGE_SECRET']}
+    for k in ('ADMIN_CODE', 'APP_URL', 'DISCORD_INVITE'):
+        if env.get(k):
+            values[k] = env[k]
+    for name, value in values.items():
+        r = wr('secret', 'put', name, '--name', BACKUP_WORKER, input_text=value)  # the value goes in through stdin, never the command line
+        if r.returncode:
+            print(r.stdout[-1500:])
+            die(f'could not set {name}')
+        ok(name)
+
+    host = app_url.split('://', 1)[-1].strip('/') or 'your domain'
+    print(f"""
+{paint('32', 'The backup is online.')} One step is left, in the Cloudflare dashboard:
+  Compute (Workers & Pages) -> {BACKUP_WORKER} -> Settings -> Domains & Routes -> Add -> Custom domain -> {host}
+  If Cloudflare says the domain is in use, first remove it from the Worker or tunnel route that has it now.
+Test: open {origin} (the home server) and https://{host} (through the backup). Both should show the app.
+Updates to the backup later: run this command again.""")
+    return 0
+
+
 def cmd_install_startup(args) -> int:
     """Start `up` when you log in (Windows Startup folder; no admin needed)."""
     if not WINDOWS:
@@ -1076,6 +1132,9 @@ def main() -> int:
     s.add_argument('--keep', type=int, default=10)
     s.add_argument('--restore', metavar='NAME', help='a backup folder name, e.g. 20261021-153000')
     s.set_defaults(fn=cmd_backup)
+    s = sub.add_parser('cloud-backup', help='put the Cloudflare backup online with its settings (cloudflare/worker.js)')
+    s.add_argument('--origin', help='the home server through the tunnel (default: https://home.<APP_URL host>)')
+    s.set_defaults(fn=cmd_cloud_backup)
     sub.add_parser('tunnel', help='public https address through Cloudflare (no domain needed)').set_defaults(fn=cmd_tunnel)
     s = sub.add_parser('install-service', help='write a systemd unit, and a Caddyfile for HTTPS on your domain')
     s.add_argument('--domain', help='e.g. shotcaller.example.com')
