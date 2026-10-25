@@ -10,19 +10,20 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { writeAtomic } from './atomicfile.js';
-import { BOOK_PAIRS, KRAKEN, summarizeBook, trackWalls } from './bookmath.js'; // the math, shared with cloudflare/worker.js
+import { BOOK_PAIRS, KRAKEN, bookBuckets, niceStep, summarizeBook, trackWalls } from './bookmath.js'; // the math, shared with cloudflare/worker.js
 
 export { BANDS, BOOK_PAIRS, logBar, summarizeBook, trackWalls } from './bookmath.js';
 
 const HISTORY_EVERY = 60000, HISTORY_KEEP = 120; // one point a minute, the last 2 hours
 const EVENTS_KEEP = 40;
+const HEAT_EVERY = 30000, HEAT_KEEP = 120; // the heatmap: a snapshot every 30 seconds, the last hour
 
 export function createOrderBook({ file = null, fetchImpl = (...a) => fetch(...a), clock = () => Date.now(), every = 3000, trackEvery = 15000, log = console } = {}) {
   const books = new Map(); // asset -> { at, out, seen, pending, history: [], events: [] }
   const timers = [];
   let dirty = false;
   const book = (asset) => {
-    if (!books.has(asset)) books.set(asset, { at: 0, out: null, seen: new Map(), pending: null, history: [], events: [] });
+    if (!books.has(asset)) books.set(asset, { at: 0, out: null, seen: new Map(), pending: null, history: [], events: [], heat: [], step: null });
     return books.get(asset);
   };
 
@@ -30,13 +31,13 @@ export function createOrderBook({ file = null, fetchImpl = (...a) => fetch(...a)
     if (!file) return;
     try {
       const d = JSON.parse(await readFile(file, 'utf8'));
-      for (const [asset, v] of Object.entries(d.assets || {})) if (BOOK_PAIRS[asset]) Object.assign(book(asset), { history: v.history || [], events: v.events || [] });
+      for (const [asset, v] of Object.entries(d.assets || {})) if (BOOK_PAIRS[asset]) Object.assign(book(asset), { history: v.history || [], events: v.events || [], heat: v.heat || [], step: v.step ?? null });
     } catch { /* first run */ }
   }
   async function save() {
     if (!file || !dirty) return;
     dirty = false;
-    const assets = Object.fromEntries([...books].map(([a, b]) => [a, { history: b.history, events: b.events }]));
+    const assets = Object.fromEntries([...books].map(([a, b]) => [a, { history: b.history, events: b.events, heat: b.heat, step: b.step }]));
     try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ v: 1, assets })); } catch (e) { log.error?.('saving the order book log failed', e.message); }
   }
 
@@ -47,13 +48,18 @@ export function createOrderBook({ file = null, fetchImpl = (...a) => fetch(...a)
     const raw = Object.values(j.result || {})[0]; // Kraken names the pair its own way (XXBTZUSD...)
     const s = raw && summarizeBook(raw.bids || [], raw.asks || []);
     if (!s) throw new Error('empty book');
-    return s;
+    return { s, raw };
   }
 
   function refresh(asset) {
     const b = book(asset);
-    b.pending ??= read(asset).then((s) => {
+    b.pending ??= read(asset).then(({ s, raw }) => {
       const now = clock(), t = trackWalls(b.seen, s, now);
+      if (!b.heat.length || now - b.heat.at(-1).t >= HEAT_EVERY) { // the heatmap: one fixed price grid per coin, so the columns line up
+        b.step ??= niceStep(s.mid);
+        const h = bookBuckets(raw.bids || [], raw.asks || [], b.step);
+        if (h) { b.heat = [...b.heat, { t: now, mid: Math.round(s.mid / b.step * 100) / 100, b: h.b, a: h.a }].slice(-HEAT_KEEP); dirty = true; }
+      }
       b.seen = t.seen;
       if (t.events.length) { b.events = [...t.events.reverse(), ...b.events].slice(0, EVENTS_KEEP); dirty = true; }
       const last = b.history[b.history.length - 1];
@@ -98,5 +104,11 @@ export function createOrderBook({ file = null, fetchImpl = (...a) => fetch(...a)
     const s = setInterval(save, 120000); s.unref?.(); timers.push(s);
   }
   function stop() { for (const t of timers) { clearTimeout(t); clearInterval(t); } timers.length = 0; return save(); }
-  return { api, load, save, start, stop, refresh };
+  // the heatmap: the last hour of snapshots, prices as grid steps (price = k × step; mid in steps too)
+  function heatmap(asset) {
+    if (!BOOK_PAIRS[asset]) return { off: 'the heatmap is for BTC, ETH, SOL, XRP and DOGE' };
+    const b = books.get(asset);
+    return { asset, source: 'Kraken', step: b?.step ?? null, every: HEAT_EVERY, snaps: b?.heat ?? [] };
+  }
+  return { api, heatmap, load, save, start, stop, refresh };
 }

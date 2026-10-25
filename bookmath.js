@@ -67,3 +67,22 @@ export function trackWalls(seen, s, now) {
   }
   return { seen: next, events };
 }
+
+// The heatmap (v13.90, like Bookmap's): the dollars resting at each price, bucketed on a fixed grid so snapshots line
+// up over time. step: a round price step about 0.04% of the price (BTC $50, ETH $1, SOL 5¢...); only the levels within
+// `range`% of the middle, and the `keep` biggest on each side, to keep each snapshot small.
+export function niceStep(mid) {
+  const raw = mid * 0.0004, p = 10 ** Math.floor(Math.log10(raw)), f = raw / p;
+  return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+}
+export function bookBuckets(rawBids, rawAsks, step, { range = 1, keep = 40 } = {}) {
+  const bids = rawBids.map(level).filter(ok), asks = rawAsks.map(level).filter(ok);
+  if (!bids.length || !asks.length) return null;
+  const mid = (Math.max(...bids.map((x) => x[0])) + Math.min(...asks.map((x) => x[0]))) / 2, lo = mid * (1 - range / 100), hi = mid * (1 + range / 100);
+  const bucket = (side) => {
+    const m = new Map();
+    for (const [p, v] of side) if (p >= lo && p <= hi) { const k = Math.floor(p / step); m.set(k, (m.get(k) || 0) + p * v); }
+    return [...m].sort((x, y) => y[1] - x[1]).slice(0, keep).map(([k, usd]) => [k, Math.round(usd)]);
+  };
+  return { mid, step, b: bucket(bids), a: bucket(asks) };
+}

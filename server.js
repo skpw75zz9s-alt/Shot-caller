@@ -40,6 +40,7 @@ import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
 import { createMovedServer, movedTarget } from './moved.js';
 import { createOrderBook } from './orderbook.js';
+import { createCoinGlass } from './coinglass.js';
 import { createEdgeSync } from './edgesync.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
@@ -107,6 +108,7 @@ export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
 const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
+const coinGlass = createCoinGlass(); // the whole futures market, with COINGLASS_API_KEY (coinglass.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
@@ -662,6 +664,8 @@ export const server = http.createServer(async (req, res) => {
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
     if (path === '/api/book') return send(res, 200, await orderBook.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // pending orders (orderbook.js)
+    if (path === '/api/coinglass') return send(res, 200, await coinGlass.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // CoinGlass (coinglass.js)
+    if (path === '/api/heatmap') return send(res, 200, orderBook.heatmap(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // the order book heatmap (orderbook.js)
     if (path === '/api/whales') { const wf = ms ? ms.whaleFilter : whaleFilter; return send(res, 200, wf ? wf.api() : { off: 'whales are for crypto markets' }); } // the Whale filter (whalefilter.js)
     if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)

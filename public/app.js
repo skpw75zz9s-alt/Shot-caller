@@ -48,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '239'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '240'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2422,6 +2422,53 @@ async function refreshBook() {
     `<b class="${KIND[e.kind][1]}">${KIND[e.kind][0]}</b> ${agoShort(Date.now() - e.at)} ago${e.stood ? ` after ${agoShort(e.stood)}` : ''}`)).join('') || '<li><small>Nothing yet: walls are logged once they stand 30 seconds.</small></li>');
 }
 setInterval(refreshBook, 3000); setTimeout(refreshBook, 2000);
+// ---------- the order book heatmap (orderbook.js heatmap): a column every 30 seconds, the last hour, like Bookmap ----------
+async function refreshHeat() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live') || $('bookCard').hidden) return;
+  let h;
+  try { h = await getJSON(api('heatmap')); } catch { return; }
+  const cv = $('obHeat'), snaps = h?.snaps || [];
+  if (!cv || h?.off || snaps.length < 2 || !h.step) return setText($('obHeatSay'), h?.off || 'Building up: a column every 30 seconds.');
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  // the price window (in grid steps): the range the price ran, plus a margin
+  const mids = snaps.map((x) => x.mid), lo = Math.min(...mids), hi = Math.max(...mids), pad = Math.max((hi - lo) * 0.6, 12); // in grid steps (about 0.5% either side at least)
+  const kLo = Math.floor(lo - pad), kHi = Math.ceil(hi + pad), rows = Math.max(1, kHi - kLo + 1), cw = W / snaps.length, rh = H / rows;
+  const all = snaps.flatMap((x) => [...x.b, ...x.a].map((l) => l[1])).sort((a, b) => a - b), top = all[Math.floor(all.length * 0.98)] || 1;
+  ctx.fillStyle = '#05070a'; ctx.fillRect(0, 0, W, H);
+  const yOf = (k) => H - (k - kLo + 1) * rh;
+  snaps.forEach((x, i) => {
+    for (const [side, rgb] of [[x.b, '34,197,94'], [x.a, '239,68,68']]) for (const [k, v] of side) {
+      if (k < kLo || k > kHi) continue;
+      ctx.fillStyle = `rgba(${rgb},${Math.min(1, Math.sqrt(v / top)).toFixed(3)})`; ctx.fillRect(i * cw, yOf(k), Math.ceil(cw), Math.ceil(rh));
+    }
+  });
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
+  snaps.forEach((x, i) => { const y = H - (x.mid - kLo + 0.5) * rh; i ? ctx.lineTo((i + 0.5) * cw, y) : ctx.moveTo(0.5 * cw, y); }); ctx.stroke();
+  const px = (k) => usd(k * h.step, h.step >= 1 ? 0 : Math.max(2, MKT.digits ?? 2));
+  setHTML($('obHeatSay'), `<span>${agoShort(snaps.at(-1).t - snaps[0].t)} ago</span><span>${px(kLo)} – ${px(kHi)}</span><span>now</span>`);
+}
+setInterval(refreshHeat, 30000); setTimeout(refreshHeat, 4000);
+// ---------- CoinGlass (coinglass.js): the whole futures market, with the owner's API key ----------
+async function refreshCoinGlass() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
+  let c;
+  try { c = await getJSON(api('coinglass')); } catch { return; }
+  if (!c) return;
+  setHidden($('cgCard'), false);
+  if (c.off) { setText($('cgSay'), c.off === 'no key' ? `Not connected. ${c.how}` : c.off); setHTML($('cgTiles'), ''); setText($('cgAt'), ''); return; }
+  const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(d)}%`), err = (k) => (c.errors?.[k] ? `<small class="muted">${esc(c.errors[k])}</small>` : '');
+  const tile = (label, b, sub, k) => `<div class="tile"><label>${label}</label><b>${b}</b><small>${sub}</small>${err(k)}</div>`;
+  setText($('cgAt'), `${c.interval} bars · ${hms(c.at)}`);
+  const n = Object.keys(c.errors || {}).length;
+  setText($('cgSay'), n === 4 ? 'CoinGlass didn\'t answer any of the four (see each tile): check the key and your plan.' : n ? `${n} of 4 not in your CoinGlass plan or not answering right now.` : 'All big exchanges\' futures together.');
+  setHTML($('cgTiles'), [
+    tile('Open interest', c.oi ? cash(c.oi.usd) : '—', c.oi ? `${pct(c.oi.change)} over the window` : '', 'oi'),
+    tile('Funding (8h)', c.funding?.rate != null ? `${c.funding.rate >= 0 ? '+' : '−'}${Math.abs(c.funding.rate).toFixed(4)}%` : '—', c.funding?.say ? esc(c.funding.say) : '', 'funding'),
+    tile('Liquidations', c.liq ? `${cash(c.liq.long + c.liq.short)}` : '—', c.liq ? `longs ${cash(c.liq.long)} · shorts ${cash(c.liq.short)}` : '', 'liq'),
+    tile('Long / short (Binance)', c.ls?.long != null ? `${c.ls.long.toFixed(0)}% / ${c.ls.short.toFixed(0)}%` : '—', c.ls?.ratio != null ? `ratio ${c.ls.ratio.toFixed(2)}` : '', 'ls'),
+  ].join(''));
+}
+setInterval(refreshCoinGlass, 60000); setTimeout(refreshCoinGlass, 5000);
 // the live window opens in a new tab in a browser; inside the installed app (its own cookies), it opens in place
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) document.querySelectorAll('a.team-live').forEach((a) => a.removeAttribute('target'));
 

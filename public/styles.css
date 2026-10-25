@@ -1305,3 +1305,8 @@ body.split .blip { display: none; }
 .ob-hist .area { fill: var(--amber); opacity: .12; }
 .ob-hist small { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
 .ob-walls small b.warn { color: var(--amber); } .ob-walls small b.muted { color: var(--muted); }
+
+/* the order book heatmap (v13.90) */
+.ob-heat canvas { display: block; width: 100%; height: 180px; border-radius: 8px; background: #05070a; }
+.ob-heat small { display: flex; justify-content: space-between; font-size: 10px; margin: 4px 0 6px; }
+.cg-card .tile small { display: block; }

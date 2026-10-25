@@ -241,13 +241,21 @@
         <ul class="ob-bands" id="obBands"></ul>
         <div class="team-feed-h">Walls: one price holding far more than the prices around it</div>
         <ul class="wf-list ob-walls" id="obWalls"></ul>
+        <div class="team-feed-h">Heatmap: where the orders sat, the last hour <small class="muted">(brighter = more dollars waiting)</small></div>
+        <div class="ob-heat" id="obHeatWrap"><canvas id="obHeat" width="600" height="220" role="img" aria-label="Order book heatmap: price up the side, time along the bottom, brighter where more dollars were waiting"></canvas><small class="muted" id="obHeatSay">Building up: a column every 30 seconds.</small></div>
         <div class="team-feed-h">Who's stacked, the last 2 hours</div>
         <div class="ob-hist" id="obHist"></div>
         <div class="team-feed-h">Activity: walls going up, getting hit, getting pulled</div>
         <ul class="wf-list ob-walls" id="obEvents"></ul>
-        <details class="how"><summary>How it works</summary><small class="fine-left">These are the orders waiting on Kraken's order book: people offering to buy below the price and to sell above it, up to 500 prices on each side, refreshed every 3 seconds while you watch. The bar compares the dollars waiting to buy against the dollars waiting to sell within 0.5% of the price. A <b>wall</b> is one price holding at least 5 times what a typical nearby price holds. The server tracks all five coins around the clock, every 15 seconds. A wall that stands 30 seconds goes in the activity log as <b>up</b>. If the price then reaches it, it was <b>hit</b> (traded into). If it vanishes before the price gets there, it was <b>pulled</b>: big orders are often placed to look like support or resistance and removed before they fill. The chart shows which side was stacked within 0.5% of the price, minute by minute (up = buyers, down = sellers). Orders can be cancelled at any moment, so this shows intent, not a promise. One exchange's book, not the whole market. Context only: no call uses it.</small></details>
+        <details class="how"><summary>How it works</summary><small class="fine-left">These are the orders waiting on Kraken's order book: people offering to buy below the price and to sell above it, up to 500 prices on each side, refreshed every 3 seconds while you watch. The bar compares the dollars waiting to buy against the dollars waiting to sell within 0.5% of the price. A <b>wall</b> is one price holding at least 5 times what a typical nearby price holds. The server tracks all five coins around the clock, every 15 seconds. A wall that stands 30 seconds goes in the activity log as <b>up</b>. If the price then reaches it, it was <b>hit</b> (traded into). If it vanishes before the price gets there, it was <b>pulled</b>: big orders are often placed to look like support or resistance and removed before they fill. The <b>heatmap</b> works like Bookmap's: price up the side, time along the bottom, and each spot as bright as the dollars that were waiting at that price then (green below the price, red above, the white line is the price). A bright band that holds is a wall people keep defending; one that disappears just before the price arrives was pulled. The stacked chart shows which side was stacked within 0.5% of the price, minute by minute (up = buyers, down = sellers). Orders can be cancelled at any moment, so this shows intent, not a promise. One exchange's book, not the whole market. Context only: no call uses it.</small></details>
       </div>
 
+      <div data-crypto-only data-pro class="card cg-card" id="cgCard" hidden>
+        <div class="card-h"><h2>Futures market (CoinGlass)</h2><span id="cgAt" class="muted"></span></div>
+        <p id="cgSay" class="muted"></p>
+        <div class="tiles2" id="cgTiles"></div>
+        <details class="how"><summary>How it works</summary><small class="fine-left">From CoinGlass, which adds up the futures markets of all the big exchanges. <b>Open interest</b>: the dollars in open futures bets; rising with the price means new money behind the move, falling means bets being closed. <b>Funding</b>: what longs pay shorts every 8 hours (or shorts pay longs when it's negative), weighted by open interest; very positive means the market is crowded long, which often ends in a flush down. <b>Liquidations</b>: longs and shorts forced out over the window. <b>Long/short</b>: the share of Binance accounts betting up vs down. Needs your own CoinGlass API key (a paid plan). Updated at most once a minute. Context only: no call uses it.</small></details>
+      </div>
       <div data-pro class="card watch" id="watchCard">
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
@@ -696,7 +704,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.88 · Stronger flip watch</p>
+      <p class="fine" id="version">Shot Caller v13.90 · Order book heatmap + CoinGlass</p>
     </section>
   </main>
 
@@ -737,7 +745,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '239';
+    window.SC_BUILD = '240';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

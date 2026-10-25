@@ -276,6 +276,11 @@ Security:
 
 ## Version notes (newest first)
 
+### Order book heatmap and CoinGlass (v13.90)
+- **Heatmap** (free, on the Pending orders card): like Bookmap's. The server already reads Kraken's order book for BTC, ETH, SOL, XRP and DOGE every 15 seconds; every 30 seconds it now also keeps the dollars resting at each price (bucketed on a fixed grid of about 0.04% of the price, within 1% of it, the 40 biggest per side), for the last hour, and keeps them through restarts. The phone draws it: price up the side, time along the bottom, green buy orders below the price, red sell orders above, brighter where more dollars sit, the white line the price. `GET /api/heatmap?m=`.
+- **CoinGlass** (needs your own key, a paid plan at coinglass.com/pricing): a "Futures market" card with open interest across the big exchanges, OI-weighted funding, liquidations (Binance, OKX, Bybit) and Binance's long/short accounts. `py scripts\shotctl.py env set COINGLASS_API_KEY=your-key` then restart. Fetched only while someone looks, kept a minute. Each reading is fetched on its own, so one your plan doesn't include shows its error and the rest still show. `COINGLASS_INTERVAL` (default `4h`, the smallest the cheapest plan allows). `GET /api/coinglass?m=`. Context only: no call uses either.
+- Bookmap itself is a desktop app with no feed a server can use, so the heatmap is built from the book the bot already has.
+
 ### The Restart watcher tells planned restarts apart (v13.89)
 
 On a home server every update restarts the app on purpose, so the Restart watcher's "the server keeps restarting" flag went off for nothing. `scripts/shotctl.py` now leaves a note (`DATA_DIR/planned-restart.json`) before a planned stop: an update installing itself, `restart`, `stop`, a backup restore. A start within 10 minutes of that note is recorded as planned (`hiring.js`). The watcher counts only unplanned starts (crashes, reboots, power cuts) toward its 10-a-week warning and shows the planned ones next to them. Starts from before this version can't be sorted, so they aren't counted.
