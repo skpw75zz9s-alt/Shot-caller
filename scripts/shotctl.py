@@ -799,12 +799,27 @@ BACKUP_WORKER = 'shotcaller-backup'
 BACKUP_MARK = RUN_DIR / 'cloud-backup'  # written once the backup is set up: `up` then keeps its copy of the app current
 
 
+BACKUP_CONFIG = ROOT / 'cloudflare' / 'wrangler.local.jsonc'  # this machine's copy: the Worker's name and its storage (git-ignored)
+KV_TITLE = 'shotcaller-edge'
+
+
+def backup_deploy_args() -> list[str]:
+    return ['--config', BACKUP_CONFIG.name] if BACKUP_CONFIG.exists() else ['--name', BACKUP_WORKER]
+
+
+def write_backup_config(kv_id: str) -> None:
+    """cloudflare/wrangler.jsonc plus this backup's name and its KV storage for the member list."""
+    base = json.loads('\n'.join(l for l in (ROOT / 'cloudflare' / 'wrangler.jsonc').read_text().splitlines() if not l.strip().startswith('//')))
+    base.update(name=BACKUP_WORKER, kv_namespaces=[{'binding': 'EDGE_KV', 'id': kv_id}])
+    BACKUP_CONFIG.write_text('// made by `shotctl.py cloud-backup`: the backup Worker with its member storage. Not in git.\n' + json.dumps(base, indent=2) + '\n')
+
+
 def push_backup() -> bool:
     """Upload the backup Worker again (its settings stay). Its copy of the app's files must match the server's."""
     npx = shutil.which('npx')
     if not npx:
         return False
-    r = subprocess.run([npx, '-y', 'wrangler@4', 'deploy', '--name', BACKUP_WORKER], cwd=ROOT / 'cloudflare', text=True, encoding='utf-8', errors='replace',
+    r = subprocess.run([npx, '-y', 'wrangler@4', 'deploy', *backup_deploy_args()], cwd=ROOT / 'cloudflare', text=True, encoding='utf-8', errors='replace',
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=600)
     return r.returncode == 0
 
@@ -836,8 +851,26 @@ def cmd_cloud_backup(args) -> int:
     else:
         ok('signed in')
 
+    step('Storage for the member list (free KV)')
+    def kv_id():
+        out = wr('kv', 'namespace', 'list', capture=True).stdout
+        try:
+            spaces = json.loads(out[out.index('['):out.rindex(']') + 1])
+        except ValueError:
+            return None
+        return next((x.get('id') for x in spaces if str(x.get('title', '')).endswith(KV_TITLE)), None)
+    kid = kv_id()
+    if not kid:
+        made = wr('kv', 'namespace', 'create', KV_TITLE, capture=True)
+        kid = kv_id()
+        if not kid:
+            print(made.stdout[-1500:])
+            die('could not make the storage (see above)')
+    ok(f'{KV_TITLE} ready')
+    write_backup_config(kid)
+
     step(f'Upload the backup ({BACKUP_WORKER})')
-    if wr('deploy', '--name', BACKUP_WORKER).returncode:
+    if wr('deploy', *backup_deploy_args()).returncode:
         die('the upload failed (see above)')
 
     step('Its settings')

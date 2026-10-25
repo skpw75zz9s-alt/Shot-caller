@@ -13,6 +13,7 @@
 //   ACCESS_SECRET  the server's ACCESS_SECRET (secret): checks members' passes
 //   EDGE_SECRET    the server's EDGE_SECRET (secret): lets the server see visitors' real addresses
 //   ADMIN_CODE     the server's ADMIN_CODE (secret, optional): the admin can sign in while the server is down
+//   EDGE_KV        a KV namespace (binding): the member list, so codes, new purchases and approvals work while it's down
 //   APP_URL, DISCORD_INVITE, PRICE, DAYS, CASHTAG  optional, for the website and the paywall page
 import { BOOK_PAIRS, KRAKEN, summarizeBook } from '../bookmath.js';
 import { ASSETS } from '../public/markets.js';
@@ -83,32 +84,143 @@ async function fromOrigin(req, env, body) {
   }
 }
 
-// ---------- the backup ----------
-function statusBody(p, env) {
+// ---------- members (v13.86) ----------
+// The server's member list, copied here every few minutes by edgesync.js into this Worker's storage (KV, EDGE_KV),
+// plus what happened here while the server was off ("changes": new purchases, "I've paid", the admin's approvals).
+// The server takes the changes back and merges them (access.js mergeEdge: the newer side wins).
+const CODE_RE = /^SC-[A-HJ-NP-Z2-9]{6}$/, ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // as access.js
+const normalizeCode = (c) => { const x = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return x ? `SC-${x.replace(/^SC/, '')}` : ''; };
+const newCode = () => `SC-${Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => ALPHABET[b % ALPHABET.length]).join('')}`;
+const MAX_OFFLINE_BUYS = 200; // unpaid codes made here while the server is off
+let memo = null; // { at, list } for 20 s: checking a sign-in on every request shouldn't read storage every time
+async function memberList(env) {
+  if (!env.EDGE_KV) return null;
+  if (memo && Date.now() - memo.at < 20000) return memo.list;
+  const [base, changes] = await Promise.all([env.EDGE_KV.get('members', 'json'), env.EDGE_KV.get('changes', 'json')]);
+  const list = { config: base?.config || null, members: { ...(base?.members || {}) }, changes: changes || {} };
+  for (const [k, r] of Object.entries(list.changes)) if (!list.members[k] || (r.updatedAt || 0) >= (list.members[k].updatedAt || 0)) list.members[k] = r;
+  memo = { at: Date.now(), list };
+  return list;
+}
+async function change(env, rec) {
+  const changes = (await env.EDGE_KV.get('changes', 'json')) || {};
+  changes[rec.code] = { code: rec.code, status: rec.status, createdAt: rec.createdAt, paidAt: rec.paidAt ?? null, approvedAt: rec.approvedAt ?? null, expires: rec.expires || 0, updatedAt: Date.now() };
+  await env.EDGE_KV.put('changes', JSON.stringify(changes));
+  memo = null;
+  return changes[rec.code];
+}
+const isActive = (m) => !!m && m.status === 'active' && m.expires > Date.now();
+// Who's signed in here: the admin; a member (a pass the server signed, or a code on the list); a buyer whose code waits
+// for approval (t 'p'). The list has the last word: a revoked code is out, a renewed one runs to its new date.
+async function accessOf(who, env) {
+  if (!who) return { access: false, role: null, m: null };
+  if (who.t === 'a') return { access: true, role: 'admin', m: null };
+  const m = (await memberList(env))?.members[who.c] ?? null;
+  return { access: m ? isActive(m) : who.t === 'm' && who.e > Date.now(), role: 'member', m };
+}
+function statusBody(who, acc, env, list) {
+  const cfg = list?.config || {}, m = acc.m;
   return {
-    access: !!p, role: p ? (p.t === 'a' ? 'admin' : 'member') : null, code: p?.c ?? null, state: p ? 'active' : null, expires: p?.e ?? null,
-    price: Number(env.PRICE) || 5, days: Number(env.DAYS) || 30, cashtag: String(env.CASHTAG || 'Akizzle55').replace(/^\$/, ''),
-    pass: null, paidAt: null, approvedAt: null, open: false, offline: true,
+    access: acc.access, role: acc.role, code: who?.c ?? null,
+    state: m ? (m.status === 'active' && m.expires <= Date.now() ? 'expired' : m.status) : acc.access && who?.t === 'm' ? 'active' : null,
+    expires: m?.expires ?? (who?.t === 'm' ? who.e : null), paidAt: m?.paidAt ?? null, approvedAt: m?.approvedAt ?? null,
+    price: Number(cfg.price ?? env.PRICE) || 5, days: Number(cfg.days ?? env.DAYS) || 30, cashtag: String(cfg.cashtag ?? env.CASHTAG ?? 'Akizzle55').replace(/^\$/, ''),
+    pass: null, open: false, offline: true,
   };
+}
+// signed in as a member (t 'm', until the code expires) or a buyer (t 'p', for a week while it waits)
+async function signIn(env, m) {
+  const t = isActive(m) ? 'm' : 'p', e = t === 'm' ? m.expires : Date.now() + 7 * DAY, who = { t, c: m.code, e };
+  return { who, cookie: setEdge(await edgeCookie(who, env.ACCESS_SECRET), e) };
 }
 
 async function accessApi(req, env, action, who) {
-  if (action === 'status') return json(statusBody(who, env));
+  const list = await memberList(env);
+  const reply = async (w, extra = {}, headers = {}) => json({ ...statusBody(w, await accessOf(w, env), env, list), ...extra }, 200, headers);
+  if (action === 'status') return reply(who);
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
   if (!env.ACCESS_SECRET) return json({ error: `${OFFLINE} (The backup has no ACCESS_SECRET, so it can't sign anyone in.)` }, 503);
   const b = await req.json().catch(() => ({}));
   if (action === 'restore') {
     const p = await verifyPass(b.pass, env.ACCESS_SECRET);
     if (!p || !(p.e > Date.now()) || (p.t !== 'm' && p.t !== 'a')) return json({ error: 'Saved access is no longer valid' }, 401);
-    const who2 = { t: p.t, c: p.t === 'm' ? p.c : null, e: p.e };
-    return json({ ...statusBody(who2, env), pass: b.pass }, 200, { 'set-cookie': setEdge(await edgeCookie(who2, env.ACCESS_SECRET), p.e) });
+    const m = p.t === 'm' ? list?.members[p.c] : null;
+    if (m && (m.status === 'revoked' || m.status === 'denied')) return json({ error: 'Access was revoked' }, 403);
+    const w = { t: p.t, c: p.t === 'm' ? p.c : null, e: p.t === 'm' && isActive(m) ? m.expires : p.e };
+    memo = null;
+    return reply(w, { pass: b.pass }, { 'set-cookie': setEdge(await edgeCookie(w, env.ACCESS_SECRET), w.e) });
   }
   if ((action === 'admin' || action === 'redeem') && env.ADMIN_CODE && sameText(String(b.code || '').trim().toLowerCase(), String(env.ADMIN_CODE).trim().toLowerCase())) {
-    const who2 = { t: 'a', c: null, e: Date.now() + DAY };
-    return json(statusBody(who2, env), 200, { 'set-cookie': setEdge(await edgeCookie(who2, env.ACCESS_SECRET), who2.e) });
+    const w = { t: 'a', c: null, e: Date.now() + DAY };
+    return reply(w, {}, { 'set-cookie': setEdge(await edgeCookie(w, env.ACCESS_SECRET), w.e) });
   }
   if (action === 'logout') return json({ ok: true }, 200, { 'set-cookie': `${COOKIE}=; Path=/; Max-Age=0` });
-  return json({ error: `${OFFLINE} A phone that has signed in before gets back in on its own; new codes work once it's back.` }, 503);
+  if (!list) return json({ error: `${OFFLINE} A phone that has signed in before gets back in on its own; new codes work once it's back.` }, 503);
+  if (action === 'redeem') {
+    const m = list.members[normalizeCode(b.code)];
+    if (!m || m.status === 'denied' || m.status === 'revoked') return json({ error: 'Code not found' }, 404);
+    const s = await signIn(env, m);
+    return reply(s.who, {}, { 'set-cookie': s.cookie });
+  }
+  if (action === 'request') { // a new buyer while the server is off: the code is made here, and the server takes it back later
+    const cur = who?.c && list.members[who.c];
+    if (cur && cur.status !== 'denied' && cur.status !== 'revoked') return reply(who);
+    if (Object.values(list.changes).filter((x) => x.status === 'pending' && !x.paidAt).length >= MAX_OFFLINE_BUYS) return json({ error: 'Too many pending payments. Try again later.' }, 503);
+    let code = normalizeCode(b.code);
+    if (!CODE_RE.test(code) || list.members[code]) do code = newCode(); while (list.members[code]);
+    const m = await change(env, { code, status: 'pending', createdAt: Date.now(), paidAt: null, approvedAt: null, expires: 0 });
+    list.members[code] = m;
+    const s = await signIn(env, m);
+    return reply(s.who, {}, { 'set-cookie': s.cookie });
+  }
+  if (action === 'paid') {
+    const m = who?.c && list.members[who.c];
+    if (!m) return json({ error: 'No purchase started' }, 400);
+    list.members[m.code] = await change(env, { ...m, paidAt: Date.now() });
+    return reply(who);
+  }
+  return json({ error: OFFLINE }, 503);
+}
+
+// the admin panel while the server is off: the members, and approve / deny / revoke (they go back to the server later)
+async function adminApi(req, env, action) {
+  const list = await memberList(env);
+  if (!list) return json({ error: OFFLINE, offline: true }, 503);
+  const cfg = list.config || {};
+  if (action === 'members' && req.method === 'GET') {
+    const members = Object.values(list.members).sort((a, b) => (b.paidAt || b.createdAt || 0) - (a.paidAt || a.createdAt || 0)).map((m) => ({ ...m, devices: 0 }));
+    return json({ config: { price: Number(cfg.price) || 5, days: Number(cfg.days) || 30, cashtag: cfg.cashtag || 'Akizzle55' }, members, discord: false, offline: true });
+  }
+  if (req.method !== 'POST' || !['approve', 'deny', 'revoke'].includes(action)) return json({ error: `${OFFLINE} This waits for it.`, offline: true }, 503);
+  const b = await req.json().catch(() => ({})), code = normalizeCode(b.code);
+  let m = list.members[code];
+  if (!m && action === 'approve' && CODE_RE.test(code)) m = { code, status: 'pending', createdAt: Date.now(), paidAt: null, approvedAt: null, expires: 0 };
+  if (!m) return json({ error: 'Code not found' }, 404);
+  const now = Date.now(), days = Number(b.days) > 0 ? Number(b.days) : Number(cfg.days) || 30;
+  const next = action === 'approve' ? { ...m, status: 'active', approvedAt: now, expires: Math.max(now, m.expires || 0) + days * DAY }
+    : action === 'deny' ? { ...m, status: 'denied' } : { ...m, status: 'revoked', expires: now };
+  const saved = await change(env, next);
+  return json({ ok: true, member: { ...saved, devices: 0 } });
+}
+
+// edgesync.js on the server: GET /__edge/changes, POST /__edge/members (both with EDGE_SECRET; answered here, never passed on)
+async function edgeApi(req, env, path) {
+  if (!env.EDGE_SECRET || !sameText(req.headers.get('x-sc-edge') || '', env.EDGE_SECRET)) return json({ error: 'forbidden' }, 403);
+  if (!env.EDGE_KV) return json({ error: 'this backup has no storage (EDGE_KV): run shotctl.py cloud-backup' }, 501);
+  if (path === '/__edge/changes' && req.method === 'GET') return json({ changes: (await env.EDGE_KV.get('changes', 'json')) || {} });
+  if (path === '/__edge/members' && req.method === 'POST') {
+    const b = await req.json().catch(() => null);
+    if (!b || !Array.isArray(b.members)) return json({ error: 'expected { members: [...] }' }, 400);
+    const members = Object.fromEntries(b.members.filter((m) => CODE_RE.test(m?.code || '')).map((m) => [m.code, m]));
+    await env.EDGE_KV.put('members', JSON.stringify({ members, config: b.config || null, at: Date.now() }));
+    // what the server merged leaves the change list; anything newer made here since stays for the next round
+    const changes = (await env.EDGE_KV.get('changes', 'json')) || {}, ack = b.ack || {};
+    for (const [k, r] of Object.entries(changes)) if (ack[k] && ack[k] >= (r.updatedAt || 0)) delete changes[k];
+    await env.EDGE_KV.put('changes', JSON.stringify(changes));
+    memo = null;
+    return json({ ok: true, members: Object.keys(members).length, waiting: Object.keys(changes).length });
+  }
+  return json({ error: 'not found' }, 404);
 }
 
 async function proxy(path, search, upstream, allow) {
@@ -157,15 +269,16 @@ async function app(req, env) {
 
 export async function offline(req, env) {
   const url = new URL(req.url), path = url.pathname;
-  const who = await readEdge(req, env.ACCESS_SECRET);
+  const who = await readEdge(req, env.ACCESS_SECRET), acc = await accessOf(who, env);
   if (path === '/healthz') return json({ ok: false, offline: true, backup: 'cloudflare' }, 503);
   if (path === '/site' || path === '/site.html') return site(req, env);
   if (path === '/api/public/info') return json({ app: 'Shot Caller', discord: env.DISCORD_INVITE || null });
   if (path === '/api/public/record') return json({ error: OFFLINE, offline: true }, 503);
-  const acc = path.match(/^\/api\/access\/(\w+)$/);
-  if (acc) return accessApi(req, env, acc[1], who);
+  const accessCall = path.match(/^\/api\/access\/(\w+)$/);
+  if (accessCall) return accessApi(req, env, accessCall[1], who);
   if (LIVE_FILES.has(path)) return new Response(OFFLINE, { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
-  if (!who) {
+  if (who?.t === 'a') { const adm = path.match(/^\/api\/admin\/(\w+)$/); if (adm) return adminApi(req, env, adm[1]); }
+  if (!acc.access) {
     if (path.startsWith('/api/')) return json({ error: 'payment required', paywall: true }, 401, { 'x-paywall': '1' });
     if (path === '/' || path === '/index.html') return site(req, env); // like the server: the address shows the website
     if (OPEN_FILES.has(path) && req.method === 'GET') return asset(req, env, path);
@@ -181,6 +294,8 @@ export async function offline(req, env) {
 export default {
   async fetch(req, env) {
     // a request body can be read once: keep it, so it can go to the home server and, if that's down, to the backup
+    const path = new URL(req.url).pathname;
+    if (path.startsWith('/__edge/')) return edgeApi(req, env, path); // the server keeping the members in step (edgesync.js)
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
     const r = await fromOrigin(req, env, body);
     if (r) return r;

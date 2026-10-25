@@ -276,6 +276,16 @@ Security:
 
 ## Version notes (newest first)
 
+### Members and new buyers in backup mode (v13.86)
+
+While the home server is off, the Cloudflare backup now handles the paywall too:
+
+- **Members sign in with their code.** Every few minutes the server sends the backup its member list (codes, status, expiry; never sessions) and the price (`edgesync.js` → `POST /__edge/members`, kept in the Worker's free KV storage `EDGE_KV`). A revoked code is out there too, and a renewal counts.
+- **New buyers can buy.** The backup makes the code (same format), takes "I've paid", and the admin can approve, deny or revoke from the app's admin panel as usual.
+- **Everything comes back.** When the server is up it fetches what happened on the backup (`GET /__edge/changes`) and merges it into its list (`access.js mergeEdge`: each record carries `updatedAt`, the newer side wins). A payment made while it was off sends the admin the usual "payment to verify" ping then. The backup then drops what was merged.
+
+The `/__edge/` calls need `EDGE_SECRET` and are answered by the Worker itself, never passed to the server. `shotctl.py cloud-backup` creates the storage (`shotcaller-edge`) and keeps this machine's Worker settings in `cloudflare/wrangler.local.jsonc`.
+
 ### The RSI agent (v13.85)
 
 A new hire in the hiring center: the **📈 RSI agent** (`public/rsiagent.js`), on the Market desk. Approve it in Settings → Admin → Hiring center and it joins the team of every market.

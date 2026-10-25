@@ -40,6 +40,7 @@ import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
 import { createMovedServer, movedTarget } from './moved.js';
 import { createOrderBook } from './orderbook.js';
+import { createEdgeSync } from './edgesync.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
@@ -70,6 +71,9 @@ export const access = createAccess({
     body: `Someone says they sent $${cfg.price} to $${cfg.cashtag} with note ${m.code}. Check Cash App, then approve it in Settings → Admin.`,
   }),
 });
+// the Cloudflare backup's copy of the members (edgesync.js, cloudflare/worker.js): members sign in and buyers buy there
+// while this server is off, and what happened there is merged back here
+const edgeSync = createEdgeSync({ access, base: appUrl(), secret: process.env.EDGE_SECRET });
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 // Ask the bot (askai.js): the AI market chatbot is OFF (no credits spent), even with ANTHROPIC_API_KEY set; ASK_AI=on (with a
@@ -692,4 +696,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && MOVED_TO) {
   if (process.env.CROSS !== 'off') crossFeed.start(); // related markets (crossfeed.js)
   if (process.env.NEWS !== 'off') newsFeed.start(); // market news for the News scout (newsfeed.js)
   ready.then(() => discordRoles.start()); // members' Discord role, every 10 minutes (only when it's set up)
+  ready.then(() => edgeSync.start()); // the Cloudflare backup's copy of the members (edgesync.js), with EDGE_SECRET and APP_URL
 }

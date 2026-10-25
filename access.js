@@ -155,7 +155,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     }
     let code = normalizeCode(wanted);
     if (!CODE_RE.test(code) || db.members[code]) do code = newCode(); while (db.members[code]);
-    db.members[code] = { code, status: 'pending', createdAt: clock(), paidAt: null, approvedAt: null, expires: 0, tokens: [] };
+    db.members[code] = { code, status: 'pending', createdAt: clock(), paidAt: null, approvedAt: null, expires: 0, tokens: [], updatedAt: clock() };
     const t = bind(code, 'member', device);
     return { status: 200, token: t, body: statusBody(t) };
   }
@@ -166,7 +166,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     if (!member) return { status: 400, body: { error: 'No purchase started' } };
     // Notify admins on the first claim, and again on a renewal after the last approval
     const first = !member.paidAt || (member.approvedAt && member.paidAt <= member.approvedAt);
-    member.paidAt = clock();
+    member.paidAt = member.updatedAt = clock();
     scheduleSave();
     if (first) onPaid(member, db.config);
     return { status: 200, body: statusBody(token) };
@@ -192,8 +192,8 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     if (p.t !== 'm' || !CODE_RE.test(p.c)) return { status: 401, body: { error: 'Saved access is no longer valid' } };
     let m = db.members[p.c];
     if (m && (m.status === 'revoked' || m.status === 'denied')) return { status: 403, body: { error: 'Access was revoked' } };
-    if (!m) m = db.members[p.c] = { code: p.c, status: 'active', createdAt: clock(), paidAt: null, approvedAt: clock(), expires: p.e, tokens: [], restored: true };
-    else if (m.status !== 'active' || m.expires < p.e) { m.status = 'active'; m.expires = Math.max(m.expires || 0, p.e); }
+    if (!m) m = db.members[p.c] = { code: p.c, status: 'active', createdAt: clock(), paidAt: null, approvedAt: clock(), expires: p.e, tokens: [], restored: true, updatedAt: clock() };
+    else if (m.status !== 'active' || m.expires < p.e) { m.status = 'active'; m.expires = Math.max(m.expires || 0, p.e); m.updatedAt = clock(); }
     const t = bind(m.code, 'member', device);
     return { status: 200, token: t, body: statusBody(t) };
   }
@@ -229,6 +229,7 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     const m = db.members[normalizeCode(code)];
     if (!m) return { status: 404, body: { error: 'Code not found' } };
     fn(m);
+    m.updatedAt = clock();
     scheduleSave();
     return { status: 200, body: { ok: true, member: { ...m, tokens: undefined, devices: m.tokens.length } } };
   }
@@ -258,6 +259,34 @@ export function createAccess({ file, env = process.env, log = console, clock = (
     return { status: 200, body: { config: db.config } };
   }
 
+  // ---------- the Cloudflare backup (cloudflare/worker.js, edgesync.js) ----------
+  // While the server is off, the backup signs members in from a copy of this list, and takes new purchases and the
+  // admin's approvals. Each record carries updatedAt: the newer side wins when the two are merged.
+  const version = (m) => Math.max(m.updatedAt || 0, m.createdAt || 0, m.paidAt || 0, m.approvedAt || 0);
+  const exportMembers = () => ({ config: db.config, members: Object.values(db.members).map(({ tokens, ...m }) => m) });
+  // changes: { code: { code, status, createdAt, paidAt, approvedAt, expires, updatedAt } } made on the backup. Returns
+  // ack ({ code: updatedAt }, so the backup can drop what was merged) and how many were newer than ours.
+  function mergeEdge(changes) {
+    const ack = {};
+    let merged = 0;
+    for (const r of Object.values(changes || {})) {
+      const code = normalizeCode(r?.code), at = Number(r?.updatedAt) || 0;
+      if (!CODE_RE.test(code) || !['pending', 'active', 'denied', 'revoked'].includes(r.status) || !at) continue;
+      ack[code] = at;
+      const m = db.members[code];
+      if (m && version(m) >= at) continue; // ours is newer: keep it
+      const newlyPaid = r.paidAt && (!m || !m.paidAt) && r.status === 'pending';
+      const next = m || (db.members[code] = { code, tokens: [] });
+      Object.assign(next, { status: r.status, createdAt: Number(r.createdAt) || next.createdAt || at, paidAt: Number(r.paidAt) || null,
+        approvedAt: Number(r.approvedAt) || null, expires: Number(r.expires) || 0, updatedAt: at, viaBackup: true });
+      if (r.status === 'revoked') { for (const t of next.tokens) delete db.sessions[t]; next.tokens = []; }
+      merged++;
+      if (newlyPaid) onPaid(next, db.config); // paid while the server was off: tell the admin now
+    }
+    if (merged) scheduleSave();
+    return { ack, merged };
+  }
+
   // Drop unpaid requests after 7 days and sessions that point nowhere.
   function prune() {
     const t = clock();
@@ -272,5 +301,5 @@ export function createAccess({ file, env = process.env, log = console, clock = (
   const hasAccess = (token) => check(token).access;
   // is this member code's access active right now (the Discord role sync asks, discordroles.js)
   const isActive = (code) => { const m = db.members[normalizeCode(code)]; return !!m && m.status === 'active' && m.expires > clock(); };
-  return { isActive, load, save, check, statusBody, request, paid, redeem, restore, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
+  return { exportMembers, mergeEdge, isActive, load, save, check, statusBody, request, paid, redeem, restore, admin, logout, listMembers, approve, deny, revoke, setConfig, prune, isAdminToken, hasAccess, config: db.config };
 }
