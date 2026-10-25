@@ -276,6 +276,10 @@ Security:
 
 ## Version notes (newest first)
 
+### The Restart watcher tells planned restarts apart (v13.89)
+
+On a home server every update restarts the app on purpose, so the Restart watcher's "the server keeps restarting" flag went off for nothing. `scripts/shotctl.py` now leaves a note (`DATA_DIR/planned-restart.json`) before a planned stop: an update installing itself, `restart`, `stop`, a backup restore. A start within 10 minutes of that note is recorded as planned (`hiring.js`). The watcher counts only unplanned starts (crashes, reboots, power cuts) toward its 10-a-week warning and shows the planned ones next to them. Starts from before this version can't be sorted, so they aren't counted.
+
 ### A stronger flip watch (v13.88)
 
 Flip warnings and the chart's ↺ turn marks were going off on noise. Now:

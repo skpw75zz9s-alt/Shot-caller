@@ -559,10 +559,18 @@ def start_background(wait: int = 60) -> bool:
     return False
 
 
-def stop_background() -> None:
+def stop_background(planned: str | None = None) -> None:
+    """planned: why, when this restart is on purpose (an update, your restart): the server's Restart watcher then
+    doesn't count it as trouble. Left out for a crash recovery or a repair."""
     pid = read_pid()
     if not pid:
         print('Not running.'); return
+    if planned:
+        try:
+            data_dir().mkdir(parents=True, exist_ok=True)
+            (data_dir() / 'planned-restart.json').write_text(json.dumps({'at': int(time.time() * 1000), 'why': planned}))
+        except OSError:
+            pass
     kill_tree(pid, force=False)
     for _ in range(30):
         if not read_pid():
@@ -575,11 +583,11 @@ def stop_background() -> None:
 
 
 def cmd_start(args) -> int: return 0 if start_background() else 1
-def cmd_stop(args) -> int: stop_background(); return 0
+def cmd_stop(args) -> int: stop_background('stop'); return 0
 
 
 def cmd_restart(args) -> int:
-    stop_background()
+    stop_background('restart')
     return 0 if start_background() else 1
 
 
@@ -647,13 +655,13 @@ def cmd_deploy(args) -> int:
         ok('tests pass')
 
     step('Restart')
-    stop_background()
+    stop_background('update')
     if start_background(args.health_timeout):
         print(paint('32', f'Deployed {after[:7] if after else "local code"}.'))
         return 0
     if git and before and before != after:
         print(paint('33', f'New version failed its health check: rolling back to {before[:7]}.'))
-        stop_background()
+        stop_background('update')
         sh(['git', 'reset', '--hard', before])
         sh(['npm', 'ci'])
         start_background(args.health_timeout)
@@ -690,7 +698,7 @@ def cmd_backup(args) -> int:
         if not src.is_dir():
             die(f'no backup {args.restore}. Backups: {", ".join(sorted(p.name for p in (data_dir() / BACKUPS).iterdir())) or "none"}')
         was_up = bool(local_health())
-        stop_background()
+        stop_background('restore')
         backup_data()  # the current data too, in case this was a mistake
         for item in data_dir().iterdir():  # the data becomes exactly the backup (the backups and this tool's files stay)
             if item.name not in (BACKUPS, '.shotctl'):

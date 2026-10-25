@@ -3,19 +3,25 @@
 // or declines it in Settings → Admin. There's always at least one applicant: when nobody fits a gap, the next ready
 // candidate stands by (said plainly on its application), until everyone in the catalog is hired. Kept in
 // DATA_DIR/hiring.json: the applications, who's hired, and the server's start times (the Restart watcher). A declined
-// candidate doesn't apply again for a week, unless it's the only one left to stand by.
-import { mkdir, readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+// candidate doesn't apply again for a week, unless it's the only one left to stand by. A start right after a planned
+// stop (scripts/shotctl.py leaves DATA_DIR/planned-restart.json for an update or a restart you asked for) is kept as
+// planned too, so the Restart watcher counts only the starts nobody meant: crashes and reboots.
+import { mkdir, readFile, unlink } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { CANDIDATES, TRIAL_H } from './public/hires.js';
 import { writeAtomic } from './atomicfile.js';
 
 const WEEK = 7 * 86400000;
 const ago = (ms) => (ms < 3600000 ? `${Math.max(1, Math.round(ms / 60000))} min` : ms < 172800000 ? `${Math.round(ms / 3600000)} h` : `${Math.round(ms / 86400000)} days`);
 export function createHiring({ file, clock = () => Date.now(), log = console, everyMs = 0 } = {}) {
-  let db = { apps: [], hired: [], starts: [], searchedAt: 0, trials: {} }, since = clock();
+  let db = { apps: [], hired: [], starts: [], planned: [], searchedAt: 0, trials: {} }, since = clock();
   async function load() {
-    try { const j = JSON.parse(await readFile(file, 'utf8')); db = { apps: j.apps || [], hired: j.hired || [], starts: j.starts || [], searchedAt: j.searchedAt || 0, trials: j.trials || {} }; } catch { /* first start */ }
+    try { const j = JSON.parse(await readFile(file, 'utf8')); db = { apps: j.apps || [], hired: j.hired || [], starts: j.starts || [], planned: j.planned || [], trackFrom: j.trackFrom || null, searchedAt: j.searchedAt || 0, trials: j.trials || {} }; } catch { /* first start */ }
     since = clock(); db.starts = [...db.starts.filter((t) => t > since - 30 * 86400000), since];
+    db.planned = (db.planned || []).filter((t) => t > since - 30 * 86400000);
+    db.trackFrom ||= since; // starts before planned ones were told apart (v13.89) can't be sorted: they aren't counted
+    const mark = join(dirname(file), 'planned-restart.json');
+    try { if (since - JSON.parse(await readFile(mark, 'utf8')).at < 10 * 60000) db.planned.push(since); await unlink(mark); } catch { /* not a planned restart */ }
     await save();
   }
   async function save() {
@@ -64,7 +70,7 @@ export function createHiring({ file, clock = () => Date.now(), log = console, ev
     trials: () => ({ ...db.trials }),
     // a hire flagged stuck or broken during its trial starts it again
     restartTrial(key) { const t = db.trials[key]; if (t && clock() - t < TRIAL_H * 3600000) { if (clock() - t > 60000) { db.trials[key] = clock(); save(); } return true; } return false; }, // (saved at most once a minute while it stays flagged)
-    uptime: () => ({ since, starts: db.starts }),
+    uptime: () => ({ since, starts: db.starts, planned: db.planned || [], trackFrom: db.trackFrom ?? null }),
     api: () => ({ searches: db.searches || 0, catalog: CANDIDATES.length, applications: db.apps.filter((a) => a.status === 'pending'), hired: db.hired.map((k) => { const c = CANDIDATES.find((x) => x.key === k); return { key: k, name: c?.name ?? k, icon: c?.icon ?? '•', job: c?.job ?? '' }; }), history: db.apps.filter((a) => a.status !== 'pending').slice(0, 10), searchedAt: db.searchedAt }),
   };
 }

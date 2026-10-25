@@ -145,14 +145,17 @@ export const CANDIDATES = [
     } },
   { key: 'restarts', role: 'h_restarts', name: 'Restart watcher', icon: '🔄', dept: 'ops',
     job: 'counts the server\'s restarts',
-    does: 'Records each time the server starts, so you can see how long it has been up and how often it restarts (a deploy, a crash, Railway moving it). Too many restarts means lost in-memory state: the team\'s feed, the fixers\' records, merit pay.',
-    cant: 'It can\'t tell a deploy from a crash: the server log can.',
+    does: 'Records each time the server starts, so you can see how long it has been up and how often it restarts on its own (a crash, a reboot); updates and restarts on purpose are counted apart. Too many restarts means lost in-memory state: the team\'s feed, the fixers\' records, merit pay.',
+    cant: 'It tells planned from unplanned, not a crash from a reboot: the server log can.',
     fit: () => 'Nobody keeps track of how often the server restarts, and every restart empties the team\'s memory.',
     row: (c) => {
-      const u = c.uptime, week = (u?.starts || []).filter((t) => t > c.now - 7 * 86400000).length;
+      // v13.89: planned restarts (an update installing itself, a restart you asked for) are counted apart: only the
+      // ones nobody meant (a crash, a reboot, a power cut) are trouble
+      const u = c.uptime, wk = (u?.starts || []).filter((t) => t > c.now - 7 * 86400000 && t >= (u?.trackFrom ?? 0)), planned = new Set(u?.planned || []);
       if (!u?.since) return { state: 'idle', status: 'Not reporting', key: 'none', talks: [] };
-      return { state: week > 10 ? 'warn' : 'ok', status: `Up ${dur((c.now - u.since) / 60000)} · ${week} start${week === 1 ? '' : 's'} in the last week`, key: week > 10 ? 'many' : 'ok', say: week > 10 ? 'the server keeps restarting' : null,
-        talks: week > 10 ? [{ to: 'nightwatch', text: `${week} restarts in a week: every one empties the team's memory.` }] : [] };
+      const meant = wk.filter((t) => planned.has(t)).length, week = wk.length - meant, many = week > 10;
+      return { state: many ? 'warn' : 'ok', status: `Up ${dur((c.now - u.since) / 60000)} · ${week} unplanned start${week === 1 ? '' : 's'} in the last week${meant ? ` (plus ${meant} planned: updates and restarts on purpose)` : ''}`, key: many ? 'many' : 'ok', say: many ? 'the server keeps restarting on its own' : null,
+        talks: many ? [{ to: 'nightwatch', text: `${week} unplanned restarts in a week (crashes or reboots): every one empties the team's memory.` }] : [] };
     } },
   // ---------- v13.81: five more, so the Recruiter always has someone to put forward ----------
   { key: 'streak', role: 'h_streak', name: 'Streak watcher', icon: '🔥', dept: 'risk',

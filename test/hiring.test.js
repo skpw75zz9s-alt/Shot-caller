@@ -108,7 +108,7 @@ test('in the team: the Recruiter with what\'s waiting, and a hire at work', () =
   assert.match(r.recruiter.status, /^2 applications waiting for your approval \(Settings → Admin → Hiring center\) · 2 hired · searching nonstop$/);
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
-  assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 start in the last week$/);
+  assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 unplanned start in the last week$/);
   assert.equal(CANDIDATES.length, 12);
 });
 
@@ -144,4 +144,23 @@ test('in the team: approve a hire and, on the very next reading, it is on probat
   const c = by();
   assert.match(c.tr_h_restarts.status, /graduated its trial/);
   assert.ok(c.h_restarts.score.day >= 50 && c.tr_h_restarts.score.day >= 50, 'the hire and its trainer each +50');
+});
+
+test('planned restarts (an update, a restart on purpose) are counted apart: only unplanned ones are trouble', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'hire-')), file = join(dir, 'hiring.json');
+  let t = et('2026-10-20T12:00:00-04:00');
+  for (let i = 0; i < 14; i++) { // 14 starts in a week: 12 after an update's planned stop, 2 on their own
+    if (i % 7 !== 0) writeFileSync(join(dir, 'planned-restart.json'), JSON.stringify({ at: t - 30000, why: 'update' }));
+    const h = createHiring({ file, clock: () => t }); await h.load(); t += 3600000;
+  }
+  const h = createHiring({ file, clock: () => t }); await h.load(); // and one more on its own
+  const u = h.uptime();
+  assert.equal(u.starts.length, 15); assert.equal(u.planned.length, 12);
+  const row = CANDIDATES.find((c) => c.key === 'restarts').row({ now: t, uptime: u });
+  assert.equal(row.state, 'ok', '3 unplanned starts is fine; the 12 updates don\'t count');
+  assert.match(row.status, /3 unplanned starts in the last week \(plus 12 planned/);
+  writeFileSync(join(dir, 'planned-restart.json'), JSON.stringify({ at: t - 3600000, why: 'update' }));
+  const late = createHiring({ file, clock: () => t }); await late.load();
+  assert.equal(late.uptime().planned.length, 12, 'a stale note (an hour old) is not taken for this start');
 });
