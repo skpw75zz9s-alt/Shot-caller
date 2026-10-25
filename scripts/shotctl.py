@@ -768,6 +768,7 @@ def cmd_up(args) -> int:
                 if behind_by(branch):
                     remote = sh(['git', 'rev-parse', f'origin/{branch}'], capture=True).stdout.strip()
                     if remote != last_failed:
+                        before = sh(['git', 'rev-parse', 'HEAD'], capture=True, check=False).stdout.strip()
                         say(f'update found ({remote[:7]}): backing up the data, then installing')
                         dest = backup_data()
                         if dest:
@@ -781,6 +782,10 @@ def cmd_up(args) -> int:
                             say(f'update {remote[:7]} was not installed (tests or health check failed); still running the old version')
                         else:
                             say(f'updated to {remote[:7]}; all data kept')
+                            # the Cloudflare backup serves its own copy of the app's files: keep it the same version
+                            changed = sh(['git', 'diff', '--name-only', f'{before}..HEAD'], capture=True, check=False).stdout if before else ''
+                            if BACKUP_MARK.exists() and re.search(r'^(public/|cloudflare/|bookmath\.js)', changed, re.M):
+                                say('updated the Cloudflare backup too' if push_backup() else 'could not update the Cloudflare backup: run `shotctl.py cloud-backup`')
             time.sleep(30)
     except KeyboardInterrupt:
         say('stopping the tunnel (the app keeps running; `shotctl.py stop` stops it)')
@@ -791,6 +796,17 @@ def cmd_up(args) -> int:
 
 
 BACKUP_WORKER = 'shotcaller-backup'
+BACKUP_MARK = RUN_DIR / 'cloud-backup'  # written once the backup is set up: `up` then keeps its copy of the app current
+
+
+def push_backup() -> bool:
+    """Upload the backup Worker again (its settings stay). Its copy of the app's files must match the server's."""
+    npx = shutil.which('npx')
+    if not npx:
+        return False
+    r = subprocess.run([npx, '-y', 'wrangler@4', 'deploy', '--name', BACKUP_WORKER], cwd=ROOT / 'cloudflare', text=True, encoding='utf-8', errors='replace',
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=600)
+    return r.returncode == 0
 
 
 def cmd_cloud_backup(args) -> int:
@@ -836,6 +852,8 @@ def cmd_cloud_backup(args) -> int:
             die(f'could not set {name}')
         ok(name)
 
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUP_MARK.write_text(origin)
     host = app_url.split('://', 1)[-1].strip('/') or 'your domain'
     print(f"""
 {paint('32', 'The backup is online.')} One step is left, in the Cloudflare dashboard:
