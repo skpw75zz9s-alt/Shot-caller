@@ -48,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '241'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '242'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -242,12 +242,24 @@ function paywalled(r) {
   throw new Error('payment required');
 }
 
+const DIRECT = { base: null, offUntil: 0 };
 async function getJSON(path) {
   // The page's first lines already started the startup requests (index.html): use those once, if they're fresh
   const pre = window.__pre && window.__pre[path];
   if (pre) delete window.__pre[path];
   // a request stuck on a flaky phone connection gives up after 10s (the next poll tries again) instead of hanging
-  const r = (pre && Date.now() - window.__pre.at < 15000 && await pre) || await fetch(`${API}/${path}`, { signal: AbortSignal.timeout?.(10000) });
+  let r = pre && Date.now() - window.__pre.at < 15000 && await pre;
+  // the direct lane (v13.92, cloudflare/worker.js direct): straight to the home server while it answers, so the polling
+  // doesn't use up the Worker's free daily requests; on any trouble, back through the Worker (and its backup) for a minute
+  if (!r && DIRECT.base && Date.now() > DIRECT.offUntil) {
+    try {
+      r = await fetch(`${DIRECT.base}/api/${path}`, { credentials: 'include', signal: AbortSignal.timeout?.(10000) });
+      if (r.status === 401 || r.status === 403 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
+    } catch { r = null; DIRECT.offUntil = Date.now() + 60000; }
+  }
+  r ||= await fetch(`${API}/${path}`, { signal: AbortSignal.timeout?.(10000) });
+  const d = r.headers.get('x-sc-direct');
+  if (d && /^https:\/\/[\w.-]+$/.test(d)) DIRECT.base = d;
   paywalled(r);
   const srv = Date.parse(r.headers.get('date') || ''); // server clock, for the health check's phone-clock test
   if (srv) state.skewMs = Date.now() - srv - 500; // the Date header drops milliseconds: half a second on average

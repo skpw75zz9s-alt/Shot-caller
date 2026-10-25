@@ -276,6 +276,9 @@ Security:
 
 ## Version notes (newest first)
 
+### The direct lane: no more Cloudflare "Error 1027" (v13.92)
+Every request through the backup Worker counts toward Cloudflare's free **100,000 requests a day**, and an open phone polls the API a few times a second, so one phone left open most of a day was enough to hit it (Error 1027, "temporarily rate limited", until midnight UTC). Now, while the home server answers, the Worker adds `x-sc-direct: <ORIGIN>` to what it passes on (only when ORIGIN is a subdomain of the site's address, like `home.shotcaller.com.co`), and the app reads the API (every `getJSON` poll) straight from that address. The server allows exactly that one parent https address to read its API (`server.js directOrigin`, CORS with credentials), and the Worker copies the sign-in cookie onto the whole domain (`Domain=`) so it reaches the home address too: members already signed in get the copy on their next request, nobody signs in again. The page, its files and every POST still go through the Worker. If a direct request fails (the server off, a 401/403/5xx), the app goes back through the Worker, and its backup, for a minute. `py scripts\shotctl.py up` redeploys the Worker on its own when it updates.
+
 ### The Fact checker (v13.91)
 A new hire in the hiring center: the **🔬 Fact checker** (`public/hires.js factCheck`), in the grading room. It puts six claims about the bot to a real test on the official record and gives each **TRUE** (the evidence is clearly for it, at 95%), **FALSE** (clearly against it, or for a "does better" claim, the difference shown to be under 5 points either way), or **UNPROVEN** (not enough evidence yet, with about how many more calls it would take if the gap held):
 1. The calls win more than half the time (Wilson 95% range against 50%).

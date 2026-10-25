@@ -84,6 +84,28 @@ async function fromOrigin(req, env, body) {
   }
 }
 
+// ---------- the direct lane (v13.92) ----------
+// Every request through this Worker counts toward Cloudflare's free 100,000 a day, and an open phone polls the API a few
+// times a second. So while the home server answers, this tells the app the server's own address (x-sc-direct: ORIGIN,
+// only when it's a subdomain of this one, like home.shotcaller.com.co) and the app reads the API from there (server.js
+// allows it). The sign-in cookie is copied onto the whole domain (Domain=) so it reaches that address too. When the
+// server is down the header isn't sent, the app's direct requests fail, and it comes back here, to the backup.
+export function direct(req, env, r) {
+  let host, origin;
+  try { host = new URL(req.url).hostname; origin = new URL(env.ORIGIN); } catch { return r; }
+  if (origin.protocol !== 'https:' || !origin.hostname.endsWith(`.${host}`)) return r;
+  const out = new Response(r.body, r);
+  out.headers.set('x-sc-direct', origin.origin);
+  const set = r.headers.getSetCookie?.() || [], dom = `; Domain=${host}`;
+  for (const c of set) if (/^sc_session=/.test(c) && !/;\s*domain=/i.test(c)) out.headers.append('set-cookie', c + dom);
+  const cookie = req.headers.get('cookie') || '', tok = /(?:^|;\s*)sc_session=([^;]+)/.exec(cookie)?.[1];
+  if (tok && !/(?:^|;\s*)sc_dom=1/.test(cookie) && !set.some((c) => /^sc_session=/.test(c))) { // signed in before this: copy it once
+    out.headers.append('set-cookie', `sc_session=${tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000; Secure${dom}`);
+    out.headers.append('set-cookie', 'sc_dom=1; Path=/; SameSite=Lax; Max-Age=31536000; Secure');
+  }
+  return out;
+}
+
 // ---------- members (v13.86) ----------
 // The server's member list, copied here every few minutes by edgesync.js into this Worker's storage (KV, EDGE_KV),
 // plus what happened here while the server was off ("changes": new purchases, "I've paid", the admin's approvals).
@@ -298,7 +320,7 @@ export default {
     if (path.startsWith('/__edge/')) return edgeApi(req, env, path); // the server keeping the members in step (edgesync.js)
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
     const r = await fromOrigin(req, env, body);
-    if (r) return r;
+    if (r) return direct(req, env, r);
     return offline(body === undefined ? req : new Request(req, { body }), env);
   },
 };

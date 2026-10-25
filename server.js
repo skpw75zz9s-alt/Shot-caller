@@ -450,6 +450,13 @@ const EDGE = process.env.EDGE_SECRET ? Buffer.from(process.env.EDGE_SECRET) : nu
 const fromEdge = (req) => { const h = Buffer.from(String(req.headers['x-sc-edge'] || '')); return !!EDGE && h.length === EDGE.length && crypto.timingSafeEqual(h, EDGE); };
 export const clientIp = (req) => (fromEdge(req) && /^[\w.:-]{2,64}$/.test(req.headers['x-sc-client-ip'] || '') ? req.headers['x-sc-client-ip']
   : (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?');
+// an https page on the parent of this server's own address (shotcaller.com.co for home.shotcaller.com.co)
+export function directOrigin(req) {
+  try {
+    const o = new URL(req.headers.origin || ''), host = String(req.headers.host || '').split(':')[0].toLowerCase();
+    return o.protocol === 'https:' && o.hostname.includes('.') && /^[a-z0-9-]+$/.test(host.slice(0, -o.hostname.length - 1)) && host.endsWith(`.${o.hostname.toLowerCase()}`); // exactly one level up
+  } catch { return false; }
+}
 function sessionCookie(req, token) {
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
   return { 'set-cookie': `sc_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}` };
@@ -576,6 +583,9 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
+    // the direct lane (v13.92): the app on the main address (behind the Cloudflare Worker) reads the API straight from
+    // this server's own address (a subdomain of it), so the phone's polling doesn't use up the Worker's free requests
+    if (path.startsWith('/api/') && req.method === 'GET' && directOrigin(req)) res.setHeader('access-control-allow-origin', req.headers.origin), res.setHeader('access-control-allow-credentials', 'true'), res.setHeader('vary', 'Origin');
     if (path === '/healthz') return send(res, 200, { ok: true, version: VERSION, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded, discordAlerts: discord.status().alerts === 'off' ? [] : discordAlerts.kinds(), discordAlertsTo: discord.status().alerts } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     // the official website and its public numbers, for everyone
