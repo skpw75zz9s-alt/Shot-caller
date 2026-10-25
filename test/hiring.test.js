@@ -38,7 +38,7 @@ test('the Recruiter searches nonstop and files what fits; approve hires, decline
   await h.load();
   const ctx = { now: t, markets: [{ series: 'KXBTC15M', name: 'Bitcoin', kind: 'crypto' }, { series: 'KXINX', name: 'S&P 500', kind: 'index' }], calls: Array.from({ length: 40 }, (_, i) => call(i % 5 !== 0)), traders: 0, uptime: h.uptime() };
   const apps = h.search(ctx);
-  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'restarts', 'streak'], 'the coaches need more graded calls; the Quiet-spell watcher needs times');
+  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'math', 'restarts', 'streak'], 'the coaches need more graded calls; the Quiet-spell watcher needs times');
   assert.match(apps.find((a) => a.key === 'hours').why, /S&P 500/); assert.ok(apps.every((a) => !a.standby));
   t += 5000;
   assert.deepEqual(h.search(ctx), [], 'it looks again on the next reading: nobody new, nobody filed twice');
@@ -109,7 +109,7 @@ test('in the team: the Recruiter with what\'s waiting, and a hire at work', () =
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
   assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 start in the last week$/);
-  assert.equal(CANDIDATES.length, 11);
+  assert.equal(CANDIDATES.length, 12);
 });
 
 // ---------- a new hire starts on probation, and the Training room picks it up the moment it joins ----------

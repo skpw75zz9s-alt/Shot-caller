@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The Mathematician (v13.87)
+
+A new hire in the hiring center: the **🧮 Mathematician** (`public/hires.js recordMath`), in the grading room. It works the official record out exactly, as $10 calls held to settlement after Kalshi's fees:
+
+- the win rate with its **95% range** (Wilson), and the win rate the calls' prices needed to **break even** (each call's −loss ÷ (win − loss), averaged)
+- the **average profit per call** with its standard error, and the total
+- a verdict: **proven ahead** of its prices (the whole range above breakeven), **proven behind** (the whole range below), or **not decided yet**, with about how many more calls it would take at the current gap. Under 30 calls nothing is proven.
+- once an edge is proven, the **Kelly stake** (and half of it, the usual safer size)
+
+It tells the Risk officer when the record is proven either way, and the Trader the Kelly stake. Exact math on the past, not a forecast: like every agent it reports, and no call uses it.
+
 ### Members and new buyers in backup mode (v13.86)
 
 While the home server is off, the Cloudflare backup now handles the paywall too:
@@ -421,6 +432,7 @@ A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has 
 | 🌊 Liquidity scout | calls are being made or traded | reads Kalshi's order book every 30 seconds and tells the Trader and the Caller how many dollars of each side are for sale within 2¢ of the best price |
 | 🔄 Restart watcher | always | records each server start: how long it's been up, and how often it restarts (each restart empties the team's memory) |
 | 📈 RSI agent | 5+ hours of saved price history | reads RSI 14 on 1, 5 and 15 minutes, tests on the saved history whether RSI extremes predicted the 15-minute rounds, and tells the Scout and the Caller when RSI hits an extreme |
+| 🧮 Mathematician | 10+ graded official calls | works the record out exactly after fees: win rate with its 95% range, the breakeven win rate, profit per call with its error, whether the record is proven ahead or behind its prices, and the Kelly stake once it is |
 
 **Every new hire starts on probation**: a **24-hour trial**, restarted if it's flagged stuck or broken while on it. The **Training room picks it up the moment it joins**: a trainer appears on the same reading, tracking the trial (*0 of 24 hours of its trial · about 24 h to go*). When the hire graduates, the hire and its trainer each earn **+50 merit**. Like everyone on the team, a hire reports and informs: none of them changes a call.
 
