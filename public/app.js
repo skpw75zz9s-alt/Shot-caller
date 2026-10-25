@@ -19,6 +19,7 @@ import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, GLOBAL_SCAN, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
+import { FLIP_MARK, flipDue } from './flipwarn.js';
 import { radarRead, radarRecord, scopeIdle, scopeSvg, SCOPE } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
@@ -47,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '237'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '238'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -823,8 +824,11 @@ function renderDeck(snap, live, sig, now) {
     const lean = leanSide(live.ev), called = sig?.called;
     // v13.38: the flip check (chart history + buyers / sellers, proven only) says the called side is more likely than not to lose
     const fcLose = called ? flipCheckNow(tk)?.pLose?.[called] : null;
-    if (sustained(watch, 'flipchk', fcLose != null && fcLose >= 0.5 && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: ${Math.round(fcLose * 100)}% the ${called === 'YES' ? 'UP' : 'DOWN'} call flips`, 'chart history and buyers / sellers · held 10s', `flipchk:${tk}`);
-    if (sustained(watch, 'flip', !!called && !!lean && lean !== called && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: bot now leans ${lean === 'YES' ? 'UP' : 'DOWN'}`, `against the ${called === 'YES' ? 'UP' : 'DOWN'} call · held 10s`, `flip:${tk}`);
+    if (sustained(watch, 'flipchk', fcLose != null && fcLose >= 0.6 && live.ev.minutesLeft >= 1, now, 20000)) alerts.event('flip', `Flip warning: ${Math.round(fcLose * 100)}% the ${called === 'YES' ? 'UP' : 'DOWN'} call flips`, 'chart history and buyers / sellers · held 20s', `flipchk:${tk}`);
+    // v13.88: not on a dip under 50% any more: the call's odds 40% or under for 20 s with a minute left (flipwarn.js)
+    if (`${tk}:${called}` !== watch.fwKey) { watch.fwKey = `${tk}:${called}`; watch.fw = {}; }
+    const calledP = called && live.ev.pYes != null ? (called === 'YES' ? live.ev.pYes : 1 - live.ev.pYes) : null;
+    if (calledP != null && flipDue(watch.fw, { p: calledP, minutesLeft: live.ev.minutesLeft, now })) alerts.event('flip', `Flip warning: the ${called === 'YES' ? 'UP' : 'DOWN'} call is down to ${Math.round(calledP * 100)}%`, `the bot leans ${lean === 'YES' ? 'UP' : 'DOWN'} · held 20s at 40% or under`, `flip:${tk}`);
     const risky = !!called && hold != null && (1 - hold) * 100 >= alerts.prefs().flipRisk;
     if (sustained(watch, 'fliprisk', risky, now)) alerts.event('fliprisk', `High flip risk: ${Math.round((1 - hold) * 100)}/100`, `hold odds ${Math.round(hold * 100)}% on the ${called === 'YES' ? 'UP' : 'DOWN'} call`, `fliprisk:${tk}`);
   }
@@ -1353,7 +1357,9 @@ function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   const move = spot * sigma * Math.sqrt(mins); // a typical move to the close: the fit's biases are in these
   lines = correctLines(scaleLines(lines, fit.scale, spot), Object.fromEntries(Object.entries(fit.bias).map(([k, b]) => [k, b * move])), now, close); // each line's moves scaled to how far they really carry, minus its measured bias
   const final = fit.final, minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta, final });
-  return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
+  // ↺ marks only for a ripe move and a real turn, and not while their record proves them no better than random (flipwarn.js)
+  const marks = flip && flip.score >= FLIP_MARK.score && !flipRecord(state.flipLog, state.flipBase).worse;
+  return { lines, minutes, turns: marks ? pathTurns(minutes, spot, now, flip.sd1, flip.v0, FLIP_MARK.depth) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
 }
 // The market radar (public/radar.js): calls about this round that hold 90%+ of the time, from the bot's own record
 function radarNow(live, snap, now, pcs = pathNow(live, snap, now)) {
@@ -1453,7 +1459,8 @@ function trackPredictions(snap, live, now) {
   const fr = flipRecord(state.flipLog, state.flipBase), f = state.flipNow;
   setHTML($('flipInfo'), (f ? `<b>Flip watch:</b> ${f.v0 >= 0 ? 'rising' : 'falling'} ${Math.abs(f.v0) < 1 ? '(barely)' : `$${Math.abs(f.v0).toFixed(0)}/min`} · ${f.dir === 'up' ? 'bounce' : 'pullback'} odds <b>${Math.round(f.score * 100)}%</b>${f.parts.length ? `: ${f.parts.map((p) => esc(p.why)).join(' · ')}` : ': no turn signs'}. ` : '')
     + (fr.n ? `Turns called: caught <b>${fr.hits} of ${fr.n}</b> (${Math.round(fr.rate * 100)}%)${fr.base != null ? ` vs <b>${Math.round(fr.base * 100)}%</b> for a random minute` : ''}${fr.n >= 20 ? ` · strength ×${fr.amp.toFixed(2)}` : ''}`
-      : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.'));
+      : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.')
+    + (fr.worse ? ' · <b>↺ marks off</b>: proven no better than a random minute' : f && f.score < FLIP_MARK.score ? ` · ↺ marks only at ${Math.round(FLIP_MARK.score * 100)}%+` : ''));
   const cr = coneRecord(state.coneLog);
   if (!live) state.coneSum = null;
   else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, pathNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s

@@ -41,7 +41,7 @@ export function createStacks({ home, dataDir, kalshi, coinbase, prices, discover
     if (assets.has(key)) return assets.get(key);
     const a = ASSETS.find((x) => x.key === key);
     const dir = join(dataDir, 'assets', key), crypto = a.kind === 'crypto';
-    const discordAlerts = createAlertWatcher({ market: { key: a.key, digits: a.digits }, post: (embed) => (say(key) ? discord.alert({ ...embed, title: `[${key}] ${embed.title || ''}` }) : null) });
+    const discordAlerts = createAlertWatcher({ market: { key: a.key, digits: a.digits }, flipFile: join(dir, 'flipwarn.json'), post: (embed) => (say(key) ? discord.alert({ ...embed, title: `[${key}] ${embed.title || ''}` }) : null) });
     const futures = crypto && a.sym?.hyper ? createFutures({ coin: a.sym.hyper }) : null;
     const whaleFilter = crypto ? createWhaleFilter({ file: join(dir, 'whales.json'), clock }) : null; // which whales move this market (whalefilter.js)
     const scanFeed = crypto ? createScanFeed({ file: join(dir, 'scan.json'), futures, asset: a, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) }) : nullScan();

@@ -2,7 +2,8 @@
 // official calls and results (discord.js). Personal alerts stay on phones only: your positions' sell alerts, adds,
 // buy-light, and your phone's own feed health depend on what you hold or how your phone is set.
 //   bail     the official call's odds fell under the bail line: sell it
-//   flip     the bot now leans against the official call (its odds on it under 50%)
+//   flip     the bot now leans against the official call: its odds on it 40% or under, held 20 s (public/flipwarn.js;
+//            graded each round, and stricter if they prove no better than a coin flip)
 //   cross    BTC crossed the round's target (at most 3 a round, a minute apart)
 //   trend    the 1-minute chart's trend turned (EMA 9 crossed EMA 21; 10 minutes apart)
 //   whale    one trade of DISCORD_WHALE_MIN dollars or more on a USD exchange (default $250,000; 2 minutes apart)
@@ -15,7 +16,12 @@
 // DISCORD_ALERTS picks which: unset = every kind but the sit-out notes (v13.20.1: so the channel is about the calls, not
 // a 'no call' every round), 'all' (sit-outs too), 'none', or a comma list (e.g. bail,flip,whale). Besides each kind's
 // spacing, at most 30 alerts an hour go out (status changes always do).
+import { readFileSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { ema } from './public/indicators.js';
+import { FLIP_WARN, flipDue, flipRecord } from './public/flipwarn.js';
+import { writeAtomic } from './atomicfile.js';
 
 export const ALERT_KINDS = ['bail', 'flip', 'cross', 'trend', 'whale', 'liquidation', 'hold', 'early', 'sitout', 'status'];
 export const ALERT_LIMITS = { perHour: 30, crossPerRound: 3, crossGapMs: 60000, trendGapMs: 10 * 60000, whaleGapMs: 2 * 60000, whaleMin: 250000, liqMin: 2000000, liqGapMs: 10 * 60000 };
@@ -44,8 +50,9 @@ const ts = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
 export const alertEmbeds = {
   bail: ({ b, ticker }) => ({ title: `🚨 BAIL OUT · ${side(b.side)} call`, color: COLORS.down,
     description: `The bot's odds on its ${side(b.side)} call fell to ${pc(b.p)}. If you bought it, selling now keeps ${b.bid ? `about ${cents(b.bid)} of each $1` : 'part of it'} instead of risking all of it.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
-  flip: ({ called, p, ticker }) => ({ title: `↺ FLIP WARNING · the bot now leans against its ${side(called)} call`, color: COLORS.warn,
-    description: `Its odds on ${side(called)} are down to ${pc(p)}. Not a bail yet: that comes if they keep falling.`, fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
+  flip: ({ called, p, ticker, held = null, record = null }) => ({ title: `↺ FLIP WARNING · the bot now leans against its ${side(called)} call`, color: COLORS.warn,
+    description: `Its odds on ${side(called)} are down to ${pc(p)}${held ? `, and have stayed that low for ${Math.round(held / 1000)} seconds` : ''}. Not a bail yet: that comes if they keep falling.${record?.n ? `\nFlip warnings so far: right ${record.right} of ${record.n} (${pc(record.rate)}).${record.mode === 'strict' ? ' They\'ve been no better than a coin flip, so this one had to clear a higher bar.' : ''}` : ''}`,
+    fields: [{ name: 'Market', value: `\`${ticker}\``, inline: true }] }),
   cross: ({ above, spot, strike, minsLeft, mk = BTC }) => ({ title: `${above ? '⬆️' : '⬇️'} ${mk.key} crossed ${above ? 'above' : 'below'} the target`, color: above ? COLORS.up : COLORS.down,
     description: `${mk.key} ${px(spot, mk)} vs the target ${px(strike, mk)}, ${minsLeft.toFixed(1)} minutes left in the round.` }),
   trend: ({ bull, price, mk = BTC }) => ({ title: bull ? '🐂 Chart turns bull' : '🐻 Chart turns bear', color: bull ? COLORS.up : COLORS.down,
@@ -64,11 +71,15 @@ export const alertEmbeds = {
 };
 
 // The watcher: fed the official bot's every tick (bot.js onTick), each settled round (onRound) and big trades (whale)
-export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS, moversOnly = process.env.DISCORD_WHALES === 'movers' } = {}) {
+export function createAlertWatcher({ post, market = BTC, flipFile = null, kinds = alertKinds(), whaleMin = Number(process.env.DISCORD_WHALE_MIN) || ALERT_LIMITS.whaleMin, liqMin = Number(process.env.DISCORD_LIQ_MIN) || ALERT_LIMITS.liqMin, limits = ALERT_LIMITS, moversOnly = process.env.DISCORD_WHALES === 'movers' } = {}) {
   const rounds = new Map(); // ticker -> what's been posted this round
   const sent = []; // times of the last hour's alerts
   let trendBull = null, trendAt = 0, whaleAt = 0, prev = null, liqAt = 0;
   const liqs = []; // the last minute's liquidations
+  // the flip warnings' record (public/flipwarn.js): [{ ticker, called, p, at, right }], kept in DATA_DIR
+  let flips = [];
+  try { flips = flipFile ? JSON.parse(readFileSync(flipFile, 'utf8')).flips || [] : []; } catch { /* first run */ }
+  const saveFlips = () => { if (flipFile) mkdir(dirname(flipFile), { recursive: true }).then(() => writeAtomic(flipFile, JSON.stringify({ flips }))).catch(() => {}); };
   const send = (kind, args, now, always = false) => {
     if (!kinds.has(kind)) return false;
     while (sent.length && sent[0] < now - 3600000) sent.shift();
@@ -83,12 +94,19 @@ export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), w
     if (live && sig) {
       const t = live.m.ticker, r = round(t), ev = live.ev;
       // a flip call starts a fresh watch on the new side
-      if (sig.flip?.from && !r.flipped) { r.flipped = true; r.bail = false; r.flip = false; }
+      if (sig.flip?.from && !r.flipped) { r.flipped = true; r.bail = false; r.flip = false; r.fw = {}; }
       // the official call going bad
       if (sig.called && ev.pYes != null) {
         const p = sig.called === 'YES' ? ev.pYes : 1 - ev.pYes;
         if (sig.bail && !r.bail) r.bail = send('bail', { b: sig.bail, ticker: t }, now) || true;
-        else if (!sig.bail && p < 0.5 && !r.flip && !r.bail) r.flip = send('flip', { called: sig.called, p, ticker: t }, now) || true;
+        else if (!sig.bail && !r.bail) {
+          const rec = flipRecord(flips);
+          r.fw ||= {};
+          if (flipDue(r.fw, { p, minutesLeft: ev.minutesLeft ?? 0, now, mode: rec.mode })) {
+            r.flip = { called: sig.called, p, at: now }; // graded when the round settles, sent or not
+            send('flip', { called: sig.called, p, ticker: t, held: now - r.fw.lowSince, record: rec }, now);
+          }
+        }
       }
       // BTC crossing the target
       const spot = snap.mSpot ?? snap.spot;
@@ -124,7 +142,13 @@ export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), w
   }
   // a settled round: a no-call round gets its sit-out note (rounds with a call get the result post instead)
   function settled({ ticker, result, called, value = null, strike = null, now = Date.now() }) {
-    if (called || rounds.get(ticker)?.called) return false;
+    const r = rounds.get(ticker);
+    if (r?.flip?.called && (result === 'yes' || result === 'no') && !r.flipGraded) { // a flip warning is right when the called side lost
+      r.flipGraded = true;
+      flips = [...flips, { ticker, called: r.flip.called, p: r.flip.p, at: r.flip.at, right: (result === 'yes') !== (r.flip.called === 'YES') }].slice(-FLIP_WARN.keep);
+      saveFlips();
+    }
+    if (called || r?.called) return false;
     return send('sitout', { ticker, result, value, strike }, now);
   }
   // filter: the Whale filter's word on it (public/whales.js predict); DISCORD_WHALES=movers skips the whales it has
@@ -145,5 +169,5 @@ export function createAlertWatcher({ post, market = BTC, kinds = alertKinds(), w
     liqAt = now;
     return send('liquidation', { side, usd, n: mine.length }, now);
   }
-  return { tick, settled, whale, liquidation, kinds: () => [...kinds] };
+  return { tick, settled, whale, liquidation, kinds: () => [...kinds], flipRecord: () => flipRecord(flips) };
 }

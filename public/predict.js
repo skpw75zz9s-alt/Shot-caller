@@ -446,9 +446,9 @@ export function pathRecord(log) {
 // The turns on the expected path (where it bottoms or tops out by at least a fifth of a typical minute), with the last 3
 // minutes in front so a turn happening right now (the live candle) shows too: the chart marks them ↺. v0: the flip
 // forecast's momentum ($/min), giving the price 3 minutes ago.
-export function pathTurns(minutes, spot, now, sd1, v0 = 0) {
+export function pathTurns(minutes, spot, now, sd1, v0 = 0, depth = 0.2) {
   if (!minutes?.length) return [];
   const live = Math.floor(now / 60000) * 60000;
   const pts = [{ t: live - 180000, v: spot - 3 * v0 }, { t: live, v: spot }, ...minutes.map((c) => ({ t: c.t, v: c.c }))];
-  return turnPoints(pts, 0.2 * sd1).filter((x) => x.t >= live).map((x) => ({ ...x, now: x.t === live }));
+  return turnPoints(pts, depth * sd1).filter((x) => x.t >= live).map((x) => ({ ...x, now: x.t === live }));
 }

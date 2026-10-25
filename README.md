@@ -276,6 +276,15 @@ Security:
 
 ## Version notes (newest first)
 
+### A stronger flip watch (v13.88)
+
+Flip warnings and the chart's ↺ turn marks were going off on noise. Now:
+
+- **Flip warnings** ("the bot now leans against its call"; Discord, push and the phone) used to fire the moment the call's odds dipped under 50%, for a single tick, so a price wobbling around the target set them off again and again. A warning now needs the call's odds **40% or under for 20 seconds straight**, with **a minute or more left** to act; a wobble back over 45% starts the count again (`public/flipwarn.js`, shared by the server and the phone).
+- **They're graded.** Every warning is checked when its round settles (right = the called side lost), kept in `DATA_DIR/flipwarn.json`, and each Discord warning shows the record so far. If they prove no better than a coin flip (20+ graded, the 95% low end of their hit rate under 50%), the bar rises on its own to **30% held 45 seconds**.
+- **The flip check's warning** (chart history and buyers/sellers) now needs a 60%+ chance of the call losing, held 20 seconds, with a minute left (was 50%, 10 seconds).
+- **↺ marks on the chart** only show when the move is ripe to turn (flip score 50%+) and the turn is a real one (0.6 of a typical minute either side, was 0.2), and they switch off while their own record proves them no better than a random minute. The prediction path still bends the same way; only the marks (and the turns graded) are stricter.
+
 ### The Mathematician (v13.87)
 
 A new hire in the hiring center: the **🧮 Mathematician** (`public/hires.js recordMath`), in the grading room. It works the official record out exactly, as $10 calls held to settlement after Kalshi's fees:

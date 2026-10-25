@@ -25,10 +25,11 @@ test('DISCORD_ALERTS: every kind but the sit-out notes by default, all, none, or
 
 test('the official call going bad: one flip warning, then one bail, once a round', () => {
   const { w, titles } = watcher();
-  w.tick({ snap: snapAt({ pYes: 0.45 }), sig: { called: 'YES' }, now: T0 });
-  w.tick({ snap: snapAt({ pYes: 0.44 }), sig: { called: 'YES' }, now: T0 + 1000 });
-  w.tick({ snap: snapAt({ pYes: 0.3 }), sig: { called: 'YES', bail: { side: 'YES', p: 0.3, bid: 0.27 } }, now: T0 + 2000 });
-  w.tick({ snap: snapAt({ pYes: 0.2 }), sig: { called: 'YES', bail: { side: 'YES', p: 0.3, bid: 0.27 } }, now: T0 + 3000 });
+  w.tick({ snap: snapAt({ pYes: 0.45 }), sig: { called: 'YES' }, now: T0 }); // under 50%: not a warning any more (v13.88)
+  w.tick({ snap: snapAt({ pYes: 0.38 }), sig: { called: 'YES' }, now: T0 + 1000 });
+  w.tick({ snap: snapAt({ pYes: 0.37 }), sig: { called: 'YES' }, now: T0 + 22000 }); // 40% or under for 20 s: the warning
+  w.tick({ snap: snapAt({ pYes: 0.3 }), sig: { called: 'YES', bail: { side: 'YES', p: 0.3, bid: 0.27 } }, now: T0 + 23000 });
+  w.tick({ snap: snapAt({ pYes: 0.2 }), sig: { called: 'YES', bail: { side: 'YES', p: 0.3, bid: 0.27 } }, now: T0 + 24000 });
   assert.deepEqual(titles().map((t) => t.split(' ')[0]), ['↺', '🚨']);
   assert.match(titles()[1], /BAIL OUT · UP call/);
 });

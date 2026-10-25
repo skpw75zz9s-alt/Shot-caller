@@ -51,6 +51,7 @@
   <link rel="modulepreload" href="fees.js">
   <link rel="modulepreload" href="callgate.js">
   <link rel="modulepreload" href="flip.js">
+  <link rel="modulepreload" href="flipwarn.js">
   <link rel="modulepreload" href="split.js">
   <link rel="modulepreload" href="why.js">
   <link rel="modulepreload" href="pulse.js">
@@ -695,7 +696,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.87 · Mathematician</p>
+      <p class="fine" id="version">Shot Caller v13.88 · Stronger flip watch</p>
     </section>
   </main>
 
@@ -736,7 +737,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '237';
+    window.SC_BUILD = '238';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

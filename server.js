@@ -103,7 +103,7 @@ export const futures = createFutures();
 // Discord auto-posts of the official calls and their results (discord.js; set DISCORD_WEBHOOK_URL to turn on), and the
 // market alerts (discordalerts.js: DISCORD_ALERTS picks which, DISCORD_ALERTS_WEBHOOK_URL gives them their own channel)
 export const discord = createDiscord();
-export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
+export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed), flipFile: join(DATA_DIR, 'flipwarn.json') });
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
 const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
