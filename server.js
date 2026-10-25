@@ -199,7 +199,7 @@ export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bo
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
   markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus(),
-  hiring, depthOf, searchFor: (s) => isHome(s), running: () => stacks.bots().map(([s]) => { const m = marketOf(s, discovery.list()); return { series: s, name: m.name, kind: m.kind }; }),
+  hiring, depthOf, searchFor: (s) => isHome(s), barsOf: (s) => (isHome(s) ? playbook : stacks.stack(s)?.playbook)?.bars?.() ?? [], // the RSI agent's history (playbookfeed.js) running: () => stacks.bots().map(([s]) => { const m = marketOf(s, discovery.list()); return { series: s, name: m.name, kind: m.kind }; }),
   news: (s) => newsFeed.api(marketOf(s, discovery.list()).asset), nameOf: (s) => marketOf(s, discovery.list()).name, // the News scout (newsfeed.js, public/news.js)
   // the flag fixers' real fixes (public/fixers.js, fixdesk.js): each returns true when it ran
   fixes: {

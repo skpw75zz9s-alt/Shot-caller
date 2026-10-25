@@ -276,6 +276,16 @@ Security:
 
 ## Version notes (newest first)
 
+### The RSI agent (v13.85)
+
+A new hire in the hiring center: the **📈 RSI agent** (`public/rsiagent.js`), on the Market desk. Approve it in Settings → Admin → Hiring center and it joins the team of every market.
+
+- **Reads** RSI 14 on 1-, 5- and 15-minute candles (70+ overbought, 30 or under oversold) and spots a fresh divergence on 1 minute (a new 30-minute high on weaker RSI, or a new low on stronger RSI).
+- **Tests** every past 15-minute round in the market's saved history (up to 21 days of 1-minute bars, `bars.json`) that opened with the 1-minute RSI at an extreme: did it reverse (overbought → down, oversold → up) more often than the base rate of up rounds says? 30+ extreme rounds and z ≥ 2 proves **extremes fade**, z ≤ −2 proves **extremes run** (momentum), anything else is **no proven edge**. The test is redone each new round.
+- **Tells** the Scout and the Caller when 1-minute RSI hits an extreme or a divergence prints, and what the test says about it.
+
+Like every agent it reports and informs: no call uses it.
+
 ### Backup mode on Cloudflare (v13.84)
 
 When the home server is off, the site no longer goes dark. A Cloudflare Worker (`cloudflare/worker.js`, free plan) sits in front of the app's address:
@@ -400,6 +410,7 @@ A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has 
 | 🕐 Hour-of-day coach | 120+ graded official calls | splits the record into six 4-hour blocks (ET) and flags a block that clearly loses to its prices (30+ calls, z ≤ −2) |
 | 🌊 Liquidity scout | calls are being made or traded | reads Kalshi's order book every 30 seconds and tells the Trader and the Caller how many dollars of each side are for sale within 2¢ of the best price |
 | 🔄 Restart watcher | always | records each server start: how long it's been up, and how often it restarts (each restart empties the team's memory) |
+| 📈 RSI agent | 5+ hours of saved price history | reads RSI 14 on 1, 5 and 15 minutes, tests on the saved history whether RSI extremes predicted the 15-minute rounds, and tells the Scout and the Caller when RSI hits an extreme |
 
 **Every new hire starts on probation**: a **24-hour trial**, restarted if it's flagged stuck or broken while on it. The **Training room picks it up the moment it joins**: a trainer appears on the same reading, tracking the trial (*0 of 24 hours of its trial · about 24 h to go*). When the hire graduates, the hire and its trainer each earn **+50 merit**. Like everyone on the team, a hire reports and informs: none of them changes a call.
 

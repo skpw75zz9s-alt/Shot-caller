@@ -4,6 +4,7 @@
 // approved hire joins the team (hiring.js keeps the applications and who's hired). Like everyone else, a hire reports
 // and informs: none of them changes a call.
 import { pnl10 } from './model.js';
+import { RSI, rsiRead, rsiTestCached } from './rsiagent.js';
 
 const ET = (t) => {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
@@ -173,6 +174,23 @@ export const CANDIDATES = [
       const long = since > 3 * usual && since > 2 * 3600000;
       return { state: long ? 'warn' : 'ok', status: `Last official call ${dur(since / 60000)} ago · the usual gap: ${dur(usual / 60000)}`, key: long ? 'quiet' : 'ok',
         say: long ? `no call in ${dur(since / 60000)}` : null, talks: long ? [{ to: 'caller', text: `No official call in ${dur(since / 60000)}: three times the usual gap (${dur(usual / 60000)}).` }] : [] };
+    } },
+  // ---------- v13.85: the RSI agent ----------
+  { key: 'rsi', role: 'h_rsi', name: 'RSI agent', icon: '📈', dept: 'desk',
+    job: 'reads RSI on 1, 5 and 15 minutes, and tests whether it predicts the round',
+    does: 'Reads RSI 14 on 1-, 5- and 15-minute candles (70+ overbought, 30 or under oversold) and spots fresh divergences. It tests every past round on the saved history that opened at an RSI extreme: did it reverse (overbought → down, oversold → up) more than chance? It tells the Scout and the Caller when RSI hits an extreme, and whether extremes have been proven to fade, to run, or neither.',
+    cant: 'RSI is one reading of momentum: an extreme can stay extreme in a strong trend. Until its test proves an edge (30+ extreme rounds, z of 2 or more), what it says is context, not a signal.',
+    fit: (c) => (c.bars?.length >= 300 ? `${Math.round(c.bars.length / 60)} hours of saved price history, and nobody watches RSI or tests whether its extremes predict the round.` : null),
+    row: (c) => {
+      const bars = c.bars || [];
+      if (bars.length < 60) return { state: 'idle', status: `${bars.length} minutes of price history: RSI needs an hour`, key: 'few', talks: [] };
+      const r = rsiRead(bars), t = rsiTestCached(c.series || 'home', bars), one = r.tfs[0];
+      const tfs = r.tfs.map((x) => `${x.min}m ${x.v ?? '—'}${x.zone && x.zone !== 'neutral' ? ` (${x.zone})` : ''}`).join(' · ');
+      const proof = t.verdict === 'few' ? `testing: ${t.extremes} of ${RSI.minExtremes} extreme rounds so far` : t.verdict === 'fade' ? `proven: extremes fade (${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})` : t.verdict === 'run' ? `proven: extremes keep running (only ${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})` : `no proven edge (${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})`;
+      const extreme = one.zone === 'overbought' || one.zone === 'oversold', say = extreme ? `1-minute RSI ${one.v}: ${one.zone}` : r.divergence ? `${r.divergence} RSI divergence` : null;
+      const lean = !extreme ? '' : t.verdict === 'fade' ? `; extremes have faded here, so a turn ${one.zone === 'overbought' ? 'down' : 'up'} is likelier` : t.verdict === 'run' ? `; extremes have kept running here, so the move may go on` : '; not proven to predict the round';
+      return { state: extreme ? 'busy' : 'ok', status: `RSI ${tfs}${r.divergence ? ` · ${r.divergence} divergence` : ''} · ${proof}`, key: `${one.zone}:${r.divergence}:${t.verdict}`,
+        say, talks: extreme || r.divergence ? ['scout', 'caller'].map((to) => ({ to, text: extreme ? `1-minute RSI is ${one.v} (${one.zone})${lean}.` : `A ${r.divergence} RSI divergence on 1 minute: ${r.divergence === 'bearish' ? 'a new high on weaker momentum' : 'a new low on stronger momentum'}.` })) : [] };
     } },
 ];
 export const HIRE_ICON = Object.fromEntries(CANDIDATES.map((c) => [c.role, c.icon]));

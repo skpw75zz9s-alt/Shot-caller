@@ -81,6 +81,7 @@
   <link rel="modulepreload" href="doctor.js">
   <link rel="modulepreload" href="whales.js">
   <link rel="modulepreload" href="hires.js">
+  <link rel="modulepreload" href="rsiagent.js">
   <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
@@ -694,7 +695,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.84 · Backup mode</p>
+      <p class="fine" id="version">Shot Caller v13.85 · RSI agent</p>
     </section>
   </main>
 
@@ -735,7 +736,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '235';
+    window.SC_BUILD = '236';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

@@ -83,7 +83,7 @@ test('always at least one applicant: when no gap calls for anyone, the next read
   for (const c of CANDIDATES) if (!h.hired().includes(c.key)) { const a = pending().find((x) => x.key === c.key) ?? (h.search(ctx, { force: true }), pending().find((x) => x.key === c.key)); if (a) await h.decide(a.id, 'approve'); }
   for (let i = 0; i < 12 && h.hired().length < CANDIDATES.length; i++) { h.search(ctx, { force: true }); for (const a of pending()) await h.decide(a.id, 'approve'); }
   assert.equal(h.hired().length, CANDIDATES.length); h.search(ctx);
-  assert.deepEqual(pending(), [], 'the whole catalog is hired'); assert.equal(h.api().catalog, 10);
+  assert.deepEqual(pending(), [], 'the whole catalog is hired'); assert.equal(h.api().catalog, CANDIDATES.length);
 });
 
 test('the five newer hires: runs of losses, prices, sides and weekdays that lose, and quiet spells', () => {
@@ -109,7 +109,7 @@ test('in the team: the Recruiter with what\'s waiting, and a hire at work', () =
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
   assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 start in the last week$/);
-  assert.equal(CANDIDATES.length, 10);
+  assert.equal(CANDIDATES.length, 11);
 });
 
 // ---------- a new hire starts on probation, and the Training room picks it up the moment it joins ----------

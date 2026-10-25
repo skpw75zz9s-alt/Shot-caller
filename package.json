@@ -1,6 +1,6 @@
 {
   "name": "shot-caller",
-  "version": "13.84.0",
+  "version": "13.85.0",
   "description": "Mobile signal bot for Kalshi's 15-minute markets (Bitcoin, other coins, indexes, gold, oil)",
   "type": "module",
   "main": "server.js",
