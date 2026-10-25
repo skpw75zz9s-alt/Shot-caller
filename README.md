@@ -276,6 +276,17 @@ Security:
 
 ## Version notes (newest first)
 
+### The Fact checker (v13.91)
+A new hire in the hiring center: the **🔬 Fact checker** (`public/hires.js factCheck`), in the grading room. It puts six claims about the bot to a real test on the official record and gives each **TRUE** (the evidence is clearly for it, at 95%), **FALSE** (clearly against it, or for a "does better" claim, the difference shown to be under 5 points either way), or **UNPROVEN** (not enough evidence yet, with about how many more calls it would take if the gap held):
+1. The calls win more than half the time (Wilson 95% range against 50%).
+2. The calls win more often than their prices say they should (wins minus the wins the prices needed).
+3. Wins and losses come in streaks (Wald-Wolfowitz runs test).
+4. The calls are getting better (the newer half's edge against the older half's).
+5. UP calls do better than DOWN calls.
+6. Pricier calls (85¢ and up) beat their prices more than cheaper ones.
+
+Groups are compared by their edge over their prices, so cheap and pricey calls are judged fairly; each test needs 30+ calls in each group. It applies at 60+ graded official calls and tells the Caller (and for 2 and 3 the Risk officer) when a claim is settled. Unproven is not false, and with six tests at 95% one verdict in a few reports can be luck.
+
 ### Order book heatmap and CoinGlass (v13.90)
 - **Heatmap** (free, on the Pending orders card): like Bookmap's. The server already reads Kraken's order book for BTC, ETH, SOL, XRP and DOGE every 15 seconds; every 30 seconds it now also keeps the dollars resting at each price (bucketed on a fixed grid of about 0.04% of the price, within 1% of it, the 40 biggest per side), for the last hour, and keeps them through restarts. The phone draws it: price up the side, time along the bottom, green buy orders below the price, red sell orders above, brighter where more dollars sit, the white line the price. `GET /api/heatmap?m=`.
 - **CoinGlass** (needs your own key, a paid plan at coinglass.com/pricing): a "Futures market" card with open interest across the big exchanges, OI-weighted funding, liquidations (Binance, OKX, Bybit) and Binance's long/short accounts. `py scripts\shotctl.py env set COINGLASS_API_KEY=your-key` then restart. Fetched only while someone looks, kept a minute. Each reading is fetched on its own, so one your plan doesn't include shows its error and the rest still show. `COINGLASS_INTERVAL` (default `4h`, the smallest the cheapest plan allows). `GET /api/coinglass?m=`. Context only: no call uses either.
@@ -451,6 +462,7 @@ A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has 
 | 🔄 Restart watcher | always | records each server start: how long it's been up, and how often it restarts (each restart empties the team's memory) |
 | 📈 RSI agent | 5+ hours of saved price history | reads RSI 14 on 1, 5 and 15 minutes, tests on the saved history whether RSI extremes predicted the 15-minute rounds, and tells the Scout and the Caller when RSI hits an extreme |
 | 🧮 Mathematician | 10+ graded official calls | works the record out exactly after fees: win rate with its 95% range, the breakeven win rate, profit per call with its error, whether the record is proven ahead or behind its prices, and the Kelly stake once it is |
+| 🔬 Fact checker | 60+ graded official calls | tests six claims about the bot on the record (wins more than half, beats its prices, streaks, getting better, UP vs DOWN, pricier calls) and marks each TRUE, FALSE or UNPROVEN at 95% |
 
 **Every new hire starts on probation**: a **24-hour trial**, restarted if it's flagged stuck or broken while on it. The **Training room picks it up the moment it joins**: a trainer appears on the same reading, tracking the trial (*0 of 24 hours of its trial · about 24 h to go*). When the hire graduates, the hire and its trainer each earn **+50 merit**. Like everyone on the team, a hire reports and informs: none of them changes a call.
 

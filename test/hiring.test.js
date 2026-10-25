@@ -109,7 +109,7 @@ test('in the team: the Recruiter with what\'s waiting, and a hire at work', () =
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
   assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 unplanned start in the last week$/);
-  assert.equal(CANDIDATES.length, 12);
+  assert.equal(CANDIDATES.length, 13);
 });
 
 // ---------- a new hire starts on probation, and the Training room picks it up the moment it joins ----------
