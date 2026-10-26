@@ -109,6 +109,7 @@ export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
 const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
+let paperCache = null;
 const coinGlass = createCoinGlass(); // the whole futures market, with COINGLASS_API_KEY (coinglass.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
@@ -675,9 +676,9 @@ export const server = http.createServer(async (req, res) => {
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
     if (path === '/api/book') return send(res, 200, await orderBook.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // pending orders (orderbook.js)
-    if (path === '/api/paper') { // the Paper: the day's news as a newspaper (public/paper.js)
-      const seen = new Set(), markets = stacks.bots().map(([s]) => marketOf(s, discovery.list())).filter((m) => !seen.has(m.asset) && seen.add(m.asset)).map((m) => ({ asset: m.asset, name: m.name, kind: m.kind }));
-      return send(res, 200, { on: newsFeed.on(), ...buildPaper({ markets, newsOf: (a) => newsFeed.api(a), record: publicRecord(bot.record()) }) });
+    if (path === '/api/paper') { // the Paper: the day's news as a newspaper (public/paper.js), made at most once a minute
+      if (!paperCache || Date.now() - paperCache.at > 60000) paperCache = { on: newsFeed.on(), ...buildPaper({ day: newsFeed.day(), record: publicRecord(bot.record()) }) };
+      return send(res, 200, paperCache);
     }
     if (path === '/api/coinglass') return send(res, 200, await coinGlass.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // CoinGlass (coinglass.js)
     if (path === '/api/heatmap') return send(res, 200, orderBook.heatmap(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // the order book heatmap (orderbook.js)

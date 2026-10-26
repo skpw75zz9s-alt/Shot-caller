@@ -276,6 +276,15 @@ Security:
 
 ## Version notes (newest first)
 
+### The Paper: every market-moving headline of the day (v13.94)
+The Paper now prints the **whole day's** market news (since midnight Eastern; before 6 AM, since 6 PM the evening before), not just the last 6 hours of the running markets. Besides each running market, the news feed now searches Google News every 10 minutes for the topics that move every market (`newsfeed.js TOPICS`): the Fed and rates, the economy (inflation, jobs), Treasury yields and the dollar, the stock market, earnings, crypto, oil and OPEC, gold and silver, and world policy (tariffs, sanctions, geopolitics). Headlines are kept 26 hours for the Paper (`day()`); the News scout still reads only the last 6. The page:
+- **Top story**: the most-covered story of the last 3 hours.
+- **The day's other big stories**: up to 5 more of the most-covered stories, one headline per story.
+- **Sections**: The economy & the Fed, Stocks, Crypto, Commodities, World & policy, with every other headline printed once, in its most specific section, with a count (30 shown per section, newest first).
+- **Today's schedule** (high and medium impact) and **From the bot's desk**.
+
+The server builds it at most once a minute. `NEWS_TOPICS=off` turns the topic searches off.
+
 ### The Paper (v13.93)
 A new **Paper** tab (between Alerts and Record): the day's market news laid out as a newspaper, *The Shot Caller Times*. It's built on the server from the News scout's feed (`public/paper.js buildPaper`, `GET /api/paper`): Google News for every running market and CoinDesk for crypto, the last 6 hours.
 - **Top story**: the headline the most other headlines are also about (sharing 3+ key words), from the last 3 hours, so the story everyone is covering leads.

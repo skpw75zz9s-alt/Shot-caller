@@ -48,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '243'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '244'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2478,7 +2478,9 @@ async function refreshPaper(force) {
   if (!p.on) setHTML($('paperLead'), '<p class="paper-empty">The news feed is turned off on this server (NEWS=off).</p>');
   else if (!p.lead) setHTML($('paperLead'), '<p class="paper-empty">No headlines yet: the first arrive within a few minutes of the server starting.</p>');
   else setHTML($('paperLead'), `<small class="paper-kicker">Top story${p.lead.covered ? ` · ${p.lead.covered} other headline${p.lead.covered === 1 ? '' : 's'} on it` : ''}</small><h2>${paperLink(p.lead)}</h2>${paperByline(p.lead)}`);
-  setHTML($('paperSections'), (p.sections || []).map((s) => `<section class="paper-sec"><h3>${esc(s.title)}</h3>${s.items.length ? s.items.map((x, i) => `<div class="paper-item${i === 0 ? ' first' : ''}">${paperLink(x)}${paperByline(x)}</div>`).join('') : '<p class="paper-empty">Quiet so far.</p>'}</section>`).join(''));
+  setHidden($('paperBig'), !p.big?.length);
+  setHTML($('paperBigList'), (p.big || []).map((x) => `<li>${paperLink(x)}${paperByline({ ...x, tags: [] })}<small class="paper-by">${x.covered} other headlines on it</small></li>`).join(''));
+  setHTML($('paperSections'), (p.sections || []).map((s) => `<section class="paper-sec"><h3>${esc(s.title)} <small>${s.total}</small></h3>${s.items.map((x, i) => `<div class="paper-item${i === 0 ? ' first' : ''}">${paperLink(x)}${paperByline(x)}</div>`).join('')}${s.total > s.items.length ? `<p class="paper-empty">…and ${s.total - s.items.length} older headlines today.</p>` : ''}</section>`).join('') || '<p class="paper-empty">No headlines yet today.</p>');
   const IMP = { High: 'paper-high', Medium: '' };
   setHTML($('paperEvents'), (p.events || []).map((e) => `<li class="${IMP[e.impact] || ''}"><time>${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(e.t))}</time><span>${esc(e.country)} ${esc(e.title)}${e.forecast ? ` <small>(forecast ${esc(e.forecast)}${e.previous ? `, before ${esc(e.previous)}` : ''})</small>` : ''}</span></li>`).join('') || '<li><span>Nothing big scheduled in the next 24 hours.</span></li>');
   const r = p.record;

@@ -594,12 +594,13 @@
       <div class="paper">
         <div class="paper-mast"><div class="paper-strip"><span id="paperDate"></span><span id="paperEdition"></span></div><h1>The Shot Caller Times</h1><div class="paper-strip"><span>Markets · Money · The bot</span><span id="paperCount"></span></div></div>
         <article class="paper-lead" id="paperLead"><p class="paper-empty">The presses are warming up: the first headlines arrive within a few minutes of the server starting.</p></article>
+        <div class="paper-big" id="paperBig" hidden><h3>The day's other big stories</h3><ol id="paperBigList"></ol></div>
         <div class="paper-cols" id="paperSections"></div>
         <div class="paper-cols paper-foot">
           <aside class="paper-box"><h3>Today's schedule</h3><ul id="paperEvents"></ul></aside>
           <aside class="paper-box"><h3>From the bot's desk</h3><div id="paperDesk"></div></aside>
         </div>
-        <p class="paper-fine">Headlines from Google News and CoinDesk for every market the bot runs, the last 6 hours, refreshed every few minutes; the schedule is the week's economic calendar (ForexFactory), high and medium impact. The lead story is the one the most other headlines are also about. Tap a headline to read the original. News moves markets but isn't a call: no call uses it.</p>
+        <p class="paper-fine">Every market-moving headline of the day (since midnight Eastern; before 6 AM, since 6 PM the evening before) from Google News and CoinDesk: the markets the bot runs plus the Fed, the economy, yields, stocks, earnings, crypto, oil, metals, and world policy (tariffs, sanctions), refreshed every few minutes, each story printed once. The schedule is the day's economic calendar (ForexFactory), high and medium impact. The lead story is the one the most other headlines are also about. Tap a headline to read the original. News moves markets but isn't a call: no call uses it.</p>
       </div>
     </section>
     <section id="view-success" class="view">
@@ -716,7 +717,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.93 · The Paper</p>
+      <p class="fine" id="version">Shot Caller v13.94 · The Paper: the whole day</p>
     </section>
   </main>
 
@@ -758,7 +759,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '243';
+    window.SC_BUILD = '244';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
