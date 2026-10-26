@@ -38,7 +38,7 @@ test('the Recruiter searches nonstop and files what fits; approve hires, decline
   await h.load();
   const ctx = { now: t, markets: [{ series: 'KXBTC15M', name: 'Bitcoin', kind: 'crypto' }, { series: 'KXINX', name: 'S&P 500', kind: 'index' }], calls: Array.from({ length: 40 }, (_, i) => call(i % 5 !== 0)), traders: 0, uptime: h.uptime() };
   const apps = h.search(ctx);
-  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'restarts', 'streak'], 'the coaches need more graded calls; the Quiet-spell watcher needs times');
+  assert.deepEqual(apps.map((a) => a.key).sort(), ['drawdown', 'hours', 'liquidity', 'math', 'restarts', 'streak'], 'the coaches need more graded calls; the Quiet-spell watcher needs times');
   assert.match(apps.find((a) => a.key === 'hours').why, /S&P 500/); assert.ok(apps.every((a) => !a.standby));
   t += 5000;
   assert.deepEqual(h.search(ctx), [], 'it looks again on the next reading: nobody new, nobody filed twice');
@@ -83,7 +83,7 @@ test('always at least one applicant: when no gap calls for anyone, the next read
   for (const c of CANDIDATES) if (!h.hired().includes(c.key)) { const a = pending().find((x) => x.key === c.key) ?? (h.search(ctx, { force: true }), pending().find((x) => x.key === c.key)); if (a) await h.decide(a.id, 'approve'); }
   for (let i = 0; i < 12 && h.hired().length < CANDIDATES.length; i++) { h.search(ctx, { force: true }); for (const a of pending()) await h.decide(a.id, 'approve'); }
   assert.equal(h.hired().length, CANDIDATES.length); h.search(ctx);
-  assert.deepEqual(pending(), [], 'the whole catalog is hired'); assert.equal(h.api().catalog, 10);
+  assert.deepEqual(pending(), [], 'the whole catalog is hired'); assert.equal(h.api().catalog, CANDIDATES.length);
 });
 
 test('the five newer hires: runs of losses, prices, sides and weekdays that lose, and quiet spells', () => {
@@ -108,8 +108,8 @@ test('in the team: the Recruiter with what\'s waiting, and a hire at work', () =
   assert.match(r.recruiter.status, /^2 applications waiting for your approval \(Settings → Admin → Hiring center\) · 2 hired · searching nonstop$/);
   assert.match(r.h_hours.status, /^S&P 500: open, closes in 10 min$/); assert.equal(r.h_hours.state, 'busy');
   assert.ok(r.h_hours.talks.some((t) => t.to === 'caller' && /closes in 10 min/.test(t.text)));
-  assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 start in the last week$/);
-  assert.equal(CANDIDATES.length, 10);
+  assert.match(r.h_restarts.status, /^Up 3 h 0 min · 1 unplanned start in the last week$/);
+  assert.equal(CANDIDATES.length, 13);
 });
 
 // ---------- a new hire starts on probation, and the Training room picks it up the moment it joins ----------
@@ -144,4 +144,23 @@ test('in the team: approve a hire and, on the very next reading, it is on probat
   const c = by();
   assert.match(c.tr_h_restarts.status, /graduated its trial/);
   assert.ok(c.h_restarts.score.day >= 50 && c.tr_h_restarts.score.day >= 50, 'the hire and its trainer each +50');
+});
+
+test('planned restarts (an update, a restart on purpose) are counted apart: only unplanned ones are trouble', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'hire-')), file = join(dir, 'hiring.json');
+  let t = et('2026-10-20T12:00:00-04:00');
+  for (let i = 0; i < 14; i++) { // 14 starts in a week: 12 after an update's planned stop, 2 on their own
+    if (i % 7 !== 0) writeFileSync(join(dir, 'planned-restart.json'), JSON.stringify({ at: t - 30000, why: 'update' }));
+    const h = createHiring({ file, clock: () => t }); await h.load(); t += 3600000;
+  }
+  const h = createHiring({ file, clock: () => t }); await h.load(); // and one more on its own
+  const u = h.uptime();
+  assert.equal(u.starts.length, 15); assert.equal(u.planned.length, 12);
+  const row = CANDIDATES.find((c) => c.key === 'restarts').row({ now: t, uptime: u });
+  assert.equal(row.state, 'ok', '3 unplanned starts is fine; the 12 updates don\'t count');
+  assert.match(row.status, /3 unplanned starts in the last week \(plus 12 planned/);
+  writeFileSync(join(dir, 'planned-restart.json'), JSON.stringify({ at: t - 3600000, why: 'update' }));
+  const late = createHiring({ file, clock: () => t }); await late.load();
+  assert.equal(late.uptime().planned.length, 12, 'a stale note (an hour old) is not taken for this start');
 });

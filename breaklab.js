@@ -5,10 +5,11 @@
 //                              and grades whatever has reached its horizon
 //   settle(series, ticker, r)  grades the claims judged on a round's result
 // The graded cases are kept per market in DATA_DIR/breaks.json (the last 400 of each).
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { findBreaks, trackBreaks } from './public/xray.js';
 import { CLAIMS, POOLS, PROOF, verdict } from './public/breakproof.js';
+import { writeAtomic } from './atomicfile.js';
 
 const RING_MS = 20 * 60000;
 export function createBreakLab({ file, clock = () => Date.now(), log = console }) {
@@ -81,7 +82,7 @@ export function createBreakLab({ file, clock = () => Date.now(), log = console }
   async function save() {
     if (saving || !dirty) return saving;
     dirty = false;
-    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(state)); await rename(`${file}.tmp`, file); })()
+    saving = (async () => { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(state)); })()
       .catch((e) => log.error?.('saving the break lab failed', e.message)).finally(() => { saving = null; });
     return saving;
   }

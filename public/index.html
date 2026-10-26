@@ -51,6 +51,7 @@
   <link rel="modulepreload" href="fees.js">
   <link rel="modulepreload" href="callgate.js">
   <link rel="modulepreload" href="flip.js">
+  <link rel="modulepreload" href="flipwarn.js">
   <link rel="modulepreload" href="split.js">
   <link rel="modulepreload" href="why.js">
   <link rel="modulepreload" href="pulse.js">
@@ -81,6 +82,7 @@
   <link rel="modulepreload" href="doctor.js">
   <link rel="modulepreload" href="whales.js">
   <link rel="modulepreload" href="hires.js">
+  <link rel="modulepreload" href="rsiagent.js">
   <link rel="modulepreload" href="phonetrade.js">
   <link rel="modulepreload" href="settle.js">
   <link rel="modulepreload" href="signals.js">
@@ -228,6 +230,32 @@
         <details class="how"><summary>How it works</summary><small class="fine-left">Every trade of $100k or more on a USD exchange is graded a minute later on what the price did: <b>moved</b> its way by at least a typical minute's move, <b>faded</b> (went the other way as much), or <b>no real move</b>. The whales are grouped by what's known the moment they print (size, exchange, buy or sell, alone or in a sweep). A group is proven to move the market once it has 30 graded whales and its average move its way is clearly more than chance (t of 2 or more); otherwise it's noise. A new whale is a <b>likely mover</b> when one of its groups is proven to move. On the live tape, ⚡ marks a likely mover and 💤 likely noise. Moving its way afterwards is what's measured, not why: a whale can buy into a rise that was coming anyway. Context only: no call uses it.</small></details>
       </div>
 
+      <div data-crypto-only data-pro class="card book-card" id="bookCard" hidden>
+        <div class="deep-head"><span>📖 Pending orders · Kraken</span><b id="obLean"></b></div>
+        <p class="wf-say" id="obSay"></p>
+        <div class="tug-bar" title="Dollars waiting to buy (green) vs to sell (red) within 0.5% of the price"><i id="obFill"></i><em id="obMark"></em></div>
+        <div class="tiles2">
+          <div class="tile"><label>Best buy order</label><b id="obBid">—</b><small id="obBidSub"></small></div>
+          <div class="tile"><label>Best sell order</label><b id="obAsk">—</b><small id="obAskSub"></small></div>
+        </div>
+        <ul class="ob-bands" id="obBands"></ul>
+        <div class="team-feed-h">Walls: one price holding far more than the prices around it</div>
+        <ul class="wf-list ob-walls" id="obWalls"></ul>
+        <div class="team-feed-h">Heatmap: where the orders sat, the last hour <small class="muted">(brighter = more dollars waiting)</small></div>
+        <div class="ob-heat" id="obHeatWrap"><canvas id="obHeat" width="600" height="220" role="img" aria-label="Order book heatmap: price up the side, time along the bottom, brighter where more dollars were waiting"></canvas><small class="muted" id="obHeatSay">Building up: a column every 30 seconds.</small></div>
+        <div class="team-feed-h">Who's stacked, the last 2 hours</div>
+        <div class="ob-hist" id="obHist"></div>
+        <div class="team-feed-h">Activity: walls going up, getting hit, getting pulled</div>
+        <ul class="wf-list ob-walls" id="obEvents"></ul>
+        <details class="how"><summary>How it works</summary><small class="fine-left">These are the orders waiting on Kraken's order book: people offering to buy below the price and to sell above it, up to 500 prices on each side, refreshed every 3 seconds while you watch. The bar compares the dollars waiting to buy against the dollars waiting to sell within 0.5% of the price. A <b>wall</b> is one price holding at least 5 times what a typical nearby price holds. The server tracks all five coins around the clock, every 15 seconds. A wall that stands 30 seconds goes in the activity log as <b>up</b>. If the price then reaches it, it was <b>hit</b> (traded into). If it vanishes before the price gets there, it was <b>pulled</b>: big orders are often placed to look like support or resistance and removed before they fill. The <b>heatmap</b> works like Bookmap's: price up the side, time along the bottom, and each spot as bright as the dollars that were waiting at that price then (green below the price, red above, the white line is the price). A bright band that holds is a wall people keep defending; one that disappears just before the price arrives was pulled. The stacked chart shows which side was stacked within 0.5% of the price, minute by minute (up = buyers, down = sellers). Orders can be cancelled at any moment, so this shows intent, not a promise. One exchange's book, not the whole market. Context only: no call uses it.</small></details>
+      </div>
+
+      <div data-crypto-only data-pro class="card cg-card" id="cgCard" hidden>
+        <div class="card-h"><h2>Futures market (CoinGlass)</h2><span id="cgAt" class="muted"></span></div>
+        <p id="cgSay" class="muted"></p>
+        <div class="tiles2" id="cgTiles"></div>
+        <details class="how"><summary>How it works</summary><small class="fine-left">From CoinGlass, which adds up the futures markets of all the big exchanges. <b>Open interest</b>: the dollars in open futures bets; rising with the price means new money behind the move, falling means bets being closed. <b>Funding</b>: what longs pay shorts every 8 hours (or shorts pay longs when it's negative), weighted by open interest; very positive means the market is crowded long, which often ends in a flush down. <b>Liquidations</b>: longs and shorts forced out over the window. <b>Long/short</b>: the share of Binance accounts betting up vs down. Needs your own CoinGlass API key (a paid plan). Updated at most once a minute. Context only: no call uses it.</small></details>
+      </div>
       <div data-pro class="card watch" id="watchCard">
         <div class="deep-head"><span>Market watch</span><b id="watchWhen"></b></div>
         <div class="watch-now" id="watchNow">Watching…</div>
@@ -562,6 +590,19 @@
       <div id="xrDebate"></div>
       <div id="xrStats" class="xr-stats"></div>
     </section>
+    <section id="view-paper" class="view">
+      <div class="paper">
+        <div class="paper-mast"><div class="paper-strip"><span id="paperDate"></span><span id="paperEdition"></span></div><h1>The Shot Caller Times</h1><div class="paper-strip"><span>Markets · Money · The bot</span><span id="paperCount"></span></div></div>
+        <article class="paper-lead" id="paperLead"><p class="paper-empty">The presses are warming up: the first headlines arrive within a few minutes of the server starting.</p></article>
+        <div class="paper-big" id="paperBig" hidden><h3>The day's other big stories</h3><ol id="paperBigList"></ol></div>
+        <div class="paper-cols" id="paperSections"></div>
+        <div class="paper-cols paper-foot">
+          <aside class="paper-box"><h3>Today's schedule</h3><ul id="paperEvents"></ul></aside>
+          <aside class="paper-box"><h3>From the bot's desk</h3><div id="paperDesk"></div></aside>
+        </div>
+        <p class="paper-fine">Every market-moving headline of the day (since midnight Eastern; before 6 AM, since 6 PM the evening before) from Google News and CoinDesk: the markets the bot runs plus the Fed, the economy, yields, stocks, earnings, crypto, oil, metals, and world policy (tariffs, sanctions), refreshed every few minutes, each story printed once. The schedule is the day's economic calendar (ForexFactory), high and medium impact. The lead story is the one the most other headlines are also about. Tap a headline to read the original. News moves markets but isn't a call: no call uses it.</p>
+      </div>
+    </section>
     <section id="view-success" class="view">
       <div class="card map-hero">
         <div class="deep-head"><span>Map to success</span><b id="mapLive" class="map-live">● live</b></div>
@@ -676,7 +717,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.82 · Whale filter</p>
+      <p class="fine" id="version">Shot Caller v13.95 · Round calls hold through reloads</p>
     </section>
   </main>
 
@@ -707,6 +748,7 @@
     <button data-view="chart"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-6 4 3 6-8"/></svg>Chart</button>
     <button data-view="radar" data-pro><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
+    <button data-view="paper"><svg viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2zM17 9h3v10a2 2 0 0 1-2 2M7 8h7M7 11h7M7 14h4M7 17h4"/></svg>Paper</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
     <button data-view="xray" data-pro><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M12 7v10M9 9.5h6M8.5 12h7M9 14.5h6"/></svg>X-ray</button>
@@ -717,7 +759,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '231';
+    window.SC_BUILD = '245';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;

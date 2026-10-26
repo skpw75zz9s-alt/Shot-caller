@@ -19,6 +19,7 @@ import { createAutopilot } from './autopilot.js';
 import { CHECKPOINTS, FEATURES, FEATURE_NAMES, GLOBAL_SCAN, MIN_SAMPLES, SCAN_EXCHANGES, checkpointFor, featureVector, fmtK, scanChance, scanRound } from './roundscan.js';
 import { LINE_NAMES, blendBand, blendFit, blendScore, coneRecord, correctLines, expectedPath, marketCone, pathMinutes, pathRecord, pathTurns, predictionLines, predictionRecord, scaleLines } from './predict.js';
 import { flipForecast, flipRecord, turnBaseRate, turnHappened } from './flip.js';
+import { FLIP_MARK, flipDue } from './flipwarn.js';
 import { radarRead, radarRecord, scopeIdle, scopeSvg, SCOPE } from './radar.js';
 import { accuracyReport, accuracyRows } from './accuracy.js';
 import { withGuard } from './winguard.js';
@@ -47,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '231'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '245'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -241,12 +242,24 @@ function paywalled(r) {
   throw new Error('payment required');
 }
 
+const DIRECT = { base: null, offUntil: 0 };
 async function getJSON(path) {
   // The page's first lines already started the startup requests (index.html): use those once, if they're fresh
   const pre = window.__pre && window.__pre[path];
   if (pre) delete window.__pre[path];
   // a request stuck on a flaky phone connection gives up after 10s (the next poll tries again) instead of hanging
-  const r = (pre && Date.now() - window.__pre.at < 15000 && await pre) || await fetch(`${API}/${path}`, { signal: AbortSignal.timeout?.(10000) });
+  let r = pre && Date.now() - window.__pre.at < 15000 && await pre;
+  // the direct lane (v13.92, cloudflare/worker.js direct): straight to the home server while it answers, so the polling
+  // doesn't use up the Worker's free daily requests; on any trouble, back through the Worker (and its backup) for a minute
+  if (!r && DIRECT.base && Date.now() > DIRECT.offUntil) {
+    try {
+      r = await fetch(`${DIRECT.base}/api/${path}`, { credentials: 'include', signal: AbortSignal.timeout?.(10000) });
+      if (r.status === 401 || r.status === 403 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
+    } catch { r = null; DIRECT.offUntil = Date.now() + 60000; }
+  }
+  r ||= await fetch(`${API}/${path}`, { signal: AbortSignal.timeout?.(10000) });
+  const d = r.headers.get('x-sc-direct');
+  if (d && /^https:\/\/[\w.-]+$/.test(d)) DIRECT.base = d;
   paywalled(r);
   const srv = Date.parse(r.headers.get('date') || ''); // server clock, for the health check's phone-clock test
   if (srv) state.skewMs = Date.now() - srv - 500; // the Date header drops milliseconds: half a second on average
@@ -823,8 +836,11 @@ function renderDeck(snap, live, sig, now) {
     const lean = leanSide(live.ev), called = sig?.called;
     // v13.38: the flip check (chart history + buyers / sellers, proven only) says the called side is more likely than not to lose
     const fcLose = called ? flipCheckNow(tk)?.pLose?.[called] : null;
-    if (sustained(watch, 'flipchk', fcLose != null && fcLose >= 0.5 && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: ${Math.round(fcLose * 100)}% the ${called === 'YES' ? 'UP' : 'DOWN'} call flips`, 'chart history and buyers / sellers · held 10s', `flipchk:${tk}`);
-    if (sustained(watch, 'flip', !!called && !!lean && lean !== called && live.ev.minutesLeft > 0.5, now)) alerts.event('flip', `Flip warning: bot now leans ${lean === 'YES' ? 'UP' : 'DOWN'}`, `against the ${called === 'YES' ? 'UP' : 'DOWN'} call · held 10s`, `flip:${tk}`);
+    if (sustained(watch, 'flipchk', fcLose != null && fcLose >= 0.6 && live.ev.minutesLeft >= 1, now, 20000)) alerts.event('flip', `Flip warning: ${Math.round(fcLose * 100)}% the ${called === 'YES' ? 'UP' : 'DOWN'} call flips`, 'chart history and buyers / sellers · held 20s', `flipchk:${tk}`);
+    // v13.88: not on a dip under 50% any more: the call's odds 40% or under for 20 s with a minute left (flipwarn.js)
+    if (`${tk}:${called}` !== watch.fwKey) { watch.fwKey = `${tk}:${called}`; watch.fw = {}; }
+    const calledP = called && live.ev.pYes != null ? (called === 'YES' ? live.ev.pYes : 1 - live.ev.pYes) : null;
+    if (calledP != null && flipDue(watch.fw, { p: calledP, minutesLeft: live.ev.minutesLeft, now })) alerts.event('flip', `Flip warning: the ${called === 'YES' ? 'UP' : 'DOWN'} call is down to ${Math.round(calledP * 100)}%`, `the bot leans ${lean === 'YES' ? 'UP' : 'DOWN'} · held 20s at 40% or under`, `flip:${tk}`);
     const risky = !!called && hold != null && (1 - hold) * 100 >= alerts.prefs().flipRisk;
     if (sustained(watch, 'fliprisk', risky, now)) alerts.event('fliprisk', `High flip risk: ${Math.round((1 - hold) * 100)}/100`, `hold odds ${Math.round(hold * 100)}% on the ${called === 'YES' ? 'UP' : 'DOWN'} call`, `fliprisk:${tk}`);
   }
@@ -1353,7 +1369,9 @@ function pathNow(live, snap, now, lines = predictionsNow(live, snap, now)) {
   const move = spot * sigma * Math.sqrt(mins); // a typical move to the close: the fit's biases are in these
   lines = correctLines(scaleLines(lines, fit.scale, spot), Object.fromEntries(Object.entries(fit.bias).map(([k, b]) => [k, b * move])), now, close); // each line's moves scaled to how far they really carry, minus its measured bias
   const final = fit.final, minutes = pathMinutes({ lines, spot, sigmaMin: sigma, now, close: horizonOf(live, now), weights, flip, beta, final });
-  return { lines, minutes, turns: flip ? pathTurns(minutes, spot, now, flip.sd1, flip.v0) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
+  // ↺ marks only for a ripe move and a real turn, and not while their record proves them no better than random (flipwarn.js)
+  const marks = flip && flip.score >= FLIP_MARK.score && !flipRecord(state.flipLog, state.flipBase).worse;
+  return { lines, minutes, turns: marks ? pathTurns(minutes, spot, now, flip.sd1, flip.v0, FLIP_MARK.depth) : [], flip, beta, path: expectedPath({ lines, spot, now, weights, flip, beta, final }) };
 }
 // The market radar (public/radar.js): calls about this round that hold 90%+ of the time, from the bot's own record
 function radarNow(live, snap, now, pcs = pathNow(live, snap, now)) {
@@ -1453,7 +1471,8 @@ function trackPredictions(snap, live, now) {
   const fr = flipRecord(state.flipLog, state.flipBase), f = state.flipNow;
   setHTML($('flipInfo'), (f ? `<b>Flip watch:</b> ${f.v0 >= 0 ? 'rising' : 'falling'} ${Math.abs(f.v0) < 1 ? '(barely)' : `$${Math.abs(f.v0).toFixed(0)}/min`} · ${f.dir === 'up' ? 'bounce' : 'pullback'} odds <b>${Math.round(f.score * 100)}%</b>${f.parts.length ? `: ${f.parts.map((p) => esc(p.why)).join(' · ')}` : ': no turn signs'}. ` : '')
     + (fr.n ? `Turns called: caught <b>${fr.hits} of ${fr.n}</b> (${Math.round(fr.rate * 100)}%)${fr.base != null ? ` vs <b>${Math.round(fr.base * 100)}%</b> for a random minute` : ''}${fr.n >= 20 ? ` · strength ×${fr.amp.toFixed(2)}` : ''}`
-      : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.'));
+      : 'Each predicted turn (↺) is checked afterwards: did price really make a V there? The record shows up here next to how often a random minute looks like one.')
+    + (fr.worse ? ' · <b>↺ marks off</b>: proven no better than a random minute' : f && f.score < FLIP_MARK.score ? ` · ↺ marks only at ${Math.round(FLIP_MARK.score * 100)}%+` : ''));
   const cr = coneRecord(state.coneLog);
   if (!live) state.coneSum = null;
   else if (!(now - (state.coneSumAt || 0) < 5000)) { state.coneSumAt = now; state.coneSum = coneNow(live, snap, now, pathNow(live, snap, now).path, Date.parse(live.m.close_time)).summary; } // every 5 s
@@ -1599,7 +1618,8 @@ function renderFailed(e) {
   let healed = true; try { healed = !!sessionStorage.getItem(key); } catch { /* storage blocked */ }
   setText($('reason'), `Couldn't draw this round (${e.message}). ${!stuck ? 'Retrying…' : healed ? 'Still failing after clearing this market\'s saved data: send a screenshot of this.' : 'Clearing this market\'s saved data on the phone…'}`);
   if (!stuck || healed) return;
-  try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) localStorage.removeItem(LK(k)); } catch { /* storage blocked */ }
+  // set aside, not deleted: each one is kept as <key>.bak (the last copy), so the logs and the scorecard can be recovered
+  try { sessionStorage.setItem(key, '1'); for (const k of MARKET_CACHES) { const v = localStorage.getItem(LK(k)); if (v != null) localStorage.setItem(`${LK(k)}.bak`, v); localStorage.removeItem(LK(k)); } } catch { /* storage blocked */ }
   location.reload();
 }
 function renderNow() {
@@ -2008,19 +2028,29 @@ function serverPickFor(live, now) {
   const k = state.pick?.live;
   return k && k.closeTime === live.m.close_time && now - (state.pickAt || 0) < 60000 ? k : null;
 }
+// v13.95 the side shown is saved on the phone too: a reload mid-round (an update, the app reopened, the server back from
+// backup mode with its own pick) used to forget it, and the round could then show the other side
+function shownRounds(now = Date.now()) {
+  if (!state.roundShown) {
+    const saved = store.get('roundShown', {}) || {};
+    state.roundShown = Object.fromEntries(Object.entries(saved).filter(([, e]) => e?.side && Date.parse(e.closeTime) > now));
+  }
+  return state.roundShown;
+}
+const saveShown = () => store.set('roundShown', state.roundShown || {});
 function lockedSideFor(live, now) {
   if (!live) return null;
-  const k = serverPickFor(live, now) ?? state.roundShown?.[live.m.ticker];
+  const k = shownRounds(now)[live.m.ticker] ?? serverPickFor(live, now); // what this phone already showed wins, as in roundCallFor
   return k?.side ? { ticker: live.m.ticker, side: k.side } : null;
 }
 function roundCallFor(live, snap, now) {
-  const t = live.m.ticker, server = serverPickFor(live, now), shown = (state.roundShown ||= {})[t];
+  const t = live.m.ticker, server = serverPickFor(live, now), shown = shownRounds(now)[t];
   if (shown) return server && server.side === shown.side ? server : shown;
-  if (server) return (state.roundShown[t] = server);
+  if (server) { state.roundShown[t] = server; saveShown(); return server; }
   const lockAt = Date.parse(live.m.close_time) - PICK.at * 60000;
   if (now < lockAt + 15000 && now - (state.pickAt || 0) < 30000) return { locking: true };
-  for (const k of Object.keys(state.roundShown)) if (!state.markets.some((m) => m.ticker === k)) delete state.roundShown[k];
-  const keep = (e) => (e?.side ? (state.roundShown[t] = e) : null);
+  for (const [k, e] of Object.entries(state.roundShown)) if (Date.parse(e.closeTime) <= now) delete state.roundShown[k]; // rounds that are over (other markets' rounds stay: switching markets mustn't forget them)
+  const keep = (e) => (e?.side ? ((state.roundShown[t] = e), saveShown(), e) : null);
   state.localPick ||= {};
   if (!state.localPick[live.m.ticker]) {
     try { const e = pickNow({ row: live, snap, settings }); if (e) state.localPick[live.m.ticker] = { ...e, price: e.ask, strike: live.strike, closeTime: live.m.close_time, local: true }; } catch { /* next tick */ }
@@ -2377,6 +2407,117 @@ async function refreshWhales() {
   setHTML($('wfList'), (w.recent || []).slice(0, 8).map((c) => `<li class="${c.side}"><time>${hms(c.t)}</time><span class="sd">${c.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${cash(c.usd)} on ${esc(String(c.ex).replace('.US', ''))}${c.sweep ? ' · sweep' : ''}</span><em class="${c.out ? WF_OUT[c.out][1] : 'muted'}">${c.out ? `${WF_OUT[c.out][0]}${c.z != null ? ` (${c.z >= 0 ? '+' : '−'}${Math.abs(c.z).toFixed(1)}×)` : ''}` : 'grading…'}</em>${c.expected && c.expected !== 'not proven yet' ? `<small>expected: ${esc(c.expected)}</small>` : ''}</li>`).join('') || '<li class="muted">No whales yet: the filter grades every trade of $100k or more.</li>');
 }
 setInterval(refreshWhales, 15000); setTimeout(refreshWhales, 3000);
+// ---------- Pending orders (orderbook.js): the buy and sell orders waiting on Kraken's book ----------
+const agoShort = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : ms < 3600000 ? `${Math.round(ms / 60000)} min` : `${(ms / 3600000).toFixed(1)} h`);
+async function refreshBook() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
+  let b;
+  try { b = await getJSON(api('book')); } catch (e) {
+    // shown, not hidden: a card that silently never appears can't be told apart from a missing feature
+    if (!$('obBid').textContent.startsWith('$')) { setHidden($('bookCard'), false); setText($('obSay'), `Couldn't load the pending orders yet (${e.message}). Retrying every 3 seconds.`); }
+    return;
+  }
+  if (!b || b.off) return setHidden($('bookCard'), true);
+  setHidden($('bookCard'), false);
+  if (b.error) { setText($('obSay'), b.error); return; }
+  const px = (v) => usd(v, v >= 1000 ? 0 : Math.max(2, MKT.digits ?? 2));
+  const half = b.bands.find((x) => x.band === 0.5) || b.bands[0], tot = half.bid + half.ask, sellShare = tot ? half.ask / tot : 0.5;
+  setText($('obLean'), b.lean === 'buyers' ? 'buyers stacked' : b.lean === 'sellers' ? 'sellers stacked' : 'even');
+  $('obLean').className = b.lean === 'buyers' ? 'ok' : b.lean === 'sellers' ? 'bad' : '';
+  $('obFill').style.width = `${(sellShare * 100).toFixed(1)}%`; $('obMark').style.left = `calc(${(sellShare * 100).toFixed(1)}% - 1px)`;
+  setText($('obSay'), `${cash(half.bid)} waiting to buy and ${cash(half.ask)} waiting to sell within 0.5% of the price.${b.stale ? ' (Kraken didn\'t answer just now: this is the last book.)' : ''}`);
+  setText($('obBid'), px(b.bid)); setText($('obAsk'), px(b.ask));
+  setText($('obBidSub'), `spread ${b.spreadBps.toFixed(1)} bps`); setText($('obAskSub'), `as of ${hms(b.at)}`);
+  setHTML($('obBands'), b.bands.map((x) => `<li><span>within ${x.band}%${x.partial ? '*' : ''}</span><em class="good">${cash(x.bid)} buy</em><em class="bad">${cash(x.ask)} sell</em></li>`).join('')
+    + (b.bands.some((x) => x.partial) ? '<li class="fine"><span>* Kraken shows 500 prices a side, which don\'t reach this far</span></li>' : ''));
+  const wallRow = (w, extra) => `<li class="${w.side}"><span class="sd">${w.side === 'buy' ? 'BUY' : 'SELL'}</span><span>${px(w.price)}</span><em class="${w.side === 'buy' ? 'good' : 'bad'}">${cash(w.usd)}</em><small>${w.away.toFixed(2)}% ${w.side === 'buy' ? 'below' : 'above'} · ${extra}</small></li>`;
+  setHTML($('obWalls'), b.walls.length ? b.walls.map((w) => wallRow(w, `there for ${agoShort(w.standing)}`)).join('') : '<li><small>No walls within 2% right now.</small></li>');
+  const h = b.history || [];
+  if (h.length < 2) setHTML($('obHist'), '<small class="muted">Building up: one point a minute.</small>');
+  else {
+    const W = 300, H = 56, t0 = h[0].t, span = Math.max(1, h[h.length - 1].t - t0), x = (p) => ((p.t - t0) / span) * W, y = (p) => H / 2 - (p.imb * H) / 2;
+    const line = h.map((p, i) => `${i ? 'L' : 'M'}${x(p).toFixed(1)},${y(p).toFixed(1)}`).join('');
+    setHTML($('obHist'), `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Buyers versus sellers stacked over the last ${agoShort(span)}"><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" class="mid"/><path d="${line}L${W},${H / 2}L0,${H / 2}Z" class="area"/><path d="${line}" class="ln"/></svg><small class="muted"><span>${agoShort(span)} ago</span><span>▲ buyers · ▼ sellers</span><span>now</span></small>`);
+  }
+  const KIND = { up: ['went up', ''], hit: ['hit', 'muted'], pulled: ['pulled', 'warn'] };
+  setHTML($('obEvents'), (b.events || []).slice(0, 12).map((e) => wallRow({ ...e, away: Math.abs((e.price - b.mid) / b.mid) * 100 },
+    `<b class="${KIND[e.kind][1]}">${KIND[e.kind][0]}</b> ${agoShort(Date.now() - e.at)} ago${e.stood ? ` after ${agoShort(e.stood)}` : ''}`)).join('') || '<li><small>Nothing yet: walls are logged once they stand 30 seconds.</small></li>');
+}
+setInterval(refreshBook, 3000); setTimeout(refreshBook, 2000);
+// ---------- the order book heatmap (orderbook.js heatmap): a column every 30 seconds, the last hour, like Bookmap ----------
+async function refreshHeat() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live') || $('bookCard').hidden) return;
+  let h;
+  try { h = await getJSON(api('heatmap')); } catch { return; }
+  const cv = $('obHeat'), snaps = h?.snaps || [];
+  if (!cv || h?.off || snaps.length < 2 || !h.step) return setText($('obHeatSay'), h?.off || 'Building up: a column every 30 seconds.');
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  // the price window (in grid steps): the range the price ran, plus a margin
+  const mids = snaps.map((x) => x.mid), lo = Math.min(...mids), hi = Math.max(...mids), pad = Math.max((hi - lo) * 0.6, 12); // in grid steps (about 0.5% either side at least)
+  const kLo = Math.floor(lo - pad), kHi = Math.ceil(hi + pad), rows = Math.max(1, kHi - kLo + 1), cw = W / snaps.length, rh = H / rows;
+  const all = snaps.flatMap((x) => [...x.b, ...x.a].map((l) => l[1])).sort((a, b) => a - b), top = all[Math.floor(all.length * 0.98)] || 1;
+  ctx.fillStyle = '#05070a'; ctx.fillRect(0, 0, W, H);
+  const yOf = (k) => H - (k - kLo + 1) * rh;
+  snaps.forEach((x, i) => {
+    for (const [side, rgb] of [[x.b, '34,197,94'], [x.a, '239,68,68']]) for (const [k, v] of side) {
+      if (k < kLo || k > kHi) continue;
+      ctx.fillStyle = `rgba(${rgb},${Math.min(1, Math.sqrt(v / top)).toFixed(3)})`; ctx.fillRect(i * cw, yOf(k), Math.ceil(cw), Math.ceil(rh));
+    }
+  });
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
+  snaps.forEach((x, i) => { const y = H - (x.mid - kLo + 0.5) * rh; i ? ctx.lineTo((i + 0.5) * cw, y) : ctx.moveTo(0.5 * cw, y); }); ctx.stroke();
+  const px = (k) => usd(k * h.step, h.step >= 1 ? 0 : Math.max(2, MKT.digits ?? 2));
+  setHTML($('obHeatSay'), `<span>${agoShort(snaps.at(-1).t - snaps[0].t)} ago</span><span>${px(kLo)} – ${px(kHi)}</span><span>now</span>`);
+}
+setInterval(refreshHeat, 30000); setTimeout(refreshHeat, 4000);
+// ---------- the Paper (public/paper.js on the server): the day's market news as a newspaper ----------
+const paperAgo = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60 ? `${m % 60} min ` : ''}ago`; };
+const paperLink = (s, cls = '') => (s.link ? `<a class="${cls}" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a>` : `<span class="${cls}">${esc(s.title)}</span>`);
+const paperByline = (s) => `<small class="paper-by">${esc(s.source || 'News')} · ${paperAgo(s.t)}${s.tags?.length ? ` · ${s.tags.map(esc).join(', ')}` : ''}</small>`;
+let paperAt = 0;
+async function refreshPaper(force) {
+  if (document.hidden || !shownViews.has('paper') || (!force && Date.now() - paperAt < 120000)) return;
+  let p;
+  try { p = await getJSON('paper'); } catch (e) { if (!paperAt) setHTML($('paperLead'), `<p class="paper-empty">Couldn't fetch today's paper (${esc(e.message)}). Trying again in a minute.</p>`); return; }
+  paperAt = Date.now();
+  const et = (o) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...o }).format(new Date(p.at));
+  const hr = Number(et({ hour: 'numeric', hourCycle: 'h23' }));
+  setText($('paperDate'), et({ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }));
+  setText($('paperEdition'), `${hr < 5 ? 'Late' : hr < 12 ? 'Morning' : hr < 17 ? 'Afternoon' : 'Evening'} edition · ${et({ hour: 'numeric', minute: '2-digit' })} ET`);
+  setText($('paperCount'), p.stories ? `${p.stories} stories` : '');
+  if (!p.on) setHTML($('paperLead'), '<p class="paper-empty">The news feed is turned off on this server (NEWS=off).</p>');
+  else if (!p.lead) setHTML($('paperLead'), '<p class="paper-empty">No headlines yet: the first arrive within a few minutes of the server starting.</p>');
+  else setHTML($('paperLead'), `<small class="paper-kicker">Top story${p.lead.covered ? ` · ${p.lead.covered} other headline${p.lead.covered === 1 ? '' : 's'} on it` : ''}</small><h2>${paperLink(p.lead)}</h2>${paperByline(p.lead)}`);
+  setHidden($('paperBig'), !p.big?.length);
+  setHTML($('paperBigList'), (p.big || []).map((x) => `<li>${paperLink(x)}${paperByline({ ...x, tags: [] })}<small class="paper-by">${x.covered} other headlines on it</small></li>`).join(''));
+  setHTML($('paperSections'), (p.sections || []).map((s) => `<section class="paper-sec"><h3>${esc(s.title)} <small>${s.total}</small></h3>${s.items.map((x, i) => `<div class="paper-item${i === 0 ? ' first' : ''}">${paperLink(x)}${paperByline(x)}</div>`).join('')}${s.total > s.items.length ? `<p class="paper-empty">…and ${s.total - s.items.length} older headlines today.</p>` : ''}</section>`).join('') || '<p class="paper-empty">No headlines yet today.</p>');
+  const IMP = { High: 'paper-high', Medium: '' };
+  setHTML($('paperEvents'), (p.events || []).map((e) => `<li class="${IMP[e.impact] || ''}"><time>${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(e.t))}</time><span>${esc(e.country)} ${esc(e.title)}${e.forecast ? ` <small>(forecast ${esc(e.forecast)}${e.previous ? `, before ${esc(e.previous)}` : ''})</small>` : ''}</span></li>`).join('') || '<li><span>Nothing big scheduled in the next 24 hours.</span></li>');
+  const r = p.record;
+  setHTML($('paperDesk'), r ? `<p>The official bot has won <b>${r.wins} of ${r.graded}</b> graded calls (${((r.wins / r.graded) * 100).toFixed(0)}%), <b>${r.usd >= 0 ? '+' : '−'}$${Math.abs(r.usd).toFixed(2)}</b> as $10 calls after fees.${r.streak?.n > 1 ? ` Current run: ${r.streak.n} ${r.streak.kind === 'W' ? 'wins' : 'losses'} in a row.` : ''}</p>` : '<p>No graded calls yet.</p>');
+}
+setInterval(() => refreshPaper(false), 60000);
+// ---------- CoinGlass (coinglass.js): the whole futures market, with the owner's API key ----------
+async function refreshCoinGlass() {
+  if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
+  let c;
+  try { c = await getJSON(api('coinglass')); } catch { return; }
+  if (!c) return;
+  setHidden($('cgCard'), false);
+  if (c.off) { setText($('cgSay'), c.off === 'no key' ? `Not connected. ${c.how}` : c.off); setHTML($('cgTiles'), ''); setText($('cgAt'), ''); return; }
+  const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(d)}%`), err = (k) => (c.errors?.[k] ? `<small class="muted">${esc(c.errors[k])}</small>` : '');
+  const tile = (label, b, sub, k) => `<div class="tile"><label>${label}</label><b>${b}</b><small>${sub}</small>${err(k)}</div>`;
+  setText($('cgAt'), `${c.interval} bars · ${hms(c.at)}`);
+  const n = Object.keys(c.errors || {}).length;
+  setText($('cgSay'), n === 4 ? 'CoinGlass didn\'t answer any of the four (see each tile): check the key and your plan.' : n ? `${n} of 4 not in your CoinGlass plan or not answering right now.` : 'All big exchanges\' futures together.');
+  setHTML($('cgTiles'), [
+    tile('Open interest', c.oi ? cash(c.oi.usd) : '—', c.oi ? `${pct(c.oi.change)} over the window` : '', 'oi'),
+    tile('Funding (8h)', c.funding?.rate != null ? `${c.funding.rate >= 0 ? '+' : '−'}${Math.abs(c.funding.rate).toFixed(4)}%` : '—', c.funding?.say ? esc(c.funding.say) : '', 'funding'),
+    tile('Liquidations', c.liq ? `${cash(c.liq.long + c.liq.short)}` : '—', c.liq ? `longs ${cash(c.liq.long)} · shorts ${cash(c.liq.short)}` : '', 'liq'),
+    tile('Long / short (Binance)', c.ls?.long != null ? `${c.ls.long.toFixed(0)}% / ${c.ls.short.toFixed(0)}%` : '—', c.ls?.ratio != null ? `ratio ${c.ls.ratio.toFixed(2)}` : '', 'ls'),
+  ].join(''));
+}
+setInterval(refreshCoinGlass, 60000); setTimeout(refreshCoinGlass, 5000);
 // the live window opens in a new tab in a browser; inside the installed app (its own cookies), it opens in place
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) document.querySelectorAll('a.team-live').forEach((a) => a.removeAttribute('target'));
 
@@ -3050,6 +3191,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'history') refreshStrength(true);
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
     if (v === 'xray') { renderXray(); refreshXray(true); }
+    if (v === 'paper') refreshPaper(true);
   }
   shownViews.clear(); for (const v of views) shownViews.add(v);
   adminPolling(views.includes('settings'));

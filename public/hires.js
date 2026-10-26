@@ -4,6 +4,7 @@
 // approved hire joins the team (hiring.js keeps the applications and who's hired). Like everyone else, a hire reports
 // and informs: none of them changes a call.
 import { pnl10 } from './model.js';
+import { RSI, rsiRead, rsiTestCached } from './rsiagent.js';
 
 const ET = (t) => {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
@@ -57,6 +58,97 @@ export function streaks(calls) {
   for (const c of graded(calls).slice().sort((x, y) => (x.at ?? 0) - (y.at ?? 0))) { const w = won(c); if (runs.at(-1)?.won === w) runs.at(-1).n++; else runs.push({ won: w, n: 1 }); }
   return { n: runs.reduce((t, r) => t + r.n, 0), cur: runs.at(-1)?.n ?? 0, won: runs.at(-1)?.won ?? null, longestLossBefore: Math.max(0, ...runs.slice(0, -1).filter((r) => !r.won).map((r) => r.n)) };
 }
+// The Mathematician's numbers (v13.87): the official record as $10 calls held to settlement after Kalshi's fees, done
+// exactly from each call's price and result. Each call's breakeven is the win rate at which its win and its loss cancel
+// out (−loss ÷ (win − loss)); the record beats its prices only if the win rate's 95% range (Wilson) sits wholly above the
+// average breakeven, and loses to them only if it sits wholly below. The Kelly stake is shown only once the edge is proven.
+export function recordMath(calls) {
+  const g = graded(calls), n = g.length;
+  if (!n) return { n: 0 };
+  let wins = 0, total = 0, sq = 0, be = 0, winSum = 0, lossSum = 0;
+  for (const c of g) {
+    const w = pnl10(c.price, true), l = pnl10(c.price, false), x = won(c) ? w : l;
+    wins += won(c) ? 1 : 0; total += x; sq += x * x; be += -l / (w - l); winSum += w; lossSum += -l;
+  }
+  const p = wins / n, breakeven = be / n, mean = total / n, sd = n > 1 ? Math.sqrt(Math.max(0, (sq - n * mean * mean) / (n - 1))) : 0;
+  const z = 1.96, den = 1 + (z * z) / n, mid = (p + (z * z) / (2 * n)) / den, half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / den;
+  const lo = mid - half, hi = mid + half;
+  const verdict = n < 30 ? 'few' : lo > breakeven ? 'ahead' : hi < breakeven ? 'behind' : 'open';
+  // calls still needed to tell the win rate from breakeven at this gap (95%), if the gap holds
+  const gap = p - breakeven, more = Math.abs(gap) > 1e-9 ? Math.max(0, Math.ceil((z * z * p * (1 - p)) / (gap * gap)) - n) : null;
+  const b = lossSum > 0 ? winSum / lossSum : 0, kelly = verdict === 'ahead' && b > 0 ? Math.max(0, (p * b - (1 - p)) / b) : 0; // avg win ÷ avg loss
+  return { n, wins, p, lo, hi, breakeven, total, mean, se: n > 1 ? sd / Math.sqrt(n) : 0, verdict, more, kelly };
+}
+const pct = (v) => `${(v * 100).toFixed(1)}%`;
+
+// The Fact checker's tests (v13.91): claims people make about the bot, each put to a real test on the official record
+// and given one of three verdicts. TRUE: the evidence is clearly for it (95%). FALSE: the evidence is clearly against it,
+// or (for "no difference" claims) the difference is shown to be small, under 5 points either way, at 95%. UNPROVEN:
+// neither yet, with how many more calls it would take if the gap held. Every test needs 30+ calls in each group.
+// Win rates against prices are compared as the "edge" (wins minus the wins the prices needed, per call), so cheap and
+// pricey calls are judged fairly.
+const Z95 = 1.96, SMALL = 0.05;
+const edgeOf = (g) => { const n = g.length, x = g.reduce((a, c) => a + (won(c) ? 1 : 0) - c.price, 0), v = g.reduce((a, c) => a + c.price * (1 - c.price), 0); return { n, e: n ? x / n : 0, v: n ? v / (n * n) : 0 }; };
+// is group a's edge bigger than group b's? (two-sided: z > 0 for a, and the 95% range of the difference)
+function compare(a, b) {
+  const A = edgeOf(a), B = edgeOf(b), d = A.e - B.e, se = Math.sqrt(A.v + B.v);
+  if (A.n < 30 || B.n < 30 || !se) return { few: true, na: A.n, nb: B.n, d };
+  return { na: A.n, nb: B.n, d, z: d / se, lo: d - Z95 * se, hi: d + Z95 * se, more: Math.abs(d) > 1e-9 ? Math.max(0, Math.ceil((Z95 * se * Math.sqrt(A.n + B.n) / d) ** 2) - A.n - B.n) : null };
+}
+// wins and losses in streaks? the Wald-Wolfowitz runs test: fewer runs than chance = streaky, more = they alternate
+export function runsTest(results) {
+  const n = results.length, w = results.filter(Boolean).length, l = n - w;
+  if (n < 30 || !w || !l) return { few: true, n };
+  let runs = 1; for (let i = 1; i < n; i++) if (results[i] !== results[i - 1]) runs++;
+  const mean = 1 + (2 * w * l) / n, v = (2 * w * l * (2 * w * l - n)) / (n * n * (n - 1));
+  return { n, runs, mean, z: v > 0 ? (runs - mean) / Math.sqrt(v) : 0 };
+}
+const pts = (d) => `${d >= 0 ? '+' : '−'}${Math.abs(d * 100).toFixed(1)} pts`;
+// a claim that group a does better than group b
+const better = (r, what) => (r.few ? { verdict: 'unproven', why: `needs 30+ calls each (${r.na} and ${r.nb} so far)` }
+  : r.lo > 0 ? { verdict: 'true', why: `${what} by ${pts(r.d)} of edge (95% range ${pts(r.lo)} to ${pts(r.hi)})` }
+    : r.hi < 0 ? { verdict: 'false', why: `the other way round, by ${pts(-r.d)} (95% range ${pts(-r.hi)} to ${pts(-r.lo)})` }
+      : r.lo > -SMALL && r.hi < SMALL ? { verdict: 'false', why: `no real difference: within ${pts(SMALL).slice(1)} either way (95% range ${pts(r.lo)} to ${pts(r.hi)})` }
+        : { verdict: 'unproven', why: `${pts(r.d)} so far, not clear yet (95% range ${pts(r.lo)} to ${pts(r.hi)})${r.more ? `; about ${r.more} more calls if the gap holds` : ''}` });
+export function factCheck(calls) {
+  const g = graded(calls).slice().sort((x, y) => (x.at ?? 0) - (y.at ?? 0)), n = g.length, out = [];
+  // 1. more than half
+  {
+    const w = g.filter(won).length, p = n ? w / n : 0, den = 1 + (Z95 * Z95) / n, mid = (p + (Z95 * Z95) / (2 * n)) / den, half = n ? (Z95 * Math.sqrt((p * (1 - p)) / n + (Z95 * Z95) / (4 * n * n))) / den : 0;
+    const lo = mid - half, hi = mid + half;
+    out.push({ key: 'half', claim: 'The calls win more than half the time', ...(n < 30 ? { verdict: 'unproven', why: `needs 30+ graded calls (${n} so far)` }
+      : lo > 0.5 ? { verdict: 'true', why: `won ${w} of ${n} (${pct(p)}, 95% range ${pct(lo)}-${pct(hi)})` } : hi < 0.5 ? { verdict: 'false', why: `won ${w} of ${n} (${pct(p)}, 95% range ${pct(lo)}-${pct(hi)})` }
+        : { verdict: 'unproven', why: `won ${w} of ${n} (${pct(p)}): the 95% range ${pct(lo)}-${pct(hi)} still includes 50%` }),
+      note: 'Winning more than half is not the same as making money: a 90¢ call has to win 90% to break even (the Mathematician checks that).' });
+  }
+  // 2. beating the prices
+  {
+    const e = edgeOf(g), se = Math.sqrt(e.v), lo = e.e - Z95 * se, hi = e.e + Z95 * se;
+    out.push({ key: 'edge', claim: 'The calls win more often than their prices say they should', ...(n < 30 ? { verdict: 'unproven', why: `needs 30+ graded calls (${n} so far)` }
+      : lo > 0 ? { verdict: 'true', why: `${pts(e.e)} more wins per call than the prices needed (95% range ${pts(lo)} to ${pts(hi)})` }
+        : hi < 0 ? { verdict: 'false', why: `${pts(-e.e)} fewer wins per call than the prices needed (95% range ${pts(lo)} to ${pts(hi)})` }
+          : { verdict: 'unproven', why: `${pts(e.e)} per call so far: the 95% range ${pts(lo)} to ${pts(hi)} still includes zero` }) });
+  }
+  // 3. streaks
+  {
+    const r = runsTest(g.map(won));
+    out.push({ key: 'streaks', claim: 'Wins and losses come in streaks', ...(r.few ? { verdict: 'unproven', why: `needs 30+ graded calls with both wins and losses (${r.n} so far)` }
+      : r.z <= -Z95 ? { verdict: 'true', why: `${r.runs} runs where chance gives about ${r.mean.toFixed(0)} (z ${zs(r.z)}): they clump` }
+        : r.z >= Z95 ? { verdict: 'false', why: `${r.runs} runs where chance gives about ${r.mean.toFixed(0)} (z ${zs(r.z)}): they alternate more than chance` }
+          : { verdict: 'unproven', why: `${r.runs} runs where chance gives about ${r.mean.toFixed(0)} (z ${zs(r.z)}): no sign of streaks beyond chance` }),
+      note: 'Streaks that chance alone makes are normal: a 60% caller loses 4 in a row about once every 40 calls.' });
+  }
+  // 4. getting better: the newer half against the older half
+  const h = Math.floor(n / 2);
+  out.push({ key: 'better', claim: 'The calls are getting better (the newer half beats the older half)', ...better(compare(g.slice(h), g.slice(0, h)), 'the newer half is ahead') });
+  // 5. UP vs DOWN
+  const up = g.filter((c) => String(c.side).toLowerCase() === 'yes'), down = g.filter((c) => String(c.side).toLowerCase() !== 'yes');
+  out.push({ key: 'updown', claim: 'UP calls do better than DOWN calls', ...better(compare(up, down), 'UP is ahead') });
+  // 6. the surer calls
+  out.push({ key: 'sure', claim: 'Pricier calls (85¢ and up) beat their prices more than cheaper ones', ...better(compare(g.filter((c) => c.price >= 0.85), g.filter((c) => c.price < 0.85)), 'the pricier calls are ahead') });
+  return { n, claims: out };
+}
+
 const BANDS = [[0, 0.7, 'under 70¢'], [0.7, 0.85, '70-85¢'], [0.85, 0.95, '85-95¢'], [0.95, 1, '95¢ and up']];
 const bandOf = (c) => BANDS.find(([lo, hi]) => c.price >= lo && c.price < hi)?.[2] ?? null;
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -121,14 +213,17 @@ export const CANDIDATES = [
     } },
   { key: 'restarts', role: 'h_restarts', name: 'Restart watcher', icon: '🔄', dept: 'ops',
     job: 'counts the server\'s restarts',
-    does: 'Records each time the server starts, so you can see how long it has been up and how often it restarts (a deploy, a crash, Railway moving it). Too many restarts means lost in-memory state: the team\'s feed, the fixers\' records, merit pay.',
-    cant: 'It can\'t tell a deploy from a crash: the server log can.',
+    does: 'Records each time the server starts, so you can see how long it has been up and how often it restarts on its own (a crash, a reboot); updates and restarts on purpose are counted apart. Too many restarts means lost in-memory state: the team\'s feed, the fixers\' records, merit pay.',
+    cant: 'It tells planned from unplanned, not a crash from a reboot: the server log can.',
     fit: () => 'Nobody keeps track of how often the server restarts, and every restart empties the team\'s memory.',
     row: (c) => {
-      const u = c.uptime, week = (u?.starts || []).filter((t) => t > c.now - 7 * 86400000).length;
+      // v13.89: planned restarts (an update installing itself, a restart you asked for) are counted apart: only the
+      // ones nobody meant (a crash, a reboot, a power cut) are trouble
+      const u = c.uptime, wk = (u?.starts || []).filter((t) => t > c.now - 7 * 86400000 && t >= (u?.trackFrom ?? 0)), planned = new Set(u?.planned || []);
       if (!u?.since) return { state: 'idle', status: 'Not reporting', key: 'none', talks: [] };
-      return { state: week > 10 ? 'warn' : 'ok', status: `Up ${dur((c.now - u.since) / 60000)} · ${week} start${week === 1 ? '' : 's'} in the last week`, key: week > 10 ? 'many' : 'ok', say: week > 10 ? 'the server keeps restarting' : null,
-        talks: week > 10 ? [{ to: 'nightwatch', text: `${week} restarts in a week: every one empties the team's memory.` }] : [] };
+      const meant = wk.filter((t) => planned.has(t)).length, week = wk.length - meant, many = week > 10;
+      return { state: many ? 'warn' : 'ok', status: `Up ${dur((c.now - u.since) / 60000)} · ${week} unplanned start${week === 1 ? '' : 's'} in the last week${meant ? ` (plus ${meant} planned: updates and restarts on purpose)` : ''}`, key: many ? 'many' : 'ok', say: many ? 'the server keeps restarting on its own' : null,
+        talks: many ? [{ to: 'nightwatch', text: `${week} unplanned restarts in a week (crashes or reboots): every one empties the team's memory.` }] : [] };
     } },
   // ---------- v13.81: five more, so the Recruiter always has someone to put forward ----------
   { key: 'streak', role: 'h_streak', name: 'Streak watcher', icon: '🔥', dept: 'risk',
@@ -173,6 +268,56 @@ export const CANDIDATES = [
       const long = since > 3 * usual && since > 2 * 3600000;
       return { state: long ? 'warn' : 'ok', status: `Last official call ${dur(since / 60000)} ago · the usual gap: ${dur(usual / 60000)}`, key: long ? 'quiet' : 'ok',
         say: long ? `no call in ${dur(since / 60000)}` : null, talks: long ? [{ to: 'caller', text: `No official call in ${dur(since / 60000)}: three times the usual gap (${dur(usual / 60000)}).` }] : [] };
+    } },
+  // ---------- v13.87: the Mathematician ----------
+  { key: 'math', role: 'h_math', name: 'Mathematician', icon: '🧮', dept: 'grade',
+    job: 'does the record\'s money math exactly, and says how sure it can be',
+    does: 'Works the official record out to the cent as $10 calls after Kalshi\'s fees: the win rate with its 95% range, the win rate the prices need to break even, the average profit per call with its error, and how many more calls it takes to know. It tells the Risk officer when the record is proven ahead of or behind its prices, and the Trader what the Kelly stake would be once an edge is proven (half of it is the usual safe choice).',
+    cant: 'Exact math on the past is not a forecast: it says what the record shows and how sure that is, never what the next round does. A proven edge can still fade.',
+    fit: (c) => { const n = graded(c.calls).length; return n >= 10 ? `${n} graded official calls, and nobody works out whether the record beats its prices and how sure that is.` : null; },
+    row: (c) => {
+      const m = recordMath(c.calls);
+      if (m.n < 10) return { state: 'idle', status: `${m.n} graded official calls: too few to work out`, key: 'few', talks: [] };
+      const line = `Won ${m.wins} of ${m.n} (${pct(m.p)}, 95% range ${pct(m.lo)}-${pct(m.hi)}) · needed ${pct(m.breakeven)} to break even · ${usd(m.mean)} per $10 call (±${usd(m.se).slice(1)}) · ${usd(m.total)} in all`;
+      const sure = m.verdict === 'ahead' ? `proven ahead of its prices${m.kelly > 0 ? ` · Kelly stake ${pct(m.kelly)} of the bankroll (half: ${pct(m.kelly / 2)})` : ''}`
+        : m.verdict === 'behind' ? 'proven behind its prices' : m.verdict === 'few' ? 'under 30 calls: nothing proven yet'
+          : `not decided yet${m.more != null ? ` (about ${m.more} more calls at this gap)` : ''}`;
+      return { state: m.verdict === 'behind' ? 'warn' : 'ok', status: `${line} · ${sure}`, key: m.verdict, say: m.verdict === 'ahead' ? 'the record is proven ahead of its prices' : m.verdict === 'behind' ? 'the record is proven behind its prices' : null,
+        talks: [
+          ...(m.verdict === 'ahead' || m.verdict === 'behind' ? [{ to: 'risk', text: `The official record is proven ${m.verdict} of its prices: ${pct(m.p)} won against ${pct(m.breakeven)} needed (95% range ${pct(m.lo)}-${pct(m.hi)}, ${m.n} calls).` }] : []),
+          ...(m.kelly > 0 ? [{ to: 'trader', text: `With a proven edge, the Kelly stake is ${pct(m.kelly)} of the bankroll per call; half-Kelly (${pct(m.kelly / 2)}) is the safer size.` }] : []),
+        ] };
+    } },
+  // ---------- v13.91: the Fact checker ----------
+  { key: 'facts', role: 'h_facts', name: 'Fact checker', icon: '🔬', dept: 'grade',
+    job: 'proves or disproves what people say about the bot',
+    does: 'Puts six claims about the bot to a real test on the official record: that it wins more than half the time, that it beats its prices, that wins and losses come in streaks, that it is getting better, that UP calls beat DOWN calls, and that the pricier calls beat their prices more. Each gets TRUE (the evidence is clearly for it, 95%), FALSE (clearly against it, or the difference is shown to be tiny), or UNPROVEN (with how many more calls it would take). It tells the Caller and the Risk officer the moment a claim is settled.',
+    cant: 'It tests the past, not the future, and only these claims; "unproven" means not enough evidence yet, not false. With six tests at 95%, about one in three such reports will show one verdict that is luck, so a claim that flips back and forth near the line deserves doubt.',
+    fit: (c) => { const n = graded(c.calls).length; return n >= 60 ? `${n} graded official calls, and nobody tests what people claim about the bot.` : null; },
+    row: (c) => {
+      const f = factCheck(c.calls);
+      if (f.n < 30) return { state: 'idle', status: `${f.n} graded official calls: needs 30 to test anything`, key: 'few', talks: [] };
+      const mark = { true: '✔ TRUE', false: '✘ FALSE', unproven: '? UNPROVEN' }, settled = f.claims.filter((x) => x.verdict !== 'unproven');
+      return { state: 'ok', status: f.claims.map((x) => `${mark[x.verdict]}: ${x.claim} (${x.why})`).join(' · '), key: f.claims.map((x) => x.verdict[0]).join(''),
+        say: settled.length ? `${settled.length} of ${f.claims.length} claims settled` : null, claims: f.claims,
+        talks: settled.flatMap((x) => (x.key === 'edge' || x.key === 'streaks' ? ['risk', 'caller'] : ['caller']).map((to) => ({ to, text: `Proven ${x.verdict === 'true' ? 'true' : 'false'}: "${x.claim}" (${x.why}).` }))) };
+    } },
+  // ---------- v13.85: the RSI agent ----------
+  { key: 'rsi', role: 'h_rsi', name: 'RSI agent', icon: '📈', dept: 'desk',
+    job: 'reads RSI on 1, 5 and 15 minutes, and tests whether it predicts the round',
+    does: 'Reads RSI 14 on 1-, 5- and 15-minute candles (70+ overbought, 30 or under oversold) and spots fresh divergences. It tests every past round on the saved history that opened at an RSI extreme: did it reverse (overbought → down, oversold → up) more than chance? It tells the Scout and the Caller when RSI hits an extreme, and whether extremes have been proven to fade, to run, or neither.',
+    cant: 'RSI is one reading of momentum: an extreme can stay extreme in a strong trend. Until its test proves an edge (30+ extreme rounds, z of 2 or more), what it says is context, not a signal.',
+    fit: (c) => (c.bars?.length >= 300 ? `${Math.round(c.bars.length / 60)} hours of saved price history, and nobody watches RSI or tests whether its extremes predict the round.` : null),
+    row: (c) => {
+      const bars = c.bars || [];
+      if (bars.length < 60) return { state: 'idle', status: `${bars.length} minutes of price history: RSI needs an hour`, key: 'few', talks: [] };
+      const r = rsiRead(bars), t = rsiTestCached(c.series || 'home', bars), one = r.tfs[0];
+      const tfs = r.tfs.map((x) => `${x.min}m ${x.v ?? '—'}${x.zone && x.zone !== 'neutral' ? ` (${x.zone})` : ''}`).join(' · ');
+      const proof = t.verdict === 'few' ? `testing: ${t.extremes} of ${RSI.minExtremes} extreme rounds so far` : t.verdict === 'fade' ? `proven: extremes fade (${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})` : t.verdict === 'run' ? `proven: extremes keep running (only ${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})` : `no proven edge (${t.hits} of ${t.extremes} reversed, z ${zs(t.z)})`;
+      const extreme = one.zone === 'overbought' || one.zone === 'oversold', say = extreme ? `1-minute RSI ${one.v}: ${one.zone}` : r.divergence ? `${r.divergence} RSI divergence` : null;
+      const lean = !extreme ? '' : t.verdict === 'fade' ? `; extremes have faded here, so a turn ${one.zone === 'overbought' ? 'down' : 'up'} is likelier` : t.verdict === 'run' ? `; extremes have kept running here, so the move may go on` : '; not proven to predict the round';
+      return { state: extreme ? 'busy' : 'ok', status: `RSI ${tfs}${r.divergence ? ` · ${r.divergence} divergence` : ''} · ${proof}`, key: `${one.zone}:${r.divergence}:${t.verdict}`,
+        say, talks: extreme || r.divergence ? ['scout', 'caller'].map((to) => ({ to, text: extreme ? `1-minute RSI is ${one.v} (${one.zone})${lean}.` : `A ${r.divergence} RSI divergence on 1 minute: ${r.divergence === 'bearish' ? 'a new high on weaker momentum' : 'a new low on stronger momentum'}.` })) : [] };
     } },
 ];
 export const HIRE_ICON = Object.fromEntries(CANDIDATES.map((c) => [c.role, c.icon]));

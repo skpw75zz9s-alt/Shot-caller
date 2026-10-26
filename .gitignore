@@ -2,3 +2,6 @@ node_modules/
 .env
 *.log
 data/
+.wrangler/
+cloudflare/wrangler.local.jsonc
+__pycache__/

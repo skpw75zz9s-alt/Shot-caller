@@ -7,17 +7,22 @@
 //   closed   nothing open right now
 // MARKETS_EXTRA (a Railway variable, "SERIES:ASSET,...") adds series discovery can't see; MARKETS_OFF removes some.
 // Only 15-minute rounds are listed and run (v13.31); MARKETS_FREQ=all brings back every timeframe (hourly, daily, ...).
+// MARKETS_ONLY=BTC,ETH,SOL,XRP,DOGE (v13.83.4) lists and runs only those assets: each running market is a full bot, so
+// a small home server can't keep up with all of them.
 import { ASSETS, SEEDS, classifySeries, listed } from './public/markets.js';
 
 export const DISCOVERY = { every: 600000, categories: ['Crypto', 'Financials', 'Commodities', 'Economics'], horizon: 26 * 3600000, maxSeries: 80 };
 
 export function createDiscovery({ kalshi, fetchJSON, env = process.env, log = console, clock = () => Date.now() }) {
-  let list = SEEDS.map((s) => ({ ...s, title: null, open: 0, next: null, state: 'unknown' })), at = 0, running = null;
+  let list, at = 0, running = null;
   const extra = String(env.MARKETS_EXTRA || '').split(',').map((x) => x.trim().split(':')).filter(([s, a]) => /^[A-Z0-9]+$/.test(s || '') && ASSETS.some((x) => x.key === a))
     .map(([series, asset]) => ({ series, asset, freq: /15M$/.test(series) ? '15m' : 'other', title: null }));
   const off = new Set(String(env.MARKETS_OFF || '').split(',').map((x) => x.trim()).filter(Boolean));
   const freq = String(env.MARKETS_FREQ || '15m').toLowerCase();
+  const only = new Set(String(env.MARKETS_ONLY || '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
+  const wanted = (m) => !only.size || only.has(m.asset);
 
+  list = SEEDS.filter(wanted).map((s) => ({ ...s, title: null, open: 0, next: null, state: 'unknown' }));
   async function scan(now = clock()) {
     const found = new Map(SEEDS.map((s) => [s.series, { ...s, title: null }]));
     for (const e of extra) found.set(e.series, e);
@@ -28,7 +33,7 @@ export function createDiscovery({ kalshi, fetchJSON, env = process.env, log = co
       } catch (e) { log.warn?.(`market discovery: ${cat}: ${e.message}`); }
     }
     const rows = [];
-    for (const m of [...found.values()].filter((x) => !off.has(x.series) && (listed(x, freq) || extra.some((e) => e.series === x.series))).slice(0, DISCOVERY.maxSeries)) {
+    for (const m of [...found.values()].filter((x) => wanted(x) && !off.has(x.series) && (listed(x, freq) || extra.some((e) => e.series === x.series))).slice(0, DISCOVERY.maxSeries)) {
       try {
         const d = await fetchJSON(`${kalshi}/markets?series_ticker=${m.series}&status=open&limit=200`);
         const ms = (d?.markets || []).filter((x) => x.floor_strike != null || x.cap_strike != null || /15M$/.test(m.series));
@@ -47,6 +52,6 @@ export function createDiscovery({ kalshi, fetchJSON, env = process.env, log = co
     list: () => list,
     at: () => at,
     // the series a full bot runs for: active ones, plus the seeds (so a 15-minute market starts the moment Kalshi opens it)
-    running: () => list.filter((m) => m.state === 'active' || SEEDS.some((s) => s.series === m.series)).map((m) => m.series),
+    running: () => list.filter((m) => wanted(m) && (m.state === 'active' || SEEDS.some((s) => s.series === m.series))).map((m) => m.series),
   };
 }

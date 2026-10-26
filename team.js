@@ -16,7 +16,7 @@ import { careOf, doctorRound, secondOpinion } from './public/doctor.js';
 const tryIt = (f) => { try { return f(); } catch { return null; } };
 export function createTeam({ book, botOf, watchOf, council, breakLab, strength, autotraders = () => 0, discord, askMode = () => 'free answers',
   stackOf = () => null, crossFeed = null, tuneUp = null, autoTune = () => null, markets = () => null, persistent = null, fixes = {}, news = () => null, nameOf = () => null,
-  hiring = null, running = () => [], depthOf = () => null, searchFor = () => true, clock = () => Date.now(), everyMs = 5000 }) {
+  hiring = null, running = () => [], depthOf = () => null, barsOf = () => [], searchFor = () => true, clock = () => Date.now(), everyMs = 5000 }) {
   const desk = createFixDesk({ actions: fixes, clock }); // the flag fixers' fixes (fixdesk.js)
   const helpDesk = createFixDesk({ actions: fixes, clock, cooldownMs: 30 * 60000, maxTries: HELP_TRIES }); // the floor helpers': slower, longer
   const per = new Map(); // series -> { at, keys, roster, feed }
@@ -24,7 +24,7 @@ export function createTeam({ book, botOf, watchOf, council, breakLab, strength, 
   const since = new Map(); // series -> { learner key: { on, at } }: when each learner last proved itself or went on probation (the mentor)
   // what the hiring center's candidates read (public/hires.js)
   function hireCtxOf(series, now, record = tryIt(() => botOf(series)?.record?.())) {
-    return { now, markets: tryIt(() => running()) || [], calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result, at: e.at })), depth: tryIt(() => depthOf(series)), uptime: hiring?.uptime?.() ?? null, traders: autotraders(series) };
+    return { now, series, markets: tryIt(() => running()) || [], calls: (record?.calls || []).map((e) => ({ side: e.side, price: e.price, result: e.result, at: e.at })), depth: tryIt(() => depthOf(series)), uptime: hiring?.uptime?.() ?? null, traders: autotraders(series), bars: tryIt(() => barsOf(series)) || [] };
   }
   // everything the roster is built from (the Manager's time sheet is added last, see read and observe)
   function inputs(series, now) {

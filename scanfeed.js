@@ -3,7 +3,7 @@
 // settles the round and learns the scan's weights from them (public/roundscan.js). The phone shows this when its
 // own feeds aren't live, and the record and weights always come from here, so the scan is graded every round
 // whether or not anyone has the app open.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createAligner, exchangesFor, globalExchangesFor, parseCoinbase } from './public/feeds.js';
 import { HOME_ASSET } from './public/markets.js';
@@ -11,6 +11,7 @@ import { quote } from './public/model.js';
 import { CHECKPOINTS, checkpointFor, featureVector, fitModels, scanChance, scanRound, scanStats } from './public/roundscan.js';
 import { liqFeedsFor } from './public/liquidations.js';
 import { pressureAgreement } from './public/settle.js';
+import { writeAtomic } from './atomicfile.js';
 
 const coinbaseFeed = (product) => ({ name: 'Coinbase', url: 'wss://ws-feed.exchange.coinbase.com', subscribe: [{ type: 'subscribe', product_ids: [product], channels: ['matches'] }], parse: parseCoinbase });
 const MAX_TRADES = 200000, MAX_GLOBAL = 150000;
@@ -41,8 +42,7 @@ export function createScanFeed({ file, log = console, WS = globalThis.WebSocket,
     saveTimer = setTimeout(async () => {
       try {
         await mkdir(dirname(file), { recursive: true });
-        await writeFile(`${file}.tmp`, JSON.stringify(data));
-        await rename(`${file}.tmp`, file);
+        await writeAtomic(file, JSON.stringify(data));
       } catch (e) { log.error('saving the round scan failed', e.message); }
     }, 2000);
     saveTimer.unref?.();

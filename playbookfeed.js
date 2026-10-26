@@ -3,7 +3,7 @@
 // 15 minutes on all of them (the rules never change, so the backtest and the live paper trades are one walk-forward
 // test), and serves the scorecard. Also the market-structure read (public/structure.js) for Market watch and the
 // micro model. Kept in DATA_DIR/bars.json.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseCandles } from './public/engine.js';
 import { backtest, scorecard } from './public/playbook.js';
@@ -13,6 +13,7 @@ import { guideBacktest, guideNow, guideReport, guideShift } from './public/guide
 import { fee10, pnl10, quote as quoteOf } from './public/model.js';
 import { PRED, fit, predictNow, predictorReport, predictorShift, series, walkForward } from './public/predictor.js';
 import { cmFit, cmLive, cmReport, cmWalkForward } from './public/candlemodel.js';
+import { writeAtomic } from './atomicfile.js';
 
 const KEEP = 21 * 86400000;
 // candleRows (v13.30): any asset's 1-minute candles in Coinbase's shape (prices.js); without it, Bitcoin from Coinbase
@@ -36,11 +37,11 @@ export function createPlaybook({ coinbase, file, fetchJSON = defaultFetch, clock
   }
   async function saveLive() {
     guideDirty = false;
-    try { await mkdir(dirname(liveFile), { recursive: true }); await writeFile(`${liveFile}.tmp`, JSON.stringify(guideLive)); await rename(`${liveFile}.tmp`, liveFile); } catch (e) { log.error('saving the guide log failed', e.message); }
-    try { await writeFile(`${predFile}.tmp`, JSON.stringify(predLive)); await rename(`${predFile}.tmp`, predFile); } catch (e) { log.error('saving the predictor log failed', e.message); }
+    try { await mkdir(dirname(liveFile), { recursive: true }); await writeAtomic(liveFile, JSON.stringify(guideLive)); } catch (e) { log.error('saving the guide log failed', e.message); }
+    try { await writeAtomic(predFile, JSON.stringify(predLive)); } catch (e) { log.error('saving the predictor log failed', e.message); }
   }
   async function save() {
-    try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify({ bars })); await rename(`${file}.tmp`, file); } catch (e) { log.error('saving bars failed', e.message); }
+    try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify({ bars })); } catch (e) { log.error('saving bars failed', e.message); }
   }
   // Two weeks of history on first start (Coinbase serves 300 minutes a request; one every 0.4 s), any gap after that
   async function backfill(now = clock(), days = 14) {

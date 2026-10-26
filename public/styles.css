@@ -1291,3 +1291,53 @@ body.split .blip { display: none; }
 .wf-list li.buy .sd { color: var(--yes); } .wf-list li.sell .sd { color: var(--no); }
 .wf-list li em { font-style: normal; font-weight: 600; white-space: nowrap; } .wf-list li em.good { color: var(--yes); } .wf-list li em.bad { color: var(--no); } .wf-list li em.muted { color: var(--muted); }
 .wf-list li small { grid-column: 3 / -1; color: var(--muted); }
+
+/* Pending orders (orderbook.js) */
+#obLean.ok { color: var(--yes); } #obLean.bad { color: var(--no); }
+.ob-bands { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; font-size: 12px; }
+.ob-bands li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 3px 2px; border-bottom: 1px solid var(--line, #1a2336); }
+.ob-bands li em { font: 600 12px var(--mono); font-style: normal; } .ob-bands em.good { color: var(--yes); } .ob-bands em.bad { color: var(--no); }
+.ob-bands li.fine { grid-template-columns: 1fr; color: var(--dim); font-size: 10.5px; border: 0; }
+.ob-walls li { grid-template-columns: auto 1fr auto; }
+.ob-walls li small { grid-column: 1 / -1; }
+.ob-hist svg { display: block; width: 100%; height: 56px; }
+.ob-hist .mid { stroke: var(--line-2); stroke-width: 1; } .ob-hist .ln { fill: none; stroke: var(--amber); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.ob-hist .area { fill: var(--amber); opacity: .12; }
+.ob-hist small { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
+.ob-walls small b.warn { color: var(--amber); } .ob-walls small b.muted { color: var(--muted); }
+
+/* the order book heatmap (v13.90) */
+.ob-heat canvas { display: block; width: 100%; height: 180px; border-radius: 8px; background: #05070a; }
+.ob-heat small { display: flex; justify-content: space-between; font-size: 10px; margin: 4px 0 6px; }
+.cg-card .tile small { display: block; }
+
+/* the Paper (v13.93): a newspaper page, ink on newsprint */
+.paper { --ink: #1b1a17; --rule: #1b1a1733; background: #f3eee2; color: var(--ink); border-radius: 10px; padding: 14px 14px 10px; margin: 8px 0 16px; font-family: Georgia, 'Times New Roman', serif; box-shadow: 0 2px 18px #0006; }
+.paper a, .paper span { color: var(--ink); text-decoration: none; }
+.paper a:hover { text-decoration: underline; }
+.paper-mast { text-align: center; border-bottom: 3px double var(--ink); padding-bottom: 6px; margin-bottom: 10px; }
+.paper-mast h1 { font: 700 clamp(26px, 7vw, 44px)/1.05 'Old English Text MT', 'UnifrakturMaguntia', Georgia, serif; margin: 4px 0; letter-spacing: .5px; color: var(--ink); }
+.paper-strip { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 3px 0; flex-wrap: wrap; }
+.paper-mast .paper-strip:first-child { border-top: 0; }
+.paper-lead { border-bottom: 1px solid var(--ink); padding-bottom: 10px; margin-bottom: 10px; }
+.paper-lead h2 { font: 700 clamp(22px, 5.5vw, 32px)/1.15 Georgia, serif; margin: 4px 0 6px; }
+.paper-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8b1a1a; }
+.paper-by { display: block; font: italic 11.5px/1.4 Georgia, serif; color: #5a564c; margin-top: 2px; }
+.paper-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+.paper-sec { padding: 0 0 8px; }
+.paper-sec h3, .paper-box h3 { font: 700 13px/1.2 Georgia, serif; text-transform: uppercase; letter-spacing: 1.5px; border-bottom: 2px solid var(--ink); padding-bottom: 3px; margin: 6px 0 6px; color: var(--ink); }
+.paper-item { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 15px; line-height: 1.3; }
+.paper-item.first { font-size: 17px; font-weight: 700; }
+.paper-foot { border-top: 1px solid var(--ink); margin-top: 6px; padding-top: 4px; }
+.paper-box ul { list-style: none; margin: 0; padding: 0; }
+.paper-box li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--rule); font-size: 13px; line-height: 1.3; }
+.paper-box li time { flex: none; width: 82px; font-size: 11.5px; color: #5a564c; }
+.paper-box li.paper-high span { font-weight: 700; }
+.paper-box p { font-size: 14px; line-height: 1.45; margin: 4px 0; }
+.paper-empty { font-style: italic; color: #5a564c; margin: 6px 0; }
+.paper-fine { font-size: 11px; line-height: 1.4; color: #5a564c; border-top: 1px solid var(--rule); padding-top: 6px; margin: 8px 0 0; }
+.paper-big { border-bottom: 1px solid var(--ink); padding-bottom: 8px; margin-bottom: 8px; }
+.paper-big h3 { font: 700 13px/1.2 Georgia, serif; text-transform: uppercase; letter-spacing: 1.5px; border-bottom: 2px solid var(--ink); padding-bottom: 3px; margin: 0 0 4px; color: var(--ink); }
+.paper-big ol { margin: 0; padding-left: 20px; }
+.paper-big li { padding: 5px 0; font-size: 16px; font-weight: 700; line-height: 1.3; border-bottom: 1px solid var(--rule); }
+.paper-sec h3 small { font-weight: 400; letter-spacing: 0; color: #5a564c; }

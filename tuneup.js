@@ -6,10 +6,11 @@
 //      setting only when it beats what the bot does now by a clear margin;
 //   3. writes what it found to DATA_DIR/tuneup.json (the settings the bot uses, and the report).
 // Nothing runs between tune-ups: it costs a few seconds of work when you run it, and no memory otherwise.
-import { readFile, rename, stat, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, stat, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { pickMix, pickScore } from './public/pick.js';
 import { tuneUpPicks } from './public/tuneup.js';
+import { writeAtomic } from './atomicfile.js';
 
 // what each learner says right now, for the before / after in the report
 export function learnerSummary(st) {
@@ -34,8 +35,7 @@ export function createTuneUp({ file, clock = () => Date.now(), log = console }) 
   }
   async function save() {
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(`${file}.tmp`, JSON.stringify(state));
-    await rename(`${file}.tmp`, file);
+    await writeAtomic(file, JSON.stringify(state));
     try { mtime = (await stat(file)).mtimeMs; } catch { /* next load rereads it */ }
   }
   // `npm run tuneup` writes the file while the server runs: pick its settings up within a minute

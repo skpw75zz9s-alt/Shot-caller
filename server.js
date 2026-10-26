@@ -1,9 +1,10 @@
 // Zero-dependency server: serves the PWA, proxies the public Kalshi and Coinbase market-data
 // APIs so the phone browser never hits CORS limits, runs the push bot, and enforces the paywall.
 import http from 'node:http';
+import crypto, { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { brotliCompressSync, constants as zc, gzipSync } from 'node:zlib';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { createBot } from './bot.js';
@@ -37,6 +38,11 @@ import { createVolTuneFeed } from './voltunefeed.js';
 import { appUrl, createDiscord } from './discord.js';
 import { createAlertWatcher } from './discordalerts.js';
 import { discordInvite, publicRecord } from './website.js';
+import { createMovedServer, movedTarget } from './moved.js';
+import { createOrderBook } from './orderbook.js';
+import { createCoinGlass } from './coinglass.js';
+import { buildPaper } from './public/paper.js';
+import { createEdgeSync } from './edgesync.js';
 import { ASSETS, HOME, isHome, marketOf } from './public/markets.js';
 import { createDiscovery } from './discovery.js';
 import { createPrices } from './prices.js';
@@ -67,6 +73,9 @@ export const access = createAccess({
     body: `Someone says they sent $${cfg.price} to $${cfg.cashtag} with note ${m.code}. Check Cash App, then approve it in Settings → Admin.`,
   }),
 });
+// the Cloudflare backup's copy of the members (edgesync.js, cloudflare/worker.js): members sign in and buyers buy there
+// while this server is off, and what happened there is merged back here
+const edgeSync = createEdgeSync({ access, base: appUrl(), secret: process.env.EDGE_SECRET });
 // Paying members get their Discord role (discordroles.js; DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN,
 // DISCORD_GUILD_ID and DISCORD_ROLE_ID in Railway's Variables turn it on)
 // Ask the bot (askai.js): the AI market chatbot is OFF (no credits spent), even with ANTHROPIC_API_KEY set; ASK_AI=on (with a
@@ -96,9 +105,12 @@ export const futures = createFutures();
 // Discord auto-posts of the official calls and their results (discord.js; set DISCORD_WEBHOOK_URL to turn on), and the
 // market alerts (discordalerts.js: DISCORD_ALERTS picks which, DISCORD_ALERTS_WEBHOOK_URL gives them their own channel)
 export const discord = createDiscord();
-export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed) });
+export const discordAlerts = createAlertWatcher({ post: (embed) => discord.alert(embed), flipFile: join(DATA_DIR, 'flipwarn.json') });
 // the Whale filter (whalefilter.js): grades every whale on what the price did next, and learns which kinds move it
 export const whaleFilter = createWhaleFilter({ file: join(DATA_DIR, 'whales.json') });
+const orderBook = createOrderBook({ file: join(DATA_DIR, 'orderbook.json') }); // pending orders on Kraken's book (orderbook.js)
+let paperCache = null;
+const coinGlass = createCoinGlass(); // the whole futures market, with COINGLASS_API_KEY (coinglass.js)
 export const scanFeed = createScanFeed({ file: join(DATA_DIR, 'scan.json'), futures, onTrade: (x, now) => { whaleFilter.add(x, now); discordAlerts.whale(x, now, whaleFilter.verdict(x)); }, onLiq: (x, now) => discordAlerts.liquidation(x, now) });
 // Real Kalshi fees measured from fills (feebook.js): the phones' account fills and the Auto-trader's orders
 export const feeBook = createFeeBook({ file: join(DATA_DIR, 'fees.json') });
@@ -195,7 +207,7 @@ export const team = createTeam({ book: marketBook, botOf: (s) => (isHome(s) ? bo
   council, breakLab, strength, autotraders: (s) => (isHome(s) ? autotrade?.running() ?? 0 : 0), discord, askMode: () => (askAI.on() ? 'AI market chatbot' : 'free answers'),
   stackOf: (s) => stacks.stack(s), crossFeed, tuneUp, persistent: STORAGE.persistent,
   markets: () => ({ listed: discovery.list().length, running: stacks.bots().length }), autoTune: () => autoTuneStatus(),
-  hiring, depthOf, searchFor: (s) => isHome(s), running: () => stacks.bots().map(([s]) => { const m = marketOf(s, discovery.list()); return { series: s, name: m.name, kind: m.kind }; }),
+  hiring, depthOf, searchFor: (s) => isHome(s), barsOf: (s) => (isHome(s) ? playbook : stacks.stack(s)?.playbook)?.bars?.() ?? [], // the RSI agent's history (playbookfeed.js) running: () => stacks.bots().map(([s]) => { const m = marketOf(s, discovery.list()); return { series: s, name: m.name, kind: m.kind }; }),
   news: (s) => newsFeed.api(marketOf(s, discovery.list()).asset), nameOf: (s) => marketOf(s, discovery.list()).name, // the News scout (newsfeed.js, public/news.js)
   // the flag fixers' real fixes (public/fixers.js, fixdesk.js): each returns true when it ran
   fixes: {
@@ -252,6 +264,13 @@ function compressed(entry, enc) {
     : gzipSync(entry.raw, { level: 6 }));
 }
 function sendEntry(req, res, status, entry, type, extra = {}) {
+  // files from disk (they carry an mtime) get an ETag, so a phone that already has a file gets a tiny 304 instead of
+  // the whole file again: opening the app re-checks ~100 files, which is slow over a home connection or a tunnel
+  if (entry.mtime !== undefined) {
+    entry.etag ??= `"${createHash('sha1').update(entry.raw).digest('base64url')}"`;
+    extra = { ...extra, etag: entry.etag };
+    if (status === 200 && req.headers['if-none-match'] === entry.etag) { res.writeHead(304, { vary: 'accept-encoding', ...extra }); return res.end(); }
+  }
   const enc = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? encodingFor(req) : null; // PNGs are already compressed
   const body = compressed(entry, enc);
   res.writeHead(status, { 'content-type': type, vary: 'accept-encoding', ...(body ? { 'content-encoding': enc } : {}), 'content-length': (body || entry.raw).length, ...extra });
@@ -358,7 +377,7 @@ export const kalshiAuthFor = (base, demoBase = KALSHI_DEMO) => async function ka
 };
 const kalshiAuth = kalshiAuthFor(KALSHI);
 autotrade = createAutoTrade({ file: join(DATA_DIR, 'autotrade.json'), secret: process.env.KEY_SECRET, kalshi: KALSHI, kalshiDemo: KALSHI_DEMO, validateOrder: (o) => validateOrder(o, { allowMaker: true }), onFee: (x) => feeBook.add([x]) });
-const ready = Promise.all([whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
+const ready = Promise.all([orderBook.load(), whaleFilter.load(), hiring.load(), tuneUp.load(), council.load(), breakLab.load(), strength.load(), flowsFeed.load(), bot.load(), access.load(), discordRoles.load(), autotrade.load(), scanFeed.load(), feeBook.load(), microFeed.load(), playbook.load()]);
 // the Recruiter searches nonstop (v13.81): every 5 seconds on its own, whether or not the bot is ticking, once the
 // hiring center's file has loaded (so a search can never overwrite it)
 ready.then(() => setInterval(() => { try { hiring.search(team.hireCtx(HOME.series)); } catch (e) { console.error('recruiter search failed', e.message); } }, 5000).unref()).catch(() => {});
@@ -427,7 +446,19 @@ function send(res, status, body, type = 'application/json', headers = {}) {
 const cookieToken = (req) => (req.headers.cookie || '').split(/;\s*/).map((c) => c.split('=')).find(([k]) => k === 'sc_session')?.[1] || null;
 // The platform proxy (Railway) appends the real client address as the LAST X-Forwarded-For entry;
 // earlier entries are whatever the client sent, so trusting them would let anyone dodge rate limits.
-const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?';
+// Behind the Cloudflare backup Worker (cloudflare/worker.js) every visitor would look like Cloudflare, so the Worker
+// passes the visitor's address in x-sc-client-ip, trusted only with the shared EDGE_SECRET it sends beside it.
+const EDGE = process.env.EDGE_SECRET ? Buffer.from(process.env.EDGE_SECRET) : null;
+const fromEdge = (req) => { const h = Buffer.from(String(req.headers['x-sc-edge'] || '')); return !!EDGE && h.length === EDGE.length && crypto.timingSafeEqual(h, EDGE); };
+export const clientIp = (req) => (fromEdge(req) && /^[\w.:-]{2,64}$/.test(req.headers['x-sc-client-ip'] || '') ? req.headers['x-sc-client-ip']
+  : (req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).pop() || req.socket.remoteAddress || '?');
+// an https page on the parent of this server's own address (shotcaller.com.co for home.shotcaller.com.co)
+export function directOrigin(req) {
+  try {
+    const o = new URL(req.headers.origin || ''), host = String(req.headers.host || '').split(':')[0].toLowerCase();
+    return o.protocol === 'https:' && o.hostname.includes('.') && /^[a-z0-9-]+$/.test(host.slice(0, -o.hostname.length - 1)) && host.endsWith(`.${o.hostname.toLowerCase()}`); // exactly one level up
+  } catch { return false; }
+}
 function sessionCookie(req, token) {
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
   return { 'set-cookie': `sc_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}` };
@@ -554,6 +585,9 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     const token = cookieToken(req);
+    // the direct lane (v13.92): the app on the main address (behind the Cloudflare Worker) reads the API straight from
+    // this server's own address (a subdomain of it), so the phone's polling doesn't use up the Worker's free requests
+    if (path.startsWith('/api/') && req.method === 'GET' && directOrigin(req)) res.setHeader('access-control-allow-origin', req.headers.origin), res.setHeader('access-control-allow-credentials', 'true'), res.setHeader('vary', 'Origin');
     if (path === '/healthz') return send(res, 200, { ok: true, version: VERSION, storage: { persistent: STORAGE.persistent }, discord: discord.status().on, ...(discord.status().on ? { discordBranded: discord.status().branded, discordAlerts: discord.status().alerts === 'off' ? [] : discordAlerts.kinds(), discordAlertsTo: discord.status().alerts } : {}), ...(discord.status().why ? { discordWhy: discord.status().why } : {}), bot: bot.status(), autotrade: { canHoldKeys: autotrade.canHoldKeys(), running: autotrade.running() }, futures: futures.status() });
 
     // the official website and its public numbers, for everyone
@@ -568,7 +602,8 @@ export const server = http.createServer(async (req, res) => {
     const dsc = path.match(/^\/api\/discord\/(\w+)$/);
     if (dsc) return await discordApi(req, res, dsc[1], token, url);
 
-    const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
+    // posix: URL paths use / on every OS; Windows' normalize turns them into backslashes and nothing would match OPEN_FILES
+    const rel = posix.normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
     // the admin's live window on the bot team (v13.66): the admin only, paywall or not
     if (LIVE_FILES.has(rel)) return access.isAdminToken(token) ? serveFile(req, res, rel === '/team-live' ? '/team-live.html' : rel) : send(res, 403, 'Admin only.', 'text/plain; charset=utf-8');
     const allowed = !PAYWALL || access.hasAccess(token);
@@ -640,6 +675,13 @@ export const server = http.createServer(async (req, res) => {
       const sc = ms ? ms.scanFeed : scanFeed, fu = ms ? ms.futures : futures, now = Date.now();
       return send(res, 200, { liqs: sc?.liqs ? liqSummary(sc.liqs(), now) : null, futures: fu ? positioning(fu.context(now)) : null, proof: breakLab.api(mq || HOME.series), at: now }); // proof: each break's claim, graded (breaklab.js)
     }
+    if (path === '/api/book') return send(res, 200, await orderBook.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // pending orders (orderbook.js)
+    if (path === '/api/paper') { // the Paper: the day's news as a newspaper (public/paper.js), made at most once a minute
+      if (!paperCache || Date.now() - paperCache.at > 60000) paperCache = { on: newsFeed.on(), ...buildPaper({ day: newsFeed.day(), record: publicRecord(bot.record()) }) };
+      return send(res, 200, paperCache);
+    }
+    if (path === '/api/coinglass') return send(res, 200, await coinGlass.api(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // CoinGlass (coinglass.js)
+    if (path === '/api/heatmap') return send(res, 200, orderBook.heatmap(mq ? marketOf(mq, discovery.list()).asset : 'BTC')); // the order book heatmap (orderbook.js)
     if (path === '/api/whales') { const wf = ms ? ms.whaleFilter : whaleFilter; return send(res, 200, wf ? wf.api() : { off: 'whales are for crypto markets' }); } // the Whale filter (whalefilter.js)
     if (path === '/api/team') return send(res, 200, team.api(mq || HOME.series)); // the bot team: who owns each action, and what each did (team.js)
     if (path === '/api/strength') return send(res, 200, strength.api(mq || HOME.series)); // is the bot getting stronger (strength.js)
@@ -657,11 +699,16 @@ export const server = http.createServer(async (req, res) => {
   }
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const MOVED_TO = movedTarget();
+if (process.argv[1] === fileURLToPath(import.meta.url) && MOVED_TO) {
+  // the app moved (moved.js): only redirect, and start none of the bots, feeds or Discord posts
+  createMovedServer(MOVED_TO).listen(PORT, () => console.log(`Shot Caller moved: sending everyone to ${MOVED_TO}`));
+} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => console.log(`Shot Caller on http://localhost:${PORT}${PAYWALL ? ' (paywall on)' : ''}`));
   // Learn the market around the clock (LEARN=off: only run while phones are subscribed)
   // SCAN_FEEDS=off: don't stream the exchanges from the server
   if (process.env.SCAN_FEEDS !== 'off') scanFeed.start();
+  if (process.env.BOOK !== 'off') ready.then(() => orderBook.start()); // BOOK=off: pending orders only while a phone looks
   if (process.env.FUTURES !== 'off') futures.start(); // FUTURES=off: no futures feed
   if (process.env.PLAYBOOK !== 'off') ready.then(() => playbook.start()); // PLAYBOOK=off: no candle history or strategy check
   ready.then(() => { if (process.env.LEARN !== 'off') bot.startLearning(); else if (bot.status().devices || autotrade.running()) bot.start(); });
@@ -669,4 +716,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.env.CROSS !== 'off') crossFeed.start(); // related markets (crossfeed.js)
   if (process.env.NEWS !== 'off') newsFeed.start(); // market news for the News scout (newsfeed.js)
   ready.then(() => discordRoles.start()); // members' Discord role, every 10 minutes (only when it's set up)
+  ready.then(() => edgeSync.start()); // the Cloudflare backup's copy of the members (edgesync.js), with EDGE_SECRET and APP_URL
 }

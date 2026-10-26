@@ -276,6 +276,154 @@ Security:
 
 ## Version notes (newest first)
 
+### Round calls hold through reloads (v13.95)
+The side the phone shows for a round (v13.45: the first side shown is the side for the rest of the round) was kept only in the page's memory. A reload mid-round (an update, the app closed and reopened, the server coming back from backup mode with a pick of its own) forgot it, and the round could then show the other side. It's now saved on the phone (`roundShown` in local storage, dropped once each round closes), and what the phone already showed wins over a later server pick for buy calls too (`lockedSideFor`), as it already did for the round call card.
+
+### The Paper: every market-moving headline of the day (v13.94)
+The Paper now prints the **whole day's** market news (since midnight Eastern; before 6 AM, since 6 PM the evening before), not just the last 6 hours of the running markets. Besides each running market, the news feed now searches Google News every 10 minutes for the topics that move every market (`newsfeed.js TOPICS`): the Fed and rates, the economy (inflation, jobs), Treasury yields and the dollar, the stock market, earnings, crypto, oil and OPEC, gold and silver, and world policy (tariffs, sanctions, geopolitics). Headlines are kept 26 hours for the Paper (`day()`); the News scout still reads only the last 6. The page:
+- **Top story**: the most-covered story of the last 3 hours.
+- **The day's other big stories**: up to 5 more of the most-covered stories, one headline per story.
+- **Sections**: The economy & the Fed, Stocks, Crypto, Commodities, World & policy, with every other headline printed once, in its most specific section, with a count (30 shown per section, newest first).
+- **Today's schedule** (high and medium impact) and **From the bot's desk**.
+
+The server builds it at most once a minute. `NEWS_TOPICS=off` turns the topic searches off.
+
+### The Paper (v13.93)
+A new **Paper** tab (between Alerts and Record): the day's market news laid out as a newspaper, *The Shot Caller Times*. It's built on the server from the News scout's feed (`public/paper.js buildPaper`, `GET /api/paper`): Google News for every running market and CoinDesk for crypto, the last 6 hours.
+- **Top story**: the headline the most other headlines are also about (sharing 3+ key words), from the last 3 hours, so the story everyone is covering leads.
+- **A section per kind of market** running (Crypto, Stocks, Commodities), newest first, 8 each; a story filed under several markets prints once, tagged with all of them.
+- **Today's schedule**: the next 24 hours of high- and medium-impact releases from the week's economic calendar, with forecasts.
+- **From the bot's desk**: the official record.
+
+Edition and date are Eastern time. The news feed now covers up to 12 running markets (was 6), so gold, silver and oil get their headlines alongside the five coins. Refreshed every 2 minutes while the tab is open. Context only: no call uses it.
+
+### The direct lane: no more Cloudflare "Error 1027" (v13.92)
+Every request through the backup Worker counts toward Cloudflare's free **100,000 requests a day**, and an open phone polls the API a few times a second, so one phone left open most of a day was enough to hit it (Error 1027, "temporarily rate limited", until midnight UTC). Now, while the home server answers, the Worker adds `x-sc-direct: <ORIGIN>` to what it passes on (only when ORIGIN is a subdomain of the site's address, like `home.shotcaller.com.co`), and the app reads the API (every `getJSON` poll) straight from that address. The server allows exactly that one parent https address to read its API (`server.js directOrigin`, CORS with credentials), and the Worker copies the sign-in cookie onto the whole domain (`Domain=`) so it reaches the home address too: members already signed in get the copy on their next request, nobody signs in again. The page, its files and every POST still go through the Worker. If a direct request fails (the server off, a 401/403/5xx), the app goes back through the Worker, and its backup, for a minute. `py scripts\shotctl.py up` redeploys the Worker on its own when it updates.
+
+### The Fact checker (v13.91)
+A new hire in the hiring center: the **🔬 Fact checker** (`public/hires.js factCheck`), in the grading room. It puts six claims about the bot to a real test on the official record and gives each **TRUE** (the evidence is clearly for it, at 95%), **FALSE** (clearly against it, or for a "does better" claim, the difference shown to be under 5 points either way), or **UNPROVEN** (not enough evidence yet, with about how many more calls it would take if the gap held):
+1. The calls win more than half the time (Wilson 95% range against 50%).
+2. The calls win more often than their prices say they should (wins minus the wins the prices needed).
+3. Wins and losses come in streaks (Wald-Wolfowitz runs test).
+4. The calls are getting better (the newer half's edge against the older half's).
+5. UP calls do better than DOWN calls.
+6. Pricier calls (85¢ and up) beat their prices more than cheaper ones.
+
+Groups are compared by their edge over their prices, so cheap and pricey calls are judged fairly; each test needs 30+ calls in each group. It applies at 60+ graded official calls and tells the Caller (and for 2 and 3 the Risk officer) when a claim is settled. Unproven is not false, and with six tests at 95% one verdict in a few reports can be luck.
+
+### Order book heatmap and CoinGlass (v13.90)
+- **Heatmap** (free, on the Pending orders card): like Bookmap's. The server already reads Kraken's order book for BTC, ETH, SOL, XRP and DOGE every 15 seconds; every 30 seconds it now also keeps the dollars resting at each price (bucketed on a fixed grid of about 0.04% of the price, within 1% of it, the 40 biggest per side), for the last hour, and keeps them through restarts. The phone draws it: price up the side, time along the bottom, green buy orders below the price, red sell orders above, brighter where more dollars sit, the white line the price. `GET /api/heatmap?m=`.
+- **CoinGlass** (needs your own key, a paid plan at coinglass.com/pricing): a "Futures market" card with open interest across the big exchanges, OI-weighted funding, liquidations (Binance, OKX, Bybit) and Binance's long/short accounts. `py scripts\shotctl.py env set COINGLASS_API_KEY=your-key` then restart. Fetched only while someone looks, kept a minute. Each reading is fetched on its own, so one your plan doesn't include shows its error and the rest still show. `COINGLASS_INTERVAL` (default `4h`, the smallest the cheapest plan allows). `GET /api/coinglass?m=`. Context only: no call uses either.
+- Bookmap itself is a desktop app with no feed a server can use, so the heatmap is built from the book the bot already has.
+
+### The Restart watcher tells planned restarts apart (v13.89)
+
+On a home server every update restarts the app on purpose, so the Restart watcher's "the server keeps restarting" flag went off for nothing. `scripts/shotctl.py` now leaves a note (`DATA_DIR/planned-restart.json`) before a planned stop: an update installing itself, `restart`, `stop`, a backup restore. A start within 10 minutes of that note is recorded as planned (`hiring.js`). The watcher counts only unplanned starts (crashes, reboots, power cuts) toward its 10-a-week warning and shows the planned ones next to them. Starts from before this version can't be sorted, so they aren't counted.
+
+### A stronger flip watch (v13.88)
+
+Flip warnings and the chart's ↺ turn marks were going off on noise. Now:
+
+- **Flip warnings** ("the bot now leans against its call"; Discord, push and the phone) used to fire the moment the call's odds dipped under 50%, for a single tick, so a price wobbling around the target set them off again and again. A warning now needs the call's odds **40% or under for 20 seconds straight**, with **a minute or more left** to act; a wobble back over 45% starts the count again (`public/flipwarn.js`, shared by the server and the phone).
+- **They're graded.** Every warning is checked when its round settles (right = the called side lost), kept in `DATA_DIR/flipwarn.json`, and each Discord warning shows the record so far. If they prove no better than a coin flip (20+ graded, the 95% low end of their hit rate under 50%), the bar rises on its own to **30% held 45 seconds**.
+- **The flip check's warning** (chart history and buyers/sellers) now needs a 60%+ chance of the call losing, held 20 seconds, with a minute left (was 50%, 10 seconds).
+- **↺ marks on the chart** only show when the move is ripe to turn (flip score 50%+) and the turn is a real one (0.6 of a typical minute either side, was 0.2), and they switch off while their own record proves them no better than a random minute. The prediction path still bends the same way; only the marks (and the turns graded) are stricter.
+
+### The Mathematician (v13.87)
+
+A new hire in the hiring center: the **🧮 Mathematician** (`public/hires.js recordMath`), in the grading room. It works the official record out exactly, as $10 calls held to settlement after Kalshi's fees:
+
+- the win rate with its **95% range** (Wilson), and the win rate the calls' prices needed to **break even** (each call's −loss ÷ (win − loss), averaged)
+- the **average profit per call** with its standard error, and the total
+- a verdict: **proven ahead** of its prices (the whole range above breakeven), **proven behind** (the whole range below), or **not decided yet**, with about how many more calls it would take at the current gap. Under 30 calls nothing is proven.
+- once an edge is proven, the **Kelly stake** (and half of it, the usual safer size)
+
+It tells the Risk officer when the record is proven either way, and the Trader the Kelly stake. Exact math on the past, not a forecast: like every agent it reports, and no call uses it.
+
+### Members and new buyers in backup mode (v13.86)
+
+While the home server is off, the Cloudflare backup now handles the paywall too:
+
+- **Members sign in with their code.** Every few minutes the server sends the backup its member list (codes, status, expiry; never sessions) and the price (`edgesync.js` → `POST /__edge/members`, kept in the Worker's free KV storage `EDGE_KV`). A revoked code is out there too, and a renewal counts.
+- **New buyers can buy.** The backup makes the code (same format), takes "I've paid", and the admin can approve, deny or revoke from the app's admin panel as usual.
+- **Everything comes back.** When the server is up it fetches what happened on the backup (`GET /__edge/changes`) and merges it into its list (`access.js mergeEdge`: each record carries `updatedAt`, the newer side wins). A payment made while it was off sends the admin the usual "payment to verify" ping then. The backup then drops what was merged.
+
+The `/__edge/` calls need `EDGE_SECRET` and are answered by the Worker itself, never passed to the server. `shotctl.py cloud-backup` creates the storage (`shotcaller-edge`) and keeps this machine's Worker settings in `cloudflare/wrangler.local.jsonc`.
+
+### The RSI agent (v13.85)
+
+A new hire in the hiring center: the **📈 RSI agent** (`public/rsiagent.js`), on the Market desk. Approve it in Settings → Admin → Hiring center and it joins the team of every market.
+
+- **Reads** RSI 14 on 1-, 5- and 15-minute candles (70+ overbought, 30 or under oversold) and spots a fresh divergence on 1 minute (a new 30-minute high on weaker RSI, or a new low on stronger RSI).
+- **Tests** every past 15-minute round in the market's saved history (up to 21 days of 1-minute bars, `bars.json`) that opened with the 1-minute RSI at an extreme: did it reverse (overbought → down, oversold → up) more often than the base rate of up rounds says? 30+ extreme rounds and z ≥ 2 proves **extremes fade**, z ≤ −2 proves **extremes run** (momentum), anything else is **no proven edge**. The test is redone each new round.
+- **Tells** the Scout and the Caller when 1-minute RSI hits an extreme or a divergence prints, and what the test says about it.
+
+Like every agent it reports and informs: no call uses it.
+
+### Backup mode on Cloudflare (v13.84)
+
+When the home server is off, the site no longer goes dark. A Cloudflare Worker (`cloudflare/worker.js`, free plan) sits in front of the app's address:
+
+- **Home server up:** every request goes to it through the tunnel (`ORIGIN`), as before. The Worker adds the visitor's address with the shared `EDGE_SECRET`, so the server's sign-in limits still count each visitor separately (`clientIp` trusts `x-sc-client-ip` only with that secret).
+- **Home server down** (unreachable, over 20 seconds, or Cloudflare's dead-tunnel page): the Worker serves the website and the app's files itself, behind the same paywall. Members get in with the signed pass their phone already keeps: the Worker checks it with the server's `ACCESS_SECRET` and gives the phone its own signed cookie until the pass runs out. The admin code works too (`ADMIN_CODE`). It fetches the market data the phone needs (Kalshi's and Coinbase's public prices, the same read-only paths the server allows) and a snapshot of Kraken's order book (`bookmath.js`, shared with the server). The phone works out the calls itself, so prices, the chart and the bot's calls keep going, under a *Backup mode* banner.
+- **What waits for the server:** Discord, push, the Auto-trader, the official record, the bot team and the other server-side cards, and buying or approving codes. Those answer "offline". The Worker stores nothing, so nothing is lost or split: everything picks up when the server is back.
+
+Set up the easy way: with the tunnel route below in place, run `python3 scripts/shotctl.py cloud-backup` on the home server. It signs in to Cloudflare (a browser window), uploads the Worker as `shotcaller-backup` and copies `ORIGIN` (`https://home.<APP_URL host>`, or `--origin`), `ACCESS_SECRET`, `EDGE_SECRET` and `ADMIN_CODE` from `.env` into it as secrets. Then add your domain to it as a Custom Domain. After that, `up` uploads the backup again by itself whenever an update changes the app's files (`public/`), so its copy never falls behind; `cloud-backup` again does it by hand.
+
+Or set it up in the Cloudflare dashboard:
+1. **The tunnel:** add a second route to the tunnel, `home.<your domain>` → `HTTP` `localhost:8080`. That's `ORIGIN`.
+2. **The Worker:** Workers & Pages → your Worker → Settings → Build → connect this GitHub repo, branch the server follows, root directory `cloudflare`. The Worker's name must match `name` in `cloudflare/wrangler.jsonc`.
+3. **Its settings:** Variables and Secrets: `ORIGIN` (text, `https://home.<your domain>`), and as secrets `ACCESS_SECRET`, `EDGE_SECRET` and `ADMIN_CODE`, copied from the server's `.env` (`shotctl.py fix` creates `EDGE_SECRET`; restart the server after).
+4. **The address:** Settings → Domains & Routes → add your domain as a Custom Domain (Cloudflare replaces the old tunnel record for it).
+
+### Run only the markets you want (v13.83.4)
+
+Every running market is a full bot, ticking every second. A small home server running all of Kalshi's 15-minute markets (the coins, the stock indexes, gold, oil) answered phones so slowly that requests timed out, and a phone could end up with half-updated app files. `MARKETS_ONLY=BTC,ETH,SOL,XRP,DOGE` lists and runs only those assets (any of BTC, ETH, SOL, XRP, DOGE, SPX, NDX, DJI, GOLD, SILVER, OIL); without it every market runs, as before.
+
+### Pending orders answer at once (v13.83.3)
+
+On a busy home server the Pending orders card never appeared: each phone request waited for a fresh read of Kraken's book, which could outlast the phone's 10-second limit, and the card stayed hidden on any failure. The server now answers from its last read straight away (the tracker keeps it under 15 seconds old) and refreshes in the background; only a first request, or one after a minute without a good read, waits for Kraken. If the card still can't load, it shows why instead of staying hidden.
+
+### A quieter activity log (v13.83.2)
+
+On the live book the Pending orders log filled with about 40 events in 10 minutes: $30k walls and market makers sliding orders a few dollars. Now only **big walls** are logged (at least 2% of the dollars waiting within 0.5% on an average side: about $300k on Bitcoin's Kraken book), and a wall that disappears while one at least 60% its size stands within 0.15% on the same side counts as **moved**, not pulled, and isn't logged. Smaller walls still show on the card while they stand.
+
+### The self-heal keeps a copy (v13.83.1)
+
+When the Deck can't draw a market for 10 seconds, the phone clears that market's saved data and reloads. It used to delete it, scorecards and call logs included. It now keeps the last copy of each as `<key>.bak` in the phone's storage, so nothing is gone for good. Updates themselves never touched this data: they only refresh the app's files.
+
+### Pending orders (v13.83)
+
+A **📖 Pending orders** card on the Deck (Pro, crypto markets: BTC, ETH, SOL, XRP and DOGE) shows the orders waiting on Kraken's order book (`orderbook.js`):
+
+- **Who's stacked.** The dollars waiting to buy and to sell within 0.1%, 0.5%, 1% and 2% of the price, a bar comparing the two within 0.5%, and a label: *buyers stacked*, *sellers stacked* or *even*.
+- **Best orders.** The best buy and sell order and the spread.
+- **Walls.** A price holding at least 5 times what a typical price within 2% holds, with how far away it is and how long it's been there.
+- **Tracked around the clock.** The server reads all five coins' books every 15 seconds, phones or not (`BOOK=off` to read only while a phone looks). A chart shows which side was stacked within 0.5%, minute by minute, for the last 2 hours. An **activity log** lists walls going **up** (stood 30 seconds), getting **hit** (the price reached them) and getting **pulled** (gone before the price got there, with under a fifth of the wall left at that price). Big orders are often placed to look like support or resistance and taken away before they fill. A wall that only shrank a little, slid out of the 500-level view or stopped counting because the prices around it grew is not called pulled. History and log are kept in `DATA_DIR/orderbook.json`.
+
+Kraken's public book (`/0/public/Depth`, no key) gives up to 500 prices a side; a band those don't reach is marked with an asterisk. A phone that's looking gets a fresh read at most every 3 seconds, shared between phones. One exchange's book, not the whole market, and orders can be cancelled any moment: context only, no call uses it.
+
+### Saves that don't trip over each other (v13.82.4)
+
+Every saved file (the records, what the bot learned, members, the Auto-trader's history...) was written to one shared `<file>.tmp` and then renamed into place. When two saves of the same file overlapped, the second found its temp file already renamed away and failed (`ENOENT ... record-pick.json.tmp`), so that save was lost. Slower disks and Windows antivirus made the overlap common. Every save now goes through `atomicfile.js`: its own temp name each time, and a short retry when Windows briefly holds the file.
+
+### Moving day (v13.82.3)
+
+The app can move to a new address and take its people with it.
+
+- **The old address sends everyone to the new one.** Set `MOVED_TO` on the old host (for example Railway) to the new site's `https://` address. Every page and API call is redirected there (`moved.js`), and an installed copy of the app at the old address replaces its service worker, removes it and opens the new address. Nothing else starts on the old host: no bots, feeds, push or Discord posts, so nothing runs twice. `/healthz` still answers, so the host's health check passes.
+- **Members come along.** `python3 scripts/shotctl.py live migrate --from https://old-address` (signed in to the new site first) copies every active member with the same code and expiry, and the price and days. Paid-but-unapproved codes are listed for you to approve. Members sign in on the new site with their code once.
+- **Settings come along.** In Railway, Variables → Raw Editor, copy everything; then `Get-Clipboard | py scripts\shotctl.py env import` (Windows) or `shotctl.py env import railway.env` adds the variables this computer doesn't have yet (Discord, Anthropic, Whale Alert keys...). It skips the old host's own (`RAILWAY_*`, `APP_URL`, `DISCORD_REDIRECT_URI`, `PORT`, `DATA_DIR`).
+- **Discord.** With `APP_URL` set to the new address, the Discord posts link there, the website's *Join the Discord* button uses `DISCORD_INVITE`, and the members' role linking sends people back to `APP_URL/api/discord/callback`: add that address under OAuth2 → Redirects in the Discord Developer Portal.
+
+### Opens faster (v13.82.2)
+
+Every time the app opened, the phone downloaded all of its ~100 files again (about 1.8 MB), because the server never told it which files hadn't changed. Files now carry an ETag: the phone asks "still this version?" and gets a tiny *not modified* answer, so only changed files are downloaded. It matters most when the server is far from the phone or behind a slow link, such as a home computer behind a Cloudflare tunnel.
+
+### Runs on Windows (v13.82.1)
+
+On a Windows computer every page answered `{"error":"payment required"}`, the sign-in page included, so nobody could get in. The server matched the page's address against the pages open to everyone with the operating system's path rules, and Windows writes paths with backslashes, so `/paywall.html` never matched. It now uses web-style paths on every system. Linux hosts (Railway, Render) were never affected.
+
 ### The Whale filter (v13.82)
 
 A **🐋 Whale filter** on the Market desk tells the whales that move the market from the ones that don't (`public/whales.js`, `whalefilter.js`, one per crypto market).
@@ -336,6 +484,9 @@ A 🧑‍💼 **Recruiter** in the Manager's office looks for gaps the team has 
 | 🕐 Hour-of-day coach | 120+ graded official calls | splits the record into six 4-hour blocks (ET) and flags a block that clearly loses to its prices (30+ calls, z ≤ −2) |
 | 🌊 Liquidity scout | calls are being made or traded | reads Kalshi's order book every 30 seconds and tells the Trader and the Caller how many dollars of each side are for sale within 2¢ of the best price |
 | 🔄 Restart watcher | always | records each server start: how long it's been up, and how often it restarts (each restart empties the team's memory) |
+| 📈 RSI agent | 5+ hours of saved price history | reads RSI 14 on 1, 5 and 15 minutes, tests on the saved history whether RSI extremes predicted the 15-minute rounds, and tells the Scout and the Caller when RSI hits an extreme |
+| 🧮 Mathematician | 10+ graded official calls | works the record out exactly after fees: win rate with its 95% range, the breakeven win rate, profit per call with its error, whether the record is proven ahead or behind its prices, and the Kelly stake once it is |
+| 🔬 Fact checker | 60+ graded official calls | tests six claims about the bot on the record (wins more than half, beats its prices, streaks, getting better, UP vs DOWN, pricier calls) and marks each TRUE, FALSE or UNPROVEN at 95% |
 
 **Every new hire starts on probation**: a **24-hour trial**, restarted if it's flagged stuck or broken while on it. The **Training room picks it up the moment it joins**: a trainer appears on the same reading, tracking the trial (*0 of 24 hours of its trial · about 24 h to go*). When the hire graduates, the hire and its trainer each earn **+50 merit**. Like everyone on the team, a hire reports and informs: none of them changes a call.
 
@@ -2057,6 +2208,15 @@ Choose one:
 - **Railway.** On railway.com: **Login with GitHub** → **New Project** → **Deploy from GitHub repo** → `Shot-caller`. `railway.json` sets the start command and health check. When the deploy goes green, open the service → **Settings → Networking → Generate Domain** (leave the port blank or enter `8080`). That gives you your `https://…up.railway.app` URL, and every push to `master` redeploys. Open the HTTPS URL on your phone, then:
   - **iPhone:** Safari → Share → *Add to Home Screen*
   - **Android:** Chrome → ⋮ → *Install app*
+- **Your own computer or server, no Railway** (`scripts/shotctl.py`, Python 3.9+, nothing to install). It scans the code, fixes what it safely can, runs the server as a real app and website, and manages the live app:
+  - `python3 scripts/shotctl.py scan` checks Node, dependencies, every `.js` file, the tests, `.env`, the data folder and the running server. `fix` installs dependencies, creates `.env` with a fresh `ACCESS_SECRET`, `KEY_SECRET` and pinned VAPID keys, and creates the data folder.
+  - `env set KEY=VALUE` / `env unset KEY` / `env list` edit `.env`, which takes the place of Railway's Variables (secrets are masked when listed).
+  - `start` / `stop` / `restart` / `status` / `logs` run the server in the background and restart it if it crashes. `deploy` pulls, installs, tests and restarts, and rolls back to the last commit if the tests or the health check fail.
+  - `up` runs everything and keeps it running: the app, your named Cloudflare tunnel (`env set TUNNEL_TOKEN=...`, the token from the tunnel's install command), and updates. It restarts the app only if it stops answering (for 90 seconds) or an update arrives. Every 5 minutes it checks GitHub; on a new commit it backs up the data folder (`data/.backups`, last 10 kept), then pulls, installs (only if dependencies changed), tests and restarts, and keeps the old version running if the update fails. Members, the record, what it learned and the Auto-trader's history all live in the data folder, so nothing is lost. `install-startup` starts `up` when you log in to Windows. `backup` makes a copy by hand; `backup --restore NAME` puts one back.
+  - `scripts/bugwatch.py` never stops looking for problems, and fixes the ones it safely can. Every minute: the app (restarts it after 5 minutes without an answer, a backstop to `up`), the website (restarts a stuck tunnel), Kalshi (reconnects Cloudflare WARP when it's blocked), the bot (restarts the app if it stopped ticking while Kalshi answers), the server log (groups new errors), logs over 20 MB (rotated) and disk space (old backups pruned). Every 10 minutes it reads every saved data file and restores a damaged one from the newest good backup. With `--tests` it also runs the test suite after every code change and every 12 hours (off by default: `up` already tests each update, and a test run takes the whole CPU for minutes). What it can't fix goes in `data/.shotctl/bugwatch.md`, and to Discord if `BUGWATCH_WEBHOOK` is set (use a private channel). `--install-startup` starts it at login on Windows; `--once` runs one round.
+  - Public address: `tunnel` gives a free `https://….trycloudflare.com` address through [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no domain needed). For your own domain, `install-service --domain shotcaller.example.com` writes a systemd unit (starts on boot) and a Caddyfile (automatic HTTPS) and sets `APP_URL`.
+  - `live login --url https://your-app` signs in with the admin code, then `live health`, `live members`, `live approve CODE --days 30`, `live deny`, `live revoke`, `live config --price 5 --days 30`, `live tuneup --run` and `live hiring` work against that app, wherever it's hosted (Railway included).
+  - Moving off Railway: copy the volume's files into `data/`, and set `ACCESS_SECRET` to `<RAILWAY_PROJECT_ID>:<RAILWAY_SERVICE_ID>` (before running `fix`) so members' saved passes keep working.
 - **Same Wi-Fi.** Run `npm start` on your computer, then open `http://<computer-ip>:8080` on your phone. Install and notifications need HTTPS, but the live view works.
 - **Android only, on the device.** Install Termux, then `pkg install nodejs git`, clone the repo, run `npm start`, and open `localhost:8080`.
 

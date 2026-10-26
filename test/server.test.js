@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'shot-srv-'));
 process.env.PAYWALL = 'off'; // paywall has its own tests
+process.env.EDGE_SECRET = 'test-edge-secret'; // the Cloudflare backup's shared secret (clientIp below)
 process.env.ADMIN_CODE = 'test-only-admin'; // a throwaway code for the admin-only tests here
 delete process.env.ANTHROPIC_API_KEY; // Ask's AI is off here (askai.test.js tests it with a stand-in client)
 
@@ -21,7 +22,7 @@ await new Promise((r) => upstream.listen(0, r));
 const base = `http://127.0.0.1:${upstream.address().port}`;
 process.env.KALSHI_API = base;
 process.env.COINBASE_API = base;
-const { server, bot } = await import('../server.js');
+const { server, bot, clientIp } = await import('../server.js');
 await new Promise((r) => server.listen(0, r));
 const app = `http://127.0.0.1:${server.address().port}`;
 test.after(() => { server.close(); upstream.close(); bot.stop(); });
@@ -246,4 +247,12 @@ test('the hiring center: the admin only; search, approve, and the hire is on the
   await new Promise((r) => setTimeout(r, 1100)); // the live window reads fresh at most once a second
   const t = await (await fetch(`${app}/api/admin/team`, h)).json();
   assert.ok(t.roster.some((r) => r.role === 'h_restarts' && r.trial) && t.roster.some((r) => r.role === 'tr_h_restarts'), 'on the team, on probation, with a trainer');
+});
+
+test('a visitor\'s address from the Cloudflare backup is trusted only with the edge secret', () => {
+  const req = (h) => ({ headers: h, socket: { remoteAddress: '10.0.0.1' } });
+  assert.equal(clientIp(req({ 'x-forwarded-for': '1.1.1.1, 2.2.2.2' })), '2.2.2.2', 'as before: the proxy\'s last entry');
+  assert.equal(clientIp(req({ 'x-forwarded-for': '2.2.2.2', 'x-sc-client-ip': '9.9.9.9', 'x-sc-edge': 'test-edge-secret' })), '9.9.9.9');
+  assert.equal(clientIp(req({ 'x-forwarded-for': '2.2.2.2', 'x-sc-client-ip': '9.9.9.9', 'x-sc-edge': 'guess' })), '2.2.2.2', 'a wrong secret is ignored');
+  assert.equal(clientIp(req({ 'x-sc-client-ip': '9.9.9.9' })), '10.0.0.1', 'no secret, no trust');
 });

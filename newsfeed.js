@@ -8,7 +8,15 @@
 // mock harness serve their own. Nothing here changes a call: the News scout informs the team (public/news.js).
 const GOOGLE = 'https://news.google.com/rss/search', COINDESK = 'https://www.coindesk.com/arc/outboundfeeds/rss/', CALENDAR = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
 const QUERY = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana crypto', XRP: 'XRP crypto', DOGE: 'dogecoin', SPX: 'S&P 500 stocks', NDX: 'Nasdaq stocks', DJI: 'Dow Jones stocks', GOLD: 'gold price', SILVER: 'silver price', OIL: 'oil price' };
-const KEEP_MS = 6 * 3600000;
+const KEEP_MS = 26 * 3600000, SCOUT_MS = 6 * 3600000; // kept a day (the Paper), the News scout reads the last 6 hours
+// The day's market-moving news beyond the running markets (v13.94, for the Paper): every 10 minutes, a Google News
+// search per topic. NEWS_TOPICS=off turns them off.
+export const TOPICS = [
+  ['fed', 'Federal Reserve interest rates'], ['economy', 'US economy inflation jobs report'], ['bonds', 'Treasury yields dollar'],
+  ['stocks', 'stock market today'], ['earnings', 'earnings stocks shares'], ['crypto', 'crypto market'],
+  ['oil', 'oil prices OPEC'], ['metals', 'gold silver prices'], ['world', 'tariffs OR sanctions OR geopolitical markets'],
+];
+const TOPIC_EVERY = 600000;
 
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 const decode = (s) => String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&(#x?[0-9a-f]+|\w+);/gi, (m, e) => (e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m)).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
@@ -39,7 +47,7 @@ export function createNewsFeed({ env = process.env, assets = () => ['BTC'], fetc
   let events = [], calAt = 0, err = null, okAt = 0, timer = null, busy = false;
   const add = (key, list) => {
     const now = clock(), seen = new Set(), all = [...list, ...(heads.get(key) || [])].filter((h) => h.t > now - KEEP_MS && h.t <= now + 300000)
-      .filter((h) => { const k = h.title.toLowerCase().replace(/\W+/g, ' ').trim(); if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => b.t - a.t).slice(0, 40);
+      .filter((h) => { const k = h.title.toLowerCase().replace(/\W+/g, ' ').trim(); if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => b.t - a.t).slice(0, 120);
     heads.set(key, all);
   };
   async function poll() {
@@ -47,7 +55,7 @@ export function createNewsFeed({ env = process.env, assets = () => ['BTC'], fetc
     busy = true;
     const now = clock(), problems = [];
     try {
-      for (const key of [...new Set(assets())].slice(0, 6)) {
+      for (const key of [...new Set(assets())].slice(0, 12)) {
         if (now - (fetched.get(key) ?? 0) < every) continue;
         fetched.set(key, now);
         const q = QUERY[key] || key;
@@ -55,6 +63,11 @@ export function createNewsFeed({ env = process.env, assets = () => ['BTC'], fetc
         if (key === 'BTC') { // CoinDesk once per round of polls, filed under Bitcoin (it's crypto-wide: every coin's api reads it)
           try { add('BTC', parseRss(await fetchText(coindesk), 'CoinDesk')); okAt = clock(); } catch (e) { problems.push(`CoinDesk: ${e.message}`); }
         }
+      }
+      if (env.NEWS_TOPICS !== 'off') for (const [key, q] of TOPICS) {
+        if (now - (fetched.get(`topic:${key}`) ?? 0) < TOPIC_EVERY) continue;
+        fetched.set(`topic:${key}`, now);
+        try { add(`topic:${key}`, parseRss(await fetchText(`${google}?q=${encodeURIComponent(`${q} when:1d`)}&hl=en-US&gl=US&ceid=US:en`))); okAt = clock(); } catch (e) { problems.push(`Google News: ${e.message}`); }
       }
       if (now - calAt >= 3600000) {
         calAt = now;
@@ -68,10 +81,16 @@ export function createNewsFeed({ env = process.env, assets = () => ['BTC'], fetc
     start() { if (!on || timer) return; poll().catch(() => {}); timer = setInterval(() => poll().catch((e) => log.warn?.('news poll failed', e.message)), 60000); timer.unref?.(); },
     stop() { clearInterval(timer); timer = null; },
     poll,
+    // the Paper's day: every headline kept, per running asset and per topic, and the calendar (newest first)
+    day(now = clock()) {
+      const pick = (k) => (heads.get(k) || []).filter((h) => h.t > now - KEEP_MS);
+      return { on, assets: Object.fromEntries([...heads.keys()].filter((k) => !k.startsWith('topic:')).map((k) => [k, pick(k)])),
+        topics: Object.fromEntries(TOPICS.map(([k]) => [k, pick(`topic:${k}`)])), events, at: okAt || null, err };
+    },
     // asset -> { headlines (newest first), events (the next 24 h and the last hour), at, err }
     api(key = 'BTC', now = clock()) {
       const crypto = ['ETH', 'SOL', 'XRP', 'DOGE'].includes(key);
-      const list = [...(heads.get(key) || []), ...(crypto ? (heads.get('BTC') || []).filter((h) => h.source === 'CoinDesk') : [])].sort((a, b) => b.t - a.t).slice(0, 25);
+      const list = [...(heads.get(key) || []), ...(crypto ? (heads.get('BTC') || []).filter((h) => h.source === 'CoinDesk') : [])].filter((h) => h.t > now - SCOUT_MS).sort((a, b) => b.t - a.t).slice(0, 25);
       return { on, headlines: list, events: events.filter((e) => e.t > now - 3600000 && e.t < now + 86400000).sort((a, b) => a.t - b.t), at: okAt || null, err };
     },
   };

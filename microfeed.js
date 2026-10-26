@@ -2,10 +2,11 @@
 // details from the live feeds (scanfeed.js trades and Round scan, futures.js, marketwatch.js Kalshi flow and jumps,
 // the bot's snapshot), predicts BTC's move 1, 3 and 5 minutes out, and grades each prediction when its time comes
 // (against BTC's actual price then) before learning from it. Kept in DATA_DIR/micro.json.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { HORIZONS, microLearn, microPredict, microRead, microShift, microVector, newMicro } from './public/micro.js';
 import { quote } from './public/model.js';
+import { writeAtomic } from './atomicfile.js';
 
 // playbook: playbookfeed.js (the market-structure read)
 export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = null, playbook = null, clock = () => Date.now(), log = console }) {
@@ -13,7 +14,7 @@ export function createMicroFeed({ file, scanFeed, futures = null, marketWatch = 
   // a saved model with a different set of inputs (an older version) starts fresh
   async function load() { try { const d = JSON.parse(await readFile(file, 'utf8')); if (d?.v === 1 && d.models?.[1]?.w?.length === newMicro().models[1].w.length) M = d; } catch { /* first run */ } }
   async function save() {
-    try { await mkdir(dirname(file), { recursive: true }); await writeFile(`${file}.tmp`, JSON.stringify(M)); await rename(`${file}.tmp`, file); } catch (e) { log.error('saving the micro model failed', e.message); }
+    try { await mkdir(dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(M)); } catch (e) { log.error('saving the micro model failed', e.message); }
   }
   // The details right now (see public/micro.js MICRO_FEATURES), from everything the server sees
   function features(snap, now) {
