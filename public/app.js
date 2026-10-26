@@ -48,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '244'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '245'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2028,19 +2028,29 @@ function serverPickFor(live, now) {
   const k = state.pick?.live;
   return k && k.closeTime === live.m.close_time && now - (state.pickAt || 0) < 60000 ? k : null;
 }
+// v13.95 the side shown is saved on the phone too: a reload mid-round (an update, the app reopened, the server back from
+// backup mode with its own pick) used to forget it, and the round could then show the other side
+function shownRounds(now = Date.now()) {
+  if (!state.roundShown) {
+    const saved = store.get('roundShown', {}) || {};
+    state.roundShown = Object.fromEntries(Object.entries(saved).filter(([, e]) => e?.side && Date.parse(e.closeTime) > now));
+  }
+  return state.roundShown;
+}
+const saveShown = () => store.set('roundShown', state.roundShown || {});
 function lockedSideFor(live, now) {
   if (!live) return null;
-  const k = serverPickFor(live, now) ?? state.roundShown?.[live.m.ticker];
+  const k = shownRounds(now)[live.m.ticker] ?? serverPickFor(live, now); // what this phone already showed wins, as in roundCallFor
   return k?.side ? { ticker: live.m.ticker, side: k.side } : null;
 }
 function roundCallFor(live, snap, now) {
-  const t = live.m.ticker, server = serverPickFor(live, now), shown = (state.roundShown ||= {})[t];
+  const t = live.m.ticker, server = serverPickFor(live, now), shown = shownRounds(now)[t];
   if (shown) return server && server.side === shown.side ? server : shown;
-  if (server) return (state.roundShown[t] = server);
+  if (server) { state.roundShown[t] = server; saveShown(); return server; }
   const lockAt = Date.parse(live.m.close_time) - PICK.at * 60000;
   if (now < lockAt + 15000 && now - (state.pickAt || 0) < 30000) return { locking: true };
-  for (const k of Object.keys(state.roundShown)) if (!state.markets.some((m) => m.ticker === k)) delete state.roundShown[k];
-  const keep = (e) => (e?.side ? (state.roundShown[t] = e) : null);
+  for (const [k, e] of Object.entries(state.roundShown)) if (Date.parse(e.closeTime) <= now) delete state.roundShown[k]; // rounds that are over (other markets' rounds stay: switching markets mustn't forget them)
+  const keep = (e) => (e?.side ? ((state.roundShown[t] = e), saveShown(), e) : null);
   state.localPick ||= {};
   if (!state.localPick[live.m.ticker]) {
     try { const e = pickNow({ row: live, snap, settings }); if (e) state.localPick[live.m.ticker] = { ...e, price: e.ask, strike: live.strike, closeTime: live.m.close_time, local: true }; } catch { /* next tick */ }

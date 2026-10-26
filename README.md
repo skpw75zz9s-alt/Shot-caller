@@ -276,6 +276,9 @@ Security:
 
 ## Version notes (newest first)
 
+### Round calls hold through reloads (v13.95)
+The side the phone shows for a round (v13.45: the first side shown is the side for the rest of the round) was kept only in the page's memory. A reload mid-round (an update, the app closed and reopened, the server coming back from backup mode with a pick of its own) forgot it, and the round could then show the other side. It's now saved on the phone (`roundShown` in local storage, dropped once each round closes), and what the phone already showed wins over a later server pick for buy calls too (`lockedSideFor`), as it already did for the round call card.
+
 ### The Paper: every market-moving headline of the day (v13.94)
 The Paper now prints the **whole day's** market news (since midnight Eastern; before 6 AM, since 6 PM the evening before), not just the last 6 hours of the running markets. Besides each running market, the news feed now searches Google News every 10 minutes for the topics that move every market (`newsfeed.js TOPICS`): the Fed and rates, the economy (inflation, jobs), Treasury yields and the dollar, the stock market, earnings, crypto, oil and OPEC, gold and silver, and world policy (tariffs, sanctions, geopolitics). Headlines are kept 26 hours for the Paper (`day()`); the News scout still reads only the last 6. The page:
 - **Top story**: the most-covered story of the last 3 hours.
