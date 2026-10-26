@@ -47,7 +47,7 @@ export function createNewsFeed({ env = process.env, assets = () => ['BTC'], fetc
     busy = true;
     const now = clock(), problems = [];
     try {
-      for (const key of [...new Set(assets())].slice(0, 6)) {
+      for (const key of [...new Set(assets())].slice(0, 12)) {
         if (now - (fetched.get(key) ?? 0) < every) continue;
         fetched.set(key, now);
         const q = QUERY[key] || key;

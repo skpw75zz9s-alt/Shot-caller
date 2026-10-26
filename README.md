@@ -276,6 +276,15 @@ Security:
 
 ## Version notes (newest first)
 
+### The Paper (v13.93)
+A new **Paper** tab (between Alerts and Record): the day's market news laid out as a newspaper, *The Shot Caller Times*. It's built on the server from the News scout's feed (`public/paper.js buildPaper`, `GET /api/paper`): Google News for every running market and CoinDesk for crypto, the last 6 hours.
+- **Top story**: the headline the most other headlines are also about (sharing 3+ key words), from the last 3 hours, so the story everyone is covering leads.
+- **A section per kind of market** running (Crypto, Stocks, Commodities), newest first, 8 each; a story filed under several markets prints once, tagged with all of them.
+- **Today's schedule**: the next 24 hours of high- and medium-impact releases from the week's economic calendar, with forecasts.
+- **From the bot's desk**: the official record.
+
+Edition and date are Eastern time. The news feed now covers up to 12 running markets (was 6), so gold, silver and oil get their headlines alongside the five coins. Refreshed every 2 minutes while the tab is open. Context only: no call uses it.
+
 ### The direct lane: no more Cloudflare "Error 1027" (v13.92)
 Every request through the backup Worker counts toward Cloudflare's free **100,000 requests a day**, and an open phone polls the API a few times a second, so one phone left open most of a day was enough to hit it (Error 1027, "temporarily rate limited", until midnight UTC). Now, while the home server answers, the Worker adds `x-sc-direct: <ORIGIN>` to what it passes on (only when ORIGIN is a subdomain of the site's address, like `home.shotcaller.com.co`), and the app reads the API (every `getJSON` poll) straight from that address. The server allows exactly that one parent https address to read its API (`server.js directOrigin`, CORS with credentials), and the Worker copies the sign-in cookie onto the whole domain (`Domain=`) so it reaches the home address too: members already signed in get the copy on their next request, nobody signs in again. The page, its files and every POST still go through the Worker. If a direct request fails (the server off, a 401/403/5xx), the app goes back through the Worker, and its backup, for a minute. `py scripts\shotctl.py up` redeploys the Worker on its own when it updates.
 

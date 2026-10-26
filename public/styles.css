@@ -1310,3 +1310,29 @@ body.split .blip { display: none; }
 .ob-heat canvas { display: block; width: 100%; height: 180px; border-radius: 8px; background: #05070a; }
 .ob-heat small { display: flex; justify-content: space-between; font-size: 10px; margin: 4px 0 6px; }
 .cg-card .tile small { display: block; }
+
+/* the Paper (v13.93): a newspaper page, ink on newsprint */
+.paper { --ink: #1b1a17; --rule: #1b1a1733; background: #f3eee2; color: var(--ink); border-radius: 10px; padding: 14px 14px 10px; margin: 8px 0 16px; font-family: Georgia, 'Times New Roman', serif; box-shadow: 0 2px 18px #0006; }
+.paper a, .paper span { color: var(--ink); text-decoration: none; }
+.paper a:hover { text-decoration: underline; }
+.paper-mast { text-align: center; border-bottom: 3px double var(--ink); padding-bottom: 6px; margin-bottom: 10px; }
+.paper-mast h1 { font: 700 clamp(26px, 7vw, 44px)/1.05 'Old English Text MT', 'UnifrakturMaguntia', Georgia, serif; margin: 4px 0; letter-spacing: .5px; color: var(--ink); }
+.paper-strip { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 3px 0; flex-wrap: wrap; }
+.paper-mast .paper-strip:first-child { border-top: 0; }
+.paper-lead { border-bottom: 1px solid var(--ink); padding-bottom: 10px; margin-bottom: 10px; }
+.paper-lead h2 { font: 700 clamp(22px, 5.5vw, 32px)/1.15 Georgia, serif; margin: 4px 0 6px; }
+.paper-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8b1a1a; }
+.paper-by { display: block; font: italic 11.5px/1.4 Georgia, serif; color: #5a564c; margin-top: 2px; }
+.paper-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+.paper-sec { padding: 0 0 8px; }
+.paper-sec h3, .paper-box h3 { font: 700 13px/1.2 Georgia, serif; text-transform: uppercase; letter-spacing: 1.5px; border-bottom: 2px solid var(--ink); padding-bottom: 3px; margin: 6px 0 6px; color: var(--ink); }
+.paper-item { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 15px; line-height: 1.3; }
+.paper-item.first { font-size: 17px; font-weight: 700; }
+.paper-foot { border-top: 1px solid var(--ink); margin-top: 6px; padding-top: 4px; }
+.paper-box ul { list-style: none; margin: 0; padding: 0; }
+.paper-box li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--rule); font-size: 13px; line-height: 1.3; }
+.paper-box li time { flex: none; width: 82px; font-size: 11.5px; color: #5a564c; }
+.paper-box li.paper-high span { font-weight: 700; }
+.paper-box p { font-size: 14px; line-height: 1.45; margin: 4px 0; }
+.paper-empty { font-style: italic; color: #5a564c; margin: 6px 0; }
+.paper-fine { font-size: 11px; line-height: 1.4; color: #5a564c; border-top: 1px solid var(--rule); padding-top: 6px; margin: 8px 0 0; }

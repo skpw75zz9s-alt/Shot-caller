@@ -48,7 +48,7 @@ import { roadHtml } from './training.js';
 import { clinicHtml } from './doctor.js';
 import { predict as whaleSays } from './whales.js';
 import { createPhoneTrade } from './phonetrade.js';
-window.SC_BOOT = '242'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
+window.SC_BOOT = '243'; // this code's build: index.html reloads with fresh files if it doesn't match its SC_BUILD
 
 const API = './api';
 const $ = (id) => document.getElementById(id);
@@ -2460,6 +2460,31 @@ async function refreshHeat() {
   setHTML($('obHeatSay'), `<span>${agoShort(snaps.at(-1).t - snaps[0].t)} ago</span><span>${px(kLo)} – ${px(kHi)}</span><span>now</span>`);
 }
 setInterval(refreshHeat, 30000); setTimeout(refreshHeat, 4000);
+// ---------- the Paper (public/paper.js on the server): the day's market news as a newspaper ----------
+const paperAgo = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60 ? `${m % 60} min ` : ''}ago`; };
+const paperLink = (s, cls = '') => (s.link ? `<a class="${cls}" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a>` : `<span class="${cls}">${esc(s.title)}</span>`);
+const paperByline = (s) => `<small class="paper-by">${esc(s.source || 'News')} · ${paperAgo(s.t)}${s.tags?.length ? ` · ${s.tags.map(esc).join(', ')}` : ''}</small>`;
+let paperAt = 0;
+async function refreshPaper(force) {
+  if (document.hidden || !shownViews.has('paper') || (!force && Date.now() - paperAt < 120000)) return;
+  let p;
+  try { p = await getJSON('paper'); } catch (e) { if (!paperAt) setHTML($('paperLead'), `<p class="paper-empty">Couldn't fetch today's paper (${esc(e.message)}). Trying again in a minute.</p>`); return; }
+  paperAt = Date.now();
+  const et = (o) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...o }).format(new Date(p.at));
+  const hr = Number(et({ hour: 'numeric', hourCycle: 'h23' }));
+  setText($('paperDate'), et({ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }));
+  setText($('paperEdition'), `${hr < 5 ? 'Late' : hr < 12 ? 'Morning' : hr < 17 ? 'Afternoon' : 'Evening'} edition · ${et({ hour: 'numeric', minute: '2-digit' })} ET`);
+  setText($('paperCount'), p.stories ? `${p.stories} stories` : '');
+  if (!p.on) setHTML($('paperLead'), '<p class="paper-empty">The news feed is turned off on this server (NEWS=off).</p>');
+  else if (!p.lead) setHTML($('paperLead'), '<p class="paper-empty">No headlines yet: the first arrive within a few minutes of the server starting.</p>');
+  else setHTML($('paperLead'), `<small class="paper-kicker">Top story${p.lead.covered ? ` · ${p.lead.covered} other headline${p.lead.covered === 1 ? '' : 's'} on it` : ''}</small><h2>${paperLink(p.lead)}</h2>${paperByline(p.lead)}`);
+  setHTML($('paperSections'), (p.sections || []).map((s) => `<section class="paper-sec"><h3>${esc(s.title)}</h3>${s.items.length ? s.items.map((x, i) => `<div class="paper-item${i === 0 ? ' first' : ''}">${paperLink(x)}${paperByline(x)}</div>`).join('') : '<p class="paper-empty">Quiet so far.</p>'}</section>`).join(''));
+  const IMP = { High: 'paper-high', Medium: '' };
+  setHTML($('paperEvents'), (p.events || []).map((e) => `<li class="${IMP[e.impact] || ''}"><time>${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(e.t))}</time><span>${esc(e.country)} ${esc(e.title)}${e.forecast ? ` <small>(forecast ${esc(e.forecast)}${e.previous ? `, before ${esc(e.previous)}` : ''})</small>` : ''}</span></li>`).join('') || '<li><span>Nothing big scheduled in the next 24 hours.</span></li>');
+  const r = p.record;
+  setHTML($('paperDesk'), r ? `<p>The official bot has won <b>${r.wins} of ${r.graded}</b> graded calls (${((r.wins / r.graded) * 100).toFixed(0)}%), <b>${r.usd >= 0 ? '+' : '−'}$${Math.abs(r.usd).toFixed(2)}</b> as $10 calls after fees.${r.streak?.n > 1 ? ` Current run: ${r.streak.n} ${r.streak.kind === 'W' ? 'wins' : 'losses'} in a row.` : ''}</p>` : '<p>No graded calls yet.</p>');
+}
+setInterval(() => refreshPaper(false), 60000);
 // ---------- CoinGlass (coinglass.js): the whole futures market, with the owner's API key ----------
 async function refreshCoinGlass() {
   if (!CRYPTO || document.hidden || !shownViews.has('live')) return;
@@ -3154,6 +3179,7 @@ const split = createSplit({ main: document.querySelector('main'), store, button:
     if (v === 'history') refreshStrength(true);
     if (v === 'success') { refreshBotRecord(); requestAnimationFrame(() => renderSuccess()); }
     if (v === 'xray') { renderXray(); refreshXray(true); }
+    if (v === 'paper') refreshPaper(true);
   }
   shownViews.clear(); for (const v of views) shownViews.add(v);
   adminPolling(views.includes('settings'));

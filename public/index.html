@@ -590,6 +590,18 @@
       <div id="xrDebate"></div>
       <div id="xrStats" class="xr-stats"></div>
     </section>
+    <section id="view-paper" class="view">
+      <div class="paper">
+        <div class="paper-mast"><div class="paper-strip"><span id="paperDate"></span><span id="paperEdition"></span></div><h1>The Shot Caller Times</h1><div class="paper-strip"><span>Markets · Money · The bot</span><span id="paperCount"></span></div></div>
+        <article class="paper-lead" id="paperLead"><p class="paper-empty">The presses are warming up: the first headlines arrive within a few minutes of the server starting.</p></article>
+        <div class="paper-cols" id="paperSections"></div>
+        <div class="paper-cols paper-foot">
+          <aside class="paper-box"><h3>Today's schedule</h3><ul id="paperEvents"></ul></aside>
+          <aside class="paper-box"><h3>From the bot's desk</h3><div id="paperDesk"></div></aside>
+        </div>
+        <p class="paper-fine">Headlines from Google News and CoinDesk for every market the bot runs, the last 6 hours, refreshed every few minutes; the schedule is the week's economic calendar (ForexFactory), high and medium impact. The lead story is the one the most other headlines are also about. Tap a headline to read the original. News moves markets but isn't a call: no call uses it.</p>
+      </div>
+    </section>
     <section id="view-success" class="view">
       <div class="card map-hero">
         <div class="deep-head"><span>Map to success</span><b id="mapLive" class="map-live">● live</b></div>
@@ -704,7 +716,7 @@
       </details>
       <p class="fine">Settings are saved on this device and sent to the alert server when notifications are on.</p>
       <p class="fine" id="splitInfo"></p>
-      <p class="fine" id="version">Shot Caller v13.92 · Direct lane (no Worker limit)</p>
+      <p class="fine" id="version">Shot Caller v13.93 · The Paper</p>
     </section>
   </main>
 
@@ -735,6 +747,7 @@
     <button data-view="chart"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-6 4 3 6-8"/></svg>Chart</button>
     <button data-view="radar" data-pro><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button data-view="alerts"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>Alerts</button>
+    <button data-view="paper"><svg viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2zM17 9h3v10a2 2 0 0 1-2 2M7 8h7M7 11h7M7 14h4M7 17h4"/></svg>Paper</button>
     <button data-view="history"><svg viewBox="0 0 24 24"><path d="M8 4h8v4a4 4 0 0 1-8 0zM12 12v5M8 21h8M16 6h3a2 2 0 0 1-2 4M8 6H5a2 2 0 0 0 2 4"/></svg>Record</button>
     <button data-view="success"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 3.5 2 3.5H5"/><circle cx="17" cy="19" r="2"/><path d="M5 17c4 0 4 2 10 2"/></svg>Map</button>
     <button data-view="xray" data-pro><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M12 7v10M9 9.5h6M8.5 12h7M9 14.5h6"/></svg>X-ray</button>
@@ -745,7 +758,7 @@
   <!-- Self-heal (v13.14.1): if the app's code didn't load, or an older copy loaded with this newer page (a patchy
        connection mid-update can mix them), clear the saved copies and reload once. Keep SC_BUILD equal to app.js's SC_BOOT. -->
   <script>
-    window.SC_BUILD = '242';
+    window.SC_BUILD = '243';
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (window.SC_BOOT === window.SC_BUILD) return;
