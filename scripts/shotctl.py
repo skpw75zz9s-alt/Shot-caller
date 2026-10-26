@@ -492,6 +492,51 @@ def preflight() -> None:
     Path(server_env()['DATA_DIR']).mkdir(parents=True, exist_ok=True)
 
 
+def port_owners(p: int) -> list[int]:
+    """The processes listening on port p (netstat on Windows, lsof elsewhere); [] if it can't tell."""
+    try:
+        if WINDOWS:
+            out = subprocess.run(['netstat', '-ano', '-p', 'TCP'], capture_output=True, text=True, errors='replace', timeout=15).stdout
+            pids = {int(l.split()[-1]) for l in out.splitlines() if 'LISTENING' in l and len(l.split()) >= 5 and l.split()[1].rsplit(':', 1)[-1] == str(p)}
+        else:
+            if not shutil.which('lsof'):
+                return []
+            out = subprocess.run(['lsof', '-ti', f'tcp:{p}', '-sTCP:LISTEN'], capture_output=True, text=True, timeout=15).stdout
+            pids = {int(x) for x in out.split() if x.isdigit()}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    return sorted(x for x in pids if x not in (0, os.getpid()))
+
+
+def is_node(pid: int) -> bool:
+    try:
+        if WINDOWS:
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, errors='replace', timeout=15).stdout
+            return out.strip().lower().startswith('"node')
+        return 'node' in Path(f'/proc/{pid}/comm').read_text() if Path(f'/proc/{pid}/comm').exists() else \
+            'node' in subprocess.run(['ps', '-p', str(pid), '-o', 'comm='], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def free_port() -> None:
+    """A Shot Caller left over from before (frozen, or its launcher gone) keeps the port, and every new start dies
+    with "address already in use". End it, but only if it's a Node process: anything else is yours to look at."""
+    for pid in port_owners(port()):
+        if is_node(pid):
+            print(paint('33', f'shotctl: port {port()} is held by an old server (Node, pid {pid}): ending it'), flush=True)
+            if WINDOWS:
+                subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True)
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            time.sleep(2)
+        else:
+            print(paint('31', f'shotctl: port {port()} is used by another program (pid {pid}), not Shot Caller: close it, or set PORT to another number'), flush=True)
+
+
 def cmd_run(args) -> int:
     """Foreground supervisor: restarts the server when it exits with an error, up to --max-restarts in a row."""
     preflight()
@@ -512,6 +557,7 @@ def cmd_run(args) -> int:
     while True:
         started = time.time()
         print(paint('1', f'shotctl: starting Shot Caller on http://localhost:{port()}'), flush=True)
+        free_port()
         child = subprocess.Popen([shutil.which('node') or 'node', 'server.js'], cwd=ROOT, env=server_env())
         code = child.wait()
         if code == 0:
